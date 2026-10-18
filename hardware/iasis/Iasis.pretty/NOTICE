@@ -1,59 +1,21 @@
-# NOTICE
+Molex_470531000.kicad_mod includes geometry from the KiCad community's
+Connector:FanPinHeader_1x04_P2.54mm_Vertical footprint, with the locating
+hole sized for Molex drawing SD-47053-001 Rev C4.
+Source: https://gitlab.com/kicad/libraries/kicad-footprints
+License: CC-BY-SA 4.0 with KiCad's design exception; see KICAD-LICENSE.md.
 
-This project includes modified KiCad community footprints and geometry derived from Raspberry Pi reference designs. Attribution and licensing details follow.
+Abracon_AOTA-B201610.kicad_mod uses the land pattern of Raspberry Pi's
+abracon_aota-b201610s3r3-101-t footprint (pads 0.7 x 1.7mm at 1.4mm pitch), and the
+RP2354 regulator, decoupling and crystal placement and copper on iasis.kicad_pcb are
+copied from the same RP2350B Minimal KiCad design (RP-010329-CA-1, revision R4).
+Source: https://pip-assets.raspberrypi.com/categories/1214-rp2350/documents/RP-010329-CA-1-RP2350B%20Minimal%20KiCAD.zip
+License: MIT, Copyright (c) 2026 Raspberry Pi Ltd; full text in ../Iasis.3dshapes/NOTICE.
 
-## Sources and licenses
-
-**KiCad footprint library**  
-https://gitlab.com/kicad/libraries/kicad-footprints
-
-License: CC-BY-SA 4.0 with the KiCad library design exception. See `KICAD-LICENSE.md`.
-
-**Raspberry Pi RP2350B Minimal KiCad Design**  
-RP-010329-CA-1, revision R4  
-https://pip-assets.raspberrypi.com/categories/1214-rp2350/documents/RP-010329-CA-1-RP2350B%20Minimal%20KiCAD.zip
-
-License: MIT, Copyright (c) 2026 Raspberry Pi Ltd. Full license text is included in `../Iasis.3dshapes/NOTICE`.
-
-## Modified KiCad footprints
-
-The following footprints incorporate geometry from the KiCad community library and retain its CC-BY-SA 4.0 license and design exception.
-
-**Molex_470531000.kicad_mod**
-
-- Based on `Connector:FanPinHeader_1x04_P2.54mm_Vertical`.
-- Locating hole resized to match Molex drawing SD-47053-001 Rev C4.
-
-**GCT_USB4105_GF_A_120.kicad_mod**
-
-- Based on `Connector_USB:USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal`.
-- GND lands use 0.20 mm corner radii.
-- Land extents, locating holes and shell slots follow GCT drawing B4:  
-  https://gct.co/files/drawings/usb4105.pdf
-
-**TestPoint_Pad_D0.5mm**
-
-- Derived from `TestPoint:TestPoint_Pad_D1.0mm`, distributed with KiCad 10.0.7.
-- Copper diameter reduced to 0.5 mm; mask opening 0.6 mm; courtyard diameter 1.0 mm.
-- Paste and silkscreen circle removed; reference hidden by default.
-- Original: https://gitlab.com/kicad/libraries/kicad-footprints/-/blob/master/TestPoint.pretty/TestPoint_Pad_D1.0mm.kicad_mod
-
-## Raspberry Pi-derived geometry
-
-The following geometry originates from the RP2350B Minimal KiCad Design identified above and is covered by its MIT license.
-
-**Abracon_AOTA-B201610.kicad_mod**
-
-- Land pattern from `abracon_aota-b201610s3r3-101-t`.
-- Pads: 0.7 × 1.7 mm at 1.4 mm pitch.
-
-**C_0402_1005Metric_WideGap.kicad_mod**
-
-- Based on KiCad's `Capacitor_SMD:C_0402_1005Metric` footprint.
-- Land pattern from Raspberry Pi's `generic_capc1005x50_wide`.
-- Pads: 0.47 × 0.55 mm at 1.03 mm pitch.
-- The KiCad-derived geometry retains CC-BY-SA 4.0 with the KiCad library design exception; the Raspberry Pi land pattern is MIT-licensed.
-
-**iasis.kicad_pcb**
-
-The RP2354 regulator, decoupling and crystal component placement and associated copper geometry are copied from the Raspberry Pi reference design.
+C_0402_1005Metric_WideGap.kicad_mod is the KiCad community's
+Capacitor_SMD:C_0402_1005Metric footprint with the land of Raspberry Pi's
+generic_capc1005x50_wide footprint from the RP2350B Minimal design above (pads
+0.47 x 0.55mm at 1.03mm pitch).
+Sources: https://gitlab.com/kicad/libraries/kicad-footprints and the RP2350B Minimal
+KiCad design above.
+License: CC-BY-SA 4.0 with KiCad's design exception (see KICAD-LICENSE.md); land
+pattern MIT, Copyright (c) 2026 Raspberry Pi Ltd.

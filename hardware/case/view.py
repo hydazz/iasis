@@ -1,7 +1,7 @@
 """Show the board and one enclosure variant in OCP CAD Viewer.
 
 uv run python -m ocp_viewer             # the viewer, at http://127.0.0.1:3939
-uv run view.py [passive|display]     # in a second terminal
+uv run view.py [passive|fan|display]     # in a second terminal
 """
 
 import sys
@@ -24,14 +24,16 @@ PART_COLORS = {
     "D": (0.92, 0.92, 0.88),
     "H": (0.80, 0.68, 0.35),
 }
+CM5_COLOR = (0.16, 0.42, 0.26)
 BOARD_COLOR = (0.08, 0.30, 0.18)
 PREVIEW_SMALL = 5.0  # mm, bounding-box diagonal under which a part is drawn as its box
 PREVIEW_MIN = 1.2  # mm, bounding-box diagonal of the smallest solid drawn
+PREVIEW_BOXED, PREVIEW_BOXED_MIN = {"J101", "J151"}, 3.0  # CM5 module and magjack: 820k triangles
 
 
 def preview_board(lay: case.Layout) -> list[Shape]:
-    """The board for on-screen review, one shape per part: small parts as boxes, tiny
-    solids dropped, colours by reference prefix."""
+    """The board for on-screen review, one shape per part: small parts and the two heaviest
+    models as boxes, tiny solids dropped, colours by reference prefix."""
     body = lay.board.body.moved(Location())
     body.color, body.label = Color(*BOARD_COLOR), "PCB"
     shapes: list[Shape] = [body]
@@ -42,9 +44,12 @@ def preview_board(lay: case.Layout) -> list[Shape]:
         else:
             kept = [s for s in [*part.solids(), *part.shells()]
                     if s.bounding_box().diagonal >= PREVIEW_MIN]  # fmt: skip
+        if ref in PREVIEW_BOXED:
+            kept = [Pos(b.center()) * Box(b.size.X, b.size.Y, b.size.Z)
+                    for b in (s.bounding_box() for s in kept) if b.diagonal >= PREVIEW_BOXED_MIN]  # fmt: skip
         if kept:
             piece = Compound(kept)
-            rgb = PART_COLORS.get(ref[0], (0.5, 0.5, 0.5))
+            rgb = CM5_COLOR if ref == case.CM5 else PART_COLORS.get(ref[0], (0.5, 0.5, 0.5))
             piece.color, piece.label = Color(*rgb), ref
             shapes.append(piece)
     return shapes
@@ -56,9 +61,13 @@ def main() -> None:
         sys.exit(f"unknown variant {variant}; choose {' or '.join(case.COVERS)}")
     lay = case.layout(kicad.load(build.STEP))
     cover = case.cover(lay, variant, case.COVERS[variant])
-    shapes = [Compound(preview_board(lay)), case.plate(lay), cover.part]
-    names = ["board", "plate", f"cover {variant}"]
-    alphas = [1.0, 1.0, 0.5]
+    shapes = [Compound(preview_board(lay)), case.plate(lay), cover.part, lay.cooler]
+    names = ["board", "plate", f"cover {variant}", "cooler envelope"]
+    alphas = [1.0, 1.0, 0.5, 0.3]
+    if cover.fan is not None:
+        shapes.append(cover.fan)
+        names.append("fan envelope")
+        alphas.append(0.3)
     if cover.display is not None:
         shapes.append(cover.display)
         names.append("display envelope")

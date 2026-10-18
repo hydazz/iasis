@@ -10,6 +10,16 @@
 	(condition "A.Type == 'Pad' && B.Type == 'Pad' && A.Hole_Size_X >= 0.5mm && B.Hole_Size_X >= 0.5mm")
 	(constraint hole_to_hole (min 0.45mm)))
 
+# Wurth WA-SMSI spacers: the GND ring surrounds the spacer's own 3.0mm NPTH.
+(rule "Spacer ring around its NPTH"
+	(condition "A.memberOfFootprint('H17?') && B.memberOfFootprint('H17?')")
+	(constraint hole_clearance (min 0mm)))
+
+# Alps SKRTLAE010 land pattern: its locating-peg NPTH sit 0.1mm from the switch's own pads.
+(rule "SKRT pegs in their own land pattern"
+	(condition "A.memberOfFootprint('SW111') && B.memberOfFootprint('SW111')")
+	(constraint hole_clearance (min 0.09mm)))
+
 # Coupled pairs run at their solved gap, inside their class clearance.
 (rule "Coupled pair gap"
 	(condition "A.isCoupledDiffPair()")
@@ -18,16 +28,14 @@
 # Pair geometry was solved without coplanar copper: keep outer-layer pours 0.6mm back.
 (rule "Pours clear of controlled pairs"
 	(layer outer)
-	(condition "A.hasNetclass('USB_90') && B.Type == 'Zone'")
+	(condition "(A.hasNetclass('USB_90') || A.hasNetclass('ETH_100')) && B.Type == 'Zone'")
 	(constraint clearance (min 0.6mm)))
+# CM5 module (1.5mm stack height): only its own connectors and holes sit under it; copper is unrestricted.
+(rule "Nothing under the CM5"
+	(condition "A.intersectsArea('CM5 module') && A.Reference != 'J101' && A.Reference != 'J102' && A.Reference != 'H101' && A.Reference != 'H102' && A.Reference != 'H103' && A.Reference != 'H104'")
+	(constraint disallow footprint))
 
 # Molex 105450 B-row via in pad: 0.45/0.20 vias staggered 0.15mm along the 0.30mm pads sit 0.125mm from the neighbouring pad and 0.133mm from each other.
 (rule "Receptacle B-row via in pad"
 	(condition "A.Type == 'Via' && (A.intersectsCourtyard('J401') || A.intersectsCourtyard('J501') || A.intersectsCourtyard('J601') || A.intersectsCourtyard('J701') || A.intersectsCourtyard('J801') || A.intersectsCourtyard('J901')) && (B.Type == 'Via' || B.memberOfFootprint('J401') || B.memberOfFootprint('J501') || B.memberOfFootprint('J601') || B.memberOfFootprint('J701') || B.memberOfFootprint('J801') || B.memberOfFootprint('J901'))")
 	(constraint clearance (min 0.12mm)))
-
-# GCT USB4105 B4: two 0.65mm locating holes near the four aliased GND lands.
-# Rounded 0.20mm land corners retain 0.2058mm nominal clearance; JLC NPTH minimum is 0.20mm.
-(rule "GCT USB4105 locating holes to GND lands"
-    (condition "A.Type == 'Pad' && B.Type == 'Pad' && A.memberOfFootprint('J1001') && B.memberOfFootprint('J1001') && A.Pad_Type == 'NPTH, mechanical' && A.Hole_Size_X == 0.65mm && B.NetName == 'GND' && (B.Pad_Number == 'A1' || B.Pad_Number == 'B12' || B.Pad_Number == 'A12' || B.Pad_Number == 'B1')")
-    (constraint hole_clearance (min 0.20mm)))

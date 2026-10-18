@@ -1,19 +1,10 @@
 # iasis
 
-Five-port USB-C hub with programmable DFU signalling for Apple devices.
+Five-port USB-C recovery appliance for Apple devices, built around a Raspberry Pi Compute Module 5.
 
-The host connects to a USB 3 hub and an RP2354 management controller. Restore traffic passes through the hub; the controller handles port orientation, power and DFU commands. A Mac can remain the restore host. A later Compute Module 5 appliance can use the same USB control interface.
+The design combines USB 3 data and USB-PD power on each port, with an internal Linux host and a local web interface over Ethernet. It targets five concurrent MacBook Air restores, with deliberate DFU, revive and erase operations.
 
-One six-layer PCB supports two assembly variants:
-
-- **Hub:** host-powered logic and limited 5 V target presence supplies.
-- **HubPD:** the same hub with a separate USB-C charging input and per-port charging supplies. It also operates without a charging supply attached.
-
-The charging input is optional in either population. Without it, the available upstream USB power limits the combined target supply; five simultaneous restores are a prototype test goal. Hub PD adds selectable 5 V and 9 V charging within the negotiated input budget.
-
-The MCU connects to an internal USB2 hub port, so the same host cable supports management and RP2354 ROM programming. BOOTSEL and RESET buttons provide recovery without soldering; SWD and a 3.3 V UART header provide independent debugging. The optional display is independent of core operation. DFU, revive and erase are separate deliberate actions.
-
-In development. Firmware and host software are not yet implemented. Hardware and restore workflows are not yet validated.
+In development. Hardware and restore workflows are not yet validated.
 
 ## License
 

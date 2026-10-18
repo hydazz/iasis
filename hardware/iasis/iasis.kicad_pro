@@ -555,6 +555,19 @@
         "wire_width": 6
       },
       {
+        "clearance": 0.2,
+        "diff_pair_gap": 0.2,
+        "diff_pair_width": 0.1191,
+        "name": "ETH_100",
+        "pcb_color": "rgba(0, 0, 0, 0.000)",
+        "priority": 0,
+        "schematic_color": "rgba(0, 0, 0, 0.000)",
+        "track_width": 0.119,
+        "tuning_profile": "",
+        "via_diameter": 0.45,
+        "via_drill": 0.2
+      },
+      {
         "clearance": 0.15,
         "name": "Power",
         "pcb_color": "rgba(0, 0, 0, 0.000)",
@@ -587,6 +600,14 @@
     "netclass_patterns": [
       {
         "netclass": "USB_90",
+        "pattern": "CM5_USB3?_*"
+      },
+      {
+        "netclass": "USB_90",
+        "pattern": "CM5_USB_DEVICE_D_?"
+      },
+      {
+        "netclass": "USB_90",
         "pattern": "/USB hub*/UP_TX_?"
       },
       {
@@ -615,6 +636,18 @@
       },
       {
         "netclass": "USB_90",
+        "pattern": "PCIE_TX_?"
+      },
+      {
+        "netclass": "USB_90",
+        "pattern": "PCIE_RX_?"
+      },
+      {
+        "netclass": "USB_90",
+        "pattern": "PCIE_CLK_?"
+      },
+      {
+        "netclass": "USB_90",
         "pattern": "EXT_TX_?"
       },
       {
@@ -638,8 +671,48 @@
         "pattern": "/Host port/D_CONN_?"
       },
       {
+        "netclass": "USB_90",
+        "pattern": "/USB hub*/MUX_TX_?"
+      },
+      {
+        "netclass": "USB_90",
+        "pattern": "/USB hub*/MUX_RX_?"
+      },
+      {
+        "netclass": "USB_90",
+        "pattern": "/USB hub*/UP_D_?"
+      },
+      {
+        "netclass": "ETH_100",
+        "pattern": "ETH?_?"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "24V_SYS"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "5V_AUX"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "5V_CM5"
+      },
+      {
         "netclass": "Power",
         "pattern": "3V3_AON"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "3V3_NVME"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "1V1_HUB"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "CM5_3V3"
       },
       {
         "netclass": "Power",
@@ -647,7 +720,51 @@
       },
       {
         "netclass": "Power",
+        "pattern": "*/24V input protection/24V_RAW"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "*/24V input protection/VIN_FUSED"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "*/24V input protection/COMMON_SOURCE"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "*/24V input protection/SENSE"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "/Target ports/Target ?/Programmable supply/VOUT"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "/Target ports/Target ?/Programmable supply/EFUSE_IN"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "/Target ports/Target ?/Programmable supply/SW?"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "/5V_* supply/SW"
+      },
+      {
+        "netclass": "Power",
         "pattern": "/Logic supplies and reset/LX_*"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "*/NVME_LX"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "*/MCU_VREG_LX"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "*/MCU_DVDD"
       },
       {
         "netclass": "Power",
@@ -660,42 +777,6 @@
       {
         "netclass": "USB_90",
         "pattern": "/Target ports/Target ?/USB-C data and PD/USB2_D_CONN_?"
-      },
-      {
-        "netclass": "Power",
-        "pattern": "VCORE"
-      },
-      {
-        "netclass": "Power",
-        "pattern": "HOST_TARGET_5V"
-      },
-      {
-        "netclass": "Power",
-        "pattern": "HV_CHARGE"
-      },
-      {
-        "netclass": "Power",
-        "pattern": "/Target ports/Target ?/Output and charging/Optional charging/SW"
-      },
-      {
-        "netclass": "Power",
-        "pattern": "/Target ports/Target ?/Output and charging/Optional charging/BUCK_VOUT"
-      },
-      {
-        "netclass": "Power",
-        "pattern": "/Optional USB-C charging input/PD_VBUS_RAW"
-      },
-      {
-        "netclass": "Power",
-        "pattern": "/Optional USB-C charging input/PD_COMMON_SOURCE"
-      },
-      {
-        "netclass": "Power",
-        "pattern": "/Optional USB-C charging input/CH_PROTECTED"
-      },
-      {
-        "netclass": "USB_90",
-        "pattern": "/RP2354 controller/MCU_USB_D_RAW_?"
       }
     ]
   },
@@ -841,16 +922,7 @@
       }
     ],
     "used_designators": "",
-    "variants": [
-      {
-        "description": "USB hub with host-powered target presence supplies",
-        "name": "Hub"
-      },
-      {
-        "description": "USB hub with optional USB-C charging input and per-port supplies",
-        "name": "HubPD"
-      }
-    ]
+    "variants": []
   },
   "sheets": [
     [
@@ -862,8 +934,24 @@
       "Host port"
     ],
     [
+      "4b9bd12d-8d0c-4c24-94d1-73cbb42f9934",
+      "CM5 carrier"
+    ],
+    [
+      "0b534c23-798e-4254-a633-113a0692d115",
+      "Ethernet"
+    ],
+    [
+      "18ac954f-45b7-4513-976f-6958abc29675",
+      "Recovery and cooling"
+    ],
+    [
+      "1db6a1a3-20d5-41aa-96ff-c80521eae555",
+      "NVMe storage"
+    ],
+    [
       "9e9db2bb-c526-4c6a-ba4d-d8b25b5f251b",
-      "USB hub \u2014 ports 1\u20135"
+      "USB hub — ports 1–5"
     ],
     [
       "eda5d45e-e86d-4d58-83d3-d3aa1de94feb",
@@ -879,11 +967,7 @@
     ],
     [
       "7c1e1271-4607-4b20-87e9-40e766ed110f",
-      "Output and charging"
-    ],
-    [
-      "42bf7062-60f9-4e10-8fdf-2895ab8c3e6f",
-      "Optional charging"
+      "Programmable supply"
     ],
     [
       "1980e6d3-fe63-4159-934f-e1343e1cb8bc",
@@ -895,11 +979,7 @@
     ],
     [
       "7c1e1271-4607-4b20-87e9-40e766ed110f",
-      "Output and charging"
-    ],
-    [
-      "42bf7062-60f9-4e10-8fdf-2895ab8c3e6f",
-      "Optional charging"
+      "Programmable supply"
     ],
     [
       "2661a9c5-45e6-413e-acf1-976df62591a5",
@@ -911,11 +991,7 @@
     ],
     [
       "7c1e1271-4607-4b20-87e9-40e766ed110f",
-      "Output and charging"
-    ],
-    [
-      "42bf7062-60f9-4e10-8fdf-2895ab8c3e6f",
-      "Optional charging"
+      "Programmable supply"
     ],
     [
       "973fb476-58e0-4ce2-9f9c-9c93ff84c555",
@@ -927,11 +1003,7 @@
     ],
     [
       "7c1e1271-4607-4b20-87e9-40e766ed110f",
-      "Output and charging"
-    ],
-    [
-      "42bf7062-60f9-4e10-8fdf-2895ab8c3e6f",
-      "Optional charging"
+      "Programmable supply"
     ],
     [
       "672b9e1d-749d-4280-bdb9-d44bea0929df",
@@ -943,15 +1015,23 @@
     ],
     [
       "7c1e1271-4607-4b20-87e9-40e766ed110f",
-      "Output and charging"
+      "Programmable supply"
     ],
     [
-      "42bf7062-60f9-4e10-8fdf-2895ab8c3e6f",
-      "Optional charging"
+      "03c2519d-e43e-4e62-b36f-9d73983cf135",
+      "24V input protection"
+    ],
+    [
+      "31257bfe-cc7f-46e1-bca5-09ebf7deeccd",
+      "5V_AUX supply"
+    ],
+    [
+      "112a20c3-c82e-4541-b08c-131200745915",
+      "5V_CM5 supply"
     ],
     [
       "b07667e5-d806-499e-b7b3-ac624f29e1b9",
-      "Host power and target budget"
+      "Logic power selection"
     ],
     [
       "32a3b17f-04ec-4707-aa21-2a6e0753ada6",
@@ -970,16 +1050,8 @@
       "Indicators and confirmation"
     ],
     [
-      "0ac3c4af-eb8f-4e1d-a467-a9cb8c0e7942",
-      "Power control outputs"
-    ],
-    [
       "25c4da15-70a7-4927-918d-26ed03ea3cca",
       "Port voltage measurement"
-    ],
-    [
-      "03c2519d-e43e-4e62-b36f-9d73983cf135",
-      "Optional USB-C charging input"
     ],
     [
       "24d22e7d-274a-4a90-9b61-33ad319e8970",

@@ -8,25 +8,11 @@ Board coordinates: origin at the centre of the outline on the bottom face, +x to
 the right, +y to the rear (away from the target ports), +z up through the parts.
 """
 
-import json
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from build123d import (
-    Align,
-    BoundBox,
-    Box,
-    Compound,
-    Face,
-    GeomType,
-    Location,
-    Pos,
-    Shape,
-    Shell,
-    Solid,
-    Vector,
-)
+from build123d import BoundBox, Compound, Face, GeomType, Location, Shape, Shell, Solid, Vector
 from OCP.collections import Sequence_TDF_Label
 from OCP.Interface import Interface_Static
 from OCP.STEPCAFControl import STEPCAFControl_Reader, STEPCAFControl_Writer
@@ -47,8 +33,6 @@ class Board:
     parts: dict[str, Compound]
     step: Path
     origin: Location  # STEP coordinates to board coordinates
-    envelopes: list[str] = field(default_factory=list)
-    missing: list[str] = field(default_factory=list)
     _rough: dict[str, BoundBox] = field(default_factory=dict, repr=False)
     _exact: dict[str, BoundBox] = field(default_factory=dict, repr=False)
 
@@ -125,34 +109,7 @@ def load(step: Path) -> Board:
         part = Compound([s.moved(to_origin) for s in solids])
         part.label = ref
         parts[ref] = part
-    envelopes, missing = [], []
-    metadata = step.with_suffix(".models.json")
-    if metadata.exists():
-        for item in json.loads(metadata.read_text())["parts"]:
-            ref = item["ref"]
-            if ref in parts:
-                continue
-            if envelope := item.get("envelope"):
-                x0, y0, x1, y1 = envelope["xy"]
-                # KiCad XY is mirrored in STEP; height starts at the board top.
-                centre = Vector((x0 + x1) / 2, -(y0 + y1) / 2, 0) + to_origin.position
-                part = Pos(centre.X, centre.Y, body.bounding_box().max.Z) * Box(
-                    x1 - x0,
-                    y1 - y0,
-                    envelope["height"] + 0.15,  # solder seating allowance
-                    align=(Align.CENTER, Align.CENTER, Align.MIN),
-                )
-                part.label = f"{ref} courtyard clearance envelope"
-                parts[ref] = Compound([part])
-                parts[ref].label = part.label
-                envelopes.append(ref)
-            else:
-                missing.append(ref)
-    else:
-        missing.append("STEP mechanical inventory (.models.json)")
-    return Board(
-        body=body, parts=parts, step=step, origin=to_origin, envelopes=envelopes, missing=missing
-    )
+    return Board(body=body, parts=parts, step=step, origin=to_origin)
 
 
 def export_assembly(board: Board, extra: list[Shape], out: Path) -> None:

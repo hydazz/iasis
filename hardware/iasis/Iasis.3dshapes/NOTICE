@@ -1,89 +1,41 @@
-# NOTICE
+M2_2280_card_envelope.step is a generated outline of a single-sided 2280 SSD, for
+clearance checks.
 
-This project includes third-party CAD models and locally generated geometry. Third-party models retain their original ownership and applicable licensing terms. Unless otherwise noted, downloaded models are unmodified except for filenames.
+EasyEDA/LCSC library models, fetched by LCSC part number from EasyEDA's component API
+(https://easyeda.com/api/products/<LCSC>/components) and model server
+(https://modules.easyeda.com/), unmodified apart from file names. Terms and conditions
+for their use remain with EasyEDA/LCSC and each manufacturer.
+- Molex_105450-0101.step: Molex 105450-0101, C134092
+- onsemi_MLP14_2.5x2.5mm.step: onsemi FUSB302BMPX, C132291
+- TI_RUK0020B.step: TI TPD6S300ARUKR, C2876380
+- TI_RPM0026A.step: TI TPS55288RPMR, C2864583
+- TI_RPW0010A.step: TI TPS259470LRPWR, C3662793
+- TI_RJR0014A.step: TI LM61460AANRJRR, C2864505 (EasyEDA's RJR model for the LMQ61460)
+- TI_CSD18532Q5B.step: TI CSD18532Q5B, C882766
+- Littelfuse_NANO2_451.step: Littelfuse 0451015.MRL, C44480
+- Microchip_VQFN-100_KDX.step: Microchip USB7206C (VQFN-100, KDX), C3210691
+- OPSCO_SK6812SIDE-A.step: OPSCO SK6812SIDE-A, C5378721
+- XINGLIGHT_XL-3210SYGC.step: XINGLIGHT XL-3210SYGC, C965878
+- Alps_SKRTLAE010.step: Alps Alpine SKRTLAE010, C110293
+- CK_PTS645SL50.step: C&K PTS645SL50SMTR92LFS, C221877
+- TI_VQFN-16_RGT.step: TI TCA6408ARGTR, C181499
 
-## Generated geometry
-
-**M2_2280_card_envelope.step**  
-Generated single-sided M.2 2280 SSD envelope for clearance checks.
-
-**Coilank_AAPS0530.step**  
-Approximate package geometry generated from page 2 of the AAPS-F datasheet:  
-https://datasheet.lcsc.com/datasheet/pdf/db0306ba92d8c07b239ddfd67f0cd388.pdf
-
-- Body: 5.3 × 5.5 mm, 3.1 mm maximum overall height
-- Terminals: two bottom pads, 1.1 × 4.3 mm, separated by 2.3 mm
-- Terminal thickness (0.1 mm) is illustrative
-- Corner radii and markings are omitted
-
-This is not manufacturer-supplied CAD.
-
-## EasyEDA / LCSC models
-
-The following models were retrieved using LCSC part numbers from the EasyEDA component API and model server:
-
-- https://easyeda.com/api/products/`<LCSC>`/components
-- https://modules.easyeda.com/
-
-Files are unmodified except for filenames. Applicable terms and redistribution rights are determined by their respective owners and providers.
-
-| File | Component | LCSC |
-|---|---|---|
-| Molex_105450-0101.step | Molex 105450-0101 | C134092 |
-| onsemi_MLP14_2.5x2.5mm.step | onsemi FUSB302BMPX | C132291 |
-| TI_RUK0020B.step | TI TPD6S300ARUKR | C2876380 |
-| TI_RPM0026A.step | TI TPS55288RPMR | C2864583 |
-| TI_RPW0010A.step | TI TPS259470LRPWR | C3662793 |
-| TI_RJR0014A.step | TI LM61460AANRJRR | C2864505 |
-| TI_CSD18532Q5B.step | TI CSD18532Q5B | C882766 |
-| Littelfuse_NANO2_451.step | Littelfuse 0451015.MRL | C44480 |
-| Microchip_VQFN-100_KDX.step | Microchip USB7206C | C3210691 |
-| OPSCO_SK6812SIDE-A.step | OPSCO SK6812SIDE-A | C5378721 |
-| XINGLIGHT_XL-3210SYGC.step | XINGLIGHT XL-3210SYGC | C965878 |
-| Alps_SKRTLAE010.step | Alps Alpine SKRTLAE010 | C110293 |
-| CK_PTS645SL50.step | C&K PTS645SL50SMTR92LFS | C221877 |
-| TI_VQFN-16_RGT.step | TI TCA6408ARGTR | C181499 |
-| TI_DRR0012G.step | TI LMR51450SDRRR | C6890985 |
-| TI_DDF0008A.step | TI LM74502DDFR | C3236215 |
-| WCH_CH224Q_DFN10.step | WCH CH224Q | C46061833 |
-| PROD_PSPMAA1040.step | PROD Technology PSPMAA1040-100M-ANP | C2983105 |
-
-Model-specific notes:
-
-- **TI_RJR0014A.step:** EasyEDA's RJR package model for the LMQ61460.
-- **PROD_PSPMAA1040.step:** EasyEDA's 11 × 10 × 4 mm moulded inductor package model.
-
-## Manufacturer and reference-design models
-
-The following models were obtained from manufacturer downloads or published Raspberry Pi hardware design files. They are unmodified except for filenames and remain subject to their respective applicable terms.
-
-**Raspberry Pi CM5 IO board** (`cm5io-KiCAD.zip`)
-
-- `10164227-1001a1rlf.stp` — Amphenol 10164227-1001A1RLF
-- `SRP5030CC.stp` — Bourns SRP5030CC
-
-**Raspberry Pi Product Information Portal**
-
-- `CM5.step` — Compute Module 5 (CM5R5), document RP-007222-DD-2
-
-**Manufacturer downloads**
-
-- `A70-112-331N126.step` — EDAC  
-  https://files.edac.net/edac/content/A7X/A70-112-331N126.STEP
-- `KPJX-4S-S.step` — Kycon  
-  https://www.kycon.com/3D/KPJX-4S-S_A.STEP
-- `SRP1265A.stp` — Bourns  
-  https://bourns.com/engineering/SRP1265A/SRP1265A%20series.stp
-- `1-2199230-4.stp` — TE Connectivity, customer view model CVM_1-2199230-4 (`3d_stp.zip`)  
+Manufacturer models, unmodified apart from file names. Terms and conditions for their
+use remain with each manufacturer.
+- 10164227-1001a1rlf.stp (Amphenol 10164227-1001A1RLF) and SRP5030CC.stp (Bourns
+  SRP5030CC): from Raspberry Pi's CM5 IO board KiCad design files (cm5io-KiCAD.zip).
+- CM5.step: Raspberry Pi Compute Module 5 (CM5R5), Raspberry Pi Product Information
+  Portal document RP-007222-DD-2.
+- A70-112-331N126.step: https://files.edac.net/edac/content/A7X/A70-112-331N126.STEP
+- KPJX-4S-S.step: https://www.kycon.com/3D/KPJX-4S-S_A.STEP
+- SRP1265A.stp: https://bourns.com/engineering/SRP1265A/SRP1265A%20series.stp
+- 1-2199230-4.stp: TE Connectivity customer view model CVM_1-2199230-4 (3d_stp.zip),
   https://www.te.com/commerce/DocumentDelivery/DDEController?Action=srchrtrv&DocNm=CVM_1-2199230-4&DocType=Customer%20View%20Model&DocLang=English&DocFormat=3d_stp.zip&PartCntxt=1-2199230-4
-- `AOTA-B201610S.step` — Abracon  
-  https://abracon.com/Support/STEP/AOTA-B201610S.STEP.zip
-- `ASEK.step` — Abracon  
-  https://abracon.com/Support/STEP/Oscillators/ASEK.STEP.zip
+- AOTA-B201610S.step: https://abracon.com/Support/STEP/AOTA-B201610S.STEP.zip
+- ASEK.step: https://abracon.com/Support/STEP/Oscillators/ASEK.STEP.zip
 
-## MIT-licensed Raspberry Pi model
-
-`rpi_rp2350b.step` is Raspberry Pi's RP2350B QFN-80 model, obtained from the RP2350B Minimal KiCad Design (RP-010329-CA-1), distributed under the MIT license.
+rpi_rp2350b.step is Raspberry Pi's RP2350B QFN-80 model, taken from the RP2350B
+minimal design (RP-010329-CA-1) under the MIT license:
 
 Copyright (c) 2026 Raspberry Pi Ltd
 
@@ -92,3 +44,9 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Coilank_AAPS0530.step is a generated package approximation from the AAPS-F
+datasheet, page 2: https://datasheet.lcsc.com/datasheet/pdf/db0306ba92d8c07b239ddfd67f0cd388.pdf
+Body: 5.3 x 5.5mm, 3.1mm maximum overall height. Two bottom terminals: 1.1 x
+4.3mm, separated by 2.3mm. Terminal thickness (0.1mm) is illustrative; body
+corner radii and markings are omitted. This is not manufacturer CAD.

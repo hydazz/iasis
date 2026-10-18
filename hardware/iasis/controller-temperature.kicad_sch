@@ -738,113 +738,33 @@
 	)
 	(wire
 		(pts
-			(xy 203.2 97.79) (xy 228.6 97.79)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "11db4b3b-c45b-4c2c-a906-bb067b001f93")
-	)
-	(wire
-		(pts
-			(xy 76.2 95.25) (xy 76.2 97.79)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "2ec32837-4a19-400a-871e-c17e5c2a7d17")
-	)
-	(wire
-		(pts
-			(xy 203.2 59.69) (xy 203.2 62.23)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "320ed206-800b-4819-888c-5ef5e99b53ae")
-	)
-	(wire
-		(pts
-			(xy 76.2 85.09) (xy 101.6 85.09)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "3b9d5c2f-a284-459d-a6aa-85216d6f8c12")
-	)
-	(wire
-		(pts
-			(xy 76.2 97.79) (xy 101.6 97.79)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "494ba41d-9d75-4e0f-9198-992e6067021d")
-	)
-	(wire
-		(pts
-			(xy 76.2 59.69) (xy 76.2 62.23)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "4d0281aa-ebc2-4d1c-bfff-a9ff479640f7")
-	)
-	(wire
-		(pts
-			(xy 203.2 69.85) (xy 203.2 85.09)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "7410e963-e726-491b-9a8a-cc27b990e030")
-	)
-	(wire
-		(pts
-			(xy 228.6 95.25) (xy 228.6 97.79)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "77072039-44a3-4beb-940a-df3676a7c356")
-	)
-	(wire
-		(pts
 			(xy 203.2 85.09) (xy 228.6 85.09)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "79230567-0c10-427a-a6b1-bd00a3ecf189")
+		(uuid "097428f3-1b93-44f8-a4c9-150592fb0a63")
 	)
 	(wire
 		(pts
-			(xy 228.6 85.09) (xy 228.6 87.63)
+			(xy 101.6 87.63) (xy 101.6 85.09)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "7cba86c8-5d11-4195-a7e1-7f98d85fa696")
+		(uuid "29ba4cd9-0893-4a85-bdaf-9fac822da131")
 	)
 	(wire
 		(pts
-			(xy 76.2 85.09) (xy 76.2 87.63)
+			(xy 203.2 87.63) (xy 203.2 85.09)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "973b0324-2a50-4c8a-be8a-962fe30f6db3")
+		(uuid "2f9d3a9b-660d-463f-ab25-07b69935abcc")
 	)
 	(wire
 		(pts
@@ -854,37 +774,27 @@
 			(width 0)
 			(type default)
 		)
-		(uuid "98d19458-dfcc-4ac7-b7cf-6d9feac83b82")
+		(uuid "38380382-8731-4629-b04c-8015255cd014")
 	)
 	(wire
 		(pts
-			(xy 101.6 95.25) (xy 101.6 97.79)
+			(xy 76.2 97.79) (xy 101.6 97.79)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "9fc0436c-f89a-4678-8392-da803b5b12b0")
+		(uuid "422cb63e-71bf-40a0-b42b-05c06ec8819b")
 	)
 	(wire
 		(pts
-			(xy 101.6 85.09) (xy 101.6 87.63)
+			(xy 203.2 69.85) (xy 203.2 85.09)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "ccf2b83a-78b4-431c-a30a-1f2169398569")
-	)
-	(wire
-		(pts
-			(xy 203.2 85.09) (xy 203.2 87.63)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "e5f0bca5-934a-42f8-8b8a-0892799a53ad")
+		(uuid "444a076f-c440-4233-972a-b84d5dd0a6e8")
 	)
 	(wire
 		(pts
@@ -894,7 +804,97 @@
 			(width 0)
 			(type default)
 		)
-		(uuid "f296b3f2-cfc9-4d6b-87cf-b3d181badec0")
+		(uuid "520bcaa2-ae17-4500-b257-f39c2a6b4c4f")
+	)
+	(wire
+		(pts
+			(xy 76.2 62.23) (xy 76.2 59.69)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "7e849074-a80f-4bc6-b9c4-0449075c9a1f")
+	)
+	(wire
+		(pts
+			(xy 101.6 95.25) (xy 101.6 97.79)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "86fbb9a2-6cb1-4e3f-8358-dc86e4b973ed")
+	)
+	(wire
+		(pts
+			(xy 76.2 85.09) (xy 101.6 85.09)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "8caa2412-5441-4d51-ad84-90319531f7e4")
+	)
+	(wire
+		(pts
+			(xy 76.2 95.25) (xy 76.2 97.79)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "a51fc27c-be46-4cb0-b698-c58a6b4ecc9e")
+	)
+	(wire
+		(pts
+			(xy 228.6 87.63) (xy 228.6 85.09)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "ab687ec7-4558-4202-bab0-946c4fc2e57a")
+	)
+	(wire
+		(pts
+			(xy 203.2 97.79) (xy 228.6 97.79)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "ad3f9d63-2af0-4100-bb0c-ad1ad613cc87")
+	)
+	(wire
+		(pts
+			(xy 203.2 62.23) (xy 203.2 59.69)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "cb89d646-ae78-4ac8-adf9-e6bccada3e36")
+	)
+	(wire
+		(pts
+			(xy 76.2 87.63) (xy 76.2 85.09)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "ef73eb3a-e030-4b56-8c2b-27c88b96bb19")
+	)
+	(wire
+		(pts
+			(xy 228.6 95.25) (xy 228.6 97.79)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "f6568a8a-6fcd-4cc8-a769-9622f898108a")
 	)
 	(global_label "3V3_AON"
 		(shape input)
@@ -1176,7 +1176,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2411221126_UNI-ROYAL-Uniroyal-Elec-0402WGF1002TCE_C25744.pdf"
+		(property "Datasheet" ""
 			(at 76.2 66.04 0)
 			(hide yes)
 			(show_name no)
@@ -1188,39 +1188,6 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 76.2 66.04 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "LCSC" "C25744"
-			(at 76.2 66.04 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "MPN" "0402WGF1002TCE"
-			(at 76.2 66.04 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "UNI-ROYAL(Uniroyal Elec)"
 			(at 76.2 66.04 0)
 			(hide yes)
 			(show_name no)
@@ -1290,7 +1257,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2304140030_Samsung-Electro-Mechanics-CL05B103KB5NNNC_C15195.pdf"
+		(property "Datasheet" ""
 			(at 101.6 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -1302,39 +1269,6 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
-			(at 101.6 91.44 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "LCSC" "C15195"
-			(at 101.6 91.44 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "MPN" "CL05B103KB5NNNC"
-			(at 101.6 91.44 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Samsung Electro-Mechanics"
 			(at 101.6 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -1404,7 +1338,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2411221126_UNI-ROYAL-Uniroyal-Elec-0402WGF1002TCE_C25744.pdf"
+		(property "Datasheet" ""
 			(at 203.2 66.04 0)
 			(hide yes)
 			(show_name no)
@@ -1416,39 +1350,6 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 203.2 66.04 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "LCSC" "C25744"
-			(at 203.2 66.04 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "MPN" "0402WGF1002TCE"
-			(at 203.2 66.04 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "UNI-ROYAL(Uniroyal Elec)"
 			(at 203.2 66.04 0)
 			(hide yes)
 			(show_name no)
@@ -1518,7 +1419,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2304140030_Samsung-Electro-Mechanics-CL05B103KB5NNNC_C15195.pdf"
+		(property "Datasheet" ""
 			(at 228.6 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -1530,39 +1431,6 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
-			(at 228.6 91.44 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "LCSC" "C15195"
-			(at 228.6 91.44 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "MPN" "CL05B103KB5NNNC"
-			(at 228.6 91.44 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Samsung Electro-Mechanics"
 			(at 228.6 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -1632,7 +1500,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2208251830_Murata-Electronics-NCU18XH103F60RB_C440252.pdf"
+		(property "Datasheet" ""
 			(at 76.2 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -1655,28 +1523,6 @@
 			)
 		)
 		(property "MPN" "NCU18XH103F60RB"
-			(at 76.2 91.44 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "LCSC" "C440252"
-			(at 76.2 91.44 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Murata Electronics"
 			(at 76.2 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -1746,7 +1592,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2208251830_Murata-Electronics-NCU18XH103F60RB_C440252.pdf"
+		(property "Datasheet" ""
 			(at 203.2 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -1769,28 +1615,6 @@
 			)
 		)
 		(property "MPN" "NCU18XH103F60RB"
-			(at 203.2 91.44 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "LCSC" "C440252"
-			(at 203.2 91.44 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Murata Electronics"
 			(at 203.2 91.44 0)
 			(hide yes)
 			(show_name no)

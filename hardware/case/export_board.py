@@ -1,4 +1,4 @@
-"""Export populated STEP geometry and mechanical inventory from a KiCad board copy.
+"""Export the populated board STEP with kicad-cli, the enclosure's only input from KiCad.
 
     uv run export_board.py [--pcb ../iasis/iasis.kicad_pcb] [--out build/board.step]
 
@@ -20,10 +20,6 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 PCB = HERE.parent / "iasis" / "iasis.kicad_pcb"
 OUT = HERE / "build" / "board.step"
-KICAD_PYTHON_MACOS = (
-    "/Applications/KiCad/KiCad.app/Contents/Frameworks/"
-    "Python.framework/Versions/Current/bin/python3"
-)
 KICAD_CLI_MACOS = "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli"
 
 
@@ -46,21 +42,6 @@ def export(pcb: Path, out: Path) -> list[str]:
         cmd = [kicad_cli(), "pcb", "export", "step", "--subst-models", "--force"]
         cmd += ["-o", str(out), str(snap / pcb.name)]
         run = subprocess.run(cmd, check=False, capture_output=True, text=True)
-        if run.returncode == 0:
-            python = os.environ.get("KICAD_PYTHON") or (
-                KICAD_PYTHON_MACOS if Path(KICAD_PYTHON_MACOS).exists() else "python3"
-            )
-            subprocess.run(
-                [
-                    python,
-                    str(HERE / "mechanical.py"),
-                    str(snap / pcb.name),
-                    str(out.with_suffix(".models.json")),
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
     if run.returncode != 0 or not out.exists():
         sys.exit(f"kicad-cli STEP export failed:\n{run.stdout}\n{run.stderr}")
     out.with_suffix(".sha256").write_text(f"{digest}  {pcb}\n")

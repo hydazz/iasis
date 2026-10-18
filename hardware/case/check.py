@@ -1,7 +1,7 @@
 """Fit and validity checks for the enclosure against the board.
 
 The cover's inside is empty except for what reaches into it (pillars, the button pin, a
-display module and its posts), so those are measured exactly against nearby
+fan, a display module and its posts), so those are measured exactly against nearby
 parts; the walls, the top and the plate are tested against part bounding boxes. Each
 opening is tested by pushing out from the part's face whatever has to pass through it.
 """
@@ -11,6 +11,7 @@ from itertools import combinations
 
 from build123d import (
     BoundBox,
+    Circle,
     Cylinder,
     Part,
     Pos,
@@ -22,9 +23,12 @@ from build123d import (
 
 import case
 
-EXPECTED_HOLES = 4
+EXPECTED_HOLES = 6
 USB_C_PLUG = (12.35, 6.5, 1.5, 20.0)  # Type-C overmold maximum, corner radius, length checked
+DIN_PLUG = (13.0, 13.0, 2.0, 20.0)  # Kycon KPPX-4P body, which meets the jack's boss face
+PIN_D = 1.0  # a straightened paperclip
 MIN_WEB = 1.0  # wall left between neighbouring openings
+FLUSH = 0.3  # a jack face this close to the outer face counts as flush
 
 
 @dataclass
@@ -56,12 +60,6 @@ def run(lay: case.Layout, plate: Part, covers: dict[str, case.Cover]) -> Report:
     parts: Candidates = [(ref, p, board.rough(ref)) for ref, p in placed.items()]
 
     r.section("board")
-    if board.envelopes:
-        r.note("courtyard/maximum-height clearance envelopes: " + ", ".join(board.envelopes))
-    if board.missing:
-        r.fail("unmodelled component bodies: " + ", ".join(board.missing))
-    else:
-        r.ok("every component body has a STEP model or clearance envelope")
     unplaced = sorted(set(board.parts) - set(placed))
     if unplaced:
         shown = " ".join(unplaced[:10]) + (" ..." if len(unplaced) > 10 else "")
@@ -88,8 +86,11 @@ def run(lay: case.Layout, plate: Part, covers: dict[str, case.Cover]) -> Report:
     r.section("walls and plate")
     outline = board.body.bounding_box()
     room = case.CLEARANCE - case.MIN_GAP
+    through = {o.ref for o in lay.openings if o.kind in case.GATED}
     margins = {}
     for ref, _, rough in parts:
+        if ref in through:
+            continue
         m = _margin_xy(rough, outline)
         margins[ref] = m if m >= -room else _margin_xy(board.box(ref), outline)
     out = sorted(ref for ref, m in margins.items() if m < -room)
@@ -107,39 +108,53 @@ def run(lay: case.Layout, plate: Part, covers: dict[str, case.Cover]) -> Report:
         standoff = Pos(h.X, h.Y, plate_top) * Cylinder(case.STANDOFF_D / 2, case.STANDOFF,
                                                          align=case.BASE)  # fmt: skip
         _clear(r, f"standoff {i + 1}", standoff, parts)
+    for ref, gate in case.gates(lay).items():
+        _clear(r, f"gate under {ref}", gate, parts, gap=case.FIT - 0.01)
+
+    cooler: Candidates = [("cooler", lay.cooler, lay.cooler.bounding_box())]
+    around_cm5 = [c for c in parts if c[0] != case.CM5]
+    r.section("cooler envelope")
+    _clear(r, "cooler envelope", lay.cooler, around_cm5)
+
     r.section("openings")
     _webs(r, lay)
+    for o in lay.openings:
+        if o.kind in case.GATED:
+            behind = (o.y_wall - o.y_face) * -o.inward
+            if abs(behind) <= FLUSH:
+                r.ok(f"{o.ref} face flush with the outer face")
+            else:
+                where = "behind" if behind > 0 else "proud of"
+                r.note(f"{o.ref} face {abs(behind):.2f} mm {where} the outer face")
 
     for name, c in covers.items():
         r.section(f"cover {name}")
-        top = lay.top_inside(case.COVERS[name].display)
+        top = lay.top_inside(case.COVERS[name].fan)
         r.ok(f"inside height {top - lay.seat:.1f} mm above the board, "
-             f"{top - lay.parts_top:.1f} mm over the "
-             "tallest part")  # fmt: skip
+             f"{top - max(lay.parts_top, lay.cooler.bounding_box().max.Z):.1f} mm over the "
+             "tallest part or cooler")  # fmt: skip
         for label, solid in c.intrusions.items():
             _clear(r, label, solid, parts)
+            if label.startswith("button"):
+                _clear(r, f"{label} to cooler", solid, cooler)
+        if c.fan is not None:
+            fan_box = c.fan.bounding_box()
+            _clear(r, "fan envelope", c.fan, parts)
+            _clear(r, "fan envelope to cooler", c.fan, cooler, gap=case.FAN_GAP)
+            inside = [(k, v, v.bounding_box()) for k, v in c.intrusions.items()]
+            _clear(r, "fan envelope to pillars and pin", c.fan, inside)
+            r.note(f"fan frame {fan_box.size.X:.0f} x {fan_box.size.Y:.0f} x "
+                   f"{fan_box.size.Z:.0f} mm against the top")  # fmt: skip
         if c.display is not None:
             others = [(k, v, v.bounding_box()) for k, v in c.intrusions.items()
                       if not k.startswith("display")]  # fmt: skip
             _clear(r, "display envelope", c.display, parts)
+            _clear(r, "display envelope to cooler", c.display, cooler)
             _clear(r, "display envelope to pillars and pin", c.display, others)
+        shell: Candidates = [("cover", c.part, c.part.bounding_box())]
+        for ref in through:
+            _clear(r, f"{ref} in its slot", board.parts[ref], shell, gap=case.FIT - 0.01)
         _paths(r, lay, c.part, plate)
-        for ref in case.RECOVERY:
-            sw = board.box(ref)
-            path = Pos(sw.center().X, sw.center().Y, sw.max.Z) * Cylinder(
-                case.RECOVERY_HOLE_D / 2 - 0.1, top + case.TOP - sw.max.Z + 1, align=case.BASE
-            )
-            _clear(
-                r, f"{ref} top access", path, [("cover", c.part, c.part.bounding_box())], gap=0.09
-            )
-            _clear(r, f"{ref} access to parts", path, [p for p in parts if p[0] != ref])
-            if c.display is not None:
-                _clear(
-                    r,
-                    f"{ref} access to display",
-                    path,
-                    [("display", c.display, c.display.bounding_box())],
-                )
     return r
 
 
@@ -172,7 +187,7 @@ def _webs(r: Report, lay: case.Layout) -> None:
     """Openings side by side in a wall leave at least MIN_WEB between them."""
 
     def span(o: case.Opening) -> tuple[float, float]:
-        bottom = o.z - o.height / 2
+        bottom = lay.z_bottom if o.kind in case.GATED else o.z - o.height / 2
         return bottom, o.z + o.height / 2
 
     thin = []
@@ -190,18 +205,26 @@ def _webs(r: Report, lay: case.Layout) -> None:
 
 
 def _paths(r: Report, lay: case.Layout, cover: Part, plate: Part) -> None:
-    """A maximum Type-C overmold and each LED's light reach their part's face."""
+    """A maximum Type-C overmold, the power plug's body, each LED's light and a pin must
+    reach their part's face without touching the cover or a gate."""
     blocked = []
     for o in lay.openings:
         if o.kind == "usb-c":
             w, h, rad, length = USB_C_PLUG
             profile = RectangleRounded(w, h, rad)
+        elif o.kind == "round":
+            w, h, rad, length = DIN_PLUG
+            profile = RectangleRounded(w, h, rad)
         elif o.kind == "light":
             profile, length = SlotOverall(o.width - 0.1, o.height - 0.1), 10.0
+        elif o.kind == "pin":
+            profile, length = Circle(PIN_D / 2), 10.0
+        else:  # an RJ45 plug passes wherever its jack does
+            continue
         path = extrude(o.plane(o.y_face) * profile, amount=length)
         if (path & cover).volume > 1e-3 or (path & plate).volume > 1e-3:
             blocked.append(o.label or o.ref)
     if blocked:
         r.fail("blocked from outside: " + ", ".join(blocked))
     else:
-        r.ok("plugs and light reach every part face")
+        r.ok("plugs, light and the boot pin reach every part face")

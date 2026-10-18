@@ -2,8 +2,8 @@
 
     uv run build.py [--step build/board.step]
 
-Uses the STEP and companion inventory from export_board.py, without loading KiCad.
-Writes build/: an assembly STEP, print-oriented STL and 3MF parts and report.txt.
+Needs only the STEP that export_board.py writes, not KiCad. Writes build/: an assembly
+STEP for review, print-oriented STL and 3MF parts and report.txt.
 """
 
 import argparse
@@ -29,9 +29,6 @@ ENVELOPE_COLOR = (0.35, 0.55, 0.85, 0.35)
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--step", type=Path, default=STEP)
-    ap.add_argument(
-        "--check-only", action="store_true", help="check geometry without writing CAD/print files"
-    )
     args = ap.parse_args()
     t0 = time.monotonic()
 
@@ -54,16 +51,13 @@ def main() -> int:
     report = check.run(lay, plate, covers)
     step("checked fit")
 
-    text = summary(lay, plate, covers, report)
-    (BUILD / "report.txt").write_text(text)
-    print(text, flush=True)
-    if args.check_only:
-        return 1 if report.failures else 0
-
     write_print_parts(plate, covers)
     write_assembly(lay, plate, covers)
     step("wrote STEP, STL and 3MF")
 
+    text = summary(lay, plate, covers, report)
+    (BUILD / "report.txt").write_text(text)
+    print(text)
     return 1 if report.failures else 0
 
 
@@ -100,17 +94,13 @@ def _to_bed(part):
 
 
 def write_assembly(lay, plate, covers) -> None:
-    """The board's STEP with the plate, every cover and the display envelopes."""
+    """The board's STEP with the plate, every cover and the cooler, fan and display envelopes."""
     plate.color = Color(*CASE_COLORS["plate"])
     extra = [plate]
-    for ref in lay.board.envelopes:
-        envelope = lay.board.parts[ref]
-        envelope.color = Color(*ENVELOPE_COLOR)
-        extra.append(envelope)
     for c in covers.values():
         c.part.color = Color(*CASE_COLORS["cover"])
         extra.append(c.part)
-    envelopes = [c.display for c in covers.values() if c.display is not None]
+    envelopes = [lay.cooler, *(e for c in covers.values() for e in (c.fan, c.display) if e)]
     for envelope in envelopes:
         envelope.color = Color(*ENVELOPE_COLOR)
         extra.append(envelope)
@@ -122,7 +112,9 @@ def summary(lay, plate, covers, report) -> str:
     for name, c in covers.items():
         bb = c.part.bounding_box()
         v = case.COVERS[name]
-        what = v.display.name if v.display else "passive"
+        what = ", ".join(
+            [v.fan.name if v.fan else "no fan", *([v.display.name] if v.display else [])]
+        )
         lines.append(f"  {name:8s} {bb.size.X:.1f} x {bb.size.Y:.1f} x {bb.size.Z:.1f} mm ({what})")
     lines += ["", *report.lines, ""]
     lines.append(f"{len(report.failures)} failures" if report.failures else "all checks passed")
