@@ -1,0 +1,17 @@
+.DS_Store
+
+# KiCad local state
+*.kicad_prl
+*.kicad_sch.lck
+*.kicad_pcb.lck
+~*.lck
+*-backups/
+_autosave-*
+fp-info-cache
+
+# Firmware images and local configuration
+*.ipsw
+*.ipsw.*
+.env
+.env.*
+!.env.example

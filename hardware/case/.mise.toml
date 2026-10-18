@@ -1,0 +1,19 @@
+[env]
+_.python.venv = { path = ".venv", create = true }
+UV_PYTHON = { value = "{{ tools.python.path }}", tools = true }
+
+[tasks.board-step]
+description = "Export the populated board STEP with kicad-cli (needs KiCad)"
+run = "uv run export_board.py"
+
+[tasks.case]
+description = "Build the enclosure and check its fit from the board STEP"
+run = "uv run build.py"
+
+[tasks.format]
+description = "Format the case sources"
+run = "ruff format"
+
+[tasks.lint]
+description = "Lint the case sources"
+run = ["ruff check", "ruff format --check"]

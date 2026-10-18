@@ -1,0 +1,122 @@
+(footprint "Yageo_PA2512_1-4mOhm"
+	(version 20260206)
+	(generator "pcbnew")
+	(generator_version "10.0")
+	(layer "F.Cu")
+	(descr "Yageo PA2512 1-4mohm long-terminal version; June24 2026 V11 PDF9 Table7 recommended pads3.05x3.68mm 1.27mm gap; Kelvin sense exits inner edges")
+	(property "Reference" "REF**"
+		(at 0 -3.09 0)
+		(layer "F.SilkS")
+		(uuid "1d945e62-4b08-4c95-840b-574bbed215e6")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Value" "Yageo_PA2512_1-4mOhm"
+		(at 0 3.09 0)
+		(layer "F.Fab")
+		(uuid "0561cb5d-ca92-43b5-a017-75534a1762a4")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "df4cca30-e28a-4ab9-9762-1d6940d5dc6f")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(property "Description" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "98428bdd-97e5-4b39-9dfa-aac7702a5ecc")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(attr smd)
+	(duplicate_pad_numbers_are_jumpers no)
+	(fp_line
+		(start -3.3 -1.835)
+		(end 3.3 -1.835)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "3010c32b-3c77-40e8-866c-76b64d134bbf")
+	)
+	(fp_line
+		(start -3.3 1.835)
+		(end 3.3 1.835)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "e588758b-344d-4d77-9119-6f85367f34c6")
+	)
+	(fp_rect
+		(start -3.935 -2.09)
+		(end 3.935 2.09)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.CrtYd")
+		(uuid "4a1141ed-6554-4ba2-82b8-afb8eaa0f1e9")
+	)
+	(fp_poly
+		(pts
+			(xy -3.3 -0.8575) (xy -2.4425 -1.715) (xy 3.3 -1.715) (xy 3.3 1.715) (xy -3.3 1.715)
+		)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.Fab")
+		(uuid "c7ec6e21-434d-4007-a39b-b1bfe42cce91")
+	)
+	(pad "1" smd roundrect
+		(at -2.16 0)
+		(size 3.05 3.68)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(roundrect_rratio 0.01639344262)
+		(uuid "d13962d5-2bef-4a13-acad-f54e3f3a9acb")
+	)
+	(pad "2" smd roundrect
+		(at 2.16 0)
+		(size 3.05 3.68)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(roundrect_rratio 0.01639344262)
+		(uuid "a5f147fb-88f5-4ffc-aa97-a1ee18bafc64")
+	)
+	(embedded_fonts no)
+	(model "${KICAD10_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_2512_6332Metric.step"
+		(offset
+			(xyz 0 0 0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 0)
+		)
+	)
+)

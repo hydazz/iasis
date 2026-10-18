@@ -1,0 +1,760 @@
+(kicad_sch
+	(version 20260306)
+	(generator "eeschema")
+	(generator_version "10.0")
+	(uuid "a379403c-5d83-493f-982e-fb5e1b803ee5")
+	(paper "A2")
+	(lib_symbols)
+	(text "Power"
+		(exclude_from_sim no)
+		(at 25 230 0)
+		(effects
+			(font
+				(size 2.5 2.5)
+			)
+			(justify left top)
+		)
+		(uuid "09a35f10-4c14-4b76-8454-e49e24cf362c")
+	)
+	(text "RP2354, USB recovery and SWD"
+		(exclude_from_sim no)
+		(at 30 170 0)
+		(effects
+			(font
+				(size 1.8 1.8)
+			)
+			(justify left top)
+		)
+		(uuid "0bc931f3-8834-4778-88ce-5657891ee9c9")
+	)
+	(text "Host / target status and deliberate confirmation"
+		(exclude_from_sim no)
+		(at 390 170 0)
+		(effects
+			(font
+				(size 1.8 1.8)
+			)
+			(justify left top)
+		)
+		(uuid "0cba6261-ddac-4f2b-b81f-c11c87144de1")
+	)
+	(text "IASIS — USB-C DFU hub"
+		(exclude_from_sim no)
+		(at 25 20 0)
+		(effects
+			(font
+				(size 4 4)
+			)
+			(justify left top)
+		)
+		(uuid "29f53299-0ae8-4951-97e2-32c6158bc88f")
+	)
+	(text "Common hub and control circuitry with an optional five-port charging population"
+		(exclude_from_sim no)
+		(at 25 35 0)
+		(effects
+			(font
+				(size 2 2)
+			)
+			(justify left top)
+		)
+		(uuid "2fc1d58b-a391-4f24-941d-86d7b4a06cf6")
+	)
+	(text "Independent target VBUS measurements"
+		(exclude_from_sim no)
+		(at 30 350 0)
+		(effects
+			(font
+				(size 1.8 1.8)
+			)
+			(justify left top)
+		)
+		(uuid "382cae4b-ea0b-4eb8-b9a3-5ae0f7d1d4a0")
+	)
+	(text "3.3 V, hub core rail and hardware reset"
+		(exclude_from_sim no)
+		(at 210 260 0)
+		(effects
+			(font
+				(size 1.8 1.8)
+			)
+			(justify left top)
+		)
+		(uuid "4256a29a-2f41-4f51-8718-393773af7854")
+	)
+	(text "External USB host: data, CC and 5 V presence"
+		(exclude_from_sim no)
+		(at 30 80 0)
+		(effects
+			(font
+				(size 1.8 1.8)
+			)
+			(justify left top)
+		)
+		(uuid "622eff87-52aa-4be5-9c8b-01e7c0b6064a")
+	)
+	(text "Per-port I2C, display and UART debug"
+		(exclude_from_sim no)
+		(at 210 170 0)
+		(effects
+			(font
+				(size 1.8 1.8)
+			)
+			(justify left top)
+		)
+		(uuid "72f3e4a4-8f29-4020-a86d-ab318190d891")
+	)
+	(text "Host-powered logic and bounded target supply"
+		(exclude_from_sim no)
+		(at 30 260 0)
+		(effects
+			(font
+				(size 1.8 1.8)
+			)
+			(justify left top)
+		)
+		(uuid "7a7c12f4-84bb-4014-ac17-b5a22fb16ae6")
+	)
+	(text "Control and recovery"
+		(exclude_from_sim no)
+		(at 25 140 0)
+		(effects
+			(font
+				(size 2.5 2.5)
+			)
+			(justify left top)
+		)
+		(uuid "a4f2f8de-575e-4eec-96d8-f5bd512ad7fb")
+	)
+	(text "Five identical USB-C / DFU / power channels"
+		(exclude_from_sim no)
+		(at 390 80 0)
+		(effects
+			(font
+				(size 1.8 1.8)
+			)
+			(justify left top)
+		)
+		(uuid "a5da801c-f689-4b3d-8450-35e149a522b0")
+	)
+	(text "USB7206C: five target ports and MCU USB2"
+		(exclude_from_sim no)
+		(at 210 80 0)
+		(effects
+			(font
+				(size 1.8 1.8)
+			)
+			(justify left top)
+		)
+		(uuid "af9c4746-4ce5-4827-bd06-49895873a077")
+	)
+	(text "Charging-stage temperature measurements"
+		(exclude_from_sim no)
+		(at 210 350 0)
+		(effects
+			(font
+				(size 1.8 1.8)
+			)
+			(justify left top)
+		)
+		(uuid "c3cf962a-16bd-4715-939d-d16bc2f62d65")
+	)
+	(text "Monitoring"
+		(exclude_from_sim no)
+		(at 25 320 0)
+		(effects
+			(font
+				(size 2.5 2.5)
+			)
+			(justify left top)
+		)
+		(uuid "d20cce80-9ebe-4c1c-89ae-da2537495c93")
+	)
+	(text "Optional USB-C charging power input"
+		(exclude_from_sim no)
+		(at 390 260 0)
+		(effects
+			(font
+				(size 1.8 1.8)
+			)
+			(justify left top)
+		)
+		(uuid "d7646959-20e1-44f0-a6fd-6cfe7c4c2224")
+	)
+	(text "USB data"
+		(exclude_from_sim no)
+		(at 25 50 0)
+		(effects
+			(font
+				(size 2.5 2.5)
+			)
+			(justify left top)
+		)
+		(uuid "f6b1fc05-1350-4a37-93bf-ff10faa0097e")
+	)
+	(sheet
+		(at 385 245)
+		(size 160 40)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "03c2519d-e43e-4e62-b36f-9d73983cf135")
+		(property "Sheetname" "Optional USB-C charging input"
+			(at 385 242.46 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "power-input.kicad_sch"
+			(at 385 287.54 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "iasis"
+				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5"
+					(page "32")
+					(variant
+						(name "Hub")
+						(dnp yes)
+					)
+				)
+			)
+		)
+	)
+	(sheet
+		(at 25 155)
+		(size 160 40)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "045ac23b-d823-440c-9a16-0df6228ec143")
+		(property "Sheetname" "RP2354 controller"
+			(at 25 152.46 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "controller-core.kicad_sch"
+			(at 25 197.54 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "iasis"
+				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5"
+					(page "27")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 385 335)
+		(size 165 50)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "0ac3c4af-eb8f-4e1d-a467-a9cb8c0e7942")
+		(property "Sheetname" "Power control outputs"
+			(at 385 332.46 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Sheetfile" "controller-power.kicad_sch"
+			(at 385 387.54 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(instances
+			(project "iasis"
+				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5"
+					(page "30")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 205 335)
+		(size 160 40)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "24d22e7d-274a-4a90-9b61-33ad319e8970")
+		(property "Sheetname" "Converter temperatures"
+			(at 205 332.46 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "controller-temperature.kicad_sch"
+			(at 205 377.54 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "iasis"
+				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5"
+					(page "33")
+					(variant
+						(name "Hub")
+						(dnp yes)
+					)
+				)
+			)
+		)
+	)
+	(sheet
+		(at 25 335)
+		(size 160 40)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "25c4da15-70a7-4927-918d-26ed03ea3cca")
+		(property "Sheetname" "Port voltage measurement"
+			(at 25 332.46 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "controller-sense.kicad_sch"
+			(at 25 377.54 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "iasis"
+				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5"
+					(page "31")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 205 245)
+		(size 160 40)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "32a3b17f-04ec-4707-aa21-2a6e0753ada6")
+		(property "Sheetname" "Logic supplies and reset"
+			(at 205 242.46 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "power-logic.kicad_sch"
+			(at 205 287.54 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "iasis"
+				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5"
+					(page "26")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 385 155)
+		(size 160 40)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "5e902199-627b-4b2e-b6c5-af3bb2ca51e8")
+		(property "Sheetname" "Indicators and confirmation"
+			(at 385 152.46 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "controller-panel.kicad_sch"
+			(at 385 197.54 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "iasis"
+				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5"
+					(page "29")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 205 65)
+		(size 160 40)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "9e9db2bb-c526-4c6a-ba4d-d8b25b5f251b")
+		(property "Sheetname" "USB hub — ports 1–5"
+			(at 205 62.46 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "hub.kicad_sch"
+			(at 205 107.54 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "iasis"
+				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5"
+					(page "3")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 25 65)
+		(size 160 40)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "a8cd007d-22b6-4951-9feb-b8af9e75802d")
+		(property "Sheetname" "Host port"
+			(at 25 62.46 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "host-port.kicad_sch"
+			(at 25 107.54 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "iasis"
+				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5"
+					(page "2")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 25 245)
+		(size 160 40)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "b07667e5-d806-499e-b7b3-ac624f29e1b9")
+		(property "Sheetname" "Host power and target budget"
+			(at 25 242.46 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "power-select.kicad_sch"
+			(at 25 287.54 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "iasis"
+				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5"
+					(page "25")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 385 65)
+		(size 160 40)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "eda5d45e-e86d-4d58-83d3-d3aa1de94feb")
+		(property "Sheetname" "Target ports"
+			(at 385 62.46 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "ports.kicad_sch"
+			(at 385 107.54 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "iasis"
+				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5"
+					(page "4")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 205 155)
+		(size 160 40)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "fb92c4c8-3914-4e35-9e8f-8fb1a9a5c34d")
+		(property "Sheetname" "Management buses"
+			(at 205 152.46 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "controller-bus.kicad_sch"
+			(at 205 197.54 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "iasis"
+				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5"
+					(page "28")
+				)
+			)
+		)
+	)
+	(sheet_instances
+		(path "/"
+			(page "1")
+		)
+	)
+	(embedded_fonts no)
+)

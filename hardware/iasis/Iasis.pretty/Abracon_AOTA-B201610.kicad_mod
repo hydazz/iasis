@@ -1,0 +1,111 @@
+(footprint "Abracon_AOTA-B201610"
+	(version 20260206)
+	(generator "pcbnew")
+	(generator_version "10.0")
+	(layer "F.Cu")
+	(descr "AOTA-B201610S3R3-101-T RevA; pad1 marked terminal, pad2 unmarked; land pattern from Raspberry Pi's RP2350 minimal boards")
+	(property "Reference" "REF**"
+		(at 0 -2.05 0)
+		(layer "F.SilkS")
+		(uuid "a9dbe62e-8397-4fce-931b-3478be2ec99f")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Value" "Abracon_AOTA-B201610"
+		(at 0 2.05 0)
+		(layer "F.Fab")
+		(uuid "613d83f2-7479-4294-ba5c-aac7a904dabf")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "16b7b9c2-21d1-44dc-b65a-ecd650ca9e08")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(property "Description" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "cf05f9e8-9335-4f29-8518-499c0ba2307a")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(attr smd)
+	(duplicate_pad_numbers_are_jumpers no)
+	(fp_circle
+		(center 1.45 -0.7)
+		(end 1.55 -0.7)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(fill yes)
+		(layer "F.SilkS")
+		(uuid "607030ee-9e03-4300-af4e-f90bdc16bdec")
+	)
+	(fp_rect
+		(start -1.25 -1)
+		(end 1.25 1)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.CrtYd")
+		(uuid "8836888d-ca13-4fdd-a109-b38ddbd2ca61")
+	)
+	(fp_poly
+		(pts
+			(xy -1 -0.8) (xy 0.6 -0.8) (xy 1 -0.4) (xy 1 0.8) (xy -1 0.8)
+		)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.Fab")
+		(uuid "ba3a7024-e669-4e2e-a166-c1876574c940")
+	)
+	(pad "1" smd rect
+		(at 0.7 0)
+		(size 0.7 1.7)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(uuid "ba729074-bfe3-4000-b20d-847d7fbaaf14")
+	)
+	(pad "2" smd rect
+		(at -0.7 0)
+		(size 0.7 1.7)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(uuid "aea290fe-51b1-4ea5-91fb-77b8ef8371b0")
+	)
+	(embedded_fonts no)
+	(model "${KIPRJMOD}/Iasis.3dshapes/AOTA-B201610S.step"
+		(offset
+			(xyz 0 0 0.525)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz -90 0 0)
+		)
+	)
+)
