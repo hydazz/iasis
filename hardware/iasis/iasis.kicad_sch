@@ -3,14 +3,20 @@
 	(generator "eeschema")
 	(generator_version "10.0")
 	(uuid "a379403c-5d83-493f-982e-fb5e1b803ee5")
-	(paper "A2")
+	(paper "A3")
+	(title_block
+		(title "IASIS — USB-C DFU hub")
+		(date "2026-10-19")
+		(rev "A")
+	)
 	(lib_symbols)
 	(text "Power"
 		(exclude_from_sim no)
-		(at 25 210 0)
+		(at 25.4 147.32 0)
 		(effects
 			(font
-				(size 2.5 2.5)
+				(size 1.778 1.778)
+				(bold yes)
 			)
 			(justify left top)
 		)
@@ -18,10 +24,10 @@
 	)
 	(text "RP2354, USB recovery and SWD"
 		(exclude_from_sim no)
-		(at 30 160 0)
+		(at 30.48 118.11 0)
 		(effects
 			(font
-				(size 1.8 1.8)
+				(size 1.27 1.27)
 			)
 			(justify left top)
 		)
@@ -29,10 +35,10 @@
 	)
 	(text "Host / target status and deliberate confirmation"
 		(exclude_from_sim no)
-		(at 390 160 0)
+		(at 284.48 118.11 0)
 		(effects
 			(font
-				(size 1.8 1.8)
+				(size 1.27 1.27)
 			)
 			(justify left top)
 		)
@@ -40,10 +46,11 @@
 	)
 	(text "IASIS — USB-C DFU hub"
 		(exclude_from_sim no)
-		(at 25 20 0)
+		(at 25.4 20.32 0)
 		(effects
 			(font
-				(size 4 4)
+				(size 2.54 2.54)
+				(bold yes)
 			)
 			(justify left top)
 		)
@@ -51,10 +58,10 @@
 	)
 	(text "Common hub and control circuitry with an optional five-port charging population"
 		(exclude_from_sim no)
-		(at 25 35 0)
+		(at 25.4 26.67 0)
 		(effects
 			(font
-				(size 2 2)
+				(size 1.27 1.27)
 			)
 			(justify left top)
 		)
@@ -62,10 +69,10 @@
 	)
 	(text "Independent target VBUS measurements"
 		(exclude_from_sim no)
-		(at 30 320 0)
+		(at 30.48 219.71 0)
 		(effects
 			(font
-				(size 1.8 1.8)
+				(size 1.27 1.27)
 			)
 			(justify left top)
 		)
@@ -73,10 +80,10 @@
 	)
 	(text "3.3 V, hub core rail and hardware reset"
 		(exclude_from_sim no)
-		(at 210 240 0)
+		(at 157.48 168.91 0)
 		(effects
 			(font
-				(size 1.8 1.8)
+				(size 1.27 1.27)
 			)
 			(justify left top)
 		)
@@ -84,10 +91,10 @@
 	)
 	(text "External USB host: data, CC and 5 V presence"
 		(exclude_from_sim no)
-		(at 30 80 0)
+		(at 30.48 67.31 0)
 		(effects
 			(font
-				(size 1.8 1.8)
+				(size 1.27 1.27)
 			)
 			(justify left top)
 		)
@@ -95,10 +102,10 @@
 	)
 	(text "Per-port I2C, display and UART debug"
 		(exclude_from_sim no)
-		(at 210 160 0)
+		(at 157.48 118.11 0)
 		(effects
 			(font
-				(size 1.8 1.8)
+				(size 1.27 1.27)
 			)
 			(justify left top)
 		)
@@ -106,10 +113,10 @@
 	)
 	(text "Host-powered logic and bounded target supply"
 		(exclude_from_sim no)
-		(at 30 240 0)
+		(at 30.48 168.91 0)
 		(effects
 			(font
-				(size 1.8 1.8)
+				(size 1.27 1.27)
 			)
 			(justify left top)
 		)
@@ -117,10 +124,11 @@
 	)
 	(text "Control and recovery"
 		(exclude_from_sim no)
-		(at 25 130 0)
+		(at 25.4 96.52 0)
 		(effects
 			(font
-				(size 2.5 2.5)
+				(size 1.778 1.778)
+				(bold yes)
 			)
 			(justify left top)
 		)
@@ -128,10 +136,10 @@
 	)
 	(text "Five identical USB-C / DFU / power channels"
 		(exclude_from_sim no)
-		(at 390 80 0)
+		(at 284.48 67.31 0)
 		(effects
 			(font
-				(size 1.8 1.8)
+				(size 1.27 1.27)
 			)
 			(justify left top)
 		)
@@ -139,10 +147,10 @@
 	)
 	(text "USB7206C: five target ports and MCU USB2"
 		(exclude_from_sim no)
-		(at 210 80 0)
+		(at 157.48 67.31 0)
 		(effects
 			(font
-				(size 1.8 1.8)
+				(size 1.27 1.27)
 			)
 			(justify left top)
 		)
@@ -150,10 +158,10 @@
 	)
 	(text "Charging-stage temperature measurements"
 		(exclude_from_sim no)
-		(at 210 320 0)
+		(at 157.48 219.71 0)
 		(effects
 			(font
-				(size 1.8 1.8)
+				(size 1.27 1.27)
 			)
 			(justify left top)
 		)
@@ -161,10 +169,11 @@
 	)
 	(text "Monitoring and power control"
 		(exclude_from_sim no)
-		(at 25 290 0)
+		(at 25.4 198.12 0)
 		(effects
 			(font
-				(size 2.5 2.5)
+				(size 1.778 1.778)
+				(bold yes)
 			)
 			(justify left top)
 		)
@@ -172,10 +181,10 @@
 	)
 	(text "Optional USB-C charging power input"
 		(exclude_from_sim no)
-		(at 390 240 0)
+		(at 284.48 168.91 0)
 		(effects
 			(font
-				(size 1.8 1.8)
+				(size 1.27 1.27)
 			)
 			(justify left top)
 		)
@@ -183,10 +192,10 @@
 	)
 	(text "Discharge, 9 V select and host budget outputs"
 		(exclude_from_sim no)
-		(at 390 320 0)
+		(at 284.48 219.71 0)
 		(effects
 			(font
-				(size 1.8 1.8)
+				(size 1.27 1.27)
 			)
 			(justify left top)
 		)
@@ -194,18 +203,19 @@
 	)
 	(text "USB data"
 		(exclude_from_sim no)
-		(at 25 50 0)
+		(at 25.4 45.72 0)
 		(effects
 			(font
-				(size 2.5 2.5)
+				(size 1.778 1.778)
+				(bold yes)
 			)
 			(justify left top)
 		)
 		(uuid "f6b1fc05-1350-4a37-93bf-ff10faa0097e")
 	)
 	(sheet
-		(at 385 225)
-		(size 160 40)
+		(at 279.4 157.48)
+		(size 101.6 25.4)
 		(exclude_from_sim no)
 		(in_bom yes)
 		(on_board yes)
@@ -220,7 +230,7 @@
 		)
 		(uuid "03c2519d-e43e-4e62-b36f-9d73983cf135")
 		(property "Sheetname" "Optional USB-C charging input"
-			(at 385 224.2884 0)
+			(at 279.4 156.7684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -231,7 +241,7 @@
 			)
 		)
 		(property "Sheetfile" "power-input.kicad_sch"
-			(at 385 265.5884 0)
+			(at 279.4 183.4684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -254,8 +264,8 @@
 		)
 	)
 	(sheet
-		(at 25 145)
-		(size 160 40)
+		(at 25.4 106.68)
+		(size 101.6 25.4)
 		(exclude_from_sim no)
 		(in_bom yes)
 		(on_board yes)
@@ -270,7 +280,7 @@
 		)
 		(uuid "045ac23b-d823-440c-9a16-0df6228ec143")
 		(property "Sheetname" "RP2354 controller"
-			(at 25 144.2884 0)
+			(at 25.4 105.9684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -281,7 +291,7 @@
 			)
 		)
 		(property "Sheetfile" "controller-core.kicad_sch"
-			(at 25 185.5884 0)
+			(at 25.4 132.6684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -300,8 +310,8 @@
 		)
 	)
 	(sheet
-		(at 385 305)
-		(size 160 40)
+		(at 279.4 208.28)
+		(size 101.6 25.4)
 		(exclude_from_sim no)
 		(in_bom yes)
 		(on_board yes)
@@ -315,25 +325,25 @@
 		)
 		(uuid "0ac3c4af-eb8f-4e1d-a467-a9cb8c0e7942")
 		(property "Sheetname" "Power control outputs"
-			(at 385 304.2884 0)
+			(at 279.4 207.5684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
 				(font
 					(size 1.27 1.27)
 				)
-				(justify left)
+				(justify left bottom)
 			)
 		)
 		(property "Sheetfile" "controller-power.kicad_sch"
-			(at 385 345.5884 0)
+			(at 279.4 234.2684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
 				(font
 					(size 1.27 1.27)
 				)
-				(justify left)
+				(justify left top)
 			)
 		)
 		(instances
@@ -345,8 +355,8 @@
 		)
 	)
 	(sheet
-		(at 205 305)
-		(size 160 40)
+		(at 152.4 208.28)
+		(size 101.6 25.4)
 		(exclude_from_sim no)
 		(in_bom yes)
 		(on_board yes)
@@ -361,7 +371,7 @@
 		)
 		(uuid "24d22e7d-274a-4a90-9b61-33ad319e8970")
 		(property "Sheetname" "Converter temperatures"
-			(at 205 304.2884 0)
+			(at 152.4 207.5684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -372,7 +382,7 @@
 			)
 		)
 		(property "Sheetfile" "controller-temperature.kicad_sch"
-			(at 205 345.5884 0)
+			(at 152.4 234.2684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -395,8 +405,8 @@
 		)
 	)
 	(sheet
-		(at 25 305)
-		(size 160 40)
+		(at 25.4 208.28)
+		(size 101.6 25.4)
 		(exclude_from_sim no)
 		(in_bom yes)
 		(on_board yes)
@@ -411,7 +421,7 @@
 		)
 		(uuid "25c4da15-70a7-4927-918d-26ed03ea3cca")
 		(property "Sheetname" "Port voltage measurement"
-			(at 25 304.2884 0)
+			(at 25.4 207.5684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -422,7 +432,7 @@
 			)
 		)
 		(property "Sheetfile" "controller-sense.kicad_sch"
-			(at 25 345.5884 0)
+			(at 25.4 234.2684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -441,8 +451,8 @@
 		)
 	)
 	(sheet
-		(at 205 225)
-		(size 160 40)
+		(at 152.4 157.48)
+		(size 101.6 25.4)
 		(exclude_from_sim no)
 		(in_bom yes)
 		(on_board yes)
@@ -457,7 +467,7 @@
 		)
 		(uuid "32a3b17f-04ec-4707-aa21-2a6e0753ada6")
 		(property "Sheetname" "Logic supplies and reset"
-			(at 205 224.2884 0)
+			(at 152.4 156.7684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -468,7 +478,7 @@
 			)
 		)
 		(property "Sheetfile" "power-logic.kicad_sch"
-			(at 205 265.5884 0)
+			(at 152.4 183.4684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -487,8 +497,8 @@
 		)
 	)
 	(sheet
-		(at 385 145)
-		(size 160 40)
+		(at 279.4 106.68)
+		(size 101.6 25.4)
 		(exclude_from_sim no)
 		(in_bom yes)
 		(on_board yes)
@@ -503,7 +513,7 @@
 		)
 		(uuid "5e902199-627b-4b2e-b6c5-af3bb2ca51e8")
 		(property "Sheetname" "Indicators and confirmation"
-			(at 385 144.2884 0)
+			(at 279.4 105.9684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -514,7 +524,7 @@
 			)
 		)
 		(property "Sheetfile" "controller-panel.kicad_sch"
-			(at 385 185.5884 0)
+			(at 279.4 132.6684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -533,8 +543,8 @@
 		)
 	)
 	(sheet
-		(at 205 65)
-		(size 160 40)
+		(at 152.4 55.88)
+		(size 101.6 25.4)
 		(exclude_from_sim no)
 		(in_bom yes)
 		(on_board yes)
@@ -549,7 +559,7 @@
 		)
 		(uuid "9e9db2bb-c526-4c6a-ba4d-d8b25b5f251b")
 		(property "Sheetname" "USB hub — ports 1–5"
-			(at 205 64.2884 0)
+			(at 152.4 55.1684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -560,7 +570,7 @@
 			)
 		)
 		(property "Sheetfile" "hub.kicad_sch"
-			(at 205 105.5884 0)
+			(at 152.4 81.8684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -579,8 +589,8 @@
 		)
 	)
 	(sheet
-		(at 25 65)
-		(size 160 40)
+		(at 25.4 55.88)
+		(size 101.6 25.4)
 		(exclude_from_sim no)
 		(in_bom yes)
 		(on_board yes)
@@ -595,7 +605,7 @@
 		)
 		(uuid "a8cd007d-22b6-4951-9feb-b8af9e75802d")
 		(property "Sheetname" "Host port"
-			(at 25 64.2884 0)
+			(at 25.4 55.1684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -606,7 +616,7 @@
 			)
 		)
 		(property "Sheetfile" "host-port.kicad_sch"
-			(at 25 105.5884 0)
+			(at 25.4 81.8684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -625,8 +635,8 @@
 		)
 	)
 	(sheet
-		(at 25 225)
-		(size 160 40)
+		(at 25.4 157.48)
+		(size 101.6 25.4)
 		(exclude_from_sim no)
 		(in_bom yes)
 		(on_board yes)
@@ -641,7 +651,7 @@
 		)
 		(uuid "b07667e5-d806-499e-b7b3-ac624f29e1b9")
 		(property "Sheetname" "Host power and target budget"
-			(at 25 224.2884 0)
+			(at 25.4 156.7684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -652,7 +662,7 @@
 			)
 		)
 		(property "Sheetfile" "power-select.kicad_sch"
-			(at 25 265.5884 0)
+			(at 25.4 183.4684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -671,8 +681,8 @@
 		)
 	)
 	(sheet
-		(at 385 65)
-		(size 160 40)
+		(at 279.4 55.88)
+		(size 101.6 25.4)
 		(exclude_from_sim no)
 		(in_bom yes)
 		(on_board yes)
@@ -687,7 +697,7 @@
 		)
 		(uuid "eda5d45e-e86d-4d58-83d3-d3aa1de94feb")
 		(property "Sheetname" "Target ports"
-			(at 385 64.2884 0)
+			(at 279.4 55.1684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -698,7 +708,7 @@
 			)
 		)
 		(property "Sheetfile" "ports.kicad_sch"
-			(at 385 105.5884 0)
+			(at 279.4 81.8684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -717,8 +727,8 @@
 		)
 	)
 	(sheet
-		(at 205 145)
-		(size 160 40)
+		(at 152.4 106.68)
+		(size 101.6 25.4)
 		(exclude_from_sim no)
 		(in_bom yes)
 		(on_board yes)
@@ -733,7 +743,7 @@
 		)
 		(uuid "fb92c4c8-3914-4e35-9e8f-8fb1a9a5c34d")
 		(property "Sheetname" "Management buses"
-			(at 205 144.2884 0)
+			(at 152.4 105.9684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -744,7 +754,7 @@
 			)
 		)
 		(property "Sheetfile" "controller-bus.kicad_sch"
-			(at 205 185.5884 0)
+			(at 152.4 132.6684 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
