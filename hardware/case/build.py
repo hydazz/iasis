@@ -1,7 +1,7 @@
 """Build the Iasis enclosure from build/board.step: parts, fit checks and outputs.
 
 Writes build/: the board STEP with the case parts added, print-oriented STL and 3MF parts
-and report.txt. Exits 1 when a fit check fails.
+and report.txt. Rerenders the tracked preview/case.png. Exits 1 when a fit check fails.
 """
 
 import sys
@@ -12,8 +12,13 @@ from build123d import Location, Mesher, Rot, export_stl
 import board as kicad
 import case
 import check
+from render import render, save
 
-BUILD = Path(__file__).resolve().parent / "build"
+HERE = Path(__file__).resolve().parent
+BUILD = HERE / "build"
+PREVIEW = HERE / "preview"
+VIEW = (-300, -400, 250)  # above the front left corner
+COVER, PLATE = (214, 216, 220), (120, 124, 130)
 
 
 def main() -> int:
@@ -48,6 +53,10 @@ def main() -> int:
     extra = [plate, *(c.part for c in covers.values())]
     extra += [c.display for c in covers.values() if c.display is not None]
     kicad.export_assembly(board, extra, BUILD / "iasis-case.step")
+
+    PREVIEW.mkdir(exist_ok=True)
+    if save(render([(plate, PLATE), (covers["passive"].part, COVER)], VIEW), PREVIEW / "case.png"):
+        print("preview/case.png written")
     return 1 if report.failures else 0
 
 

@@ -2,6 +2,11 @@
 
 lockfile_version = 3
 
+[[tools.oxipng]]
+version = "10.2.1"
+backend = "aqua:oxipng/oxipng"
+specifiers = ["10.2.1"]
+
 [[tools.python]]
 version = "3.14.7"
 backend = "core:python"
@@ -21,6 +26,11 @@ provenance = "github-attestations"
 checksum = "sha256:44b4716f4e63bc85e1c07ea2aca730d13a0ec3557d06526d84a13b1d111cf4f9"
 url = "https://github.com/astral-sh/python-build-standalone/releases/download/20260929/cpython-3.14.7+20260929-aarch64-apple-darwin-install_only_stripped.tar.gz"
 provenance = "github-attestations"
+
+[[tools.resvg]]
+version = "0.48.1"
+backend = "aqua:linebender/resvg"
+specifiers = ["0.48.1"]
 
 [[tools.ruff]]
 version = "0.17.1"

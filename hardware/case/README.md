@@ -2,6 +2,8 @@
 
 A 3D-printed enclosure for the compact Iasis Hub and Hub PD board, generated with [build123d](https://github.com/gumyr/build123d) from the board's STEP export. A plate carries the board on four standoffs. Passive and optional OLED covers share that plate.
 
+<img src="preview/case.png" alt="Passive cover on its plate" width="400">
+
 ## Build
 
 Tools come from mise (`mise install` at the repository root); mise also creates and activates `.venv` here with its Python, and uv fills it from `uv.lock`. The board export needs KiCad 10 at the path `KICAD_CLI` names in the root `.mise/config.toml`. Run tasks in this directory, or elsewhere as `mise run //hardware/case:<task>`.
@@ -17,6 +19,8 @@ mise run case
 | `iasis-case.step`            | KiCad's board STEP with the plate, covers and display envelope added, in KiCad coordinates |
 | `print/*.stl`, `print/*.3mf` | Plate and covers in print orientation                                                      |
 | `report.txt`                 | Sizes and fit checks                                                                       |
+
+It also renders `preview/case.png`, the passive cover on its plate, and rewrites it only when its pixels change. It is tracked, so commit it with the change that moved it and git history shows how the case changes.
 
 Open `build/iasis-case.step` in a STEP viewer or CAD editor. The case parts are solid bodies named `plate`, `cover passive` and `cover display`; hide the cover you are not inspecting. The body named `Adafruit 938 1.3in 128x64 OLED envelope` is the display module's clearance envelope, not its shape.
 

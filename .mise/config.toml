@@ -4,6 +4,8 @@ monorepo_root = true
 python = "3.14.7"
 uv = "0.12.20"
 ruff = "0.17.1"
+resvg = "0.48.1"
+oxipng = "10.2.1"
 
 [settings]
 experimental = true

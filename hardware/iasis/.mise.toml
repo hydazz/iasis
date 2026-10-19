@@ -1,5 +1,12 @@
+[tasks.preview]
+description = "Render and plot the board into preview/ for git history (needs KiCad)"
+sources = ["iasis.kicad_pcb", "Iasis.3dshapes/*", "preview.py"]
+outputs = ["preview/board.png", "preview/layout.png"]
+run = "python3 preview.py"
+
 [tasks.fab]
 description = "Write the JLC fab files: gerber and drill zip, BOM and CPL per variant (needs KiCad)"
+depends = ["preview"]
 sources = ["*.kicad_pcb", "*.kicad_sch", "*.kicad_pro"]
 outputs = ["build/gerbers.zip", "build/bom-Hub.csv", "build/bom-HubPD.csv", "build/cpl-Hub.csv", "build/cpl-HubPD.csv"]
 run = '''
