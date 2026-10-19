@@ -137,6 +137,7 @@ WALL_SLOT_CLEAR = 3.0  # rear slots to any other opening or label
 # Marks
 TEXT_DEPTH = 0.6
 WORDMARK = "iasis"
+WORDMARK_SIZE = 9.6
 
 BASE = (Align.CENTER, Align.CENTER, Align.MIN)  # centred, standing on the given point
 Z_UP = (0, 0, 1)  # the outline comes from the board's underside and faces down
@@ -480,7 +481,7 @@ def _wall_slots(lay: Layout, avoid: list[BoundBox], top_in: float) -> list[Part]
 
 def _wordmark(lay: Layout, top_out: float) -> list[Part]:
     """The name, centred near the front left corner."""
-    mark = Text(WORDMARK, font_size=8, font_style=FontStyle.BOLD)
+    mark = Text(WORDMARK, font_size=WORDMARK_SIZE, font_style=FontStyle.BOLD)
     c = mark.bounding_box().center()
     at = Pos(-lay.length / 2 + 32 - c.X, lay.y_front + 13 - c.Y, top_out)
     return [extrude(at * mark, amount=-TEXT_DEPTH)]
