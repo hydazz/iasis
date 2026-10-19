@@ -7,7 +7,7 @@ run = "python3 preview.py"
 [tasks.fab]
 description = "Write the JLC fab files: gerber and drill zip, BOM and CPL per variant (needs KiCad)"
 depends = ["preview"]
-sources = ["*.kicad_pcb", "*.kicad_sch", "*.kicad_pro"]
+sources = ["*.kicad_pcb", "*.kicad_sch", "*.kicad_pro", "jlc_cpl.py"]
 outputs = ["build/gerbers.zip", "build/bom-Hub.csv", "build/bom-HubPD.csv", "build/cpl-Hub.csv", "build/cpl-HubPD.csv"]
 run = '''
 rm -rf build && mkdir -p build/gerbers
@@ -19,7 +19,7 @@ for v in Hub HubPD; do
     --fields 'Value,Reference,Footprint,LCSC,MPN,Manufacturer,${QUANTITY}' \
     --labels 'Comment,Designator,Footprint,LCSC Part #,MPN,Manufacturer,Quantity' iasis.kicad_sch
   "$KICAD_CLI" pcb export pos --variant $v --exclude-dnp --format csv --units mm -o build/pos.csv iasis.kicad_pcb
-  { echo 'Designator,Value,Package,Mid X,Mid Y,Rotation,Layer'; tail -n +2 build/pos.csv; } > build/cpl-$v.csv
+  python3 jlc_cpl.py build/pos.csv build/bom-$v.csv build/cpl-$v.csv
 done
 rm build/pos.csv
 '''
