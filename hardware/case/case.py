@@ -14,6 +14,7 @@ the STEP does not contain.
 import math
 from dataclasses import dataclass
 from functools import cached_property
+from pathlib import Path
 
 from build123d import (
     Align,
@@ -479,3 +480,24 @@ def _wordmark(lay: Layout, top_out: float) -> list[Part]:
     c = mark.bounding_box().center()
     at = Pos(-lay.length / 2 + 32 - c.X, lay.y_front + 13 - c.Y, top_out)
     return [extrude(at * mark, amount=-TEXT_DEPTH)]
+
+
+if __name__ == "__main__":  # show the board, plate and one cover in OCP CAD Viewer
+    import sys
+
+    from ocp_vscode import show
+
+    from board import load
+
+    name = sys.argv[1] if len(sys.argv) > 1 else "passive"
+    lay = layout(load(Path(__file__).with_name("build") / "board.step"))
+    c = cover(lay, name, COVERS[name])
+    shown = [  # shape, colour, alpha
+        (Compound([lay.board.body], label="pcb"), "#1f5e3c", 1),
+        (Compound(list(lay.board.parts.values()), label="parts"), "#9a9a9a", 1),
+        (plate(lay), "#d8d8d2", 1),
+        (c.display, "#3d6fd1", 1),
+        (c.part, "#e8e8e3", 0.5),
+    ]
+    shapes, colors, alphas = zip(*(s for s in shown if s[0] is not None))
+    show(*shapes, colors=list(colors), alphas=list(alphas))

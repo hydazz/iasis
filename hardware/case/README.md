@@ -20,6 +20,12 @@ mise run case
 
 Open `build/iasis-case.step` in a STEP viewer or CAD editor. The case parts are solid bodies named `plate`, `cover passive` and `cover display`; hide the cover you are not inspecting. The body named `Adafruit 938 1.3in 128x64 OLED envelope` is the display module's clearance envelope, not its shape.
 
+## Preview
+
+The repository recommends the VS Code extension [OCP CAD Viewer](https://marketplace.visualstudio.com/items?itemName=bernhard-42.ocp-cad-viewer), and `.vscode/settings.json` makes this directory's `.venv` the workspace interpreter, which the extension uses. Opening `case.py` starts the viewer. Running the file (Run Python File) shows the board, plate and passive cover from `build/board.step`, so export that first with `mise run board-step`; `uv run case.py display` shows the display cover. Under the debugger, the viewer also shows the shapes in scope at each breakpoint.
+
+The extension expects the `ocp-vscode` locked here at its own major.minor version. When an extension update reports the library as older, run `uv lock --upgrade-package ocp-vscode` instead of using its Install button, which installs outside the lock.
+
 ## Design
 
 - **Board reference.** Part instances in the STEP carry their reference designators. The outline, four 3.2 mm mounting holes, connector faces, lights, switches and populated heights come from that file. `case.py` names the required references and holds fit and form dimensions. The fit checks see only modelled parts, so every placed component needs a 3D model in the board. The optional display module is a clearance envelope.

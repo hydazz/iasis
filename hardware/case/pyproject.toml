@@ -5,6 +5,9 @@ description = "Parametric 3D-printed enclosure for the Iasis board"
 requires-python = ">=3.14"
 dependencies = ["build123d>=0.13.0"]
 
+[dependency-groups]
+dev = ["ocp-vscode>=4.2.0"]
+
 [tool.uv]
 package = false
 

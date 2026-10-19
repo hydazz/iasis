@@ -1,11 +1,4 @@
 {
-	"python-envs.pythonProjects": [
-		{
-			"path": "hardware/case",
-			"envManager": "ms-python.python:venv",
-			"packageManager": "ms-python.python:pip"
-		}
-	],
 	"python.useEnvironmentsExtension": true,
-	"python.analysis.usePerProjectEnvironments": true
+	"python.defaultInterpreterPath": "${workspaceFolder}/hardware/case/.venv/bin/python"
 }
