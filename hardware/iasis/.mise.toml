@@ -1,0 +1,18 @@
+[tasks.fab]
+description = "Write the JLC fab files: gerber and drill zip, BOM and CPL per variant (needs KiCad)"
+sources = ["*.kicad_pcb", "*.kicad_sch", "*.kicad_pro"]
+outputs = ["build/gerbers.zip", "build/bom-Hub.csv", "build/bom-HubPD.csv", "build/cpl-Hub.csv", "build/cpl-HubPD.csv"]
+run = '''
+rm -rf build && mkdir -p build/gerbers
+"$KICAD_CLI" pcb export gerbers --check-zones -o build/gerbers -l F.Cu,In1.Cu,In2.Cu,In3.Cu,In4.Cu,B.Cu,F.Paste,F.Silkscreen,B.Silkscreen,F.Mask,B.Mask,Edge.Cuts iasis.kicad_pcb
+"$KICAD_CLI" pcb export drill --excellon-separate-th -o build/gerbers iasis.kicad_pcb
+zip -jq build/gerbers.zip build/gerbers/*
+for v in Hub HubPD; do
+  "$KICAD_CLI" sch export bom --variant $v --exclude-dnp --group-by LCSC --ref-range-delimiter '' -o build/bom-$v.csv \
+    --fields 'Value,Reference,Footprint,LCSC,MPN,Manufacturer,${QUANTITY}' \
+    --labels 'Comment,Designator,Footprint,LCSC Part #,MPN,Manufacturer,Quantity' iasis.kicad_sch
+  "$KICAD_CLI" pcb export pos --variant $v --exclude-dnp --format csv --units mm -o build/pos.csv iasis.kicad_pcb
+  { echo 'Designator,Value,Package,Mid X,Mid Y,Rotation,Layer'; tail -n +2 build/pos.csv; } > build/cpl-$v.csv
+done
+rm build/pos.csv
+'''

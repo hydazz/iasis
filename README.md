@@ -15,6 +15,16 @@ The MCU connects to an internal USB2 hub port, so the same host cable supports m
 
 In development. Firmware and host software are not yet implemented. Hardware and restore workflows are not yet validated.
 
+## Fabrication
+
+Tools come from mise (`mise install` at the repository root); KiCad 10 is needed at the path `KICAD_CLI` names in `.mise/config.toml`.
+
+```bash
+mise run //hardware/iasis:fab
+```
+
+This writes `hardware/iasis/build/`: `gerbers.zip` (gerbers and drill files for JLCPCB), and `bom-Hub.csv`, `bom-HubPD.csv`, `cpl-Hub.csv` and `cpl-HubPD.csv` for JLCPCB assembly of each variant. Check part rotations in JLCPCB's placement preview before ordering. The enclosure has its own tasks; see [hardware/case](hardware/case/README.md).
+
 ## License
 
 Original software, firmware, documentation, CAD and enclosure sources are licensed under [Apache-2.0](LICENSE). Third-party material retains its original licenses and notices.

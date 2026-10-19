@@ -10,5 +10,8 @@ experimental = true
 pin = true
 lockfile = true
 
+[env]
+KICAD_CLI = "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli"
+
 [monorepo]
-config_roots = ["hardware/case"]
+config_roots = ["hardware/case", "hardware/iasis"]
