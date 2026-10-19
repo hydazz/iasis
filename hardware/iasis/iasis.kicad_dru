@@ -31,3 +31,8 @@
 (rule "GCT USB4105 locating holes to GND lands"
     (condition "A.Type == 'Pad' && B.Type == 'Pad' && A.memberOfFootprint('J1001') && B.memberOfFootprint('J1001') && A.Pad_Type == 'NPTH, mechanical' && A.Hole_Size_X == 0.65mm && B.NetName == 'GND' && (B.Pad_Number == 'A1' || B.Pad_Number == 'B12' || B.Pad_Number == 'A12' || B.Pad_Number == 'B1')")
     (constraint hole_clearance (min 0.20mm)))
+
+# Exposed pads and their thermal vias tie solidly into the planes; KiCad tags them as heatsink pads.
+(rule "Heatsink pads connect solid"
+	(condition "A.Type == 'Pad' && A.Fabrication_Property == 'Heatsink pad'")
+	(constraint zone_connection solid))

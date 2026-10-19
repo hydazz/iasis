@@ -2334,18 +2334,8 @@
 		(attr smd)
 		(duplicate_pad_numbers_are_jumpers no)
 		(fp_line
-			(start -1.36 -1.36)
-			(end -1.135 -1.36)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "fb2cbb58-32c1-4ace-9abb-be82ea2cc221")
-		)
-		(fp_line
 			(start -1.36 -0.885)
-			(end -1.36 -1.36)
+			(end -1.36 -1.12)
 			(stroke
 				(width 0.12)
 				(type solid)
@@ -2415,7 +2405,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -1.86 -0.5) (xy -2.19 -0.26) (xy -2.19 -0.74)
+				(xy -1.38 -1.36) (xy -1.62 -1.69) (xy -1.14 -1.69)
 			)
 			(stroke
 				(width 0.12)
@@ -2819,6 +2809,7 @@
 		(pad "15" smd rect
 			(at 0 0)
 			(size 1.45 1.45)
+			(property pad_prop_heatsink)
 			(layers "F.Cu" "F.Mask")
 			(net "GND")
 			(pinfunction "GND_15")
@@ -2835,7 +2826,7 @@
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 270)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -8435,18 +8426,8 @@
 		(attr smd)
 		(duplicate_pad_numbers_are_jumpers no)
 		(fp_line
-			(start -1.61 -1.61)
-			(end -1.16 -1.61)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "8a0b3306-08e7-46e8-983d-e2302804b64a")
-		)
-		(fp_line
 			(start -1.61 -1.16)
-			(end -1.61 -1.61)
+			(end -1.61 -1.37)
 			(stroke
 				(width 0.12)
 				(type solid)
@@ -8463,6 +8444,16 @@
 			)
 			(layer "F.SilkS")
 			(uuid "419b57b1-db76-4fad-82bf-cfbe30bafabd")
+		)
+		(fp_line
+			(start -1.313241 -1.61)
+			(end -1.16 -1.61)
+			(stroke
+				(width 0.12)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "8a0b3306-08e7-46e8-983d-e2302804b64a")
 		)
 		(fp_line
 			(start -1.16 1.61)
@@ -8516,7 +8507,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -2.14 -0.8) (xy -2.47 -0.56) (xy -2.47 -1.04)
+				(xy -1.61 -1.61) (xy -1.85 -1.94) (xy -1.37 -1.94)
 			)
 			(stroke
 				(width 0.12)
@@ -8981,29 +8972,30 @@
 			(at -0.6 -0.6)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "06ded029-2f96-4b7f-8418-e82668d986be")
 		)
 		(pad "21" thru_hole circle
 			(at -0.6 0.6)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "9ccb8d20-141e-4673-84ee-23fed82db609")
 		)
 		(pad "21" smd rect
 			(at 0 0)
 			(size 1.7 1.7)
+			(property pad_prop_heatsink)
 			(layers "F.Cu" "F.Mask")
 			(net "GND")
 			(pinfunction "GND_21")
@@ -9014,6 +9006,7 @@
 		(pad "21" smd rect
 			(at 0 0)
 			(size 1.7 1.7)
+			(property pad_prop_heatsink)
 			(layers "B.Cu")
 			(net "GND")
 			(pinfunction "GND_21")
@@ -9025,24 +9018,24 @@
 			(at 0.6 -0.6)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "d0028e93-fbe6-4b75-a14b-426fe56efe0c")
 		)
 		(pad "21" thru_hole circle
 			(at 0.6 0.6)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "9595eef3-345f-478d-9141-7241eaefb340")
 		)
 		(embedded_fonts no)
@@ -9054,7 +9047,7 @@
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 270)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -9637,6 +9630,16 @@
 			(uuid "f5d2481a-fb5a-4604-b61c-5a507510c456")
 		)
 		(fp_line
+			(start -1.313241 -1.61)
+			(end -1.16 -1.61)
+			(stroke
+				(width 0.12)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "6ec6a325-c86a-4ce5-a3c1-fdc396da3af1")
+		)
+		(fp_line
 			(start -1.61 1.61)
 			(end -1.61 1.16)
 			(stroke
@@ -9648,7 +9651,7 @@
 		)
 		(fp_line
 			(start -1.61 -1.16)
-			(end -1.61 -1.61)
+			(end -1.61 -1.37)
 			(stroke
 				(width 0.12)
 				(type solid)
@@ -9656,19 +9659,9 @@
 			(layer "F.SilkS")
 			(uuid "4eea9fb6-16e3-4aee-af6c-2ba9c11cdfdf")
 		)
-		(fp_line
-			(start -1.61 -1.61)
-			(end -1.16 -1.61)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "6ec6a325-c86a-4ce5-a3c1-fdc396da3af1")
-		)
 		(fp_poly
 			(pts
-				(xy -2.14 -0.8) (xy -2.47 -0.56) (xy -2.47 -1.04)
+				(xy -1.61 -1.61) (xy -1.85 -1.94) (xy -1.37 -1.94)
 			)
 			(stroke
 				(width 0.12)
@@ -10133,29 +10126,30 @@
 			(at -0.6 -0.6 180)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "9d4cced6-508d-48c8-b90b-8af8dcca4eba")
 		)
 		(pad "21" thru_hole circle
 			(at -0.6 0.6 180)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "f802ca6b-ffa7-45f6-b9da-080d74707a17")
 		)
 		(pad "21" smd rect
 			(at 0 0 180)
 			(size 1.7 1.7)
+			(property pad_prop_heatsink)
 			(layers "F.Cu" "F.Mask")
 			(net "GND")
 			(pinfunction "GND_21")
@@ -10166,6 +10160,7 @@
 		(pad "21" smd rect
 			(at 0 0 180)
 			(size 1.7 1.7)
+			(property pad_prop_heatsink)
 			(layers "B.Cu")
 			(net "GND")
 			(pinfunction "GND_21")
@@ -10177,24 +10172,24 @@
 			(at 0.6 -0.6 180)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "3087acee-d272-44fa-8136-fbdcbd455e81")
 		)
 		(pad "21" thru_hole circle
 			(at 0.6 0.6 180)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "0cfa9b58-8818-47bf-912c-3457bcafbe3f")
 		)
 		(embedded_fonts no)
@@ -10206,7 +10201,7 @@
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 270)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -10521,18 +10516,8 @@
 		(attr smd)
 		(duplicate_pad_numbers_are_jumpers no)
 		(fp_line
-			(start -1.36 -1.36)
-			(end -1.135 -1.36)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "3b3b86d2-b88a-4938-bd57-cabda0cbb640")
-		)
-		(fp_line
 			(start -1.36 -0.885)
-			(end -1.36 -1.36)
+			(end -1.36 -1.12)
 			(stroke
 				(width 0.12)
 				(type solid)
@@ -10602,7 +10587,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -1.86 -0.5) (xy -2.19 -0.26) (xy -2.19 -0.74)
+				(xy -1.38 -1.36) (xy -1.62 -1.69) (xy -1.14 -1.69)
 			)
 			(stroke
 				(width 0.12)
@@ -11006,6 +10991,7 @@
 		(pad "15" smd rect
 			(at 0 0)
 			(size 1.45 1.45)
+			(property pad_prop_heatsink)
 			(layers "F.Cu" "F.Mask")
 			(net "GND")
 			(pinfunction "GND_15")
@@ -11022,7 +11008,7 @@
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 270)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -12372,18 +12358,8 @@
 		(attr smd)
 		(duplicate_pad_numbers_are_jumpers no)
 		(fp_line
-			(start -1.61 -1.61)
-			(end -1.135 -1.61)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "5fb6b775-a256-4d41-b130-a430eec7f90a")
-		)
-		(fp_line
 			(start -1.61 -1.135)
-			(end -1.61 -1.61)
+			(end -1.61 -1.37)
 			(stroke
 				(width 0.12)
 				(type solid)
@@ -12400,6 +12376,16 @@
 			)
 			(layer "F.SilkS")
 			(uuid "f93d105e-0fac-47d6-b008-dcea6f5be8de")
+		)
+		(fp_line
+			(start -1.313241 -1.61)
+			(end -1.135 -1.61)
+			(stroke
+				(width 0.12)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "5fb6b775-a256-4d41-b130-a430eec7f90a")
 		)
 		(fp_line
 			(start -1.135 1.61)
@@ -12453,7 +12439,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -2.14 -0.75) (xy -2.47 -0.51) (xy -2.47 -0.99)
+				(xy -1.61 -1.61) (xy -1.85 -1.94) (xy -1.37 -1.94)
 			)
 			(stroke
 				(width 0.12)
@@ -12886,7 +12872,7 @@
 			(uuid "d5d746bf-1ff5-4b2a-8903-171f0b6b7696")
 		)
 		(embedded_fonts no)
-		(model "${KIPRJMOD}/Iasis.3dshapes/TI_VQFN-16_RGT.step"
+		(model "${KICAD10_3DMODEL_DIR}/Package_DFN_QFN.3dshapes/QFN-16-1EP_3x3mm_P0.5mm_EP1.7x1.7mm.step"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -14283,17 +14269,7 @@
 			(uuid "ad8a7225-82e2-4804-b11f-939364efd51a")
 		)
 		(fp_line
-			(start -1.36 -2.135)
-			(end -1.36 -2.36)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "b24e6c66-507d-4cfb-88fa-f9e5ddcf21dc")
-		)
-		(fp_line
-			(start -1.36 -2.36)
+			(start -1.12 -2.36)
 			(end -0.635 -2.36)
 			(stroke
 				(width 0.12)
@@ -14324,7 +14300,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -0.25 -2.86) (xy -0.49 -3.19) (xy -0.01 -3.19)
+				(xy -1.36 -2.38) (xy -1.69 -2.14) (xy -1.69 -2.62)
 			)
 			(stroke
 				(width 0.12)
@@ -14774,6 +14750,7 @@
 		(pad "21" smd rect
 			(at 0 0 270)
 			(size 1 3)
+			(property pad_prop_heatsink)
 			(layers "F.Cu" "F.Mask")
 			(net "GND")
 			(pinfunction "EP_21")
@@ -24774,7 +24751,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69)
+				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69) (xy -0.62 -1.41)
 			)
 			(stroke
 				(width 0.12)
@@ -28376,18 +28353,8 @@
 		(attr smd)
 		(duplicate_pad_numbers_are_jumpers no)
 		(fp_line
-			(start -1.36 -1.36)
-			(end -1.135 -1.36)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "f16f4486-8b8c-4921-af35-24fee38318ca")
-		)
-		(fp_line
 			(start -1.36 -0.885)
-			(end -1.36 -1.36)
+			(end -1.36 -1.12)
 			(stroke
 				(width 0.12)
 				(type solid)
@@ -28457,7 +28424,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -1.86 -0.5) (xy -2.19 -0.26) (xy -2.19 -0.74)
+				(xy -1.38 -1.36) (xy -1.62 -1.69) (xy -1.14 -1.69)
 			)
 			(stroke
 				(width 0.12)
@@ -28861,6 +28828,7 @@
 		(pad "15" smd rect
 			(at 0 0)
 			(size 1.45 1.45)
+			(property pad_prop_heatsink)
 			(layers "F.Cu" "F.Mask")
 			(net "GND")
 			(pinfunction "GND_15")
@@ -28877,7 +28845,7 @@
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 270)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -30130,17 +30098,7 @@
 			(uuid "8bcceef8-ca28-46a6-b75c-43bfa5c05282")
 		)
 		(fp_line
-			(start -1.36 -2.135)
-			(end -1.36 -2.36)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "6017766e-1d94-4073-adf2-1cb691afffda")
-		)
-		(fp_line
-			(start -1.36 -2.36)
+			(start -1.12 -2.36)
 			(end -0.635 -2.36)
 			(stroke
 				(width 0.12)
@@ -30171,7 +30129,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -0.25 -2.86) (xy -0.49 -3.19) (xy -0.01 -3.19)
+				(xy -1.36 -2.38) (xy -1.69 -2.14) (xy -1.69 -2.62)
 			)
 			(stroke
 				(width 0.12)
@@ -30621,6 +30579,7 @@
 		(pad "21" smd rect
 			(at 0 0 270)
 			(size 1 3)
+			(property pad_prop_heatsink)
 			(layers "F.Cu" "F.Mask")
 			(net "GND")
 			(pinfunction "EP_21")
@@ -32419,7 +32378,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69)
+				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69) (xy -0.62 -1.41)
 			)
 			(stroke
 				(width 0.12)
@@ -43667,18 +43626,8 @@
 		(attr smd)
 		(duplicate_pad_numbers_are_jumpers no)
 		(fp_line
-			(start -1.36 -1.36)
-			(end -1.135 -1.36)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "977a270b-0aa7-4027-b38d-612d2c4c5fd4")
-		)
-		(fp_line
 			(start -1.36 -0.885)
-			(end -1.36 -1.36)
+			(end -1.36 -1.12)
 			(stroke
 				(width 0.12)
 				(type solid)
@@ -43748,7 +43697,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -1.86 -0.5) (xy -2.19 -0.26) (xy -2.19 -0.74)
+				(xy -1.38 -1.36) (xy -1.62 -1.69) (xy -1.14 -1.69)
 			)
 			(stroke
 				(width 0.12)
@@ -44152,6 +44101,7 @@
 		(pad "15" smd rect
 			(at 0 0)
 			(size 1.45 1.45)
+			(property pad_prop_heatsink)
 			(layers "F.Cu" "F.Mask")
 			(net "GND")
 			(pinfunction "GND_15")
@@ -44168,7 +44118,7 @@
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 270)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -51014,7 +50964,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69)
+				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69) (xy -0.62 -1.41)
 			)
 			(stroke
 				(width 0.12)
@@ -52923,6 +52873,16 @@
 			(uuid "0dd36f4f-6f7d-41a7-8b8e-af0f046ca966")
 		)
 		(fp_line
+			(start -1.313241 -1.61)
+			(end -1.16 -1.61)
+			(stroke
+				(width 0.12)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "e69015d3-232b-47b5-a8ba-7934e9a14855")
+		)
+		(fp_line
 			(start -1.61 1.61)
 			(end -1.61 1.16)
 			(stroke
@@ -52934,7 +52894,7 @@
 		)
 		(fp_line
 			(start -1.61 -1.16)
-			(end -1.61 -1.61)
+			(end -1.61 -1.37)
 			(stroke
 				(width 0.12)
 				(type solid)
@@ -52942,19 +52902,9 @@
 			(layer "F.SilkS")
 			(uuid "f76d6d59-6665-4ab8-b57d-11e7919afe52")
 		)
-		(fp_line
-			(start -1.61 -1.61)
-			(end -1.16 -1.61)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "e69015d3-232b-47b5-a8ba-7934e9a14855")
-		)
 		(fp_poly
 			(pts
-				(xy -2.14 -0.8) (xy -2.47 -0.56) (xy -2.47 -1.04)
+				(xy -1.61 -1.61) (xy -1.85 -1.94) (xy -1.37 -1.94)
 			)
 			(stroke
 				(width 0.12)
@@ -53419,29 +53369,30 @@
 			(at -0.6 -0.6 180)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "baafafde-58ee-4da3-b07f-f98a7835f189")
 		)
 		(pad "21" thru_hole circle
 			(at -0.6 0.6 180)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "3ffdcc5e-d025-4cd3-9fcf-09484999aac1")
 		)
 		(pad "21" smd rect
 			(at 0 0 180)
 			(size 1.7 1.7)
+			(property pad_prop_heatsink)
 			(layers "F.Cu" "F.Mask")
 			(net "GND")
 			(pinfunction "GND_21")
@@ -53452,6 +53403,7 @@
 		(pad "21" smd rect
 			(at 0 0 180)
 			(size 1.7 1.7)
+			(property pad_prop_heatsink)
 			(layers "B.Cu")
 			(net "GND")
 			(pinfunction "GND_21")
@@ -53463,24 +53415,24 @@
 			(at 0.6 -0.6 180)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "f956b3c5-7851-43e0-84af-cac36c512b72")
 		)
 		(pad "21" thru_hole circle
 			(at 0.6 0.6 180)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "20ec48a2-687a-4028-a12d-8fffaea76493")
 		)
 		(embedded_fonts no)
@@ -53492,7 +53444,7 @@
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 270)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -53672,7 +53624,7 @@
 		)
 		(fp_line
 			(start -1.36 -0.885)
-			(end -1.36 -1.36)
+			(end -1.36 -1.12)
 			(stroke
 				(width 0.12)
 				(type solid)
@@ -53680,19 +53632,9 @@
 			(layer "F.SilkS")
 			(uuid "3af9efac-7627-4246-a0bc-0dde94e12a5c")
 		)
-		(fp_line
-			(start -1.36 -1.36)
-			(end -1.135 -1.36)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "5acc0d08-56cb-4e0f-8577-2cb61473b4b8")
-		)
 		(fp_poly
 			(pts
-				(xy -1.5 -1.5) (xy -2 -1.5) (xy -1.5 -2)
+				(xy -1.38 -1.36) (xy -1.62 -1.69) (xy -1.14 -1.69)
 			)
 			(stroke
 				(width 0.12)
@@ -54096,6 +54038,7 @@
 		(pad "15" smd rect
 			(at 0 0 180)
 			(size 1.45 1.45)
+			(property pad_prop_heatsink)
 			(layers "F.Cu" "F.Mask")
 			(net "GND")
 			(pinfunction "GND_15")
@@ -54112,7 +54055,7 @@
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 270)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -58364,6 +58307,7 @@
 			(at -4.32 -2.805)
 			(size 1.1 2.1)
 			(drill oval 0.6 1.6)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -58375,6 +58319,7 @@
 			(at -4.32 2.555)
 			(size 1.1 2.6)
 			(drill oval 0.6 2.1)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -58386,6 +58331,7 @@
 			(at 4.32 -2.805)
 			(size 1.1 2.1)
 			(drill oval 0.6 1.6)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -58397,6 +58343,7 @@
 			(at 4.32 2.555)
 			(size 1.1 2.6)
 			(drill oval 0.6 2.1)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -58411,7 +58358,7 @@
 			(connect_pads
 				(clearance 0)
 			)
-			(min_thickness 0.25)
+			(min_thickness 0.254)
 			(keepout
 				(tracks not_allowed)
 				(vias not_allowed)
@@ -58424,8 +58371,8 @@
 				(sheetname "")
 			)
 			(fill
-				(thermal_gap 0.5)
-				(thermal_bridge_width 0.5)
+				(thermal_gap 0.508)
+				(thermal_bridge_width 0.508)
 				(island_removal_mode 0)
 			)
 			(polygon
@@ -60713,6 +60660,16 @@
 			(uuid "aa8956a3-640a-4c03-b420-ec4ce9e17369")
 		)
 		(fp_line
+			(start -1.313241 -1.61)
+			(end -1.16 -1.61)
+			(stroke
+				(width 0.12)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "a034ba15-8e05-4944-aea0-e5c2da584f5b")
+		)
+		(fp_line
 			(start -1.61 1.61)
 			(end -1.61 1.16)
 			(stroke
@@ -60724,7 +60681,7 @@
 		)
 		(fp_line
 			(start -1.61 -1.16)
-			(end -1.61 -1.61)
+			(end -1.61 -1.37)
 			(stroke
 				(width 0.12)
 				(type solid)
@@ -60732,19 +60689,9 @@
 			(layer "F.SilkS")
 			(uuid "7ffdc2bf-71cf-4c23-a23b-0a3c5f8ac403")
 		)
-		(fp_line
-			(start -1.61 -1.61)
-			(end -1.16 -1.61)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "a034ba15-8e05-4944-aea0-e5c2da584f5b")
-		)
 		(fp_poly
 			(pts
-				(xy -2.14 -0.8) (xy -2.47 -0.56) (xy -2.47 -1.04)
+				(xy -1.61 -1.61) (xy -1.85 -1.94) (xy -1.37 -1.94)
 			)
 			(stroke
 				(width 0.12)
@@ -61209,29 +61156,30 @@
 			(at -0.6 -0.6 180)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "53efaf0e-354c-46ff-908d-32fc41e55f7d")
 		)
 		(pad "21" thru_hole circle
 			(at -0.6 0.6 180)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "1a797c0f-166d-439c-bd73-9e5578246c0b")
 		)
 		(pad "21" smd rect
 			(at 0 0 180)
 			(size 1.7 1.7)
+			(property pad_prop_heatsink)
 			(layers "F.Cu" "F.Mask")
 			(net "GND")
 			(pinfunction "GND_21")
@@ -61242,6 +61190,7 @@
 		(pad "21" smd rect
 			(at 0 0 180)
 			(size 1.7 1.7)
+			(property pad_prop_heatsink)
 			(layers "B.Cu")
 			(net "GND")
 			(pinfunction "GND_21")
@@ -61253,24 +61202,24 @@
 			(at 0.6 -0.6 180)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "841804b8-ea3e-45ae-aa3a-8386fa9d44d5")
 		)
 		(pad "21" thru_hole circle
 			(at 0.6 0.6 180)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "90bc3f53-0584-45d6-af1d-173a66be211c")
 		)
 		(embedded_fonts no)
@@ -61282,7 +61231,7 @@
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 270)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -62458,7 +62407,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69)
+				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69) (xy -0.62 -1.41)
 			)
 			(stroke
 				(width 0.12)
@@ -64021,6 +63970,7 @@
 			(at -4.32 -2.805)
 			(size 1.1 2.1)
 			(drill oval 0.6 1.6)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -64032,6 +63982,7 @@
 			(at -4.32 2.555)
 			(size 1.1 2.6)
 			(drill oval 0.6 2.1)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -64043,6 +63994,7 @@
 			(at 4.32 -2.805)
 			(size 1.1 2.1)
 			(drill oval 0.6 1.6)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -64054,6 +64006,7 @@
 			(at 4.32 2.555)
 			(size 1.1 2.6)
 			(drill oval 0.6 2.1)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -64068,7 +64021,7 @@
 			(connect_pads
 				(clearance 0)
 			)
-			(min_thickness 0.25)
+			(min_thickness 0.254)
 			(keepout
 				(tracks not_allowed)
 				(vias not_allowed)
@@ -64081,8 +64034,8 @@
 				(sheetname "")
 			)
 			(fill
-				(thermal_gap 0.5)
-				(thermal_bridge_width 0.5)
+				(thermal_gap 0.508)
+				(thermal_bridge_width 0.508)
 				(island_removal_mode 0)
 			)
 			(polygon
@@ -69360,6 +69313,16 @@
 			(uuid "e6b0dea7-a964-477d-9986-1cb81c9812c8")
 		)
 		(fp_line
+			(start -1.313241 -1.61)
+			(end -1.16 -1.61)
+			(stroke
+				(width 0.12)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "4580917d-7319-4c62-868a-92ad55314163")
+		)
+		(fp_line
 			(start -1.61 1.61)
 			(end -1.61 1.16)
 			(stroke
@@ -69371,7 +69334,7 @@
 		)
 		(fp_line
 			(start -1.61 -1.16)
-			(end -1.61 -1.61)
+			(end -1.61 -1.37)
 			(stroke
 				(width 0.12)
 				(type solid)
@@ -69379,19 +69342,9 @@
 			(layer "F.SilkS")
 			(uuid "658d713f-718c-4e52-af61-fa5ea37b36cc")
 		)
-		(fp_line
-			(start -1.61 -1.61)
-			(end -1.16 -1.61)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "4580917d-7319-4c62-868a-92ad55314163")
-		)
 		(fp_poly
 			(pts
-				(xy -2.14 -0.8) (xy -2.47 -0.56) (xy -2.47 -1.04)
+				(xy -1.61 -1.61) (xy -1.85 -1.94) (xy -1.37 -1.94)
 			)
 			(stroke
 				(width 0.12)
@@ -69856,29 +69809,30 @@
 			(at -0.6 -0.6 180)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "c18a3012-73b1-4a47-8f3d-b31089cb995b")
 		)
 		(pad "21" thru_hole circle
 			(at -0.6 0.6 180)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "a5919820-8732-49aa-8c5d-b08b64e30431")
 		)
 		(pad "21" smd rect
 			(at 0 0 180)
 			(size 1.7 1.7)
+			(property pad_prop_heatsink)
 			(layers "F.Cu" "F.Mask")
 			(net "GND")
 			(pinfunction "GND_21")
@@ -69889,6 +69843,7 @@
 		(pad "21" smd rect
 			(at 0 0 180)
 			(size 1.7 1.7)
+			(property pad_prop_heatsink)
 			(layers "B.Cu")
 			(net "GND")
 			(pinfunction "GND_21")
@@ -69900,24 +69855,24 @@
 			(at 0.6 -0.6 180)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "f8861865-a02f-48c5-bd56-619aee36117c")
 		)
 		(pad "21" thru_hole circle
 			(at 0.6 0.6 180)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "0264263a-2c9f-437a-a7ab-3917022d4182")
 		)
 		(embedded_fonts no)
@@ -69929,7 +69884,7 @@
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 270)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -72572,6 +72527,7 @@
 			(at -4.32 -2.805)
 			(size 1.1 2.1)
 			(drill oval 0.6 1.6)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -72583,6 +72539,7 @@
 			(at -4.32 2.555)
 			(size 1.1 2.6)
 			(drill oval 0.6 2.1)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -72594,6 +72551,7 @@
 			(at 4.32 -2.805)
 			(size 1.1 2.1)
 			(drill oval 0.6 1.6)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -72605,6 +72563,7 @@
 			(at 4.32 2.555)
 			(size 1.1 2.6)
 			(drill oval 0.6 2.1)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -72619,7 +72578,7 @@
 			(connect_pads
 				(clearance 0)
 			)
-			(min_thickness 0.25)
+			(min_thickness 0.254)
 			(keepout
 				(tracks not_allowed)
 				(vias not_allowed)
@@ -72632,8 +72591,8 @@
 				(sheetname "")
 			)
 			(fill
-				(thermal_gap 0.5)
-				(thermal_bridge_width 0.5)
+				(thermal_gap 0.508)
+				(thermal_bridge_width 0.508)
 				(island_removal_mode 0)
 			)
 			(polygon
@@ -75389,17 +75348,7 @@
 			(uuid "e341e97a-ac0e-482a-a9f0-ab42ad0cb498")
 		)
 		(fp_line
-			(start -1.36 -2.135)
-			(end -1.36 -2.36)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "aaa8e25d-11d7-4609-bca6-3298d24e41e8")
-		)
-		(fp_line
-			(start -1.36 -2.36)
+			(start -1.12 -2.36)
 			(end -0.635 -2.36)
 			(stroke
 				(width 0.12)
@@ -75430,7 +75379,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -0.25 -2.86) (xy -0.49 -3.19) (xy -0.01 -3.19)
+				(xy -1.36 -2.38) (xy -1.69 -2.14) (xy -1.69 -2.62)
 			)
 			(stroke
 				(width 0.12)
@@ -75880,6 +75829,7 @@
 		(pad "21" smd rect
 			(at 0 0 270)
 			(size 1 3)
+			(property pad_prop_heatsink)
 			(layers "F.Cu" "F.Mask")
 			(net "GND")
 			(pinfunction "EP_21")
@@ -80810,7 +80760,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69)
+				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69) (xy -0.62 -1.41)
 			)
 			(stroke
 				(width 0.12)
@@ -82211,17 +82161,7 @@
 			(uuid "787055ee-d9fe-4574-8660-a91f21d82819")
 		)
 		(fp_line
-			(start -1.36 -2.135)
-			(end -1.36 -2.36)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "2a4e7fea-1df2-4528-8077-56396451b7ac")
-		)
-		(fp_line
-			(start -1.36 -2.36)
+			(start -1.12 -2.36)
 			(end -0.635 -2.36)
 			(stroke
 				(width 0.12)
@@ -82252,7 +82192,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -0.25 -2.86) (xy -0.49 -3.19) (xy -0.01 -3.19)
+				(xy -1.36 -2.38) (xy -1.69 -2.14) (xy -1.69 -2.62)
 			)
 			(stroke
 				(width 0.12)
@@ -82702,6 +82642,7 @@
 		(pad "21" smd rect
 			(at 0 0 270)
 			(size 1 3)
+			(property pad_prop_heatsink)
 			(layers "F.Cu" "F.Mask")
 			(net "GND")
 			(pinfunction "EP_21")
@@ -88019,7 +87960,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69)
+				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69) (xy -0.62 -1.41)
 			)
 			(stroke
 				(width 0.12)
@@ -97847,6 +97788,7 @@
 		(pad "9" smd rect
 			(at 0 0)
 			(size 0.9 1.7)
+			(property pad_prop_heatsink)
 			(layers "F.Cu" "F.Mask")
 			(net "GND")
 			(pinfunction "SGND_9")
@@ -98379,7 +98321,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69)
+				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69) (xy -0.62 -1.41)
 			)
 			(stroke
 				(width 0.12)
@@ -101297,7 +101239,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69)
+				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69) (xy -0.62 -1.41)
 			)
 			(stroke
 				(width 0.12)
@@ -102277,7 +102219,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69)
+				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69) (xy -0.62 -1.41)
 			)
 			(stroke
 				(width 0.12)
@@ -103064,17 +103006,7 @@
 			(uuid "5c701646-0796-465c-95d9-8868fd32914e")
 		)
 		(fp_line
-			(start -1.36 -2.135)
-			(end -1.36 -2.36)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "8cf3ce77-78fa-4dfa-a2ad-705380ceb458")
-		)
-		(fp_line
-			(start -1.36 -2.36)
+			(start -1.12 -2.36)
 			(end -0.635 -2.36)
 			(stroke
 				(width 0.12)
@@ -103105,7 +103037,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -0.25 -2.86) (xy -0.49 -3.19) (xy -0.01 -3.19)
+				(xy -1.36 -2.38) (xy -1.69 -2.14) (xy -1.69 -2.62)
 			)
 			(stroke
 				(width 0.12)
@@ -103555,6 +103487,7 @@
 		(pad "21" smd rect
 			(at 0 0 270)
 			(size 1 3)
+			(property pad_prop_heatsink)
 			(layers "F.Cu" "F.Mask")
 			(net "GND")
 			(pinfunction "EP_21")
@@ -104493,7 +104426,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69)
+				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69) (xy -0.62 -1.41)
 			)
 			(stroke
 				(width 0.12)
@@ -105103,6 +105036,7 @@
 		(pad "9" smd rect
 			(at 0 0)
 			(size 0.9 1.7)
+			(property pad_prop_heatsink)
 			(layers "F.Cu" "F.Mask")
 			(net "GND")
 			(pinfunction "SGND_9")
@@ -106666,7 +106600,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69)
+				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69) (xy -0.62 -1.41)
 			)
 			(stroke
 				(width 0.12)
@@ -109436,6 +109370,7 @@
 			(at -4.32 -2.805 180)
 			(size 1.1 2.1)
 			(drill oval 0.6 1.6)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -109447,6 +109382,7 @@
 			(at -4.32 2.555 180)
 			(size 1.1 2.6)
 			(drill oval 0.6 2.1)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -109458,6 +109394,7 @@
 			(at 4.32 -2.805 180)
 			(size 1.1 2.1)
 			(drill oval 0.6 1.6)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -109469,6 +109406,7 @@
 			(at 4.32 2.555 180)
 			(size 1.1 2.6)
 			(drill oval 0.6 2.1)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -109483,7 +109421,7 @@
 			(connect_pads
 				(clearance 0)
 			)
-			(min_thickness 0.25)
+			(min_thickness 0.254)
 			(keepout
 				(tracks not_allowed)
 				(vias not_allowed)
@@ -109496,8 +109434,8 @@
 				(sheetname "")
 			)
 			(fill
-				(thermal_gap 0.5)
-				(thermal_bridge_width 0.5)
+				(thermal_gap 0.508)
+				(thermal_bridge_width 0.508)
 				(island_removal_mode 0)
 			)
 			(polygon
@@ -115695,18 +115633,8 @@
 		(attr smd)
 		(duplicate_pad_numbers_are_jumpers no)
 		(fp_line
-			(start -1.36 -1.36)
-			(end -1.135 -1.36)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "9fbed44c-9d1b-4473-b8e7-9175ffc1d9fe")
-		)
-		(fp_line
 			(start -1.36 -0.885)
-			(end -1.36 -1.36)
+			(end -1.36 -1.12)
 			(stroke
 				(width 0.12)
 				(type solid)
@@ -115776,7 +115704,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -1.86 -0.5) (xy -2.19 -0.26) (xy -2.19 -0.74)
+				(xy -1.38 -1.36) (xy -1.62 -1.69) (xy -1.14 -1.69)
 			)
 			(stroke
 				(width 0.12)
@@ -116180,6 +116108,7 @@
 		(pad "15" smd rect
 			(at 0 0)
 			(size 1.45 1.45)
+			(property pad_prop_heatsink)
 			(layers "F.Cu" "F.Mask")
 			(net "GND")
 			(pinfunction "GND_15")
@@ -116196,7 +116125,7 @@
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 270)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -123771,18 +123700,8 @@
 		(attr smd)
 		(duplicate_pad_numbers_are_jumpers no)
 		(fp_line
-			(start -6.11 -6.11)
-			(end -5.16 -6.11)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "fce16ef4-0076-4e94-8a26-086eda68c917")
-		)
-		(fp_line
 			(start -6.11 -5.16)
-			(end -6.11 -6.11)
+			(end -6.11 -5.87)
 			(stroke
 				(width 0.12)
 				(type solid)
@@ -123799,6 +123718,16 @@
 			)
 			(layer "F.SilkS")
 			(uuid "fcf9f926-4738-45fe-8d48-5e25025250e6")
+		)
+		(fp_line
+			(start -5.813241 -6.11)
+			(end -5.16 -6.11)
+			(stroke
+				(width 0.12)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "fce16ef4-0076-4e94-8a26-086eda68c917")
 		)
 		(fp_line
 			(start -5.16 6.11)
@@ -123852,7 +123781,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -6.61 -4.81) (xy -6.94 -4.57) (xy -6.94 -5.05)
+				(xy -6.11 -6.11) (xy -6.35 -6.44) (xy -5.87 -6.44)
 			)
 			(stroke
 				(width 0.12)
@@ -125207,7 +125136,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "e2e147a8-3821-451d-8344-d52bf178b223")
 		)
 		(pad "101" thru_hole circle
@@ -125220,7 +125148,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "c243b47c-5726-4a16-b079-b7d7a352df2a")
 		)
 		(pad "101" thru_hole circle
@@ -125233,7 +125160,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "8cfa1c70-317c-4e10-a1b4-dd639ed36485")
 		)
 		(pad "101" thru_hole circle
@@ -125246,7 +125172,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "b470cd0a-9e2f-4270-8aa3-4dc2fb44b23d")
 		)
 		(pad "101" thru_hole circle
@@ -125259,7 +125184,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "a8c7e210-fbcc-42ce-8ee7-04d4eb9b52c1")
 		)
 		(pad "101" thru_hole circle
@@ -125272,7 +125196,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "02010a91-152f-4bb8-9d05-37a458ddbfcb")
 		)
 		(pad "101" thru_hole circle
@@ -125285,7 +125208,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "25e452db-3d08-4d88-a95e-40dc1445e291")
 		)
 		(pad "101" thru_hole circle
@@ -125298,7 +125220,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "bc5ecf5e-5e0e-4f7f-90a8-f5c4c7b75cb4")
 		)
 		(pad "101" thru_hole circle
@@ -125311,7 +125232,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "7352853e-44fb-4481-93c6-176697193540")
 		)
 		(pad "101" thru_hole circle
@@ -125324,7 +125244,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "3ed27d65-9f3d-4e5e-8627-0a11780cbed1")
 		)
 		(pad "101" thru_hole circle
@@ -125337,7 +125256,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "2785f2ac-05d2-4a94-a9bd-6a0278a8d70f")
 		)
 		(pad "101" thru_hole circle
@@ -125350,7 +125268,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "455a292c-fe21-4118-9376-054b43a8ec60")
 		)
 		(pad "101" thru_hole circle
@@ -125363,7 +125280,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "e005bf24-d408-4561-ab37-bf0f7abb9d6d")
 		)
 		(pad "101" smd rect
@@ -125398,7 +125314,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "0936cb5d-852a-4f44-a73e-73130086155e")
 		)
 		(pad "101" thru_hole circle
@@ -125411,7 +125326,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "e7672e35-a69d-4046-86bb-ee6ebf0256af")
 		)
 		(pad "101" thru_hole circle
@@ -125424,7 +125338,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "a1eb9c7f-4e80-4cb4-b1a5-4dd02ea0e93e")
 		)
 		(pad "101" thru_hole circle
@@ -125437,7 +125350,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "f5179755-73c2-4699-9adf-16887dc56ff9")
 		)
 		(pad "101" thru_hole circle
@@ -125450,7 +125362,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "e2510e69-7ed7-4b88-83bb-6c3526ccc0fd")
 		)
 		(pad "101" thru_hole circle
@@ -125463,7 +125374,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "88843284-d50c-4ac7-a091-ed56758e00be")
 		)
 		(pad "101" thru_hole circle
@@ -125476,7 +125386,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "8d41bcb6-68f6-4170-bf24-7633ff4c6997")
 		)
 		(pad "101" thru_hole circle
@@ -125489,7 +125398,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "1c9d5e99-d882-4319-8cf0-a047ae53fd8f")
 		)
 		(pad "101" thru_hole circle
@@ -125502,7 +125410,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "4270341f-f025-487c-b54b-782ea308bd57")
 		)
 		(pad "101" thru_hole circle
@@ -125515,7 +125422,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "db7893f2-7f6f-4212-a30d-4d9eafdf8bf6")
 		)
 		(pad "101" thru_hole circle
@@ -125528,7 +125434,6 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "683ca2a9-30c0-406a-ae9a-70d8daf488ff")
 		)
 		(pad "101" thru_hole circle
@@ -125541,13 +125446,12 @@
 			(net "GND")
 			(pinfunction "VSS_101")
 			(pintype "power_in")
-			(zone_connect 2)
 			(uuid "6fe87215-857c-41f8-8970-dda42be56e2b")
 		)
 		(embedded_fonts no)
-		(model "${KIPRJMOD}/Iasis.3dshapes/Microchip_VQFN-100_KDX.step"
+		(model "${KICAD10_3DMODEL_DIR}/Package_DFN_QFN.3dshapes/ArtInChip_QFN-100-1EP_12x12mm_P0.4mm_EP7.4x7.4mm.step"
 			(offset
-				(xyz 0 0 0.02)
+				(xyz 0 0 0)
 			)
 			(scale
 				(xyz 1 1 1)
@@ -126403,7 +126307,8 @@
 		(layer "F.Cu")
 		(uuid "c231f25f-28b7-4951-9a08-998c55274134")
 		(at 75.25 54.5 90)
-		(descr "TI DDF0008A SOT-23-THIN 8; manufacturer land pattern 4222047/E 07/2024")
+		(descr "Texas DDF0008A SOT, 8 Pin (https://www.ti.com/lit/ds/symlink/mspm0c1104.pdf)")
+		(tags "Texas SOT TO_SOT_SMD")
 		(property "Reference" "U1001"
 			(at 0 -2.8 90)
 			(layer "F.SilkS")
@@ -126446,6 +126351,19 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "KiLib_Generator" "package/gullwing"
+			(at 0 0 90)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "5ed5ee5d-90b6-4a3a-a2dd-6cf1115cc7ee")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
 				)
 			)
 		)
@@ -126493,7 +126411,7 @@
 			(unlocked yes)
 			(layer "F.Fab")
 			(hide yes)
-			(uuid "5ed5ee5d-90b6-4a3a-a2dd-6cf1115cc7ee")
+			(uuid "9b6db14c-cc6f-481e-b874-31a1b62265af")
 			(effects
 				(font
 					(size 1 1)
@@ -126512,38 +126430,209 @@
 		)
 		(attr smd)
 		(duplicate_pad_numbers_are_jumpers no)
-		(fp_circle
-			(center -1.65 -1.5)
-			(end -1.53 -1.5)
+		(fp_line
+			(start 0.91 -1.56)
+			(end 0.91 -1.46)
 			(stroke
 				(width 0.12)
-				(type default)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "9561c90b-bae2-4671-9b78-89b498a8137c")
+		)
+		(fp_line
+			(start -0.91 -1.56)
+			(end 0.91 -1.56)
+			(stroke
+				(width 0.12)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "3e2aaef3-91de-4399-92da-8bd9b1ca4dd7")
+		)
+		(fp_line
+			(start -0.91 -1.46)
+			(end -0.91 -1.56)
+			(stroke
+				(width 0.12)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "a5953fb3-90fd-447e-a417-98a34691099c")
+		)
+		(fp_line
+			(start 0.91 1.46)
+			(end 0.91 1.56)
+			(stroke
+				(width 0.12)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "724324c3-1ce8-40a7-b50a-46f634a28af3")
+		)
+		(fp_line
+			(start 0.91 1.56)
+			(end -0.91 1.56)
+			(stroke
+				(width 0.12)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "9c74272a-2d13-4bdb-8ee5-174919e1f72a")
+		)
+		(fp_line
+			(start -0.91 1.56)
+			(end -0.91 1.46)
+			(stroke
+				(width 0.12)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "9d78495a-ed97-4cf6-a23c-21dc78b96485")
+		)
+		(fp_poly
+			(pts
+				(xy -1.45 -1.47) (xy -1.69 -1.8) (xy -1.21 -1.8)
+			)
+			(stroke
+				(width 0.12)
+				(type solid)
 			)
 			(fill yes)
 			(layer "F.SilkS")
-			(uuid "a91cf7e4-fec8-4341-8de0-d5ac5577a9f3")
+			(uuid "12082e65-d8d6-4a68-a1e8-4d5a57ca4aef")
 		)
-		(fp_rect
-			(start -2.1 -1.7)
-			(end 2.1 1.7)
+		(fp_line
+			(start 1.05 -1.7)
+			(end 1.05 -1.45)
 			(stroke
 				(width 0.05)
-				(type default)
+				(type solid)
 			)
-			(fill no)
 			(layer "F.CrtYd")
-			(uuid "7f0bea83-dab6-4f46-bd3f-045b483e65a0")
+			(uuid "f47b2cec-5f01-4f3e-bd57-0b8805ec79dc")
 		)
-		(fp_rect
-			(start -0.8 -1.45)
-			(end 0.8 1.45)
+		(fp_line
+			(start -1.05 -1.7)
+			(end 1.05 -1.7)
+			(stroke
+				(width 0.05)
+				(type solid)
+			)
+			(layer "F.CrtYd")
+			(uuid "276f2d99-ebd1-43f8-a81f-dc5424637a26")
+		)
+		(fp_line
+			(start 2.08 -1.45)
+			(end 2.08 1.45)
+			(stroke
+				(width 0.05)
+				(type solid)
+			)
+			(layer "F.CrtYd")
+			(uuid "08ced01c-ac2f-4c74-9593-9582507b8b2a")
+		)
+		(fp_line
+			(start 1.05 -1.45)
+			(end 2.08 -1.45)
+			(stroke
+				(width 0.05)
+				(type solid)
+			)
+			(layer "F.CrtYd")
+			(uuid "a0d557d7-3b8b-40ec-a152-f49611d60f62")
+		)
+		(fp_line
+			(start -1.05 -1.45)
+			(end -1.05 -1.7)
+			(stroke
+				(width 0.05)
+				(type solid)
+			)
+			(layer "F.CrtYd")
+			(uuid "5b7d6c7e-14b1-43a0-9198-fe3c2c2e03e6")
+		)
+		(fp_line
+			(start -2.08 -1.45)
+			(end -1.05 -1.45)
+			(stroke
+				(width 0.05)
+				(type solid)
+			)
+			(layer "F.CrtYd")
+			(uuid "0a90fe31-f2a9-4d74-8184-94a53208ecd3")
+		)
+		(fp_line
+			(start 2.08 1.45)
+			(end 1.05 1.45)
+			(stroke
+				(width 0.05)
+				(type solid)
+			)
+			(layer "F.CrtYd")
+			(uuid "86e1b8ac-daa5-41ce-bfd5-d37fcb260128")
+		)
+		(fp_line
+			(start 1.05 1.45)
+			(end 1.05 1.7)
+			(stroke
+				(width 0.05)
+				(type solid)
+			)
+			(layer "F.CrtYd")
+			(uuid "23bd6144-459f-4c4f-bd2b-6f8cf738e370")
+		)
+		(fp_line
+			(start -1.05 1.45)
+			(end -2.08 1.45)
+			(stroke
+				(width 0.05)
+				(type solid)
+			)
+			(layer "F.CrtYd")
+			(uuid "fbad8a49-9766-4eb9-b2cd-ab3fda47c7cd")
+		)
+		(fp_line
+			(start -2.08 1.45)
+			(end -2.08 -1.45)
+			(stroke
+				(width 0.05)
+				(type solid)
+			)
+			(layer "F.CrtYd")
+			(uuid "21129242-2bfb-4d93-9fb7-ec86d78e8c4d")
+		)
+		(fp_line
+			(start 1.05 1.7)
+			(end -1.05 1.7)
+			(stroke
+				(width 0.05)
+				(type solid)
+			)
+			(layer "F.CrtYd")
+			(uuid "8e31e822-9326-4048-b13a-78ea8e12ad94")
+		)
+		(fp_line
+			(start -1.05 1.7)
+			(end -1.05 1.45)
+			(stroke
+				(width 0.05)
+				(type solid)
+			)
+			(layer "F.CrtYd")
+			(uuid "7594d750-7183-4560-bbd7-30e4a2847ad7")
+		)
+		(fp_poly
+			(pts
+				(xy -0.4 -1.45) (xy 0.8 -1.45) (xy 0.8 1.45) (xy -0.8 1.45) (xy -0.8 -1.05)
+			)
 			(stroke
 				(width 0.1)
-				(type default)
+				(type solid)
 			)
 			(fill no)
 			(layer "F.Fab")
-			(uuid "406b35c3-894a-4024-a80e-5e753522b466")
+			(uuid "f1fe6289-2a46-4794-ba11-4940df5a6e37")
 		)
 		(fp_text user "${REFERENCE}"
 			(at 0 0 90)
@@ -126641,9 +126730,9 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KIPRJMOD}/Iasis.3dshapes/TI_DDF0008A.step"
+		(model "${KICAD10_3DMODEL_DIR}/Package_TO_SOT_SMD.3dshapes/TSOT-23-8.step"
 			(offset
-				(xyz 0 0 -0.051)
+				(xyz 0 0 0)
 			)
 			(scale
 				(xyz 1 1 1)
@@ -128383,6 +128472,7 @@
 			(at -4.32 -2.805)
 			(size 1.1 2.1)
 			(drill oval 0.6 1.6)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -128394,6 +128484,7 @@
 			(at -4.32 2.555)
 			(size 1.1 2.6)
 			(drill oval 0.6 2.1)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -128405,6 +128496,7 @@
 			(at 4.32 -2.805)
 			(size 1.1 2.1)
 			(drill oval 0.6 1.6)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -128416,6 +128508,7 @@
 			(at 4.32 2.555)
 			(size 1.1 2.6)
 			(drill oval 0.6 2.1)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -128430,7 +128523,7 @@
 			(connect_pads
 				(clearance 0)
 			)
-			(min_thickness 0.25)
+			(min_thickness 0.254)
 			(keepout
 				(tracks not_allowed)
 				(vias not_allowed)
@@ -128443,8 +128536,8 @@
 				(sheetname "")
 			)
 			(fill
-				(thermal_gap 0.5)
-				(thermal_bridge_width 0.5)
+				(thermal_gap 0.508)
+				(thermal_bridge_width 0.508)
 				(island_removal_mode 0)
 			)
 			(polygon
@@ -145536,7 +145629,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69)
+				(xy -0.62 -1.41) (xy -0.9 -1.41) (xy -0.62 -1.69) (xy -0.62 -1.41)
 			)
 			(stroke
 				(width 0.12)
@@ -146475,6 +146568,7 @@
 			(at -4.32 -2.805)
 			(size 1.1 2.1)
 			(drill oval 0.6 1.6)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -146486,6 +146580,7 @@
 			(at -4.32 2.555)
 			(size 1.1 2.6)
 			(drill oval 0.6 2.1)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -146497,6 +146592,7 @@
 			(at 4.32 -2.805)
 			(size 1.1 2.1)
 			(drill oval 0.6 1.6)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -146508,6 +146604,7 @@
 			(at 4.32 2.555)
 			(size 1.1 2.6)
 			(drill oval 0.6 2.1)
+			(property pad_prop_mechanical)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
@@ -146522,7 +146619,7 @@
 			(connect_pads
 				(clearance 0)
 			)
-			(min_thickness 0.25)
+			(min_thickness 0.254)
 			(keepout
 				(tracks not_allowed)
 				(vias not_allowed)
@@ -146535,8 +146632,8 @@
 				(sheetname "")
 			)
 			(fill
-				(thermal_gap 0.5)
-				(thermal_bridge_width 0.5)
+				(thermal_gap 0.508)
+				(thermal_bridge_width 0.508)
 				(island_removal_mode 0)
 			)
 			(polygon
@@ -150302,6 +150399,16 @@
 			(uuid "1a57c4a2-b571-4e0a-8dc5-b1a3673aeabe")
 		)
 		(fp_line
+			(start -1.313241 -1.61)
+			(end -1.16 -1.61)
+			(stroke
+				(width 0.12)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "18b61208-5fab-4a7c-94bc-f024c8fb9536")
+		)
+		(fp_line
 			(start -1.61 1.61)
 			(end -1.61 1.16)
 			(stroke
@@ -150313,7 +150420,7 @@
 		)
 		(fp_line
 			(start -1.61 -1.16)
-			(end -1.61 -1.61)
+			(end -1.61 -1.37)
 			(stroke
 				(width 0.12)
 				(type solid)
@@ -150321,19 +150428,9 @@
 			(layer "F.SilkS")
 			(uuid "6898232c-7ff1-4d74-8cad-9027b264703d")
 		)
-		(fp_line
-			(start -1.61 -1.61)
-			(end -1.16 -1.61)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "18b61208-5fab-4a7c-94bc-f024c8fb9536")
-		)
 		(fp_poly
 			(pts
-				(xy -2.14 -0.8) (xy -2.47 -0.56) (xy -2.47 -1.04)
+				(xy -1.61 -1.61) (xy -1.85 -1.94) (xy -1.37 -1.94)
 			)
 			(stroke
 				(width 0.12)
@@ -150798,29 +150895,30 @@
 			(at -0.6 -0.6 180)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "003c9d1a-33b9-43d1-8a13-0b3162f421d4")
 		)
 		(pad "21" thru_hole circle
 			(at -0.6 0.6 180)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "c4059429-abe2-44a1-abe0-ddd30f52a023")
 		)
 		(pad "21" smd rect
 			(at 0 0 180)
 			(size 1.7 1.7)
+			(property pad_prop_heatsink)
 			(layers "F.Cu" "F.Mask")
 			(net "GND")
 			(pinfunction "GND_21")
@@ -150831,6 +150929,7 @@
 		(pad "21" smd rect
 			(at 0 0 180)
 			(size 1.7 1.7)
+			(property pad_prop_heatsink)
 			(layers "B.Cu")
 			(net "GND")
 			(pinfunction "GND_21")
@@ -150842,24 +150941,24 @@
 			(at 0.6 -0.6 180)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "e2729ce8-bf52-4703-949b-bff3a17567ed")
 		)
 		(pad "21" thru_hole circle
 			(at 0.6 0.6 180)
 			(size 0.5 0.5)
 			(drill 0.2)
+			(property pad_prop_heatsink)
 			(layers "*.Cu")
 			(remove_unused_layers no)
 			(net "GND")
 			(pinfunction "GND_21")
 			(pintype "passive")
-			(zone_connect 2)
 			(uuid "81ebb4fa-b1ee-4257-8cd0-c446f1e0b09b")
 		)
 		(embedded_fonts no)
@@ -150871,7 +150970,7 @@
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 270)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -152260,7 +152359,7 @@
 			(uuid "45021af4-48fe-4b8e-be8d-631712181d8a")
 		)
 		(fp_line
-			(start -1.36 -2.36)
+			(start -1.12 -2.36)
 			(end -0.635 -2.36)
 			(stroke
 				(width 0.12)
@@ -152268,16 +152367,6 @@
 			)
 			(layer "F.SilkS")
 			(uuid "c89416d4-df6b-4490-9d15-be3b187368d2")
-		)
-		(fp_line
-			(start -1.36 -2.135)
-			(end -1.36 -2.36)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "5fedec05-3ccf-4c51-abf8-04543d025f7a")
 		)
 		(fp_line
 			(start 1.36 2.135)
@@ -152321,7 +152410,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -0.25 -2.86) (xy -0.49 -3.19) (xy -0.01 -3.19)
+				(xy -1.36 -2.38) (xy -1.69 -2.14) (xy -1.69 -2.62)
 			)
 			(stroke
 				(width 0.12)
@@ -152771,6 +152860,7 @@
 		(pad "21" smd rect
 			(at 0 0 90)
 			(size 1 3)
+			(property pad_prop_heatsink)
 			(layers "F.Cu" "F.Mask")
 			(net "GND")
 			(pinfunction "EP_21")
@@ -155060,18 +155150,8 @@
 		(attr smd)
 		(duplicate_pad_numbers_are_jumpers no)
 		(fp_line
-			(start -5.11 -5.11)
-			(end -4.16 -5.11)
-			(stroke
-				(width 0.12)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "e8816057-b0d4-49cf-b771-e97fe0ab6d40")
-		)
-		(fp_line
 			(start -5.11 -4.16)
-			(end -5.11 -5.11)
+			(end -5.11 -4.87)
 			(stroke
 				(width 0.12)
 				(type solid)
@@ -155088,6 +155168,16 @@
 			)
 			(layer "F.SilkS")
 			(uuid "75a0e5b2-5eba-4e55-8402-7bbccb17592a")
+		)
+		(fp_line
+			(start -4.813241 -5.11)
+			(end -4.16 -5.11)
+			(stroke
+				(width 0.12)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "e8816057-b0d4-49cf-b771-e97fe0ab6d40")
 		)
 		(fp_line
 			(start -4.16 5.11)
@@ -155141,7 +155231,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -5.61 -3.8) (xy -5.94 -3.56) (xy -5.94 -4.04)
+				(xy -5.11 -5.11) (xy -5.35 -5.44) (xy -4.87 -5.44)
 			)
 			(stroke
 				(width 0.12)
@@ -156240,6 +156330,7 @@
 		(pad "81" smd rect
 			(at 0 0)
 			(size 3.4 3.4)
+			(property pad_prop_heatsink)
 			(layers "F.Cu" "F.Mask")
 			(net "GND")
 			(pinfunction "GND_81")
@@ -237738,6 +237829,14 @@
 		(uuid "32f33264-2c18-4fb4-8f10-6795b6e0f2ed")
 	)
 	(segment
+		(start 152.4 66.5)
+		(end 152.4 66.4)
+		(width 0.15)
+		(layer "F.Cu")
+		(net "P5_SEL_9V")
+		(uuid "5c7253f6-9353-46be-9250-2d271cba6421")
+	)
+	(segment
 		(start 151 64.9)
 		(end 151.1 65)
 		(width 0.15)
@@ -279211,14 +279310,6 @@
 		(layer "B.Cu")
 		(net "Net-(U1331-ILIM)")
 		(uuid "6e1fe29e-bba4-417d-862e-353b7c8ddb7c")
-	)
-	(segment
-		(start 152.4 66.5)
-		(end 152.4 66.4)
-		(width 0.15)
-		(layer "F.Cu")
-		(net "P5_SEL_9V")
-		(uuid "5c7253f6-9353-46be-9250-2d271cba6421")
 	)
 	(zone
 		(net "GND")
