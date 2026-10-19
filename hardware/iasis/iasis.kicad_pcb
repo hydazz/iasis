@@ -26593,7 +26593,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2206010045_UNI-ROYAL-Uniroyal-Elec-0402WGF4992TCE_C25897.pdf"
+		(property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2304140030_YAGEO-RC0402FR-0749K9L_C137969.pdf"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -26627,7 +26627,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C25897"
+		(property "LCSC" "C137969"
 			(at 0 0 0)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -26640,7 +26640,7 @@
 				)
 			)
 		)
-		(property "MPN" "0402WGF4992TCE"
+		(property "MPN" "RC0402FR-0749K9L"
 			(at 0 0 0)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -26653,7 +26653,7 @@
 				)
 			)
 		)
-		(property "Manufacturer" "UNI-ROYAL(Uniroyal Elec)"
+		(property "Manufacturer" "YAGEO"
 			(at 0 0 0)
 			(unlocked yes)
 			(layer "F.Fab")
