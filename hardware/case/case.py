@@ -122,12 +122,7 @@ POST_D = 4.0  # leaves 0.4 mm to the glass beside the holes
 POST_SKIN = 0.8  # top left above the pilot holes
 
 
-@dataclass(frozen=True)
-class Variant:
-    display: Display | None = None
-
-
-COVERS = {"passive": Variant(), "display": Variant(display=OLED)}
+COVERS = {"passive": None, "display": OLED}
 
 # Passive ventilation in the top and low in the end and rear walls.
 SLOT_W, SLOT_PITCH = 2.0, 4.0
@@ -228,7 +223,6 @@ def layout(board: Board) -> Layout:
     missing = required - board.parts.keys()
     if missing:
         raise ValueError("board STEP lacks enclosure references: " + ", ".join(sorted(missing)))
-    placed = board.placed()
     size = board.size
     radii = [e.radius for e in board.outline().edges() if e.geom_type == GeomType.CIRCLE]
     corner = min(radii, default=0.0)
@@ -241,7 +235,7 @@ def layout(board: Board) -> Layout:
         z_bottom=-(STANDOFF + PLATE),
         corner_r=corner + CLEARANCE + WALL,
         holes=board.holes(HOLE_D),
-        parts_top=max(board.rough(ref).max.Z for ref in placed),
+        parts_top=max(board.box(ref, exact=False).max.Z for ref in board.parts),
     )
 
 
@@ -288,8 +282,8 @@ def plate(lay: Layout) -> Part:
     return body
 
 
-def cover(lay: Layout, name: str, variant: Variant) -> Cover:
-    top_in = lay.top_inside(variant.display)
+def cover(lay: Layout, name: str, display: Display | None) -> Cover:
+    top_in = lay.top_inside(display)
     top_out = top_in + TOP
     z0 = lay.z_bottom
 
@@ -313,7 +307,7 @@ def cover(lay: Layout, name: str, variant: Variant) -> Cover:
     wall = [_wall_cut(lay, o) for o in lay.openings] + _labels(lay)
     cuts += wall
     cuts += _wall_slots(lay, [c.bounding_box() for c in wall], top_in)
-    if not variant.display:
+    if not display:
         cuts += _top_slots(lay, top_in - 1, TOP + 2)
     cuts += _wordmark(lay, top_out)
     for ref, label in RECOVERY.items():
@@ -334,8 +328,8 @@ def cover(lay: Layout, name: str, variant: Variant) -> Cover:
     cuts += tongue
 
     display_part = None
-    if variant.display:
-        window, posts, pilots, display_part = _display(lay, variant.display, top_in, top_out)
+    if display:
+        window, posts, pilots, display_part = _display(lay, display, top_in, top_out)
         cuts += [window, *pilots]
         shell += Compound(posts)
         intrusions |= {f"display post {i + 1}": p for i, p in enumerate(posts)}

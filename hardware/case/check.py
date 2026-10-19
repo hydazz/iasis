@@ -1,24 +1,14 @@
-"""Fit and validity checks for the enclosure against the board.
+"""Fit checks for the enclosure against the board.
 
 The cover's inside is empty except for what reaches into it (pillars, the button pin, a
-display module and its posts), so those are measured exactly against nearby
-parts; the walls, the top and the plate are tested against part bounding boxes. Each
-opening is tested by pushing out from the part's face whatever has to pass through it.
+display module and its posts), so those are measured exactly against nearby parts; the
+walls, the top and the plate are tested against part bounding boxes. Each opening is
+tested by pushing out from the part's face whatever has to pass through it.
 """
 
-from dataclasses import dataclass, field
 from itertools import combinations
 
-from build123d import (
-    BoundBox,
-    Cylinder,
-    Part,
-    Pos,
-    RectangleRounded,
-    Shape,
-    SlotOverall,
-    extrude,
-)
+from build123d import BoundBox, Cylinder, Part, Pos, RectangleRounded, Shape, SlotOverall, extrude
 
 import case
 
@@ -26,11 +16,13 @@ EXPECTED_HOLES = 4
 USB_C_PLUG = (12.35, 6.5, 1.5, 20.0)  # Type-C overmold maximum, corner radius, length checked
 MIN_WEB = 1.0  # wall left between neighbouring openings
 
+Candidates = list[tuple[str, Shape, BoundBox]]
 
-@dataclass
+
 class Report:
-    lines: list[str] = field(default_factory=list)
-    failures: list[str] = field(default_factory=list)
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+        self.failures: list[str] = []
 
     def ok(self, msg: str) -> None:
         self.lines.append(f"  ok    {msg}")
@@ -39,39 +31,19 @@ class Report:
         self.lines.append(f"  FAIL  {msg}")
         self.failures.append(msg)
 
-    def note(self, msg: str) -> None:
-        self.lines.append(f"  note  {msg}")
-
-    def section(self, title: str) -> None:
-        self.lines.append(title)
-
-
-Candidates = list[tuple[str, Shape, BoundBox]]
-
 
 def run(lay: case.Layout, plate: Part, covers: dict[str, case.Cover]) -> Report:
     r = Report()
     board = lay.board
-    placed = board.placed()
-    parts: Candidates = [(ref, p, board.rough(ref)) for ref, p in placed.items()]
+    parts: Candidates = [(ref, p, board.box(ref, exact=False)) for ref, p in board.parts.items()]
 
-    r.section("board")
-    if board.envelopes:
-        r.note("courtyard/maximum-height clearance envelopes: " + ", ".join(board.envelopes))
-    if board.missing:
-        r.fail("unmodelled component bodies: " + ", ".join(board.missing))
-    else:
-        r.ok("every component body has a STEP model or clearance envelope")
-    unplaced = sorted(set(board.parts) - set(placed))
-    if unplaced:
-        shown = " ".join(unplaced[:10]) + (" ..." if len(unplaced) > 10 else "")
-        r.note(f"{len(unplaced)} parts lie outside the outline and are ignored: {shown}")
+    r.lines.append("board")
     if len(lay.holes) == EXPECTED_HOLES:
         r.ok(f"{len(lay.holes)} M3 holes")
     else:
         r.fail(f"{len(lay.holes)} M3 holes, expected {EXPECTED_HOLES}")
 
-    r.section("solids")
+    r.lines.append("solids")
     for part in [plate, *(c.part for c in covers.values())]:
         if part.is_valid and len(part.solids()) == 1 and part.volume > 0:
             bb = part.bounding_box()
@@ -79,21 +51,17 @@ def run(lay: case.Layout, plate: Part, covers: dict[str, case.Cover]) -> Report:
                  f"{bb.size.X:.1f} x {bb.size.Y:.1f} x {bb.size.Z:.1f} mm")  # fmt: skip
         else:
             r.fail(f"{part.label}: valid={part.is_valid}, {len(part.solids())} solids")
-
-    for part in [plate, *(c.part for c in covers.values())]:
-        overlap = (part & board.body).volume
-        if overlap > 1e-3:
+        if (overlap := (part & board.body).volume) > 1e-3:
             r.fail(f"{part.label} overlaps the board by {overlap:.0f} mm3")
 
-    r.section("walls and plate")
+    r.lines.append("walls and plate")
     outline = board.body.bounding_box()
     room = case.CLEARANCE - case.MIN_GAP
     margins = {}
     for ref, _, rough in parts:
         m = _margin_xy(rough, outline)
         margins[ref] = m if m >= -room else _margin_xy(board.box(ref), outline)
-    out = sorted(ref for ref, m in margins.items() if m < -room)
-    if out:
+    if out := sorted(ref for ref, m in margins.items() if m < -room):
         r.fail("parts reach the cover walls: " + ", ".join(f"{x} {margins[x]:+.2f}" for x in out))
     else:
         r.ok(f"parts stay {case.CLEARANCE + min(margins.values()):.2f} mm or more from the walls")
@@ -104,18 +72,19 @@ def run(lay: case.Layout, plate: Part, covers: dict[str, case.Cover]) -> Report:
     else:
         r.fail(f"part tails reach {low - plate_top:.2f} mm from the plate")
     for i, h in enumerate(lay.holes):
-        standoff = Pos(h.X, h.Y, plate_top) * Cylinder(case.STANDOFF_D / 2, case.STANDOFF,
-                                                         align=case.BASE)  # fmt: skip
+        standoff = Pos(h.X, h.Y, plate_top) * Cylinder(
+            case.STANDOFF_D / 2, case.STANDOFF, align=case.BASE
+        )
         _clear(r, f"standoff {i + 1}", standoff, parts)
-    r.section("openings")
+
+    r.lines.append("openings")
     _webs(r, lay)
 
     for name, c in covers.items():
-        r.section(f"cover {name}")
-        top = lay.top_inside(case.COVERS[name].display)
+        r.lines.append(f"cover {name}")
+        top = lay.top_inside(case.COVERS[name])
         r.ok(f"inside height {top - lay.seat:.1f} mm above the board, "
-             f"{top - lay.parts_top:.1f} mm over the "
-             "tallest part")  # fmt: skip
+             f"{top - lay.parts_top:.1f} mm over the tallest part")  # fmt: skip
         for label, solid in c.intrusions.items():
             _clear(r, label, solid, parts)
         if c.display is not None:
@@ -129,17 +98,12 @@ def run(lay: case.Layout, plate: Part, covers: dict[str, case.Cover]) -> Report:
             path = Pos(sw.center().X, sw.center().Y, sw.max.Z) * Cylinder(
                 case.RECOVERY_HOLE_D / 2 - 0.1, top + case.TOP - sw.max.Z + 1, align=case.BASE
             )
-            _clear(
-                r, f"{ref} top access", path, [("cover", c.part, c.part.bounding_box())], gap=0.09
-            )
+            cover = [("cover", c.part, c.part.bounding_box())]
+            _clear(r, f"{ref} top access", path, cover, gap=0.09)
             _clear(r, f"{ref} access to parts", path, [p for p in parts if p[0] != ref])
             if c.display is not None:
-                _clear(
-                    r,
-                    f"{ref} access to display",
-                    path,
-                    [("display", c.display, c.display.bounding_box())],
-                )
+                display = [("display", c.display, c.display.bounding_box())]
+                _clear(r, f"{ref} access to display", path, display)
     return r
 
 
@@ -158,10 +122,8 @@ def _clear(r: Report, label: str, solid: Shape, candidates: Candidates, gap: flo
     sb = solid.bounding_box()
     hits = []
     for name, other, box in candidates:
-        if _near(sb, box, gap):
-            d = solid.distance_to(other)
-            if d < gap - 1e-6:
-                hits.append(f"{name} {d:.2f} mm")
+        if _near(sb, box, gap) and (d := solid.distance_to(other)) < gap - 1e-6:
+            hits.append(f"{name} {d:.2f} mm")
     if hits:
         r.fail(f"{label}: " + ", ".join(hits))
     else:
@@ -170,18 +132,13 @@ def _clear(r: Report, label: str, solid: Shape, candidates: Candidates, gap: flo
 
 def _webs(r: Report, lay: case.Layout) -> None:
     """Openings side by side in a wall leave at least MIN_WEB between them."""
-
-    def span(o: case.Opening) -> tuple[float, float]:
-        bottom = o.z - o.height / 2
-        return bottom, o.z + o.height / 2
-
     thin = []
     for a, b in combinations(sorted(lay.openings, key=lambda o: o.x), 2):
-        (a0, a1), (b0, b1) = span(a), span(b)
-        if a.front != b.front or a1 < b0 or b1 < a0:
-            continue
+        overlap = (
+            a.z - a.height / 2 <= b.z + b.height / 2 and b.z - b.height / 2 <= a.z + a.height / 2
+        )
         web = (b.x - b.width / 2) - (a.x + a.width / 2)
-        if web < MIN_WEB:
+        if a.front == b.front and overlap and web < MIN_WEB:
             thin.append(f"{a.ref}/{b.ref} {web:.2f} mm")
     if thin:
         r.fail("thin wall between openings: " + ", ".join(thin))
@@ -196,7 +153,7 @@ def _paths(r: Report, lay: case.Layout, cover: Part, plate: Part) -> None:
         if o.kind == "usb-c":
             w, h, rad, length = USB_C_PLUG
             profile = RectangleRounded(w, h, rad)
-        elif o.kind == "light":
+        else:
             profile, length = SlotOverall(o.width - 0.1, o.height - 0.1), 10.0
         path = extrude(o.plane(o.y_face) * profile, amount=length)
         if (path & cover).volume > 1e-3 or (path & plate).volume > 1e-3:

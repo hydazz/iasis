@@ -3,11 +3,17 @@ _.python.venv = { path = ".venv", create = true }
 UV_PYTHON = { value = "{{ tools.python.path }}", tools = true }
 
 [tasks.board-step]
-description = "Export the populated board STEP with kicad-cli (needs KiCad)"
-run = "uv run export_board.py"
+description = "Export the populated board STEP (needs KiCad)"
+sources = ["../iasis/iasis.kicad_pcb", "../iasis/Iasis.3dshapes/*"]
+outputs = ["build/board.step"]
+run = [
+  "mkdir -p build",
+  '"$KICAD_CLI" pcb export step --subst-models --force -o build/board.step ../iasis/iasis.kicad_pcb',
+]
 
 [tasks.case]
-description = "Build the enclosure and check its fit from the board STEP"
+description = "Build the enclosure and check its fit against the board STEP"
+depends = ["board-step"]
 run = "uv run build.py"
 
 [tasks.format]
