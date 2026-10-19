@@ -208137,14 +208137,6 @@
 		(uuid "f5cc279b-9daa-42c4-91c7-4b3b23c6e37b")
 	)
 	(segment
-		(start 115.6 58.7)
-		(end 115.8 58.9)
-		(width 0.15)
-		(layer "F.Cu")
-		(net "/Host port/CC1_CONN")
-		(uuid "09681439-8615-4b9c-9d3b-c3ca3c5ad9f9")
-	)
-	(segment
 		(start 120.7 64)
 		(end 120.85 64)
 		(width 0.15)
@@ -208225,7 +208217,7 @@
 		(uuid "90963e92-baef-4e82-9710-378857b641dc")
 	)
 	(segment
-		(start 115.8 58.9)
+		(start 115.8 58.55)
 		(end 115.8 60.9)
 		(width 0.15)
 		(layer "F.Cu")
@@ -208266,7 +208258,7 @@
 	)
 	(segment
 		(start 116 58.35)
-		(end 115.65 58.7)
+		(end 115.8 58.55)
 		(width 0.15)
 		(layer "F.Cu")
 		(net "/Host port/CC1_CONN")
@@ -208279,14 +208271,6 @@
 		(layer "F.Cu")
 		(net "/Host port/CC1_CONN")
 		(uuid "f627b0d5-8a0c-4072-8210-ac7983f6f96e")
-	)
-	(via
-		(at 115.65 58.7)
-		(size 0.45)
-		(drill 0.2)
-		(layers "F.Cu" "B.Cu")
-		(net "/Host port/CC1_CONN")
-		(uuid "54409907-e7d2-4cbb-8b61-6bbcea079bbd")
 	)
 	(via
 		(at 120.6 64)
@@ -209979,7 +209963,7 @@
 	)
 	(segment
 		(start 90 141.65)
-		(end 90.35 141.3)
+		(end 90.4 141.25)
 		(width 0.15)
 		(layer "F.Cu")
 		(net "/Target ports/Target 2/USB-C data and PD/CC1_CONN")
@@ -209994,7 +209978,7 @@
 		(uuid "8bd051e4-6114-4dc2-89c4-17a574cdf9ad")
 	)
 	(segment
-		(start 90.4 141.3)
+		(start 90.4 141.25)
 		(end 90.4 141)
 		(width 0.15)
 		(layer "F.Cu")
@@ -210024,14 +210008,6 @@
 		(layer "F.Cu")
 		(net "/Target ports/Target 2/USB-C data and PD/CC1_CONN")
 		(uuid "c140aa2b-f6ff-4b53-9580-9b6969d1c23f")
-	)
-	(via
-		(at 90.35 141.3)
-		(size 0.45)
-		(drill 0.2)
-		(layers "F.Cu" "B.Cu")
-		(net "/Target ports/Target 2/USB-C data and PD/CC1_CONN")
-		(uuid "294655fb-60ac-47d3-aab3-b573148f2dc0")
 	)
 	(via
 		(at 84.9 136.3)
@@ -235422,7 +235398,7 @@
 		(uuid "682558ae-8489-4bae-8ba9-7722b2c61746")
 	)
 	(segment
-		(start 143.5 117.1)
+		(start 143.6 117)
 		(end 140.9 119.7)
 		(width 0.15)
 		(layer "F.Cu")
@@ -235430,15 +235406,7 @@
 		(uuid "791ee238-f771-4018-8d26-6a1a31ed39fc")
 	)
 	(segment
-		(start 143.7 117.1)
-		(end 143.8 117)
-		(width 0.15)
-		(layer "F.Cu")
-		(net "P2_PD_IRQ_N")
-		(uuid "8c7d927e-c8a6-49b1-a28f-44f625af161a")
-	)
-	(segment
-		(start 143.8 117)
+		(start 143.6 117)
 		(end 144.2 117)
 		(width 0.15)
 		(layer "F.Cu")
@@ -235524,14 +235492,6 @@
 		(layers "F.Cu" "B.Cu")
 		(net "P2_PD_IRQ_N")
 		(uuid "5e795124-cfe4-4b44-85d3-1888a9b038cf")
-	)
-	(via
-		(at 143.7 117.1)
-		(size 0.45)
-		(drill 0.2)
-		(layers "F.Cu" "B.Cu")
-		(net "P2_PD_IRQ_N")
-		(uuid "74d7c9f1-1f2e-4ca8-bfa3-6f82dc609fd3")
 	)
 	(via
 		(at 108.8 141.3)
@@ -237741,14 +237701,6 @@
 		(layer "F.Cu")
 		(net "P5_SEL_9V")
 		(uuid "11f641df-4014-4883-a350-764e059b33cb")
-	)
-	(segment
-		(start 152.4 66.4)
-		(end 152.5 66.4)
-		(width 0.15)
-		(layer "F.Cu")
-		(net "P5_SEL_9V")
-		(uuid "290fdd07-cbf3-4c2e-b773-7cb29b9a121f")
 	)
 	(segment
 		(start 151.1 64.7)
@@ -250615,7 +250567,7 @@
 		(uuid "e86bfb06-65fd-40ca-8628-42f2bb37cecd")
 	)
 	(segment
-		(start 162.4 141.3)
+		(start 162.4 141.25)
 		(end 162.4 141)
 		(width 0.15)
 		(layer "F.Cu")
@@ -250672,7 +250624,7 @@
 	)
 	(segment
 		(start 162 141.65)
-		(end 162.35 141.3)
+		(end 162.4 141.25)
 		(width 0.15)
 		(layer "F.Cu")
 		(net "/Target ports/Target 5/USB-C data and PD/CC1_CONN")
@@ -250693,14 +250645,6 @@
 		(layers "F.Cu" "B.Cu")
 		(net "/Target ports/Target 5/USB-C data and PD/CC1_CONN")
 		(uuid "3c373296-ceee-4b33-9dec-5fb78c2fac24")
-	)
-	(via
-		(at 162.35 141.3)
-		(size 0.45)
-		(drill 0.2)
-		(layers "F.Cu" "B.Cu")
-		(net "/Target ports/Target 5/USB-C data and PD/CC1_CONN")
-		(uuid "43011f27-5f8e-4141-8098-de138c713e5b")
 	)
 	(via
 		(at 156.9 136.3)
@@ -254499,7 +254443,7 @@
 		(uuid "2d974d22-9d58-48b9-90c8-82d1513fe77d")
 	)
 	(segment
-		(start 138.4 141.3)
+		(start 138.4 141.25)
 		(end 138.4 141)
 		(width 0.15)
 		(layer "F.Cu")
@@ -254524,7 +254468,7 @@
 	)
 	(segment
 		(start 138 141.65)
-		(end 138.35 141.3)
+		(end 138.4 141.25)
 		(width 0.15)
 		(layer "F.Cu")
 		(net "/Target ports/Target 4/USB-C data and PD/CC1_CONN")
@@ -254545,14 +254489,6 @@
 		(layers "F.Cu" "B.Cu")
 		(net "/Target ports/Target 4/USB-C data and PD/CC1_CONN")
 		(uuid "c1d2abc0-2b0e-4f76-af2f-cac88be9d2f8")
-	)
-	(via
-		(at 138.35 141.3)
-		(size 0.45)
-		(drill 0.2)
-		(layers "F.Cu" "B.Cu")
-		(net "/Target ports/Target 4/USB-C data and PD/CC1_CONN")
-		(uuid "c2712ad9-b62c-4bfe-97e8-3aa7afff084b")
 	)
 	(segment
 		(start 135.5 136.4)
@@ -255399,7 +255335,7 @@
 	)
 	(segment
 		(start 114 141.65)
-		(end 114.35 141.3)
+		(end 114.4 141.25)
 		(width 0.15)
 		(layer "F.Cu")
 		(net "/Target ports/Target 3/USB-C data and PD/CC1_CONN")
@@ -255430,7 +255366,7 @@
 		(uuid "958439e7-b59e-4b14-92a4-a8ee192d46eb")
 	)
 	(segment
-		(start 114.4 141.3)
+		(start 114.4 141.25)
 		(end 114.4 141)
 		(width 0.15)
 		(layer "F.Cu")
@@ -255444,14 +255380,6 @@
 		(layer "F.Cu")
 		(net "/Target ports/Target 3/USB-C data and PD/CC1_CONN")
 		(uuid "affac05c-c747-48b1-ac9b-20b54a690052")
-	)
-	(via
-		(at 114.35 141.3)
-		(size 0.45)
-		(drill 0.2)
-		(layers "F.Cu" "B.Cu")
-		(net "/Target ports/Target 3/USB-C data and PD/CC1_CONN")
-		(uuid "3331b258-c64e-47a9-ae3c-3ded96a4f08e")
 	)
 	(via
 		(at 114.2 139.1)
@@ -259800,14 +259728,14 @@
 	)
 	(segment
 		(start 66 141.65)
-		(end 66.35 141.3)
+		(end 66.4 141.25)
 		(width 0.15)
 		(layer "F.Cu")
 		(net "/Target ports/Target 1/USB-C data and PD/CC1_CONN")
 		(uuid "0b7e0086-7457-40eb-8592-6373c2edca05")
 	)
 	(segment
-		(start 66.4 141.3)
+		(start 66.4 141.25)
 		(end 66.4 141)
 		(width 0.15)
 		(layer "F.Cu")
@@ -259861,14 +259789,6 @@
 		(layers "F.Cu" "B.Cu")
 		(net "/Target ports/Target 1/USB-C data and PD/CC1_CONN")
 		(uuid "7b5fae83-ed25-4c57-9fd5-75acf9f6670e")
-	)
-	(via
-		(at 66.35 141.3)
-		(size 0.45)
-		(drill 0.2)
-		(layers "F.Cu" "B.Cu")
-		(net "/Target ports/Target 1/USB-C data and PD/CC1_CONN")
-		(uuid "a93746bb-ecd2-41a0-b1f7-7371e680111d")
 	)
 	(segment
 		(start 66.2 139.1)
@@ -271902,15 +271822,6 @@
 		(uuid "c52c068c-5e33-49be-8ab9-e2a54162f127")
 	)
 	(segment
-		(start 99.4 54.7)
-		(end 99.4 55)
-		(width 0.15)
-		(locked yes)
-		(layer "F.Cu")
-		(net "AUX_SDA")
-		(uuid "c69e83e2-9871-4c77-80e0-1dd8d3e319a7")
-	)
-	(segment
 		(start 131 100.8)
 		(end 141.4 100.8)
 		(width 0.15)
@@ -272021,15 +271932,6 @@
 		(layers "F.Cu" "B.Cu")
 		(net "AUX_SDA")
 		(uuid "67c86980-04d8-45ed-bbce-42b7ca4e1268")
-	)
-	(via
-		(at 99.4 55)
-		(size 0.45)
-		(drill 0.2)
-		(layers "F.Cu" "B.Cu")
-		(locked yes)
-		(net "AUX_SDA")
-		(uuid "732dadd3-0284-401a-bea7-94e06ee9cbb0")
 	)
 	(via
 		(at 132.2 63.5)
@@ -279309,6 +279211,14 @@
 		(layer "B.Cu")
 		(net "Net-(U1331-ILIM)")
 		(uuid "6e1fe29e-bba4-417d-862e-353b7c8ddb7c")
+	)
+	(segment
+		(start 152.4 66.5)
+		(end 152.4 66.4)
+		(width 0.15)
+		(layer "F.Cu")
+		(net "P5_SEL_9V")
+		(uuid "5c7253f6-9353-46be-9250-2d271cba6421")
 	)
 	(zone
 		(net "GND")
