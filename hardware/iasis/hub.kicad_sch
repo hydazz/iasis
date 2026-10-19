@@ -9769,7 +9769,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Package_DFN_QFN:VQFN-100-1EP_12x12mm_P0.4mm_EP8x8mm_ThermalVias"
+		(property "Footprint" "Iasis:VQFN-100-1EP_12x12mm_P0.4mm_EP8x8mm_ThermalVias"
 			(at 200.66 142.24 0)
 			(hide yes)
 			(show_name no)

@@ -8339,7 +8339,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Package_SO:HTSSOP-16-1EP_4.4x5mm_P0.65mm_EP3.4x5mm_Mask2.66x2.46mm_ThermalVias"
+		(property "Footprint" "Iasis:HTSSOP-16-1EP_4.4x5mm_P0.65mm_EP3.4x5mm_Mask2.66x2.46mm_ThermalVias"
 			(at 358.14 77.47 0)
 			(hide yes)
 			(show_name no)

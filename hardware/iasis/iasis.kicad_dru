@@ -21,7 +21,7 @@
 	(condition "A.hasNetclass('USB_90') && B.Type == 'Zone'")
 	(constraint clearance (min 0.6mm)))
 
-# Molex 105450 B-row via in pad: 0.45/0.20 vias staggered 0.15mm along the 0.30mm pads sit 0.125mm from the neighbouring pad and 0.133mm from each other.
+# Molex 105450 B-row via in pad: 0.45/0.30 vias staggered 0.15mm along the 0.30mm pads sit 0.125mm from the neighbouring pad and 0.133mm from each other; their holes keep the 0.2mm board minimum.
 (rule "Receptacle B-row via in pad"
 	(condition "A.Type == 'Via' && (A.intersectsCourtyard('J401') || A.intersectsCourtyard('J501') || A.intersectsCourtyard('J601') || A.intersectsCourtyard('J701') || A.intersectsCourtyard('J801') || A.intersectsCourtyard('J901')) && (B.Type == 'Via' || B.memberOfFootprint('J401') || B.memberOfFootprint('J501') || B.memberOfFootprint('J601') || B.memberOfFootprint('J701') || B.memberOfFootprint('J801') || B.memberOfFootprint('J901'))")
 	(constraint clearance (min 0.12mm)))

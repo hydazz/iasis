@@ -26,6 +26,12 @@ The following footprints incorporate geometry from the KiCad community library a
 - Land extents, locating holes and shell slots follow GCT drawing B4:  
   https://gct.co/files/drawings/usb4105.pdf
 
+**HTSSOP-16-1EP_4.4x5mm_P0.65mm_EP3.4x5mm_Mask2.66x2.46mm_ThermalVias.kicad_mod**, **VQFN-100-1EP_12x12mm_P0.4mm_EP8x8mm_ThermalVias.kicad_mod**, **WQFN-20-1EP_3x3mm_P0.4mm_EP1.7x1.7mm_ThermalVias.kicad_mod**
+
+- The `Package_SO` and `Package_DFN_QFN` footprints of the same names, distributed with KiCad 10.0.7.
+- Thermal via drill 0.3 mm instead of 0.2 mm, so every hole on the board stays in JLC's standard via tier.
+- 3D model entries match the board instances.
+
 **TestPoint_Pad_D0.5mm**
 
 - Derived from `TestPoint:TestPoint_Pad_D1.0mm`, distributed with KiCad 10.0.7.

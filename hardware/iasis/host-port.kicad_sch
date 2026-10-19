@@ -7472,7 +7472,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Package_DFN_QFN:WQFN-20-1EP_3x3mm_P0.4mm_EP1.7x1.7mm_ThermalVias"
+		(property "Footprint" "Iasis:WQFN-20-1EP_3x3mm_P0.4mm_EP1.7x1.7mm_ThermalVias"
 			(at 254 99.06 0)
 			(hide yes)
 			(show_name no)
