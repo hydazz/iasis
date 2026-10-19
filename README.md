@@ -23,7 +23,7 @@ Tools come from mise (`mise install` at the repository root); KiCad 10 is needed
 mise run //hardware/iasis:fab
 ```
 
-This writes `hardware/iasis/build/`: `gerbers.zip` (gerbers and drill files for JLCPCB), and `bom-Hub.csv`, `bom-HubPD.csv`, `cpl-Hub.csv` and `cpl-HubPD.csv` for JLCPCB assembly of each variant. Check part rotations in JLCPCB's placement preview before ordering. The enclosure has its own tasks; see [hardware/case](hardware/case/README.md).
+This writes `hardware/iasis/build/`: `gerbers.zip` (gerbers and drill files for JLCPCB), and `bom-Hub.csv`, `bom-HubPD.csv`, `cpl-Hub.csv` and `cpl-HubPD.csv` for JLCPCB assembly of each variant, with placements corrected for JLCPCB's footprints. It also refreshes the board's tracked previews. [hardware/iasis](hardware/iasis/README.md) lists the JLCPCB order options. The enclosure has its own tasks; see [hardware/case](hardware/case/README.md).
 
 ## License
 
