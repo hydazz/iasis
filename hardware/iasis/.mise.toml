@@ -23,3 +23,7 @@ for v in Hub HubPD; do
 done
 rm build/pos.csv
 '''
+
+[tasks.diff]
+description = "Show the board's changes against a git revision (default HEAD) in the browser (needs KiCad)"
+run = "python3 diff.py"

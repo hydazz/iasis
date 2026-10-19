@@ -8,7 +8,7 @@ KiCad 10 project for the six-layer, 130 × 100 mm Iasis board. One layout carrie
 
 - `iasis.kicad_sch` and its sheets, `iasis.kicad_pcb`, `iasis.kicad_pro`, and `iasis.kicad_dru` for the rules the board setup cannot express.
 - `Iasis.kicad_sym`, `Iasis.pretty` and `Iasis.3dshapes`: project symbols, footprints and models. `NOTICE` files give their sources and licences.
-- `jlc_cpl.py` corrects placements for JLCPCB (below); `preview.py` writes `preview/board.png` and `preview/layout.png`.
+- `jlc_cpl.py` corrects placements for JLCPCB (below); `preview.py` writes `preview/board.png` and `preview/layout.png`; `diff.py` shows a board change (below).
 
 ## Fab files
 
@@ -27,6 +27,14 @@ The task first runs `preview`, which renders the HubPD top side into `preview/bo
 | `cpl-Hub.csv`, `cpl-HubPD.csv` | Placements per variant, corrected for JLCPCB's footprints |
 
 Both previews are tracked so that history shows how the board changes; commit them with the change that moved them. A preview is rewritten only when its content changes. The layout, rasterised by resvg and packed by oxipng (both from mise), repeats byte for byte; the render differs by a few bytes between runs of an unchanged board, so it is replaced only when more than that changes.
+
+## Visual diff
+
+```bash
+mise run //hardware/iasis:diff
+```
+
+compares the last commit's board with the working copy; `diff REV` compares a revision with the working copy, and `diff OLD NEW` two revisions. The task plots each copper, silkscreen and courtyard layer and the outline of both boards, without zone fills, and draws what was removed red, what was added green and the rest grey. It opens `build/diff/index.html`, which pans and zooms each layer and counts the tracks, vias and footprints that changed.
 
 ## JLCPCB order
 
