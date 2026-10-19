@@ -3735,7 +3735,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "11.5k 0.1%"
+		(property "Value" "11.3k 0.1%"
 			(at 139.7 124.46 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3757,7 +3757,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://wmsc.lcsc.com/wmsc/upload/file/pdf/v2/lcsc/2009282238_YAGEO-RT0603BRD0711K5L_C705719.pdf"
+		(property "Datasheet" "https://wmsc.lcsc.com/wmsc/upload/file/pdf/v2/lcsc/2203300930_YAGEO-RT0603BRD0711K3L_C861088.pdf"
 			(at 137.16 123.19 0)
 			(hide yes)
 			(show_name no)
@@ -3779,7 +3779,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C705719"
+		(property "LCSC" "C861088"
 			(at 137.16 123.19 0)
 			(hide yes)
 			(show_name no)
@@ -3790,7 +3790,7 @@
 				)
 			)
 		)
-		(property "MPN" "RT0603BRD0711K5L"
+		(property "MPN" "RT0603BRD0711K3L"
 			(at 137.16 123.19 0)
 			(hide yes)
 			(show_name no)

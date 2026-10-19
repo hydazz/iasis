@@ -19690,7 +19690,7 @@
 				)
 			)
 		)
-		(property "Value" "11.5k 0.1%"
+		(property "Value" "11.3k 0.1%"
 			(at 0 1.43 0)
 			(layer "F.Fab")
 			(uuid "e633de22-f5fe-4fa5-9ccb-7ee178c0ed8c")
@@ -19701,7 +19701,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://wmsc.lcsc.com/wmsc/upload/file/pdf/v2/lcsc/2009282238_YAGEO-RT0603BRD0711K5L_C705719.pdf"
+		(property "Datasheet" "https://wmsc.lcsc.com/wmsc/upload/file/pdf/v2/lcsc/2203300930_YAGEO-RT0603BRD0711K3L_C861088.pdf"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -19735,7 +19735,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C705719"
+		(property "LCSC" "C861088"
 			(at 0 0 180)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -19748,7 +19748,7 @@
 				)
 			)
 		)
-		(property "MPN" "RT0603BRD0711K5L"
+		(property "MPN" "RT0603BRD0711K3L"
 			(at 0 0 180)
 			(unlocked yes)
 			(layer "F.Fab")
