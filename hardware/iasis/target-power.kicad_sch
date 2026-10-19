@@ -2887,7 +2887,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "SN74LVC2G08DCUR"
+		(property "Value" "74LVC2G08DC-Q100H"
 			(at 66.04 93.98 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2910,7 +2910,7 @@
 				(justify left)
 			)
 		)
-		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/sn74lvc2g08.pdf"
+		(property "Datasheet" "https://assets.nexperia.com/documents/data-sheet/74LVC2G08_Q100.pdf"
 			(at 73.66 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -2922,7 +2922,7 @@
 				(justify left)
 			)
 		)
-		(property "Description" "Single 2-input AND gate, low-power CMOS"
+		(property "Description" "Dual AND Gate, Low-Voltage CMOS"
 			(at 73.66 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -2934,7 +2934,7 @@
 				(justify left)
 			)
 		)
-		(property "LCSC" "C91875"
+		(property "LCSC" "C548572"
 			(at 73.66 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -2946,7 +2946,7 @@
 				(justify left)
 			)
 		)
-		(property "MPN" "SN74LVC2G08DCUR"
+		(property "MPN" "74LVC2G08DC-Q100H"
 			(at 73.66 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -2970,7 +2970,7 @@
 				(justify left)
 			)
 		)
-		(property "Manufacturer" "Texas Instruments"
+		(property "Manufacturer" "Nexperia"
 			(at 73.66 101.6 0)
 			(hide yes)
 			(show_name no)
@@ -3987,7 +3987,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "SN74LVC2G08DCUR"
+		(property "Value" "74LVC2G08DC-Q100H"
 			(at 66.04 68.58 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4010,7 +4010,7 @@
 				(justify left)
 			)
 		)
-		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/sn74lvc2g08.pdf"
+		(property "Datasheet" "https://assets.nexperia.com/documents/data-sheet/74LVC2G08_Q100.pdf"
 			(at 73.66 66.04 0)
 			(hide yes)
 			(show_name no)
@@ -4022,7 +4022,7 @@
 				(justify left)
 			)
 		)
-		(property "Description" "Single 2-input AND gate, low-power CMOS"
+		(property "Description" "Dual AND Gate, Low-Voltage CMOS"
 			(at 73.66 66.04 0)
 			(hide yes)
 			(show_name no)
@@ -4034,7 +4034,7 @@
 				(justify left)
 			)
 		)
-		(property "LCSC" "C91875"
+		(property "LCSC" "C548572"
 			(at 73.66 66.04 0)
 			(hide yes)
 			(show_name no)
@@ -4046,7 +4046,7 @@
 				(justify left)
 			)
 		)
-		(property "MPN" "SN74LVC2G08DCUR"
+		(property "MPN" "74LVC2G08DC-Q100H"
 			(at 73.66 66.04 0)
 			(hide yes)
 			(show_name no)
@@ -4070,7 +4070,7 @@
 				(justify left)
 			)
 		)
-		(property "Manufacturer" "Texas Instruments"
+		(property "Manufacturer" "Nexperia"
 			(at 73.66 76.2 0)
 			(hide yes)
 			(show_name no)
@@ -5746,7 +5746,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "SN74LVC2G08DCUR"
+		(property "Value" "74LVC2G08DC-Q100H"
 			(at 67.31 130.81 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5769,7 +5769,7 @@
 				(justify left)
 			)
 		)
-		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/sn74lvc2g08.pdf"
+		(property "Datasheet" "https://assets.nexperia.com/documents/data-sheet/74LVC2G08_Q100.pdf"
 			(at 73.66 119.38 0)
 			(hide yes)
 			(show_name no)
@@ -5781,7 +5781,7 @@
 				(justify left)
 			)
 		)
-		(property "Description" "Single 2-input AND gate, low-power CMOS"
+		(property "Description" "Dual AND Gate, Low-Voltage CMOS"
 			(at 73.66 119.38 0)
 			(hide yes)
 			(show_name no)
@@ -5793,7 +5793,7 @@
 				(justify left)
 			)
 		)
-		(property "LCSC" "C91875"
+		(property "LCSC" "C548572"
 			(at 73.66 119.38 0)
 			(hide yes)
 			(show_name no)
@@ -5805,7 +5805,7 @@
 				(justify left)
 			)
 		)
-		(property "MPN" "SN74LVC2G08DCUR"
+		(property "MPN" "74LVC2G08DC-Q100H"
 			(at 73.66 119.38 0)
 			(hide yes)
 			(show_name no)
@@ -5829,7 +5829,7 @@
 				(justify left)
 			)
 		)
-		(property "Manufacturer" "Texas Instruments"
+		(property "Manufacturer" "Nexperia"
 			(at 73.66 129.54 0)
 			(hide yes)
 			(show_name no)
