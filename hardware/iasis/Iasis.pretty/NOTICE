@@ -1,6 +1,6 @@
 # NOTICE
 
-This project includes modified KiCad community footprints and geometry derived from Raspberry Pi reference designs. Attribution and licensing details follow.
+This project includes modified KiCad community footprints, geometry derived from Raspberry Pi reference designs and footprints drawn from manufacturer documents. Attribution and licensing details follow.
 
 ## Sources and licenses
 
@@ -18,11 +18,6 @@ License: MIT, Copyright (c) 2026 Raspberry Pi Ltd. Full license text is included
 ## Modified KiCad footprints
 
 The following footprints incorporate geometry from the KiCad community library and retain its CC-BY-SA 4.0 license and design exception.
-
-**Molex_470531000.kicad_mod**
-
-- Based on `Connector:FanPinHeader_1x04_P2.54mm_Vertical`.
-- Locating hole resized to match Molex drawing SD-47053-001 Rev C4.
 
 **GCT_USB4105_GF_A_120.kicad_mod**
 
@@ -42,11 +37,6 @@ The following footprints incorporate geometry from the KiCad community library a
 
 The following geometry originates from the RP2350B Minimal KiCad Design identified above and is covered by its MIT license.
 
-**Abracon_AOTA-B201610.kicad_mod**
-
-- Land pattern from `abracon_aota-b201610s3r3-101-t`.
-- Pads: 0.7 × 1.7 mm at 1.4 mm pitch.
-
 **C_0402_1005Metric_WideGap.kicad_mod**
 
 - Based on KiCad's `Capacitor_SMD:C_0402_1005Metric` footprint.
@@ -57,3 +47,16 @@ The following geometry originates from the RP2350B Minimal KiCad Design identifi
 **iasis.kicad_pcb**
 
 The RP2354 regulator, decoupling and crystal component placement and associated copper geometry are copied from the Raspberry Pi reference design.
+
+## Footprints drawn from manufacturer documents
+
+These are original project work under the repository's Apache-2.0 license. Each footprint's description names its source.
+
+- `Bourns_SRP5030CC.kicad_mod`: Bourns SRP5030CC recommended land.
+- `L_Coilank_AAPS0530.kicad_mod`: Coilank AAPS-F datasheet, page 2.
+- `OPSCO_SK6812SIDE-A.kicad_mod`: OPSCO OSK-SPC-SK6812SIDEI-A-S rev A/1.
+- `PSPMAA1040.kicad_mod`: PROD Technology PSPMAA series, 1040 drawing.
+- `TI_CSD18543Q3A.kicad_mod`: TI SLPS633 land and stencil.
+- `TI_DRR0012G.kicad_mod`: TI DRR0012G land (LMR51450 datasheet).
+- `TI_RPW0010A.kicad_mod`: TI package drawing 4225183A.
+- `WCH_CH224Q_DFN10.kicad_mod`: WCH CH224 datasheet, DFN10 drawing.

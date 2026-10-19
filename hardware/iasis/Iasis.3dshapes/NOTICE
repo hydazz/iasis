@@ -4,9 +4,6 @@ This project includes third-party CAD models and locally generated geometry. Thi
 
 ## Generated geometry
 
-**M2_2280_card_envelope.step**  
-Generated single-sided M.2 2280 SSD envelope for clearance checks.
-
 **Coilank_AAPS0530.step**  
 Approximate package geometry generated from page 2 of the AAPS-F datasheet:  
 https://datasheet.lcsc.com/datasheet/pdf/db0306ba92d8c07b239ddfd67f0cd388.pdf
@@ -32,14 +29,8 @@ Files are unmodified except for filenames. Applicable terms and redistribution r
 | Molex_105450-0101.step | Molex 105450-0101 | C134092 |
 | onsemi_MLP14_2.5x2.5mm.step | onsemi FUSB302BMPX | C132291 |
 | TI_RUK0020B.step | TI TPD6S300ARUKR | C2876380 |
-| TI_RPM0026A.step | TI TPS55288RPMR | C2864583 |
 | TI_RPW0010A.step | TI TPS259470LRPWR | C3662793 |
-| TI_RJR0014A.step | TI LM61460AANRJRR | C2864505 |
-| TI_CSD18532Q5B.step | TI CSD18532Q5B | C882766 |
-| Littelfuse_NANO2_451.step | Littelfuse 0451015.MRL | C44480 |
 | OPSCO_SK6812SIDE-A.step | OPSCO SK6812SIDE-A | C5378721 |
-| XINGLIGHT_XL-3210SYGC.step | XINGLIGHT XL-3210SYGC | C965878 |
-| Alps_SKRTLAE010.step | Alps Alpine SKRTLAE010 | C110293 |
 | CK_PTS645SL50.step | C&K PTS645SL50SMTR92LFS | C221877 |
 | TI_DRR0012G.step | TI LMR51450SDRRR | C6890985 |
 | WCH_CH224Q_DFN10.step | WCH CH224Q | C46061833 |
@@ -47,36 +38,11 @@ Files are unmodified except for filenames. Applicable terms and redistribution r
 
 Model-specific notes:
 
-- **TI_RJR0014A.step:** EasyEDA's RJR package model for the LMQ61460.
 - **PROD_PSPMAA1040.step:** EasyEDA's 11 × 10 × 4 mm moulded inductor package model.
 
-## Manufacturer and reference-design models
+## Reference-design model
 
-The following models were obtained from manufacturer downloads or published Raspberry Pi hardware design files. They are unmodified except for filenames and remain subject to their respective applicable terms.
-
-**Raspberry Pi CM5 IO board** (`cm5io-KiCAD.zip`)
-
-- `10164227-1001a1rlf.stp` — Amphenol 10164227-1001A1RLF
-- `SRP5030CC.stp` — Bourns SRP5030CC
-
-**Raspberry Pi Product Information Portal**
-
-- `CM5.step` — Compute Module 5 (CM5R5), document RP-007222-DD-2
-
-**Manufacturer downloads**
-
-- `A70-112-331N126.step` — EDAC  
-  https://files.edac.net/edac/content/A7X/A70-112-331N126.STEP
-- `KPJX-4S-S.step` — Kycon  
-  https://www.kycon.com/3D/KPJX-4S-S_A.STEP
-- `SRP1265A.stp` — Bourns  
-  https://bourns.com/engineering/SRP1265A/SRP1265A%20series.stp
-- `1-2199230-4.stp` — TE Connectivity, customer view model CVM_1-2199230-4 (`3d_stp.zip`)  
-  https://www.te.com/commerce/DocumentDelivery/DDEController?Action=srchrtrv&DocNm=CVM_1-2199230-4&DocType=Customer%20View%20Model&DocLang=English&DocFormat=3d_stp.zip&PartCntxt=1-2199230-4
-- `AOTA-B201610S.step` — Abracon  
-  https://abracon.com/Support/STEP/AOTA-B201610S.STEP.zip
-- `ASEK.step` — Abracon  
-  https://abracon.com/Support/STEP/Oscillators/ASEK.STEP.zip
+`SRP5030CC.stp` (Bourns SRP5030CC) comes from Raspberry Pi's published CM5 IO board design files (`cm5io-KiCAD.zip`). It is unmodified except for its filename and remains subject to its applicable terms.
 
 ## MIT-licensed Raspberry Pi model
 
