@@ -61,7 +61,8 @@ These are original project work under the repository's Apache-2.0 license. Each 
 - `Bourns_SRP5030CC.kicad_mod`: Bourns SRP5030CC recommended land.
 - `L_Coilank_AAPS0530.kicad_mod`: Coilank AAPS-F datasheet, page 2.
 - `OPSCO_SK6812SIDE-A.kicad_mod`: OPSCO OSK-SPC-SK6812SIDEI-A-S rev A/1.
-- `PSPMAA1040.kicad_mod`: PROD Technology PSPMAA series, 1040 drawing.
+- `PSTMAA666460.kicad_mod`: PROD Technology PSTMAA666460-6R8MB specification A2.0, page 3.
+- `SolderPads_1x03_P2.54mm.kicad_mod`: three wire or header solder pads; no source document.
 - `TI_CSD18543Q3A.kicad_mod`: TI SLPS633 land and stencil.
 - `TI_DRR0012G.kicad_mod`: TI DRR0012G land (LMR51450 datasheet).
 - `TI_RPW0010A.kicad_mod`: TI package drawing 4225183A.

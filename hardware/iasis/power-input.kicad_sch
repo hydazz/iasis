@@ -8515,7 +8515,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "100u 50V"
+		(property "Value" "68u 50V"
 			(at 224.79 158.75 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8526,7 +8526,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:CP_Elec_10x10.5"
+		(property "Footprint" "Capacitor_SMD:CP_Elec_8x10.5"
 			(at 231.14 158.75 0)
 			(hide yes)
 			(show_name no)
@@ -8538,7 +8538,7 @@
 				(justify left)
 			)
 		)
-		(property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2304140030_PANASONIC-EEHZA1H101P_C109086.pdf"
+		(property "Datasheet" "https://datasheet.lcsc.com/datasheet/pdf/d3106b7be65c7347fb943a2e324d3be8.pdf"
 			(at 231.14 158.75 0)
 			(hide yes)
 			(show_name no)
@@ -8550,7 +8550,7 @@
 				(justify left)
 			)
 		)
-		(property "Description" "Unpolarized capacitor"
+		(property "Description" "Polarized capacitor"
 			(at 231.14 158.75 0)
 			(hide yes)
 			(show_name no)
@@ -8562,7 +8562,7 @@
 				(justify left)
 			)
 		)
-		(property "LCSC" "C109086"
+		(property "LCSC" "C178645"
 			(at 231.14 158.75 0)
 			(hide yes)
 			(show_name no)
@@ -8574,7 +8574,7 @@
 				(justify left)
 			)
 		)
-		(property "MPN" "EEHZA1H101P"
+		(property "MPN" "EEHZC1H680P"
 			(at 231.14 158.75 0)
 			(hide yes)
 			(show_name no)

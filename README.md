@@ -11,7 +11,7 @@ One six-layer PCB supports two assembly variants:
 
 The charging input is optional in either population. Without it, the available upstream USB power limits the combined target supply; five simultaneous restores are a prototype test goal. Hub PD adds selectable 5 V and 9 V charging within the negotiated input budget.
 
-The MCU connects to an internal USB2 hub port, so the same host cable supports management and RP2354 ROM programming. BOOTSEL and RESET buttons provide recovery without soldering; SWD and a 3.3 V UART header provide independent debugging. The optional display is independent of core operation. DFU, revive and erase are separate deliberate actions.
+The MCU connects to an internal USB2 hub port, so the same host cable supports management and RP2354 ROM programming. BOOTSEL and RESET buttons provide recovery without soldering; SWD and 3.3 V UART solder pads provide independent debugging. The optional display is independent of core operation. DFU, revive and erase are separate deliberate actions.
 
 In development. Firmware and host software are not yet implemented. Hardware and restore workflows are not yet validated.
 

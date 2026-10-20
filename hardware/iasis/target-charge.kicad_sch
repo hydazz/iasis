@@ -7360,7 +7360,7 @@
 				)
 			)
 		)
-		(property "Value" "10u 10A"
+		(property "Value" "6.8u 12.5A"
 			(at 151.13 82.55 90)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7370,7 +7370,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Iasis:PSPMAA1040"
+		(property "Footprint" "Iasis:PSTMAA666460"
 			(at 153.67 85.09 0)
 			(hide yes)
 			(show_name no)
@@ -7382,7 +7382,7 @@
 				(justify left)
 			)
 		)
-		(property "Datasheet" "https://wmsc.lcsc.com/wmsc/upload/file/pdf/v2/lcsc/2207051830_PROD-Tech-PSPMAA1040-100M-ANP_C2983105.pdf"
+		(property "Datasheet" "https://datasheet.lcsc.com/datasheet/pdf/eae0dbe4b558713dce5995c355b822c6.pdf"
 			(at 153.67 85.09 0)
 			(hide yes)
 			(show_name no)
@@ -7406,7 +7406,7 @@
 				(justify left)
 			)
 		)
-		(property "LCSC" "C2983105"
+		(property "LCSC" "C55172548"
 			(at 153.67 85.09 0)
 			(hide yes)
 			(show_name no)
@@ -7418,7 +7418,7 @@
 				(justify left)
 			)
 		)
-		(property "MPN" "PSPMAA1040-100M-ANP"
+		(property "MPN" "PSTMAA666460-6R8MB"
 			(at 153.67 85.09 0)
 			(hide yes)
 			(show_name no)
@@ -10046,7 +10046,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "100u 50V"
+		(property "Value" "100u 35V"
 			(at 273.05 88.9 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10057,7 +10057,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:CP_Elec_10x10.5"
+		(property "Footprint" "Capacitor_SMD:CP_Elec_6.3x7.7"
 			(at 271.78 88.9 0)
 			(hide yes)
 			(show_name no)
@@ -10069,7 +10069,7 @@
 				(justify left)
 			)
 		)
-		(property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2304140030_PANASONIC-EEHZA1H101P_C109086.pdf"
+		(property "Datasheet" "https://datasheet.lcsc.com/datasheet/pdf/8c74a3ab0c5c583fd1c39d99a73b3ca6.pdf"
 			(at 271.78 88.9 0)
 			(hide yes)
 			(show_name no)
@@ -10093,7 +10093,7 @@
 				(justify left)
 			)
 		)
-		(property "LCSC" "C109086"
+		(property "LCSC" "C454360"
 			(at 271.78 88.9 0)
 			(hide yes)
 			(show_name no)
@@ -10105,7 +10105,7 @@
 				(justify left)
 			)
 		)
-		(property "MPN" "EEHZA1H101P"
+		(property "MPN" "EEHZK1V101XP"
 			(at 271.78 88.9 0)
 			(hide yes)
 			(show_name no)

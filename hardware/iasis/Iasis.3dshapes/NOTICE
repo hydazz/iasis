@@ -15,6 +15,16 @@ https://datasheet.lcsc.com/datasheet/pdf/db0306ba92d8c07b239ddfd67f0cd388.pdf
 
 This is not manufacturer-supplied CAD.
 
+**PROD_PSTMAA666460.step**  
+Approximate package geometry generated from page 3 of PROD Technology's PSTMAA666460-6R8MB specification (A2.0):  
+https://datasheet.lcsc.com/datasheet/pdf/eae0dbe4b558713dce5995c355b822c6.pdf
+
+- Body: 6.4 × 6.6 mm, 6.0 mm maximum overall height
+- Terminals: two bottom pads, 1.9 × 3.6 mm, at the body ends
+- Terminal thickness (0.1 mm) is illustrative
+
+This is not manufacturer-supplied CAD.
+
 ## EasyEDA / LCSC models
 
 The following models were retrieved using LCSC part numbers from the EasyEDA component API and model server:
@@ -34,11 +44,6 @@ Files are unmodified except for filenames. Applicable terms and redistribution r
 | CK_PTS645SL50.step | C&K PTS645SL50SMTR92LFS | C221877 |
 | TI_DRR0012G.step | TI LMR51450SDRRR | C6890985 |
 | WCH_CH224Q_DFN10.step | WCH CH224Q | C46061833 |
-| PROD_PSPMAA1040.step | PROD Technology PSPMAA1040-100M-ANP | C2983105 |
-
-Model-specific notes:
-
-- **PROD_PSPMAA1040.step:** EasyEDA's 11 × 10 × 4 mm moulded inductor package model.
 
 ## Reference-design model
 
