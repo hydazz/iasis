@@ -83140,6 +83140,7 @@
 		(property "Reference" "R1631"
 			(at -2.15 0.5 0)
 			(layer "F.SilkS")
+			(hide yes)
 			(uuid "6d9abd98-8f1c-4a32-aad7-175e8b8ce9ee")
 			(effects
 				(font
@@ -90944,7 +90945,7 @@
 		(descr "Resistor SMD 0402 (1005 Metric), square (rectangular) end terminal, IPC-7351 nominal, (Body size source: IPC-SM-782 page 72, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf)")
 		(tags "resistor")
 		(property "Reference" "R1135"
-			(at 0 2.830475 0)
+			(at 0 1.139999 90)
 			(layer "F.SilkS")
 			(uuid "46e562ed-b3b6-4643-ab51-b3222c25c35c")
 			(effects
@@ -93195,7 +93196,7 @@
 		(descr "Tactile switch, 6x6 mm, H4.3 mm, gullwing terminals, https://www.ckswitches.com/media/1471/pts645.pdf")
 		(tags "SPST Button Switch CK C&K")
 		(property "Reference" "SW1101"
-			(at 0 4.069999 0)
+			(at -0.5 4.069999 0)
 			(layer "F.SilkS")
 			(uuid "6601f643-cedc-43b4-b0ad-cbeac40e064b")
 			(effects
@@ -101284,6 +101285,7 @@
 		(property "Reference" "C1534"
 			(at 5.393515 1.25 0)
 			(layer "F.SilkS")
+			(hide yes)
 			(uuid "e75bdfdb-8dec-4ec9-b6e1-1f8f4da4f7d2")
 			(effects
 				(font
@@ -148454,7 +148456,7 @@
 		(descr "Three 1.5x2.5mm wire or header solder pads on a 2.54mm pitch; no paste, no part")
 		(tags "solder pad wire debug")
 		(property "Reference" "J1132"
-			(at 4.5 2.169999 0)
+			(at -4.5 -2.17 0)
 			(layer "F.SilkS")
 			(uuid "6a1594ad-7c96-4311-9b05-f561cd7af746")
 			(effects
@@ -170084,7 +170086,7 @@
 	(gr_text "BOOTSEL"
 		(at 137.285482 53.5 0)
 		(layer "F.SilkS")
-		(uuid "1e2e22e9-e781-49f9-87f4-3e990159bb8a")
+		(uuid "8ff496cb-89d0-4aa7-946c-204266552837")
 		(effects
 			(font
 				(size 1 1)
@@ -170093,31 +170095,9 @@
 		)
 	)
 	(gr_text "RESET"
-		(at 154.25 58.069999 0)
+		(at 157 58.069999 0)
 		(layer "F.SilkS")
-		(uuid "07fe9029-b129-48e7-b345-39497600fa36")
-		(effects
-			(font
-				(size 1 1)
-				(thickness 0.15)
-			)
-		)
-	)
-	(gr_text "GND"
-		(at 155.4 63.8 0)
-		(layer "F.SilkS")
-		(uuid "48a29348-2a63-4a44-bd44-7af71c0b77ef")
-		(effects
-			(font
-				(size 1 1)
-				(thickness 0.15)
-			)
-		)
-	)
-	(gr_text "TX"
-		(at 157.94 58.99 90)
-		(layer "F.SilkS")
-		(uuid "21519aca-295d-4d25-885a-73a6fec6399c")
+		(uuid "f3e3edfd-e089-4dbe-b69b-801c1d1c3f76")
 		(effects
 			(font
 				(size 1 1)
@@ -170126,9 +170106,31 @@
 		)
 	)
 	(gr_text "RX"
-		(at 160.48 58.99 90)
+		(at 152.86 64.25 90)
 		(layer "F.SilkS")
-		(uuid "8985deeb-d545-4a4a-9afb-1bc753916a81")
+		(uuid "58f1254d-1ed4-46fb-a8ba-e313071a423d")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(gr_text "GND"
+		(at 155.4 64.65 90)
+		(layer "F.SilkS")
+		(uuid "58b248aa-8006-4dda-b843-54abe02c1e0d")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(gr_text "TX"
+		(at 157.94 64.25 90)
+		(layer "F.SilkS")
+		(uuid "bf4ed12f-967d-4f0e-8f15-810875dd49cc")
 		(effects
 			(font
 				(size 1 1)
@@ -170139,7 +170141,7 @@
 	(gr_text "PD IN"
 		(at 69.75 59.214999 0)
 		(layer "F.SilkS")
-		(uuid "39e92f0f-2139-4ec9-a4b9-01ad22870d7a")
+		(uuid "e9cdd794-7dd6-443a-afc8-65f730e14cb6")
 		(effects
 			(font
 				(size 1.2 1.2)
@@ -170150,7 +170152,7 @@
 	(gr_text "SWD"
 		(at 145 63.884999 0)
 		(layer "F.SilkS")
-		(uuid "885b094d-f40a-4098-ba3c-e6e80abb90f0")
+		(uuid "f21ce51c-421b-4a07-b08f-ec7beb482047")
 		(effects
 			(font
 				(size 1.2 1.2)
@@ -170161,7 +170163,7 @@
 	(gr_text "CONFIRM"
 		(at 147.379286 113.6 0)
 		(layer "F.SilkS")
-		(uuid "eecf2afa-a473-43c9-a33e-a031ead8296d")
+		(uuid "46bdb724-b1f4-4d10-8523-7d22307de859")
 		(effects
 			(font
 				(size 1.2 1.2)
@@ -170172,7 +170174,7 @@
 	(gr_text "I2C"
 		(at 166.4 58.264999 0)
 		(layer "F.SilkS")
-		(uuid "1ecbc87c-27d6-4809-a149-af5b101652b8")
+		(uuid "94f6a79b-76d4-4078-9c8a-8bf6ac4322da")
 		(effects
 			(font
 				(size 1.2 1.2)
@@ -170183,7 +170185,7 @@
 	(gr_text "1"
 		(at 60.25 136.245 0)
 		(layer "F.SilkS")
-		(uuid "7edc451e-5935-4ed1-978d-6fc7c0d7a73c")
+		(uuid "e1213b71-0448-4579-bcfa-2c59d69a5432")
 		(effects
 			(font
 				(size 1.5 1.5)
@@ -170194,7 +170196,7 @@
 	(gr_text "2"
 		(at 82.5 136.245 0)
 		(layer "F.SilkS")
-		(uuid "48a0e7ff-1ae4-45d1-9175-a8d203b4b04f")
+		(uuid "ba0bccbf-745d-4f21-947e-c897d2c67d1d")
 		(effects
 			(font
 				(size 1.5 1.5)
@@ -170205,7 +170207,7 @@
 	(gr_text "3"
 		(at 104.5 136.245 0)
 		(layer "F.SilkS")
-		(uuid "b96cb71f-c3be-4dab-9dab-bb5e7d8e3a29")
+		(uuid "c3be1f73-8556-4c5e-ab5c-f138e4a6f434")
 		(effects
 			(font
 				(size 1.5 1.5)
@@ -170216,7 +170218,7 @@
 	(gr_text "4"
 		(at 128.5 136.210774 0)
 		(layer "F.SilkS")
-		(uuid "68e751cc-ddf0-4b79-9b72-eddc4dcb4300")
+		(uuid "262cd199-66a9-4bf0-a827-33a0abff80dc")
 		(effects
 			(font
 				(size 1.5 1.5)
@@ -170227,7 +170229,7 @@
 	(gr_text "5"
 		(at 154.5 136.245 0)
 		(layer "F.SilkS")
-		(uuid "e22565fc-a9ba-44f5-a814-81bc1bef1858")
+		(uuid "d98f64fa-dff5-4465-aaef-fbe0cccf4ece")
 		(effects
 			(font
 				(size 1.5 1.5)
