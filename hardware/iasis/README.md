@@ -1,6 +1,6 @@
 # Iasis board
 
-KiCad 10 project for the six-layer, 130 × 100 mm Iasis board. One layout carries two assembly variants, Hub and HubPD; the [repository README](../../README.md) describes them.
+KiCad 10 project for the six-layer, 125 × 89 mm Iasis board. One layout carries two assembly variants, Hub and HubPD; the [repository README](../../README.md) describes them.
 
 <img src="preview/board.png" alt="Hub PD, top side" width="400"> <img src="preview/layout.png" alt="Tracks on every copper layer, pads and top silkscreen outlines" width="400">
 
@@ -42,7 +42,7 @@ PCB options:
 
 | Option                  | Setting                 | Reason                                                                                                        |
 | ----------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Layers, size            | 6, 130 × 100 mm         |                                                                                                               |
+| Layers, size            | 6, 125 × 89 mm          |                                                                                                               |
 | Thickness               | 1.6 mm                  | Economic assembly of six layers needs 1.6 mm, green and ENIG                                                  |
 | Specify stackup         | JLC06161H-3313          | The 90 Ω pairs (0.1356 mm tracks, 0.1501 mm gap) are sized for it; accept JLC's 1.54 mm actual thickness note |
 | Colour                  | Green                   | As thickness                                                                                                  |
