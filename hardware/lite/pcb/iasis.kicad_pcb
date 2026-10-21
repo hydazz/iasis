@@ -313145,4 +313145,10 @@
 		)
 	)
 	(embedded_fonts no)
-)
+
+  (gr_text "STATUS"
+    (at 172.3 136.2 0)
+    (layer "F.SilkS")
+    (effects (font (size 0.8 0.8) (thickness 0.15)))
+    (uuid "0de935b9-0c30-4b8b-a863-ad7bdd27e48d")
+  ))

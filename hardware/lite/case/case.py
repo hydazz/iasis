@@ -84,7 +84,7 @@ MATED_SHOULDER = {ref: 1.85 if ref == "J1001" else 6.51 - 4.90 for ref in PORTS}
 
 # Side-emitting LEDs at the board edge shine through windows no larger than their
 # emitting face. A captive round cap operates the target-control switch.
-LIGHTS = ("D1170", "D1171", "D1172", "D1173", "D1174", "D1175")  # host, targets
+LIGHTS = ("D1170", "D1171", "D1172", "D1173", "D1174", "D1175")  # status, targets
 WINDOW = (3.0, 1.6)
 BUTTON = "SW1171"
 BUTTON_D, BUTTON_FIT = 10.0, 0.25  # radial fit in the cover
@@ -479,14 +479,16 @@ def _wall_cut(o: Opening) -> Part:
 
 
 def _artwork(lay: Layout) -> list[Sketch]:
-    """Top-face marks: host/power icons, first-port dot, tap/hold legend and name."""
+    """Top-face marks for connectors, status, controls and name."""
     host, power, first = (lay.board.box(ref).center() for ref in ("J901", "J1001", "J401"))
+    status = lay.board.box("D1170").center()
     sw = lay.board.box(BUTTON).center()
     y = sw.Y - 10.5
     return [
         Pos(host.X, lay.y_rear - 7) * icon("laptop-minimal"),
         Pos(power.X, lay.y_rear - 7) * icon("plug"),
         Pos(first.X, lay.y_front + 7) * Circle(1),
+        Pos(status.X, lay.y_front + 7) * icon("activity", size=5.5),
         Pos(0, lay.y_front + 7) * wordmark(WORDMARK, WORDMARK_SIZE, lay.logo),
         Pos(sw.X - 10.3, y) * Circle(0.7),
         Pos(sw.X - 3.8, y) * Text("DFU", font_size=TEXT_SIZE, font_style=FontStyle.BOLD),

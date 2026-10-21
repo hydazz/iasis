@@ -43,7 +43,7 @@ Place the board on the tray pegs, insert the button from inside the cover, and p
 
 The OLED cover accepts an Adafruit 938 STEMMA QT display. Seat it on the cover's locating pins, slip the retaining frame into the two rear keepers, then press its front edge into the finger catch. To remove it, push the finger pad inward, lift the front edge and slide the frame out. Connect a Qwiic cable before closing the case, keeping the lead clear of the button and catches.
 
-A dot marks target port 1; laptop and plug icons identify host and power. The button legend denotes a click for DFU and a hold to reboot connected targets. Firmware is not yet implemented. Remove the cover to reach BOOTSEL and RESET.
+A dot marks target port 1; laptop and plug icons identify host and power. The activity icon marks the Iasis status LED. The button legend denotes a click for DFU and a hold to reboot connected targets. Firmware is not yet implemented. Remove the cover to reach BOOTSEL and RESET.
 
 ## Viewer
 

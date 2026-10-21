@@ -2190,17 +2190,6 @@
 			(embedded_fonts no)
 		)
 	)
-	(text "D1170 is the host indicator; D1171-D1175 are targets 1-5 (GRB, 800 kHz).\nU1172 controls host orientation and HUB_RUN; reset leaves HUB_RUN high and EXT_ORIENT low.\nThe host VBUS monitor is independent of this expander and of MCU firmware.\nConfirmation is a deliberate firmware action; attachment alone does not authorize erase."
-		(exclude_from_sim no)
-		(at 25.4 203.2 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left top)
-		)
-		(uuid "dfa40f94-9276-4965-b846-fb474635ec83")
-	)
 	(text "Port indicators and physical confirmation"
 		(exclude_from_sim no)
 		(at 25.4 20.32 0)
@@ -3537,6 +3526,11 @@
 			)
 		)
 	)
+  (text "D1170 is the Iasis status indicator; D1171-D1175 are targets 1-5 (GRB, 800 kHz).\nU1172 controls host orientation and HUB_RUN; reset leaves HUB_RUN high and EXT_ORIENT low.\nThe host VBUS monitor is independent of this expander and of MCU firmware.\nConfirmation is a deliberate firmware action; attachment alone does not authorize erase."
+    (at 25.4 203.2 0)
+    (effects (font (size 1.27 1.27)) (justify left top))
+    (uuid "269de7c7-c373-462e-9ad0-d13aea0ecc18")
+  )
 	(symbol
 		(lib_id "Device:C")
 		(at 266.7 146.05 0)
