@@ -14,6 +14,7 @@ lockfile = true
 
 [env]
 KICAD_CLI = "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli"
+KICAD_PYTHON = "/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3"
 
 [monorepo]
 config_roots = ["hardware/lite/case", "hardware/lite/pcb"]

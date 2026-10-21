@@ -16,11 +16,12 @@ BUILD = HERE / "build"
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, help="separate build directory")
+    parser.add_argument("--logo", type=Path, help="filled SVG placed beside the name")
+    parser.add_argument("--output", type=Path, help="build output directory")
     args = parser.parse_args()
     output = args.output.resolve() if args.output else BUILD
     output.mkdir(parents=True, exist_ok=True)
-    lay, tray, covers = case.assemble()
+    lay, tray, covers = case.assemble(args.logo)
 
     print_dir = output / "print"
     printing.export("tray", tray, print_dir)

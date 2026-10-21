@@ -321,7 +321,13 @@ def _paths(r: Report, lay: case.Layout, cover: Part, tray: Part) -> None:
 
 
 def main() -> int:
-    report = run(*case.assemble())
+    import argparse
+    from pathlib import Path
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--logo", type=Path, help="filled SVG placed beside the name")
+    args = parser.parse_args()
+    report = run(*case.assemble(args.logo))
     print("\n".join(report.lines))
     print(f"{len(report.failures)} failures" if report.failures else "all checks passed")
     return int(bool(report.failures))

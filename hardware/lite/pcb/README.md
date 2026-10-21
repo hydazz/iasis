@@ -32,6 +32,22 @@ Run `mise run //hardware/lite/pcb:step` to export `build/board.step`, which the 
 
 The upload ZIP contains Gerber and drill files. It excludes the optional Gerber job file, whose board-preview colour and impedance-control metadata differ from the order settings below.
 
+The underside carries the name, repository URL and `REV ${REVISION}`, read from the board's title block. The PCB revision identifies a fabricated board design; tag its source commit (for example, `hw-rev-a`) and keep that release's fabrication files together. Hub and HubPD share the PCB revision.
+
+### Logo
+
+Supply a filled SVG to place a logo on the back silkscreen:
+
+```bash
+mise run //hardware/lite/pcb:fab -- --logo ../../../logos/logo.svg
+```
+
+The logo fits within a 45 × 45 mm slot centred 82 mm from the left and 42.5 mm from the top, viewed from below. Its proportions and viewing orientation are preserved. Use solid filled paths; convert text and strokes to paths before exporting the SVG. KiCad's bundled Python, selected by `KICAD_PYTHON`, handles the import.
+
+Without `--logo`, the board has only its identity text. The source board is never modified. Outputs include a board copy, project settings and `bottom.svg` alongside the fabrication files. Use `--output DIR` to change the output directory.
+
+The root `logos/` directory holds local SVG inputs and ignores them by default. A logo can also be supplied from any other path.
+
 ## Visual diff
 
 ```bash

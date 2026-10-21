@@ -1,9 +1,28 @@
-"""Lucide SVG strokes expanded into printable, planar inlays."""
+"""Planar case markings from text and SVG artwork."""
 
 from functools import lru_cache
 from pathlib import Path
 
-from build123d import Align, Face, Pos, Sketch, Wire, import_svg
+from build123d import Align, Face, FontStyle, Pos, Sketch, Text, Wire, import_svg
+
+
+def wordmark(name: str, size: float, logo: Path | None = None) -> Sketch:
+    text = Text(name, font_size=size, font_style=FontStyle.BOLD)
+    if logo is None:
+        return text
+    shapes = import_svg(logo)
+    mark = Sketch([face for shape in shapes for face in shape.faces()])
+    if not mark.faces():
+        raise ValueError(f"{logo}: expected filled SVG artwork")
+    bounds = mark.bounding_box().size
+    mark = mark.scale(min(20 / bounds.X, 10.8 / bounds.Y))
+    lb, tb = mark.bounding_box(), text.bounding_box()
+    width = lb.size.X + 1.8 + tb.size.X
+    combined = (
+        Pos(-width / 2 - lb.min.X, -lb.center().Y) * mark
+        + Pos(-width / 2 + lb.size.X + 1.8 - tb.min.X, -tb.center().Y) * text
+    )
+    return Sketch(combined.faces())
 
 
 @lru_cache

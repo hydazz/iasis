@@ -40,7 +40,7 @@ from build123d import (
     extrude,
 )
 
-from artwork import icon
+from artwork import icon, wordmark
 from board import Board, load
 from retention import DisplayFrame, Joint
 
@@ -194,6 +194,7 @@ class Layout:
     holes: list[Vector]
     parts_top: float  # tallest placed part
     split: float
+    logo: Path | None = None
 
     @property
     def y_front(self) -> float:
@@ -247,7 +248,7 @@ class Cover:
     retainer: DisplayFrame | None
 
 
-def layout(board: Board) -> Layout:
+def layout(board: Board, logo: Path | None = None) -> Layout:
     required = set(PORTS) | set(LIGHTS) | {BUTTON}
     missing = required - board.parts.keys()
     if missing:
@@ -281,6 +282,7 @@ def layout(board: Board) -> Layout:
         holes=board.holes(HOLE_D),
         parts_top=max(board.box(ref, exact=False).max.Z for ref in board.parts),
         split=board.body.bounding_box().max.Z + 1.6,
+        logo=logo,
     )
 
 
@@ -485,8 +487,7 @@ def _artwork(lay: Layout) -> list[Sketch]:
         Pos(host.X, lay.y_rear - 7) * icon("laptop-minimal"),
         Pos(power.X, lay.y_rear - 7) * icon("plug"),
         Pos(first.X, lay.y_front + 7) * Circle(1),
-        Pos(0, lay.y_front + 7)
-        * Text(WORDMARK, font_size=WORDMARK_SIZE, font_style=FontStyle.BOLD),
+        Pos(0, lay.y_front + 7) * wordmark(WORDMARK, WORDMARK_SIZE, lay.logo),
         Pos(sw.X - 10.3, y) * Circle(0.7),
         Pos(sw.X - 3.8, y) * Text("DFU", font_size=TEXT_SIZE, font_style=FontStyle.BOLD),
         Pos(sw.X + 4.7, y) * SlotOverall(4, 1.4),
@@ -561,9 +562,9 @@ def _top_slots(lay: Layout, z: float, depth: float, display: Display | None) -> 
     return slots
 
 
-def assemble() -> tuple[Layout, Part, dict[str, Cover]]:
+def assemble(logo: Path | None = None) -> tuple[Layout, Part, dict[str, Cover]]:
     step = Path(__file__).resolve().parents[1] / "pcb" / "build" / "board.step"
-    lay = layout(load(step))
+    lay = layout(load(step), logo)
     covers = {name: cover(lay, name, display) for name, display in COVERS.items()}
     return lay, tray(lay), covers
 
@@ -575,6 +576,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("cover", nargs="?", choices=COVERS, default="passive")
+    parser.add_argument("--logo", type=Path, help="filled SVG placed beside the name")
     args = parser.parse_args()
-    lay, bottom, covers = assemble()
+    lay, bottom, covers = assemble(args.logo)
     show(lay, bottom, covers, active=args.cover)

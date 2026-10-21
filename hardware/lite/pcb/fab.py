@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import shutil
 import subprocess
 import tempfile
 import zipfile
@@ -17,7 +18,8 @@ def run(*args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, help="separate fabrication directory")
+    parser.add_argument("--logo", type=Path, help="filled SVG for the back-silkscreen logo")
+    parser.add_argument("--output", type=Path, help="fabrication output directory")
     args = parser.parse_args()
     output = args.output.resolve() if args.output else HERE / "build"
     cli = os.environ["KICAD_CLI"]
@@ -25,6 +27,33 @@ def main():
     with tempfile.TemporaryDirectory(dir=output) as directory:
         work = Path(directory)
         board = HERE / "iasis.kicad_pcb"
+        if args.logo:
+            board = work / "iasis.kicad_pcb"
+            run(
+                os.environ["KICAD_PYTHON"],
+                HERE / "artwork.py",
+                HERE / board.name,
+                args.logo.resolve(),
+                board,
+            )
+        shutil.copyfile(HERE / "iasis.kicad_pro", work / "iasis.kicad_pro")
+        shutil.copyfile(HERE / "iasis.kicad_dru", work / "iasis.kicad_dru")
+        run(
+            cli,
+            "pcb",
+            "export",
+            "svg",
+            "--mode-single",
+            "--layers",
+            "B.Mask,B.Silkscreen,Edge.Cuts",
+            "--mirror",
+            "--page-size-mode",
+            "2",
+            "--exclude-drawing-sheet",
+            "--output",
+            output / "bottom.svg",
+            board,
+        )
         gerbers = work / "gerbers"
         run(
             cli,
@@ -100,6 +129,9 @@ def main():
         for pattern in ("gerbers.zip", "bom-*.csv", "cpl-*.csv"):
             for file in work.glob(pattern):
                 file.replace(output / file.name)
+        shutil.copyfile(board, output / board.name)
+        shutil.copyfile(work / "iasis.kicad_pro", output / "iasis.kicad_pro")
+        shutil.copyfile(work / "iasis.kicad_dru", output / "iasis.kicad_dru")
 
 
 if __name__ == "__main__":

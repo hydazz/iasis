@@ -25,6 +25,16 @@ The task exports the populated board from `../pcb`, then writes the case files t
 
 Run `mise run //hardware/lite/case:preview` to refresh `preview/case.png`. Run `mise run //hardware/lite/case:check` to check solid validity, component clearance, USB access and moving parts. Neither is part of the build task.
 
+To place a logo beside the name, supply a filled SVG:
+
+```bash
+mise run //hardware/lite/case:build -- --logo ../../../logos/logo.svg
+```
+
+The logo fits within 20 × 10.8 mm, with a 1.8 mm gap before the name; the pair is centred together. Both covers include it in the engraving and lettering STLs. Use filled paths with text and strokes converted to paths. Without `--logo`, only the name is used. The root `logos/` directory holds local SVG inputs and ignores them by default; any other path also works.
+
+The `preview`, `check` and `view` tasks accept the same `--logo` option. Use `--output DIR` on `build` or `preview` to change their output directories.
+
 ## Print and assemble
 
 Use a 0.4 mm nozzle and 0.20 mm layers, without supports. Print the button in the body colour. For multicolour covers, import the cover and its matching lettering STL together as parts of one object, preserving their positions, then assign filaments. Leave the lettering out for recessed markings.
@@ -38,6 +48,8 @@ A dot marks target port 1; laptop and plug icons identify host and power. The bu
 ## Viewer
 
 Run `mise run //hardware/lite/case:view` with [OCP CAD Viewer](https://marketplace.visualstudio.com/items?itemName=bernhard-42.ocp-cad-viewer) to show Tray, PCB and Cover layers. Both cover variants are under Cover; show one at a time. Add `-- display` to start with the OLED cover visible.
+
+The viewer also accepts `--logo /path/to/case.svg`.
 
 Use this directory's `.venv`, configured in `.vscode/settings.json`. Update the viewer library with `uv lock --upgrade-package ocp-vscode` when the extension requires a newer version.
 
