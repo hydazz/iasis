@@ -1,5 +1,10 @@
 .DS_Store
 
+# Python
+.venv/
+__pycache__/
+.ruff_cache/
+
 # KiCad local state
 *.kicad_prl
 *.kicad_sch.lck

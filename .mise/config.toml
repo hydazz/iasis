@@ -16,4 +16,32 @@ lockfile = true
 KICAD_CLI = "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli"
 
 [monorepo]
-config_roots = ["hardware/case", "hardware/iasis"]
+config_roots = ["hardware/lite/case", "hardware/lite/pcb"]
+
+[tasks.deps]
+description = "Install Python dependencies"
+depends = ["//hardware/lite/case:deps"]
+
+[tasks.build]
+description = "Build the case and PCB fabrication files"
+depends = ["//hardware/lite/case:build", "//hardware/lite/pcb:fab"]
+
+[tasks.preview]
+description = "Refresh the case and board previews"
+depends = ["//hardware/lite/case:preview", "//hardware/lite/pcb:preview"]
+
+[tasks.check]
+description = "Check Python sources, enclosure fit and KiCad designs"
+depends = ["lint", "fmt-check", "//hardware/lite/case:check", "//hardware/lite/pcb:check"]
+
+[tasks.lint]
+description = "Lint Python sources"
+run = "ruff check hardware"
+
+[tasks.format]
+description = "Format Python sources"
+run = "ruff format hardware"
+
+[tasks.fmt-check]
+description = "Check Python formatting"
+run = "ruff format --check hardware"

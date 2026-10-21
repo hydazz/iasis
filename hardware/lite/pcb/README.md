@@ -1,6 +1,6 @@
 # Iasis board
 
-KiCad 10 project for the six-layer, 125 × 89 mm Iasis board. One layout carries two assembly variants, Hub and HubPD; the [repository README](../../README.md) describes them.
+KiCad 10 project for the six-layer, 125 × 89 mm Iasis board. One layout carries two assembly variants, Hub and HubPD; the [repository README](../../../README.md) describes them.
 
 <img src="preview/board.png" alt="Hub PD, top side" width="400"> <img src="preview/layout.png" alt="Tracks on every copper layer, pads and top silkscreen outlines" width="400">
 
@@ -15,10 +15,10 @@ KiCad 10 project for the six-layer, 125 × 89 mm Iasis board. One layout carries
 Tools come from mise (`mise install` at the repository root); KiCad 10 must be at the path `KICAD_CLI` names in `.mise/config.toml`.
 
 ```bash
-mise run //hardware/iasis:fab
+mise run //hardware/lite/pcb:fab
 ```
 
-The task first runs `preview`, which renders the HubPD top side into `preview/board.png` and plots every copper layer's tracks and pads, without zone fills, and the top silkscreen's outlines into `preview/layout.png`, then rewrites `build/`:
+The task writes `build/`:
 
 | File                           | Contents                                                  |
 | ------------------------------ | --------------------------------------------------------- |
@@ -26,14 +26,16 @@ The task first runs `preview`, which renders the HubPD top side into `preview/bo
 | `bom-Hub.csv`, `bom-HubPD.csv` | Bill of materials per variant, one row per LCSC part      |
 | `cpl-Hub.csv`, `cpl-HubPD.csv` | Placements per variant, corrected for JLCPCB's footprints |
 
-Both previews are tracked so that history shows how the board changes; commit them with the change that moved them. A preview is rewritten only when its content changes. The layout, rasterised by resvg and packed by oxipng (both from mise), repeats byte for byte; the render differs by a few bytes between runs of an unchanged board, so it is replaced only when more than that changes.
+Run `mise run //hardware/lite/pcb:preview` to refresh the tracked board and copper-layout images. Commit them with the design changes they show.
+
+Run `mise run //hardware/lite/pcb:step` to export `build/board.step`, which the case tasks consume. Run `mise run //hardware/lite/pcb:check` for DRC with schematic parity and ERC errors; reports are written to `build/drc.json` and `build/erc.json`.
 
 The upload ZIP contains Gerber and drill files. It excludes the optional Gerber job file, whose board-preview colour and impedance-control metadata differ from the order settings below.
 
 ## Visual diff
 
 ```bash
-mise run //hardware/iasis:diff
+mise run //hardware/lite/pcb:diff
 ```
 
 compares the last commit's board with the working copy; `diff REV` compares a revision with the working copy, and `diff OLD NEW` two revisions. The task plots each copper, silkscreen and courtyard layer and the outline of both boards, without zone fills, and draws what was removed red, what was added green and the rest grey. It opens `build/diff/index.html`, which pans and zooms each layer and counts the tracks, vias and footprints that changed.

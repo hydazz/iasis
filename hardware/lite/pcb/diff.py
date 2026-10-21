@@ -27,18 +27,28 @@ SAME, REMOVED, ADDED = "#c4c4c4", "#d7301f", "#1a9641"
 
 
 def run(*command: str) -> None:
-    subprocess.run(
-        command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-    )
+    subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def board_text(rev: str | None) -> str:
     if rev is None:
         return BOARD.read_text()
-    show = ["git", "show", f"{rev}:./{BOARD.name}"]
-    return subprocess.run(
-        show, cwd=HERE, check=True, capture_output=True, text=True
-    ).stdout
+    root = Path(
+        subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"], cwd=HERE, text=True
+        ).strip()
+    )
+    path = BOARD.relative_to(root).as_posix()
+    paths = subprocess.check_output(
+        ["git", "ls-tree", "-r", "--full-tree", "--name-only", rev], cwd=HERE, text=True
+    ).splitlines()
+    if path not in paths:
+        # Revisions before a directory move still use the board's original path.
+        matches = [p for p in paths if Path(p).name == BOARD.name]
+        if len(matches) != 1:
+            raise ValueError(f"{rev}: cannot identify {BOARD.name}")
+        path = matches[0]
+    return subprocess.check_output(["git", "show", f"{rev}:{path}"], cwd=HERE, text=True)
 
 
 def blocks(text: str) -> list[str]:
@@ -72,9 +82,7 @@ def summary(old: str, new: str) -> tuple[list[tuple[str, int, int]], list[str]]:
         a = sum(n for (lay, _), n in came.items() if lay == layer)
         if r or a:
             rows.append((layer, r, a))
-    moved = sorted(
-        (ref for ref in op.keys() & np.keys() if op[ref] != np[ref]), key=natural
-    )
+    moved = sorted((ref for ref in op.keys() & np.keys() if op[ref] != np[ref]), key=natural)
     moved += [f"{ref} (new)" for ref in sorted(np.keys() - op.keys(), key=natural)]
     moved += [f"{ref} (removed)" for ref in sorted(op.keys() - np.keys(), key=natural)]
     return rows, moved
@@ -89,9 +97,7 @@ def plot(text: str, folder: Path) -> dict[str, str]:
     """Each layer's SVG body, every item drawn in currentColor."""
     folder.mkdir()
     board = folder / BOARD.name
-    board.write_text(
-        re.sub(r"\n\t\t\(filled_polygon\n.*?\n\t\t\)", "", text, flags=re.DOTALL)
-    )
+    board.write_text(re.sub(r"\n\t\t\(filled_polygon\n.*?\n\t\t\)", "", text, flags=re.DOTALL))
     run(os.environ["KICAD_CLI"], "pcb", "export", "svg", "--mode-multi", "--black-and-white",
         "--page-size-mode", "1", "--exclude-drawing-sheet", "--drill-shape-opt", "0",
         "--layers", ",".join(LAYERS), "--output", str(folder), str(board))  # fmt: skip
@@ -99,12 +105,8 @@ def plot(text: str, folder: Path) -> dict[str, str]:
     for layer in LAYERS:
         svg = (folder / f"{board.stem}-{layer.replace('.', '_')}.svg").read_text()
         body = svg[svg.index("</desc>") + 7 : svg.rindex("</svg>")]
-        body = re.sub(
-            r"<text\b.*?</text>", "", body, flags=re.DOTALL
-        )  # hidden search copies
-        bodies[layer] = re.sub(
-            r"#(000000|FFFFFF)", "currentColor", body, flags=re.IGNORECASE
-        )
+        body = re.sub(r"<text\b.*?</text>", "", body, flags=re.DOTALL)  # hidden search copies
+        bodies[layer] = re.sub(r"#(000000|FFFFFF)", "currentColor", body, flags=re.IGNORECASE)
     return bodies
 
 
@@ -115,9 +117,7 @@ def frame(*texts: str, margin: float = 2.0) -> tuple[float, float, float, float]
     for text in texts:
         for b in blocks(text):
             if b.startswith("(gr_") and '(layer "Edge.Cuts")' in b:
-                for x, y in re.findall(
-                    r"\((?:start|mid|end|center|xy) ([-\d.]+) ([-\d.]+)\)", b
-                ):
+                for x, y in re.findall(r"\((?:start|mid|end|center|xy) ([-\d.]+) ([-\d.]+)\)", b):
                     xs.append(float(x))
                     ys.append(float(y))
     x0, y0 = min(xs) - margin, min(ys) - margin
@@ -234,9 +234,7 @@ def main() -> None:
         + "</button>"
         for layer in LAYERS
     )  # fmt: skip
-    table = "".join(
-        f"<tr><td>{layer}</td><td>−{r}</td><td>+{n}</td></tr>" for layer, r, n in rows
-    )
+    table = "".join(f"<tr><td>{layer}</td><td>−{r}</td><td>+{n}</td></tr>" for layer, r, n in rows)
     first = next((layer for layer, _, _ in rows if layer in LAYERS), LAYERS[0])
     page = PAGE.format(
         title=html.escape(title), buttons=buttons, first=first, open=" open" if rows or moved else "",

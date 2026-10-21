@@ -1,8 +1,7 @@
 """Iasis enclosure: a lower tray and upper cover split through the USB-C ports.
 
-Four underside M3 screws clamp the board between the tray standoffs and the cover's
-insert pillars. Passive and OLED covers share the tray. Flush top markings are
-separate solids for multicolour printing.
+The board sits on locating posts between a tray and removable cover. Passive and OLED
+covers share the tray. Flush top markings are separate solids for multicolour printing.
 
 Geometry is in board coordinates (board.py). The board STEP supplies the outline, the
 holes, every connector, light and button; the numbers here are fit, form and the parts
@@ -42,10 +41,11 @@ from build123d import (
 )
 
 from artwork import icon
-from board import Board
+from board import Board, load
+from retention import DisplayFrame, Joint
 
 # Fit
-CLEARANCE = 0.3  # board edge to inner wall; also the allowed lateral board movement
+CLEARANCE = 0.3  # board edge to inner wall
 PORT_FIT = 0.30  # each side of the metal shell
 PORT_ERROR = 0.15  # additional axial print and connector-placement allowance
 SHOULDER_GAP = 0.05  # minimum fully seated plug shoulder to exterior wall
@@ -60,11 +60,10 @@ STANDOFF = 3.0  # clear space under the board
 TOP_CHAMFER = 0.8  # 45 degrees, supported when the cover prints top down
 BASE_CHAMFER = 0.6
 
-# Fasteners: M3 x 10 ISO 7380 button heads from below into M3 x 5.7 heat-set inserts
+# Board support
 HOLE_D = 3.2  # the board's M3 drill, which identifies the case holes
-SCREW_LENGTH, SCREW_CLEAR = 10.0, 3.4
-HEAD_D, HEAD_DEPTH = 6.2, 1.0  # heads stand ~0.7 mm proud; feet clear them
-INSERT_D, INSERT_DEPTH = 4.0, 6.5
+LOCATOR_D, LOCATOR_OVER = 2.9, 0.8
+BOARD_HOLD_GAP = 0.15
 PILLAR_D = 6.6  # inside the mounting holes' 7 mm courtyard
 STANDOFF_D = 7.0
 
@@ -97,7 +96,7 @@ BUTTON_TRAVEL = 0.6  # case clearance envelope, not the switch's permitted strok
 
 @dataclass(frozen=True)
 class Display:
-    """An I2C OLED module hung glass up under the top from screw posts, on a cable to the
+    """An I2C OLED module held glass up under the top, on a cable to the
     board's JST-SH socket. Positions are from the module PCB's centre, x along the case,
     y toward the rear."""
 
@@ -107,7 +106,6 @@ class Display:
     active: tuple[float, float, float, float]  # visible pixels: centre x, y; size x, y
     back: float  # tallest part under the PCB, connector included
     holes: tuple[tuple[float, float], ...]
-    pilot: float  # for self-tapping screws through the module's holes
 
 
 # Adafruit 938, from its board file, fab print and STEP model. The flex edge faces the
@@ -119,15 +117,14 @@ OLED = Display(
     active=(0.0, 2.11, 29.42, 14.70),
     back=3.0,  # the JST-SH sockets
     holes=tuple((sx * 15.24, sy * 13.97) for sx in (-1, 1) for sy in (-1, 1)),
-    pilot=1.7,  # M2 x 4
 )
 DISPLAY_OVER = ("J501", "J601")  # centred between ports 2 and 3
 WINDOW_MARGIN = 0.5  # window beyond the active area, each side
 WINDOW_BEVEL = 1.4  # 45 degree chamfer round the window's outer edge
 GLASS_GAP = 0.4  # glass face to the inside of the top; clears the tape over the flex
 POST_D = 4.0  # leaves 0.4 mm to the glass beside the holes
-DISPLAY_SCREW_LENGTH = 4.0
-POST_SKIN = 0.8  # top left above the pilot holes
+DISPLAY_HOLE_D, DISPLAY_PIN_D = 2.5, 2.1
+DISPLAY_PIN_OVER = 0.2
 
 
 COVERS = {"passive": None, "display": OLED}
@@ -217,7 +214,7 @@ class Layout:
         return sum(self.board.box(ref).center().X for ref in DISPLAY_OVER) / len(DISPLAY_OVER)
 
     def top_inside(self, display: Display | None = None) -> float:
-        top = max(self.parts_top + HEADROOM, self.seat + INSERT_DEPTH + 1.0)
+        top = self.parts_top + HEADROOM
         if display:
             # Only components beneath the module determine its required height.
             w, h, thickness = display.pcb
@@ -246,6 +243,8 @@ class Cover:
     display: Part | None  # the module's envelope
     markings: Compound
     button: Part
+    joint: Joint
+    retainer: DisplayFrame | None
 
 
 def layout(board: Board) -> Layout:
@@ -351,11 +350,17 @@ def tray(lay: Layout) -> Part:
             for h in lay.holes
         ]
     )
-    cuts = [_wall_cut(o) for o in lay.openings]
     for h in lay.holes:
-        cuts.append(Pos(h.X, h.Y, z0) * Cylinder(SCREW_CLEAR / 2, -z0 + 0.1, align=BASE))
-        cuts.append(Pos(h.X, h.Y, z0) * Cylinder(HEAD_D / 2, HEAD_DEPTH, align=BASE))
-    body -= Compound(cuts)
+        body += Pos(h.X, h.Y, -0.1) * Cylinder(
+            LOCATOR_D / 2, lay.seat + LOCATOR_OVER - 0.3, align=BASE
+        )
+        body += Pos(h.X, h.Y, lay.seat + LOCATOR_OVER - 0.4) * Cone(
+            LOCATOR_D / 2, LOCATOR_D / 2 - 0.4, 0.4, align=BASE
+        )
+    body -= Compound([_wall_cut(o) for o in lay.openings])
+    joint = Joint(lay.length / 2, lay.split, lay.top_inside())
+    body += Compound(joint.tray_parts())
+    body -= Compound(joint.tray_cuts())
     body.label = "tray"
     # build123d's boolean annotations lose the result's dimensional subtype.
     return cast(Part, body)
@@ -373,12 +378,17 @@ def cover(lay: Layout, name: str, display: Display | None) -> Cover:
 
     # Pillars and display posts project from the roof into the cavity.
     intrusions: dict[str, Part] = {}
+    joint = Joint(lay.length / 2, lay.split, top_in)
+    shell -= Compound(joint.cover_cuts())
+    intrusions |= {f"latch {i + 1}": p for i, p in enumerate(joint.cover_parts())}
     cuts: list[Part] = []
     for i, h in enumerate(lay.holes):
-        intrusions[f"pillar {i + 1}"] = Pos(h.X, h.Y, lay.seat) * Cylinder(
-            PILLAR_D / 2, top_in - lay.seat + 0.5, align=BASE
+        bottom = lay.seat + BOARD_HOLD_GAP
+        pillar = Pos(h.X, h.Y, bottom) * Cylinder(PILLAR_D / 2, top_in - bottom + 0.5, align=BASE)
+        pillar -= Pos(h.X, h.Y, bottom - 0.1) * Cylinder(
+            (LOCATOR_D + 2 * CLEARANCE) / 2, LOCATOR_OVER + CLEARANCE, align=BASE
         )
-        cuts.append(Pos(h.X, h.Y, lay.seat) * Cylinder(INSERT_D / 2, INSERT_DEPTH, align=BASE))
+        intrusions[f"pillar {i + 1}"] = cast(Part, pillar)
     shell += Compound(list(intrusions.values()))
 
     cuts += [_wall_cut(o) for o in lay.openings]
@@ -389,11 +399,16 @@ def cover(lay: Layout, name: str, display: Display | None) -> Cover:
     )
 
     display_part = None
+    retainer = None
     if display:
-        window, posts, pilots, display_part = _display(lay, display, top_in, top_out)
-        cuts += [window, *pilots]
+        window, posts, display_part = _display(lay, display, top_in, top_out)
+        cuts.append(window)
         shell += Compound(posts)
         intrusions |= {f"display post {i + 1}": p for i, p in enumerate(posts)}
+        rear = top_in - GLASS_GAP - display.glass[4] - display.pcb[2]
+        retainer = DisplayFrame(lay.display_x, rear, top_in, display.holes)
+        shell += Compound(retainer.keepers)
+        intrusions |= {f"display keeper {i + 1}": p for i, p in enumerate(retainer.keepers)}
 
     markings = _markings(lay, top_out)
     shell -= Compound(cuts)
@@ -405,14 +420,15 @@ def cover(lay: Layout, name: str, display: Display | None) -> Cover:
         display=display_part,
         markings=markings,
         button=_button(lay, name, top_in, top_out),
+        joint=joint,
+        retainer=retainer,
     )
 
 
 def _display(
     lay: Layout, d: Display, top_in: float, top_out: float
-) -> tuple[Part, list[Part], list[Part], Part]:
-    """The window with its outer bevel, the posts the module hangs from with their pilot
-    holes, and the module's envelope."""
+) -> tuple[Part, list[Part], Part]:
+    """Window, locating posts and the module envelope, including clear mounting corners."""
     pw, pd, pt = d.pcb
     x = lay.display_x
     y = 0.0  # board centre; clears the front mounting pillars
@@ -424,20 +440,34 @@ def _display(
 
     gx, gy, gw, gh, gt = d.glass
     face = top_in - GLASS_GAP - gt  # the module PCB's top face
-    posts, pilots = [], []
+    posts = []
     for hx, hy in d.holes:
         at = Pos(x + hx, y + hy, face)
-        posts.append(at * Cylinder(POST_D / 2, top_in - face + 0.5, align=BASE))
-        pilots.append(Pos(0, 0, -1) * at * Cylinder(d.pilot / 2, top_out - POST_SKIN - face + 1,
-                                                     align=BASE))  # fmt: skip
+        post = at * Cylinder(POST_D / 2, top_in - face + 0.5, align=BASE)
+        post += Pos(x + hx, y + hy, face - pt) * Cylinder(DISPLAY_PIN_D / 2, pt + 0.1, align=BASE)
+        post += Pos(x + hx, y + hy, face - pt - DISPLAY_PIN_OVER) * Cone(
+            DISPLAY_PIN_D / 2 - DISPLAY_PIN_OVER,
+            DISPLAY_PIN_D / 2,
+            DISPLAY_PIN_OVER,
+            align=BASE,
+        )
+        posts.append(cast(Part, post))
 
     module = Pos(x, y, face) * Box(pw, pd, pt, align=(Align.CENTER, Align.CENTER, Align.MAX))
-    module += Pos(x, y, face - pt) * Box(
-        pw, pd, d.back, align=(Align.CENTER, Align.CENTER, Align.MAX)
-    )
+    for hx, hy in d.holes:
+        module -= Pos(x + hx, y + hy, face - pt - 0.1) * Cylinder(
+            DISPLAY_HOLE_D / 2, pt + 0.2, align=BASE
+        )
+    back = Pos(x, y, face - pt) * Box(pw, pd, d.back, align=(Align.CENTER, Align.CENTER, Align.MAX))
+    # The vendor STEP leaves these mounting corners free of rear components and flex.
+    for hx, hy in d.holes:
+        back -= Pos(x + hx, y + hy, face - pt - d.back - 0.1) * Cylinder(
+            3.8, d.back + 0.2, align=BASE
+        )
+    module += back
     module += Pos(x + gx, y + gy, face) * Box(gw, gh, gt, align=BASE)
     module.label = f"{d.name} envelope"
-    return window, posts, pilots, module
+    return window, posts, cast(Part, module)
 
 
 def _wall_cut(o: Opening) -> Part:
@@ -531,13 +561,20 @@ def _top_slots(lay: Layout, z: float, depth: float, display: Display | None) -> 
     return slots
 
 
-if __name__ == "__main__":
-    import sys
+def assemble() -> tuple[Layout, Part, dict[str, Cover]]:
+    step = Path(__file__).resolve().parents[1] / "pcb" / "build" / "board.step"
+    lay = layout(load(step))
+    covers = {name: cover(lay, name, display) for name, display in COVERS.items()}
+    return lay, tray(lay), covers
 
-    from board import load
+
+if __name__ == "__main__":
+    import argparse
+
     from viewer import show
 
-    name = sys.argv[1] if len(sys.argv) > 1 else "passive"
-    lay = layout(load(Path(__file__).with_name("build") / "board.step"))
-    covers = {key: cover(lay, key, display) for key, display in COVERS.items()}
-    show(lay, tray(lay), covers, active=name)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("cover", nargs="?", choices=COVERS, default="passive")
+    args = parser.parse_args()
+    lay, bottom, covers = assemble()
+    show(lay, bottom, covers, active=args.cover)

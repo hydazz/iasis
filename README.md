@@ -15,15 +15,33 @@ The MCU connects to an internal USB2 hub port, so the same host cable supports m
 
 In development. Firmware and host software are not yet implemented. Hardware and restore workflows are not yet validated.
 
+## Development
+
+The current board and enclosure live in `hardware/lite/pcb` and `hardware/lite/case`.
+
+```bash
+mise install
+mise run deps
+```
+
+| Task | Output |
+| --- | --- |
+| `mise run build` | Case STLs, assembly STEP and PCB fabrication files |
+| `mise run preview` | Tracked board and case images |
+| `mise run check` | Python lint/format checks, case fit checks, KiCad DRC and ERC |
+| `mise run format` | Formatted Python sources |
+
+Builds, previews and checks are independent. Component tasks can be run directly, for example `mise run //hardware/lite/case:build`.
+
 ## Fabrication
 
 Tools come from mise (`mise install` at the repository root); KiCad 10 is needed at the path `KICAD_CLI` names in `.mise/config.toml`.
 
 ```bash
-mise run //hardware/iasis:fab
+mise run //hardware/lite/pcb:fab
 ```
 
-This writes `hardware/iasis/build/`: `gerbers.zip` (gerbers and drill files for JLCPCB), and `bom-Hub.csv`, `bom-HubPD.csv`, `cpl-Hub.csv` and `cpl-HubPD.csv` for JLCPCB assembly of each variant, with placements corrected for JLCPCB's footprints. It also refreshes the board's tracked previews. [hardware/iasis](hardware/iasis/README.md) lists the JLCPCB order options. The enclosure has its own tasks; see [hardware/case](hardware/case/README.md).
+This writes `hardware/lite/pcb/build/`: `gerbers.zip` (gerbers and drill files for JLCPCB), and `bom-Hub.csv`, `bom-HubPD.csv`, `cpl-Hub.csv` and `cpl-HubPD.csv` for JLCPCB assembly of each variant, with placements corrected for JLCPCB's footprints. [hardware/lite/pcb](hardware/lite/pcb/README.md) lists the JLCPCB order options. The enclosure has its own tasks; see [hardware/lite/case](hardware/lite/case/README.md).
 
 ## License
 

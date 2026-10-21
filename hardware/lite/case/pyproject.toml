@@ -1,0 +1,8 @@
+[project]
+name = "iasis-case"
+version = "0.1.0"
+requires-python = ">=3.14,<3.15"
+dependencies = ["build123d>=0.13.0"]
+
+[dependency-groups]
+dev = ["ocp-vscode>=4.2.0"]
