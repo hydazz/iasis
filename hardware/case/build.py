@@ -1,63 +1,78 @@
 """Build the Iasis enclosure from build/board.step: parts, fit checks and outputs.
 
 Writes build/: the board STEP with the case parts added, print-oriented STL and 3MF parts
-and report.txt. Rerenders the tracked preview/case.png. Exits 1 when a fit check fails.
+and report.txt. Rerenders preview/case.png. Exits 1 when a fit check fails.
 """
 
 import sys
 from pathlib import Path
 
-from build123d import Location, Mesher, Rot, export_stl
+from build123d import Compound, Rot
+from build123d.topology.shape_core import Shape
 
 import board as kicad
 import case
 import check
+import printing
 from render import render, save
 
 HERE = Path(__file__).resolve().parent
 BUILD = HERE / "build"
 PREVIEW = HERE / "preview"
 VIEW = (-300, -400, 250)  # above the front left corner
-COVER, PLATE = (214, 216, 220), (120, 124, 130)
+BODY, TEXT = (214, 216, 220), (35, 38, 42)
 
 
 def main() -> int:
     board = kicad.load(BUILD / "board.step")
     lay = case.layout(board)
-    plate = case.plate(lay)
+    tray = case.tray(lay)
     covers = {name: case.cover(lay, name, display) for name, display in case.COVERS.items()}
-    report = check.run(lay, plate, covers)
+    report = check.run(lay, tray, covers)
 
     lines = ["Iasis enclosure", ""]
     for name, c in covers.items():
         bb = c.part.bounding_box()
         what = case.COVERS[name].name if case.COVERS[name] else "passive"
-        lines.append(f"  {name:8s} {bb.size.X:.1f} x {bb.size.Y:.1f} x {bb.size.Z:.1f} mm ({what})")
+        lines.append(
+            f"  {name:8s} {bb.size.X:.1f} x {bb.size.Y:.1f} x "
+            f"{bb.max.Z - lay.z_bottom:.1f} mm assembled ({what})"
+        )
     lines += ["", *report.lines, ""]
     lines.append(f"{len(report.failures)} failures" if report.failures else "all checks passed")
     text = "\n".join(lines) + "\n"
     (BUILD / "report.txt").write_text(text)
     print(text, end="")
+    if report.failures:
+        return 1
 
     print_dir = BUILD / "print"
     print_dir.mkdir(exist_ok=True)
-    parts = {"plate": plate} | {f"cover-{n}": Rot(X=180) * c.part for n, c in covers.items()}
-    for name, part in parts.items():  # covers print top down, the plate flat
-        bb = part.bounding_box()
-        part = part.moved(Location((-bb.center().X, -bb.center().Y, -bb.min.Z)))
-        export_stl(part, print_dir / f"{name}.stl", tolerance=0.01, angular_tolerance=0.1)
-        mesher = Mesher()
-        mesher.add_shape(part, linear_deflection=0.01, angular_deflection=0.1, part_number=name)
-        mesher.write(str(print_dir / f"{name}.3mf"))
+    printing.export("tray", tray, print_dir)
+    for name, c in covers.items():
+        printing.export(f"cover-{name}", c.part, print_dir, c.markings, rotation=Rot(X=180))
+        printing.export(f"button-{name}", c.button, print_dir, rotation=Rot(X=180))
 
-    extra = [plate, *(c.part for c in covers.values())]
-    extra += [c.display for c in covers.values() if c.display is not None]
+    extra: list[Shape] = [tray]
+    for c in covers.values():
+        extra += [c.part, c.markings, c.button]
+        if c.display is not None:
+            extra.append(c.display)
     kicad.export_assembly(board, extra, BUILD / "iasis-case.step")
 
     PREVIEW.mkdir(exist_ok=True)
-    if save(render([(plate, PLATE), (covers["passive"].part, COVER)], VIEW), PREVIEW / "case.png"):
+    visible = Compound([board.parts[ref] for ref in (*case.PORTS, *case.LIGHTS)])
+    c = covers["passive"]
+    shown = [
+        (tray, BODY),
+        (c.part, BODY),
+        (c.markings, TEXT),
+        (c.button, BODY),
+        (visible, (100, 106, 112)),
+    ]
+    if save(render(shown, VIEW), PREVIEW / "case.png"):
         print("preview/case.png written")
-    return 1 if report.failures else 0
+    return 0
 
 
 if __name__ == "__main__":

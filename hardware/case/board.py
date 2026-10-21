@@ -11,19 +11,20 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from build123d import BoundBox, Compound, Face, GeomType, Location, Shape, Shell, Solid, Vector
-from OCP.collections import Sequence_TDF_Label
-from OCP.Interface import Interface_Static
-from OCP.STEPCAFControl import STEPCAFControl_Reader, STEPCAFControl_Writer
-from OCP.STEPControl import STEPControl_AsIs
-from OCP.TCollection import TCollection_AsciiString, TCollection_ExtendedString
-from OCP.TDataStd import TDataStd_Name
-from OCP.TDF import TDF_Label
-from OCP.TDocStd import TDocStd_Document
-from OCP.TopAbs import TopAbs_SHELL, TopAbs_SOLID
-from OCP.TopExp import TopExp_Explorer
-from OCP.TopLoc import TopLoc_Location
-from OCP.XCAFDoc import XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
+from build123d import BoundBox, Compound, Face, GeomType, Location, Shell, Solid, Vector
+from build123d.topology.shape_core import Shape
+from OCP.OCP.collections import Sequence_TDF_Label
+from OCP.OCP.Interface import Interface_Static
+from OCP.OCP.STEPCAFControl import STEPCAFControl_Reader, STEPCAFControl_Writer
+from OCP.OCP.STEPControl import STEPControl_AsIs
+from OCP.OCP.TCollection import TCollection_AsciiString, TCollection_ExtendedString
+from OCP.OCP.TDataStd import TDataStd_Name
+from OCP.OCP.TDF import TDF_Label
+from OCP.OCP.TDocStd import TDocStd_Document
+from OCP.OCP.TopAbs import TopAbs_SHELL, TopAbs_SOLID
+from OCP.OCP.TopExp import TopExp_Explorer
+from OCP.OCP.TopLoc import TopLoc_Location
+from OCP.OCP.XCAFDoc import XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
 
 
 @dataclass
@@ -47,8 +48,10 @@ class Board:
         """Centres of the through holes of one drill size, on the bottom plane."""
         found: list[Vector] = []
         for face in self.body.faces().filter_by(GeomType.CYLINDER):
-            if abs(face.radius * 2 - diameter) <= tol:
-                c = face.axis_of_rotation.position
+            radius, axis = face.radius, face.axis_of_rotation
+            assert radius is not None and axis is not None
+            if abs(radius * 2 - diameter) <= tol:
+                c = axis.position
                 c = Vector(c.X, c.Y, 0)
                 if all((c - f).length > 0.01 for f in found):
                     found.append(c)
@@ -74,8 +77,8 @@ def load(step: Path) -> Board:
             body = solids[0]
         else:
             found.setdefault(_name(component), []).extend(solids)
-    if body is None:
-        raise RuntimeError(f"no board body in {step}")
+    if not isinstance(body, Solid):
+        raise TypeError(f"no solid board body in {step}")
     bb = body.bounding_box()
     origin = Location((-bb.center().X, -bb.center().Y, -bb.min.Z))
     parts = {}

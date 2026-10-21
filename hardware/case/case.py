@@ -1,10 +1,8 @@
-"""Iasis enclosure: a plate that carries the board and a cover shell that drops over it.
+"""Iasis enclosure: a lower tray and upper cover split through the USB-C ports.
 
-Four M3 screws come up through the plate and the board's M3 holes into heat-set
-inserts in the cover's pillars, clamping the board between the plate's standoffs and
-the pillars. The cover carries every opening, so the seam runs round the underside,
-with seven USB-C openings. A passive cover and an optional OLED cover share the same
-plate.
+Four underside M3 screws clamp the board between the tray standoffs and the cover's
+insert pillars. Passive and OLED covers share the tray. Flush top markings are
+separate solids for multicolour printing.
 
 Geometry is in board coordinates (board.py). The board STEP supplies the outline, the
 holes, every connector, light and button; the numbers here are fit, form and the parts
@@ -15,13 +13,16 @@ import math
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
+from typing import cast
 
 from build123d import (
     Align,
     Axis,
     BoundBox,
     Box,
+    Circle,
     Compound,
+    Cone,
     Cylinder,
     Face,
     FontStyle,
@@ -32,42 +33,41 @@ from build123d import (
     Rectangle,
     RectangleRounded,
     Rot,
+    Sketch,
     SlotOverall,
     Text,
     Vector,
     chamfer,
     extrude,
-    fillet,
 )
 
+from artwork import icon
 from board import Board
 
 # Fit
-CLEARANCE = 0.55  # board edge to the cover's inner wall; USB-C faces stand 0.22 proud
-PLATE_FIT = 0.25  # plate edge to the cover's inner wall
-HEADROOM = 2.0  # tallest part or envelope to the cover's inner top
+CLEARANCE = 0.3  # board edge to inner wall; also the allowed lateral board movement
+PORT_FIT = 0.30  # each side of the metal shell
+PORT_ERROR = 0.15  # additional axial print and connector-placement allowance
+SHOULDER_GAP = 0.05  # minimum fully seated plug shoulder to exterior wall
+HEADROOM = 1.2  # tallest part or envelope to the cover's inner top
 MIN_GAP = 0.3  # smallest gap between the case and a part
 
 # Form
-WALL = 1.6
-TOP = 2.4
-PLATE = 3.0
-STANDOFF = 5.0  # plate to board; through-hole tails reach 2.3 mm below the board
-EDGE_R = 3.0  # cover top perimeter
-BASE_CHAMFER = 0.8
+WALL = 1.2
+TOP = 1.6
+FLOOR = 2.0
+STANDOFF = 3.0  # clear space under the board
+TOP_CHAMFER = 0.8  # 45 degrees, supported when the cover prints top down
+BASE_CHAMFER = 0.6
 
-# Fasteners: M3 x 12 ISO 7380 button heads from below into M3 x 5.7 heat-set inserts
+# Fasteners: M3 x 10 ISO 7380 button heads from below into M3 x 5.7 heat-set inserts
 HOLE_D = 3.2  # the board's M3 drill, which identifies the case holes
-SCREW_CLEAR = 3.4
-HEAD_D, HEAD_DEPTH = 6.2, 2.0
+SCREW_LENGTH, SCREW_CLEAR = 10.0, 3.4
+HEAD_D, HEAD_DEPTH = 6.2, 1.0  # heads stand ~0.7 mm proud; feet clear them
 INSERT_D, INSERT_DEPTH = 4.0, 6.5
 PILLAR_D = 6.6  # inside the mounting holes' 7 mm courtyard
 STANDOFF_D = 7.0
-FOOT_D, FOOT_POCKET = 12.4, 1.0  # stick-on 12 mm feet
 
-# USB-C openings pass the plug overmold through the wall to the receptacle face.
-OVERMOLD = (12.35, 6.5, 1.5)  # width, height, corner radius
-OVERMOLD_FIT = 0.25
 PORTS = {  # reference: (kind, label)
     "J401": ("usb-c", "1"),
     "J501": ("usb-c", "2"),
@@ -78,15 +78,21 @@ PORTS = {  # reference: (kind, label)
     "J1001": ("usb-c", "POWER"),
 }
 
+# Minimum fully mated shoulder-to-mouth distances, not generic receptacle depths.
+# Molex SD-105450-001: USB-IF exposed shell 6.51 min - mouth depth (4.70 + 0.20).
+# GCT USB4105 drawing: 1.85 min in the plug/receptacle mating view.
+MATED_SHOULDER = {ref: 1.85 if ref == "J1001" else 6.51 - 4.90 for ref in PORTS}
+
 # Side-emitting LEDs at the board edge shine through windows no larger than their
-# emitting face. The confirm button is pressed through a tongue in the top.
+# emitting face. A captive round cap operates the target-control switch.
 LIGHTS = ("D1170", "D1171", "D1172", "D1173", "D1174", "D1175")  # host, targets
 WINDOW = (3.0, 1.6)
-RECOVERY = {"SW1101": "BOOTSEL", "SW1102": "RESET"}
-RECOVERY_HOLE_D = 6.0
 BUTTON = "SW1171"
-BUTTON_TONGUE = (16.0, 9.0)  # length (hinge to free end), width
-BUTTON_SLOT, BUTTON_SKIN, BUTTON_GAP, BUTTON_PIN = 0.8, 1.4, 0.4, 4.0
+BUTTON_D, BUTTON_FIT = 10.0, 0.25  # radial fit in the cover
+BUTTON_FLANGE_D = 13.0
+BUTTON_FLANGE_H = (BUTTON_FLANGE_D - BUTTON_D) / 2  # printable 45 degree shoulder
+BUTTON_ROOF_GAP, BUTTON_PROUD, BUTTON_PIN = 0.2, 0.2, 4.0
+BUTTON_TRAVEL = 0.6  # case clearance envelope, not the switch's permitted stroke
 
 
 @dataclass(frozen=True)
@@ -113,27 +119,27 @@ OLED = Display(
     active=(0.0, 2.11, 29.42, 14.70),
     back=3.0,  # the JST-SH sockets
     holes=tuple((sx * 15.24, sy * 13.97) for sx in (-1, 1) for sy in (-1, 1)),
-    pilot=1.7,  # M2 x 5
+    pilot=1.7,  # M2 x 4
 )
 DISPLAY_OVER = ("J501", "J601")  # centred between ports 2 and 3
 WINDOW_MARGIN = 0.5  # window beyond the active area, each side
 WINDOW_BEVEL = 1.4  # 45 degree chamfer round the window's outer edge
 GLASS_GAP = 0.4  # glass face to the inside of the top; clears the tape over the flex
 POST_D = 4.0  # leaves 0.4 mm to the glass beside the holes
+DISPLAY_SCREW_LENGTH = 4.0
 POST_SKIN = 0.8  # top left above the pilot holes
 
 
 COVERS = {"passive": None, "display": OLED}
 
-# Passive ventilation in the top and low in the end and rear walls.
-SLOT_W, SLOT_PITCH = 2.0, 4.0
-WALL_SLOT_W, WALL_SLOT_PITCH, WALL_SLOT_H = 2.0, 5.0, 10.0
-WALL_SLOT_CLEAR = 3.0  # rear slots to any other opening or label
+# Top ventilation.
+SLOT_W = 2.0
 
 # Marks
-TEXT_DEPTH = 0.6
+TEXT_DEPTH = 0.6  # three 0.20 mm layers, flush with the top
+TEXT_SIZE = 4.0
 WORDMARK = "iasis"
-WORDMARK_SIZE = 9.6
+WORDMARK_SIZE = 8.0
 
 BASE = (Align.CENTER, Align.CENTER, Align.MIN)  # centred, standing on the given point
 Z_UP = (0, 0, 1)  # the outline comes from the board's underside and faces down
@@ -170,7 +176,7 @@ class Opening:
         return Plane(origin=(self.x, y, self.z), x_dir=(self.inward, 0, 0),
                      z_dir=(0, -self.inward, 0))  # fmt: skip
 
-    def profile(self) -> Face:
+    def profile(self) -> Sketch:
         if self.kind == "light":
             return SlotOverall(self.width, self.height)
         return RectangleRounded(self.width, self.height, self.radius)
@@ -185,10 +191,12 @@ class Layout:
     cavity: Face  # cover inner outline, z = 0
     length: float  # outer
     width: float
-    z_bottom: float  # plate underside and cover rim
+    port_wall: float
+    z_bottom: float  # tray underside
     corner_r: float  # outer vertical corners: the board's plus clearance and wall
     holes: list[Vector]
     parts_top: float  # tallest placed part
+    split: float
 
     @property
     def y_front(self) -> float:
@@ -204,11 +212,30 @@ class Layout:
         out += [_light(self, ref) for ref in LIGHTS]
         return out
 
+    @cached_property
+    def display_x(self) -> float:
+        return sum(self.board.box(ref).center().X for ref in DISPLAY_OVER) / len(DISPLAY_OVER)
+
     def top_inside(self, display: Display | None = None) -> float:
         top = max(self.parts_top + HEADROOM, self.seat + INSERT_DEPTH + 1.0)
         if display:
-            # Reserve the module's full underside envelope above the populated board.
-            top += GLASS_GAP + display.glass[4] + display.pcb[2] + display.back
+            # Only components beneath the module determine its required height.
+            w, h, thickness = display.pcb
+            boxes = [self.board.box(ref, exact=False) for ref in self.board.parts]
+            local_top = max(
+                [self.seat]
+                + [
+                    b.max.Z
+                    for b in boxes
+                    if b.min.X < self.display_x + w / 2 + MIN_GAP
+                    and b.max.X > self.display_x - w / 2 - MIN_GAP
+                    and b.min.Y < h / 2 + MIN_GAP
+                    and b.max.Y > -h / 2 - MIN_GAP
+                ]
+            )
+            top = max(
+                top, local_top + MIN_GAP + display.back + thickness + display.glass[4] + GLASS_GAP
+            )
         return math.ceil(top * 2) / 2
 
 
@@ -217,26 +244,44 @@ class Cover:
     part: Part
     intrusions: dict[str, Part]  # solids that reach into the cavity, for the fit check
     display: Part | None  # the module's envelope
+    markings: Compound
+    button: Part
 
 
 def layout(board: Board) -> Layout:
-    required = set(PORTS) | set(LIGHTS) | set(RECOVERY) | {BUTTON}
+    required = set(PORTS) | set(LIGHTS) | {BUTTON}
     missing = required - board.parts.keys()
     if missing:
         raise ValueError("board STEP lacks enclosure references: " + ", ".join(sorted(missing)))
     size = board.size
     radii = [e.radius for e in board.outline().edges() if e.geom_type == GeomType.CIRCLE]
     corner = min(radii, default=0.0)
+    # Both the nominal board gap and its full sideways movement consume recess.
+    # Round down to a printable wall thickness, retaining the seating/error budget.
+    wall_limit = min(
+        MATED_SHOULDER[ref]
+        - SHOULDER_GAP
+        + abs(_mouth_y(board, ref))
+        - size.Y / 2
+        - 2 * CLEARANCE
+        - PORT_ERROR
+        for ref in PORTS
+    )
+    port_wall = min(WALL, math.floor((wall_limit + 1e-6) * 10) / 10)
+    if port_wall < 0.8:
+        raise ValueError(f"USB seating budget leaves only {port_wall:.1f} mm wall")
     return Layout(
         board=board,
         seat=board.body.bounding_box().max.Z,
         cavity=Face(board.outline().outer_wire().offset_2d(CLEARANCE)),
         length=size.X + 2 * (CLEARANCE + WALL),
-        width=size.Y + 2 * (CLEARANCE + WALL),
-        z_bottom=-(STANDOFF + PLATE),
-        corner_r=corner + CLEARANCE + WALL,
+        width=size.Y + 2 * (CLEARANCE + port_wall),
+        port_wall=port_wall,
+        z_bottom=-(STANDOFF + FLOOR),
+        corner_r=corner + CLEARANCE + min(WALL, port_wall),
         holes=board.holes(HOLE_D),
         parts_top=max(board.box(ref, exact=False).max.Z for ref in board.parts),
+        split=board.body.bounding_box().max.Z + 1.6,
     )
 
 
@@ -249,13 +294,39 @@ def _facing(lay: Layout, ref: str) -> tuple[BoundBox, float, float]:
     return bb, bb.min.Y, lay.y_front
 
 
+def _mouth_y(board: Board, ref: str) -> float:
+    bb = board.box(ref)
+    return bb.max.Y if bb.center().Y > 0 else bb.min.Y
+
+
+def _nose(board: Board, ref: str) -> BoundBox:
+    bb = board.box(ref)
+    y_face = _mouth_y(board, ref)
+    inward = -1 if y_face > 0 else 1
+    # The nose section excludes shell anchors and solder tails from the opening.
+    section = board.parts[ref] & (
+        Pos(bb.center().X, y_face + inward * 0.05, bb.center().Z)
+        * Box(bb.size.X + 2, 0.10, bb.size.Z + 2)
+    )
+    return section.bounding_box()
+
+
 def _port(lay: Layout, ref: str, kind: str, label: str) -> Opening:
-    bb, y_face, y_wall = _facing(lay, ref)
-    w, h, r = OVERMOLD
-    f = OVERMOLD_FIT
-    z = (lay.seat + bb.max.Z) / 2
-    return Opening(ref, kind, label, bb.center().X, z, w + 2 * f, h + 2 * f, r + f,
-                   y_face, y_wall)  # fmt: skip
+    _, y_face, y_wall = _facing(lay, ref)
+    nose = _nose(lay.board, ref)
+    w, h = nose.size.X + 2 * PORT_FIT, nose.size.Z + 2 * PORT_FIT
+    return Opening(
+        ref,
+        kind,
+        label,
+        nose.center().X,
+        nose.center().Z,
+        w,
+        h,
+        min(h / 2 - 0.01, 1.5),
+        y_face,
+        y_wall,
+    )
 
 
 def _light(lay: Layout, ref: str) -> Opening:
@@ -264,38 +335,43 @@ def _light(lay: Layout, ref: str) -> Opening:
     return Opening(ref, "light", None, bb.center().X, bb.center().Z, w, h, h / 2, y_face, y_wall)
 
 
-def plate(lay: Layout) -> Part:
+def _outline(lay: Layout) -> Sketch:
+    return RectangleRounded(lay.length, lay.width, lay.corner_r)
+
+
+def tray(lay: Layout) -> Part:
+    """Lower tray, printed floor down, with open-top halves of the port openings."""
     z0 = lay.z_bottom
-    outline = Face(lay.cavity.outer_wire().offset_2d(-PLATE_FIT))
-    body = extrude(Pos(0, 0, z0) * outline, amount=PLATE, dir=Z_UP)
-    body += Compound([Pos(h.X, h.Y, z0 + 1) * Cylinder(STANDOFF_D / 2, STANDOFF + PLATE - 1,
-                                                       align=BASE) for h in lay.holes])  # fmt: skip
-    cuts = []
+    body = extrude(Pos(0, 0, z0) * _outline(lay), amount=lay.split - z0)
+    body = chamfer(body.edges().group_by(Axis.Z)[0], BASE_CHAMFER)
+    body -= extrude(Pos(0, 0, z0 + FLOOR) * lay.cavity, amount=lay.split - z0 - FLOOR + 1, dir=Z_UP)
+    body += Compound(
+        [
+            Pos(h.X, h.Y, z0 + FLOOR - 0.1) * Cylinder(STANDOFF_D / 2, STANDOFF + 0.1, align=BASE)
+            for h in lay.holes
+        ]
+    )
+    cuts = [_wall_cut(o) for o in lay.openings]
     for h in lay.holes:
-        cuts.append(Pos(h.X, h.Y, z0) * Cylinder(SCREW_CLEAR / 2, -z0, align=BASE))
+        cuts.append(Pos(h.X, h.Y, z0) * Cylinder(SCREW_CLEAR / 2, -z0 + 0.1, align=BASE))
         cuts.append(Pos(h.X, h.Y, z0) * Cylinder(HEAD_D / 2, HEAD_DEPTH, align=BASE))
-    for sx in (-1, 1):
-        for sy in (-1, 1):
-            at = Pos(sx * (lay.length / 2 - 18), sy * (lay.width / 2 - 14), z0)
-            cuts.append(at * Cylinder(FOOT_D / 2, FOOT_POCKET, align=BASE))
     body -= Compound(cuts)
-    body.label = "plate"
-    return body
+    body.label = "tray"
+    # build123d's boolean annotations lose the result's dimensional subtype.
+    return cast(Part, body)
 
 
 def cover(lay: Layout, name: str, display: Display | None) -> Cover:
     top_in = lay.top_inside(display)
     top_out = top_in + TOP
-    z0 = lay.z_bottom
+    z0 = lay.split
 
-    shell = extrude(Pos(0, 0, z0) * RectangleRounded(lay.length, lay.width, lay.corner_r),
+    shell = extrude(Pos(0, 0, z0) * _outline(lay),
                     amount=top_out - z0)  # fmt: skip
-    shell = fillet(shell.edges().group_by(Axis.Z)[-1], EDGE_R)
-    shell = chamfer(shell.edges().group_by(Axis.Z)[0], BASE_CHAMFER)
+    shell = chamfer(shell.edges().group_by(Axis.Z)[-1], TOP_CHAMFER)
     shell -= extrude(Pos(0, 0, z0 - 1) * lay.cavity, amount=top_in - z0 + 1, dir=Z_UP)
 
-    # Everything that reaches into the cavity, then everything cut, then the button
-    # pin, which has to join the tongue after the tongue is thinned.
+    # Pillars and display posts project from the roof into the cavity.
     intrusions: dict[str, Part] = {}
     cuts: list[Part] = []
     for i, h in enumerate(lay.holes):
@@ -305,28 +381,12 @@ def cover(lay: Layout, name: str, display: Display | None) -> Cover:
         cuts.append(Pos(h.X, h.Y, lay.seat) * Cylinder(INSERT_D / 2, INSERT_DEPTH, align=BASE))
     shell += Compound(list(intrusions.values()))
 
-    wall = [_wall_cut(lay, o) for o in lay.openings] + _labels(lay)
-    cuts += wall
-    cuts += _wall_slots(lay, [c.bounding_box() for c in wall], top_in)
-    if not display:
-        cuts += _top_slots(lay, top_in - 1, TOP + 2)
-    cuts += _wordmark(lay, top_out)
-    for ref, label in RECOVERY.items():
-        sw = lay.board.box(ref)
-        cuts.append(
-            Pos(sw.center().X, sw.center().Y, top_in - 1)
-            * Cylinder(RECOVERY_HOLE_D / 2, TOP + 2, align=BASE)
-        )
-        text = Text(label, font_size=2.5)
-        cuts.append(
-            extrude(
-                Pos(sw.center().X, sw.center().Y + (-5.5 if sw.center().Y > 0 else 5.5), top_out)
-                * text,
-                amount=-TEXT_DEPTH,
-            )
-        )
-    tongue, pin = _button(lay, top_in, top_out)
-    cuts += tongue
+    cuts += [_wall_cut(o) for o in lay.openings]
+    cuts += _top_slots(lay, top_in - 1, TOP + 2, display)
+    sw = lay.board.box(BUTTON).center()
+    cuts.append(
+        Pos(sw.X, sw.Y, top_in - 1) * Cylinder(BUTTON_D / 2 + BUTTON_FIT, TOP + 2, align=BASE)
+    )
 
     display_part = None
     if display:
@@ -335,11 +395,17 @@ def cover(lay: Layout, name: str, display: Display | None) -> Cover:
         shell += Compound(posts)
         intrusions |= {f"display post {i + 1}": p for i, p in enumerate(posts)}
 
+    markings = _markings(lay, top_out)
     shell -= Compound(cuts)
-    shell += pin
-    intrusions["button pin"] = pin
+    shell -= markings
     shell.label = f"cover {name}"
-    return Cover(part=shell, intrusions=intrusions, display=display_part)
+    return Cover(
+        part=cast(Part, shell),
+        intrusions=intrusions,
+        display=display_part,
+        markings=markings,
+        button=_button(lay, name, top_in, top_out),
+    )
 
 
 def _display(
@@ -348,7 +414,7 @@ def _display(
     """The window with its outer bevel, the posts the module hangs from with their pilot
     holes, and the module's envelope."""
     pw, pd, pt = d.pcb
-    x = sum(lay.board.box(ref).center().X for ref in DISPLAY_OVER) / len(DISPLAY_OVER)
+    x = lay.display_x
     y = 0.0  # board centre; clears the front mounting pillars
     ax, ay, aw, ah = d.active
     w, h = aw + 2 * WINDOW_MARGIN, ah + 2 * WINDOW_MARGIN
@@ -374,130 +440,104 @@ def _display(
     return window, posts, pilots, module
 
 
-def _wall_cut(lay: Layout, o: Opening) -> Part:
+def _wall_cut(o: Opening) -> Part:
     start = o.plane(o.y_wall - o.inward)  # 1 mm outside
     profile = o.profile()
     return extrude(start * profile, amount=-(WALL + 2))
 
 
-def _labels(lay: Layout) -> list[Part]:
-    """Port names centred between the base chamfer and openings above their span."""
-    cuts = []
-    for o in lay.openings:
-        if not o.label:
-            continue
-        text = Text(o.label, font_size=3.5, font_style=FontStyle.BOLD)
-        half = text.bounding_box().size.X / 2
-        bottom = min(
-            p.z - p.height / 2
-            for p in lay.openings
-            if p.front == o.front and abs(p.x - o.x) < half + p.width / 2
-        )
-        dz = (lay.z_bottom + BASE_CHAMFER + bottom) / 2 - o.z
-        cuts.append(extrude(o.plane(o.y_wall) * Pos(0, dz) * text, amount=-TEXT_DEPTH))
-    return cuts
+def _artwork(lay: Layout) -> list[Sketch]:
+    """Top-face marks: host/power icons, first-port dot, tap/hold legend and name."""
+    host, power, first = (lay.board.box(ref).center() for ref in ("J901", "J1001", "J401"))
+    sw = lay.board.box(BUTTON).center()
+    y = sw.Y - 10.5
+    return [
+        Pos(host.X, lay.y_rear - 7) * icon("laptop-minimal"),
+        Pos(power.X, lay.y_rear - 7) * icon("plug"),
+        Pos(first.X, lay.y_front + 7) * Circle(1),
+        Pos(0, lay.y_front + 7)
+        * Text(WORDMARK, font_size=WORDMARK_SIZE, font_style=FontStyle.BOLD),
+        Pos(sw.X - 10.3, y) * Circle(0.7),
+        Pos(sw.X - 3.8, y) * Text("DFU", font_size=TEXT_SIZE, font_style=FontStyle.BOLD),
+        Pos(sw.X + 4.7, y) * SlotOverall(4, 1.4),
+        Pos(sw.X + 11.2, y) * icon("rotate-ccw", size=5.5),
+    ]
 
 
-def _button(lay: Layout, top_in: float, top_out: float) -> tuple[list[Part], Part]:
-    """A top tongue hinged toward the case centre, with a pin over the switch."""
+def _markings(lay: Layout, top: float) -> Compound:
+    marks = Compound([extrude(Pos(0, 0, top) * face, amount=-TEXT_DEPTH) for face in _artwork(lay)])
+    marks.label = "markings"
+    return marks
+
+
+def _button(lay: Layout, name: str, top_in: float, top_out: float) -> Part:
+    """Separate cap inserted from inside; the flange retains it and the switch returns it."""
     sb = lay.board.box(BUTTON)
     sw = sb.center()
-    length, width = BUTTON_TONGUE
-    s = BUTTON_SLOT
-    at = Pos(sw.X, sw.Y, top_in - 1) * Rot(Z=180 if sw.X < 0 else 0)
-    free_x = 3.0
-    hinge_x = free_x - length
-    u = Pos((hinge_x + free_x + s) / 2, 0) * Rectangle(length + s, width + 2 * s)
-    u -= Pos((hinge_x - 1 + free_x) / 2, 0) * Rectangle(length + 1, width)
-    skin = (
-        at
-        * Pos((hinge_x - 1 + free_x) / 2, 0)
-        * Box(length + 1, width, TOP - BUTTON_SKIN + 1, align=BASE)
+    flange_top = top_in - BUTTON_ROOF_GAP
+    flange_bottom = flange_top - BUTTON_FLANGE_H
+    pin_bottom = sb.max.Z
+    cap = Pos(sw.X, sw.Y, flange_top) * Cylinder(
+        BUTTON_D / 2, top_out + BUTTON_PROUD - flange_top, align=BASE
     )
-    pin_bottom = sb.max.Z + BUTTON_GAP
-    pin = Pos(sw.X, sw.Y, pin_bottom) * Cylinder(
-        BUTTON_PIN / 2, top_out - BUTTON_SKIN - pin_bottom + 0.5, align=BASE
+    cap += Pos(sw.X, sw.Y, flange_bottom) * Cone(
+        BUTTON_FLANGE_D / 2, BUTTON_D / 2, BUTTON_FLANGE_H, align=BASE
     )
-    return [extrude(at * u, amount=TOP + 2), skin], pin
+    cap += Pos(sw.X, sw.Y, pin_bottom) * Cylinder(
+        BUTTON_PIN / 2, flange_bottom - pin_bottom + 0.1, align=BASE
+    )
+    cap.label = f"button {name}"
+    return cast(Part, cap)
 
 
-def _top_slots(lay: Layout, z: float, depth: float) -> list[Part]:
-    """Rear top vents, with solid material around the controls and their labels."""
-    margin = lay.corner_r + WALL_SLOT_CLEAR
-    field = (-lay.length / 2 + margin, 4.0, lay.length / 2 - margin, lay.y_rear - margin)
-    slots = _slots(field, z, depth)
-    for ref in (*RECOVERY, BUTTON):
-        bb = lay.board.box(ref)
-        w, d = (36.0, 14.0) if ref == BUTTON else (24.0, 18.0)
-        slots -= Pos(
-            bb.center().X,
-            bb.center().Y + (0 if ref == BUTTON else (-3 if bb.center().Y > 0 else 3)),
-            z,
-        ) * Box(w, d, depth, align=BASE)
-    return [slots]
+def _top_slots(lay: Layout, z: float, depth: float, display: Display | None) -> list[Part]:
+    """Whole slots on a regular grid; no clipped slots around controls or the display."""
+    avoid = [f.bounding_box() for f in _artwork(lay)]
+    bb = lay.board.box(BUTTON)
+    avoid.append(
+        (Pos(bb.center().X, bb.center().Y) * Circle(BUTTON_FLANGE_D / 2 + MIN_GAP)).bounding_box()
+    )
+    if display:
+        avoid.append(
+            (
+                Pos(lay.display_x, 0) * Rectangle(display.pcb[0] + 8, display.pcb[1] + 8)
+            ).bounding_box()
+        )
+    slots = []
+    rows: dict[int, list[tuple[int, Sketch]]] = {}
+    # Short 12 mm vents leave cross ribs and bridge cleanly on the print bed.
+    for x in range(-48, 49, 4):
+        for y in (-16, 0, 16):
+            profile = Pos(x, y, z) * Rot(Z=90) * SlotOverall(12, SLOT_W)
+            b = profile.bounding_box()
+            if any(
+                b.min.X < a.max.X + 2
+                and b.max.X > a.min.X - 2
+                and b.min.Y < a.max.Y + 2
+                and b.max.Y > a.min.Y - 2
+                for a in avoid
+            ):
+                continue
+            rows.setdefault(y, []).append((x, profile))
+    for row in rows.values():
+        groups: list[list[tuple[int, Sketch]]] = []
+        for x, profile in row:
+            if not groups or x - groups[-1][-1][0] > 4:
+                groups.append([])
+            groups[-1].append((x, profile))
+        for group in groups:
+            if len(group) >= 3:
+                slots.extend(extrude(profile, amount=depth) for _, profile in group)
+    return slots
 
 
-def _slots(field, z: float, depth: float) -> Part:
-    x0, y0, x1, y1 = field
-    if x1 - x0 < SLOT_W or y1 - y0 <= SLOT_W:
-        return Compound([])
-    n = int((x1 - x0 + SLOT_PITCH - SLOT_W) // SLOT_PITCH)
-    span = (n - 1) * SLOT_PITCH
-    xc, yc = (x0 + x1) / 2, (y0 + y1) / 2
-    slot = Rot(Z=90) * SlotOverall(y1 - y0, SLOT_W)
-    faces = [Pos(xc - span / 2 + i * SLOT_PITCH, yc, z) * slot for i in range(n)]
-    return Compound([extrude(f, amount=depth) for f in faces])
-
-
-def _wall_slots(lay: Layout, avoid: list[BoundBox], top_in: float) -> list[Part]:
-    """Vertical intake slots low in the end walls, and along the rear wall wherever it
-    is clear of openings and labels."""
-    height = min(WALL_SLOT_H, top_in - lay.seat - 3.0)
-    if height <= WALL_SLOT_W:
-        return []
-    z = lay.seat + 1.5 + height / 2
-    slot = Rot(Z=90) * SlotOverall(height, WALL_SLOT_W)
-    cuts = []
-    for sx in (-1, 1):
-        plane = Plane.YZ.offset(sx * lay.length / 2)
-        cuts += [extrude(plane * Pos(i * WALL_SLOT_PITCH, z) * slot, amount=WALL + 2, both=True)
-                 for i in range(-int((lay.width / 2 - lay.corner_r - WALL_SLOT_CLEAR) // WALL_SLOT_PITCH),
-                                int((lay.width / 2 - lay.corner_r - WALL_SLOT_CLEAR) // WALL_SLOT_PITCH) + 1)]  # fmt: skip
-    rear = [b for b in avoid if b.center().Y > 0]
-    end = lay.length / 2 - lay.corner_r - WALL_SLOT_CLEAR
-    plane = Plane.XZ.offset(-lay.y_rear)
-    half = WALL_SLOT_W / 2 + WALL_SLOT_CLEAR
-    for i in range(int(2 * end // WALL_SLOT_PITCH) + 1):
-        x = -end + i * WALL_SLOT_PITCH
-        if all(x + half < b.min.X or x - half > b.max.X for b in rear):
-            cuts.append(extrude(plane * Pos(x, z) * slot, amount=WALL + 2, both=True))
-    return cuts
-
-
-def _wordmark(lay: Layout, top_out: float) -> list[Part]:
-    """The name, centred near the front left corner."""
-    mark = Text(WORDMARK, font_size=WORDMARK_SIZE, font_style=FontStyle.BOLD)
-    c = mark.bounding_box().center()
-    at = Pos(-lay.length / 2 + 32 - c.X, lay.y_front + 13 - c.Y, top_out)
-    return [extrude(at * mark, amount=-TEXT_DEPTH)]
-
-
-if __name__ == "__main__":  # show the board, plate and one cover in OCP CAD Viewer
+if __name__ == "__main__":
     import sys
 
-    from ocp_vscode import show
-
     from board import load
+    from viewer import show
 
     name = sys.argv[1] if len(sys.argv) > 1 else "passive"
     lay = layout(load(Path(__file__).with_name("build") / "board.step"))
-    c = cover(lay, name, COVERS[name])
-    shown = [  # shape, colour, alpha
-        (Compound([lay.board.body], label="pcb"), "#1f5e3c", 1),
-        (Compound(list(lay.board.parts.values()), label="parts"), "#9a9a9a", 1),
-        (plate(lay), "#d8d8d2", 1),
-        (c.display, "#3d6fd1", 1),
-        (c.part, "#e8e8e3", 0.5),
-    ]
-    shapes, colors, alphas = zip(*(s for s in shown if s[0] is not None))
-    show(*shapes, colors=list(colors), alphas=list(alphas))
+    covers = {key: cover(lay, key, display) for key, display in COVERS.items()}
+    show(lay, tray(lay), covers, active=name)

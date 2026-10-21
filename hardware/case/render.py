@@ -8,7 +8,7 @@ surface direction jumps between neighbouring pixels.
 from pathlib import Path
 
 import numpy as np
-from build123d import Shape
+from build123d.topology.shape_core import Shape
 from PIL import Image
 
 AMBIENT, DIFFUSE = 0.4, 0.6
