@@ -1666,4 +1666,169 @@
 (symbol "LM74502DDFR" (pin_names (offset 1.016)) (exclude_from_sim no) (in_bom yes) (on_board yes) (property "Reference" "U" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27)) (justify left)))(property "Value" "LM74502DDFR" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27)) (justify left)))(property "Footprint" "Package_TO_SOT_SMD:Texas_DDF0008A_SOT-8_1.6x2.9mm_P0.65mm" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27)) (justify left)))(property "Datasheet" "https://www.ti.com/lit/ds/symlink/lm74502.pdf" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27)) (justify left))) (symbol "LM74502DDFR_0_1" (rectangle (start -10.16 -7.62) (end 10.16 7.62) (stroke (width 0.254) (type default)) (fill (type background)))) (symbol "LM74502DDFR_1_1" (pin power_in line (at -15.24 3.81 0) (length 5.08) (name "VS" (effects (font (size 1.016 1.016)))) (number "5" (effects (font (size 1.016 1.016)))))(pin input line (at -15.24 1.27 0) (length 5.08) (name "EN" (effects (font (size 1.016 1.016)))) (number "1" (effects (font (size 1.016 1.016)))))(pin input line (at -15.24 -1.27 0) (length 5.08) (name "OV" (effects (font (size 1.016 1.016)))) (number "7" (effects (font (size 1.016 1.016)))))(pin no_connect line (at -15.24 -3.81 0) (length 5.08) (name "NC" (effects (font (size 1.016 1.016)))) (number "3" (effects (font (size 1.016 1.016)))))(pin passive line (at 15.24 2.54 180) (length 5.08) (name "VCAP" (effects (font (size 1.016 1.016)))) (number "4" (effects (font (size 1.016 1.016)))))(pin output line (at 15.24 0.0 180) (length 5.08) (name "GATE" (effects (font (size 1.016 1.016)))) (number "6" (effects (font (size 1.016 1.016)))))(pin input line (at 15.24 -2.54 180) (length 5.08) (name "SRC" (effects (font (size 1.016 1.016)))) (number "8" (effects (font (size 1.016 1.016)))))(pin power_in line (at 0.0 -12.7 90) (length 5.08) (name "GND" (effects (font (size 1.016 1.016)))) (number "2" (effects (font (size 1.016 1.016)))))))
 
 (symbol "AP22653W6-7" (pin_names (offset 1.016)) (exclude_from_sim no) (in_bom yes) (on_board yes) (property "Reference" "U" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27)) (justify left)))(property "Value" "AP22653W6-7" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27)) (justify left)))(property "Footprint" "Package_TO_SOT_SMD:SOT-23-6" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27)) (justify left)))(property "Datasheet" "https://www.diodes.com/datasheet/download/AP22652_AP22653_AP22652A_AP22653A.pdf" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27)) (justify left))) (symbol "AP22653W6-7_0_1" (rectangle (start -10.16 -6.35) (end 10.16 6.35) (stroke (width 0.254) (type default)) (fill (type background)))) (symbol "AP22653W6-7_1_1" (pin power_in line (at -15.24 2.54 0) (length 5.08) (name "IN" (effects (font (size 1.016 1.016)))) (number "1" (effects (font (size 1.016 1.016)))))(pin input line (at -15.24 0.0 0) (length 5.08) (name "EN" (effects (font (size 1.016 1.016)))) (number "3" (effects (font (size 1.016 1.016)))))(pin passive line (at -15.24 -2.54 0) (length 5.08) (name "ILIM" (effects (font (size 1.016 1.016)))) (number "5" (effects (font (size 1.016 1.016)))))(pin power_out line (at 15.24 1.27 180) (length 5.08) (name "OUT" (effects (font (size 1.016 1.016)))) (number "6" (effects (font (size 1.016 1.016)))))(pin open_collector line (at 15.24 -1.27 180) (length 5.08) (name "FAULT_N" (effects (font (size 1.016 1.016)))) (number "4" (effects (font (size 1.016 1.016)))))(pin power_in line (at 0.0 -11.43 90) (length 5.08) (name "GND" (effects (font (size 1.016 1.016)))) (number "2" (effects (font (size 1.016 1.016)))))))
+
+  (symbol "PTS645SL50SMTR92LFS"
+    (pin_numbers
+      (hide yes)
+    )
+    (pin_names
+      (offset 1.016)
+      (hide yes)
+    )
+    (exclude_from_sim no)
+    (in_bom yes)
+    (on_board yes)
+    (in_pos_files yes)
+    (duplicate_pin_numbers_are_jumpers yes)
+    (property "Reference" "SW"
+      (at 1.27 2.54 0)
+      (show_name no)
+      (do_not_autoplace no)
+      (effects
+        (font
+          (size 1.27 1.27)
+        )
+        (justify left)
+      )
+    )
+    (property "Value" "PTS645SL50SMTR92LFS"
+      (at 0 -1.524 0)
+      (show_name no)
+      (do_not_autoplace no)
+      (effects
+        (font
+          (size 1.27 1.27)
+        )
+      )
+    )
+    (property "Footprint" "Button_Switch_SMD:SW_SPST_PTS645Sx43SMTR92"
+      (at 0 5.08 0)
+      (show_name no)
+      (do_not_autoplace no)
+      (hide yes)
+      (effects
+        (font
+          (size 1.27 1.27)
+        )
+      )
+    )
+    (property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2304140030_C-K-PTS645SL50SMTR92LFS_C221877.pdf"
+      (at 0 5.08 0)
+      (show_name no)
+      (do_not_autoplace no)
+      (hide yes)
+      (effects
+        (font
+          (size 1.27 1.27)
+        )
+      )
+    )
+    (property "Description" "6 mm tact switch; each pin has two terminals joined inside the switch"
+      (at 0 0 0)
+      (show_name no)
+      (do_not_autoplace no)
+      (hide yes)
+      (effects
+        (font
+          (size 1.27 1.27)
+        )
+      )
+    )
+    (property "ki_keywords" "switch normally-open pushbutton push-button"
+      (at 0 0 0)
+      (show_name no)
+      (do_not_autoplace no)
+      (hide yes)
+      (effects
+        (font
+          (size 1.27 1.27)
+        )
+      )
+    )
+    (symbol "PTS645SL50SMTR92LFS_0_1"
+      (circle
+        (center -2.032 0)
+        (radius 0.508)
+        (stroke
+          (width 0)
+          (type default)
+        )
+        (fill
+          (type none)
+        )
+      )
+      (polyline
+        (pts
+          (xy 0 1.27) (xy 0 3.048)
+        )
+        (stroke
+          (width 0)
+          (type default)
+        )
+        (fill
+          (type none)
+        )
+      )
+      (circle
+        (center 2.032 0)
+        (radius 0.508)
+        (stroke
+          (width 0)
+          (type default)
+        )
+        (fill
+          (type none)
+        )
+      )
+      (polyline
+        (pts
+          (xy 2.54 1.27) (xy -2.54 1.27)
+        )
+        (stroke
+          (width 0)
+          (type default)
+        )
+        (fill
+          (type none)
+        )
+      )
+      (pin passive line
+        (at -5.08 0 0)
+        (length 2.54)
+        (name "1"
+          (effects
+            (font
+              (size 1.27 1.27)
+            )
+          )
+        )
+        (number "1"
+          (effects
+            (font
+              (size 1.27 1.27)
+            )
+          )
+        )
+      )
+      (pin passive line
+        (at 5.08 0 180)
+        (length 2.54)
+        (name "2"
+          (effects
+            (font
+              (size 1.27 1.27)
+            )
+          )
+        )
+        (number "2"
+          (effects
+            (font
+              (size 1.27 1.27)
+            )
+          )
+        )
+      )
+    )
+    (embedded_fonts no)
+  )
 )
