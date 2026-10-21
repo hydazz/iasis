@@ -281,7 +281,7 @@
       "internal_id": "",
       "mfg": "",
       "mpn": "",
-      "sch_revision": ""
+      "sch_revision": "A"
     },
     "layer_pairs": [],
     "layer_presets": [],
@@ -863,7 +863,7 @@
     ],
     [
       "9e9db2bb-c526-4c6a-ba4d-d8b25b5f251b",
-      "USB hub \u2014 ports 1\u20135"
+      "USB hub — ports 1–5"
     ],
     [
       "eda5d45e-e86d-4d58-83d3-d3aa1de94feb",

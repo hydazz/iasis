@@ -3874,7 +3874,7 @@
 		)
 		(uuid "68079b1d-acbb-41c4-bd29-27e38084b6bb")
 	)
-	(text "Configuration 3: CFG_STRAP1 10k; CFG_STRAP2/3, NON_REM and BC_EN 200k pull-downs.\nInternal ROM boot; all ports removable; battery charging detection off.\nHUB_SCL/SDA stay low during reset for autonomous attachment.\nRESET_N = AON_RESET_N AND HUB_RUN; HUB_RUN has a pull-up.\nThe external host reaches the hub directly through the upstream orientation mux.\nHUB_UP_VBUS is a hardware divider from host VBUS; MCU firmware is not needed to enumerate.\nPort 6 USB2 connects the RP2354. Target power is controlled independently of PRT_CTL1-6.\nUpstream TX uses C222/C223; downstream TX coupling is on the repeated port sheets.\nSuperSpeed lanes support native rate negotiation; USB2 D+/D- are never polarity swapped."
+	(text "Configuration 3: CFG_STRAP1 10k; CFG_STRAP2/3, NON_REM and BC_EN 200k pull-downs.\nInternal ROM boot; all ports removable; battery charging detection off.\nHUB_SCL/SDA stay low during reset for autonomous attachment.\nRESET_N = AON_RESET_N AND HUB_RUN; HUB_RUN has a pull-up.\nThe external host reaches the hub directly through the upstream orientation mux.\nHUB_UP_VBUS has a 10k pull-up to 3V3_AON and follows hub power; MCU firmware is not needed to enumerate.\nPort 6 USB2 connects the RP2354. Target power is controlled independently of PRT_CTL1-6.\nUpstream TX uses C222/C223; downstream TX coupling is on the repeated port sheets.\nSuperSpeed lanes support native rate negotiation; USB2 D+/D- are never polarity swapped."
 		(exclude_from_sim no)
 		(at 287.02 172.72 0)
 		(effects
@@ -3950,12 +3950,6 @@
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "28de58e0-bfe8-421d-8b2d-ad39174692be")
-	)
-	(junction
-		(at 38.1 210.82)
-		(diameter 0)
-		(color 0 0 0 0)
-		(uuid "304a87cd-c96a-480f-b101-bf05e7f5e7e3")
 	)
 	(junction
 		(at 287.02 55.88)
@@ -4459,16 +4453,6 @@
 	)
 	(wire
 		(pts
-			(xy 38.1 203.2) (xy 38.1 200.66)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "183cdbc6-0bb5-4037-8162-ae828c7a167d")
-	)
-	(wire
-		(pts
 			(xy 205.74 55.88) (xy 208.28 55.88)
 		)
 		(stroke
@@ -4489,23 +4473,13 @@
 	)
 	(wire
 		(pts
-			(xy 33.02 210.82) (xy 38.1 210.82)
+			(xy 33.02 210.82) (xy 55.88 210.82)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
 		(uuid "1949302d-3e00-4339-a53f-301a25f13d40")
-	)
-	(wire
-		(pts
-			(xy 38.1 210.82) (xy 55.88 210.82)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "1ab05ce5-7b64-4f59-bcea-3dfdebaff48c")
 	)
 	(wire
 		(pts
@@ -7561,6 +7535,28 @@
 			)
 		)
 	)
+	(global_label "3V3_AON"
+		(shape input)
+		(at 38.1 208.28 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "b0c876b6-deca-46d5-b5f9-e7401a37c64f")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 38.1 208.28 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+	)
 	(global_label "HUB_SDA"
 		(shape input)
 		(at 55.88 246.38 0)
@@ -8895,7 +8891,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 38.1 207.01 0)
+		(at 38.1 204.47 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -8905,6 +8901,17 @@
 		(dnp no)
 		(uuid "2027e05f-d27a-42e4-b68e-0021d7e6443b")
 		(property "Reference" "R216"
+			(at 40.64 203.2 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "10k"
 			(at 40.64 205.74 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8915,19 +8922,8 @@
 				(justify left)
 			)
 		)
-		(property "Value" "49.9k 1%"
-			(at 40.64 208.28 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "Footprint" "Resistor_SMD:R_0402_1005Metric"
-			(at 38.1 207.01 0)
+			(at 38.1 204.47 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8937,8 +8933,8 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2304140030_YAGEO-RC0402FR-0749K9L_C137969.pdf"
-			(at 38.1 207.01 0)
+		(property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2411221126_UNI-ROYAL-Uniroyal-Elec-0402WGF1002TCE_C25744.pdf"
+			(at 38.1 204.47 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8949,7 +8945,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 38.1 207.01 0)
+			(at 38.1 204.47 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8959,8 +8955,8 @@
 				)
 			)
 		)
-		(property "LCSC" "C137969"
-			(at 38.1 207.01 0)
+		(property "LCSC" "C25744"
+			(at 38.1 204.47 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8970,8 +8966,8 @@
 				)
 			)
 		)
-		(property "MPN" "RC0402FR-0749K9L"
-			(at 38.1 207.01 0)
+		(property "MPN" "0402WGF1002TCE"
+			(at 38.1 204.47 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8981,8 +8977,8 @@
 				)
 			)
 		)
-		(property "Manufacturer" "YAGEO"
-			(at 38.1 207.01 0)
+		(property "Manufacturer" "UNI-ROYAL(Uniroyal Elec)"
+			(at 38.1 204.47 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)

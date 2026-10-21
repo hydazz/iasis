@@ -1588,7 +1588,7 @@
 		)
 		(uuid "0bd9788f-5337-4883-92bc-9436756a77f3")
 	)
-	(text "VCORE = 1.122 V nominal. Shared USB7206 and RP2354 DVDD.\nR1060 10k / R1061 11.5k, both 0.1%; retain local bulk and decoupling."
+	(text "VCORE = 1.131 V nominal. Shared USB7206 and RP2354 DVDD.\nR1060 10k / R1061 11.3k, both 0.1%; retain local bulk and decoupling."
 		(exclude_from_sim no)
 		(at 147.32 137.16 0)
 		(effects
@@ -3757,7 +3757,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://wmsc.lcsc.com/wmsc/upload/file/pdf/v2/lcsc/2203300930_YAGEO-RT0603BRD0711K3L_C861088.pdf"
+		(property "Datasheet" "https://www.vishay.com/docs/28758/tnpw_e3.pdf"
 			(at 137.16 123.19 0)
 			(hide yes)
 			(show_name no)
@@ -3779,7 +3779,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C861088"
+		(property "LCSC" "C3980906"
 			(at 137.16 123.19 0)
 			(hide yes)
 			(show_name no)
@@ -3790,7 +3790,7 @@
 				)
 			)
 		)
-		(property "MPN" "RT0603BRD0711K3L"
+		(property "MPN" "TNPW060311K3BEEA"
 			(at 137.16 123.19 0)
 			(hide yes)
 			(show_name no)
@@ -3801,7 +3801,7 @@
 				)
 			)
 		)
-		(property "Manufacturer" "YAGEO"
+		(property "Manufacturer" "Vishay"
 			(at 137.16 123.19 0)
 			(hide yes)
 			(show_name no)

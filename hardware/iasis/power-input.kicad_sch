@@ -5511,7 +5511,7 @@
 				(justify left)
 			)
 		)
-		(property "Description" "100V N-channel NexFET, 2.4mOhm max, D2PAK"
+		(property "Description" "60V N-channel NexFET, 9.9mOhm max at 10V, Q3A"
 			(at 248.92 91.44 0)
 			(hide yes)
 			(show_name no)

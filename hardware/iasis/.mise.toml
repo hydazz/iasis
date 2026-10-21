@@ -13,7 +13,7 @@ run = '''
 rm -rf build && mkdir -p build/gerbers
 "$KICAD_CLI" pcb export gerbers --check-zones -o build/gerbers -l F.Cu,In1.Cu,In2.Cu,In3.Cu,In4.Cu,B.Cu,F.Paste,F.Silkscreen,B.Silkscreen,F.Mask,B.Mask,Edge.Cuts iasis.kicad_pcb
 "$KICAD_CLI" pcb export drill --excellon-separate-th -o build/gerbers iasis.kicad_pcb
-zip -jq build/gerbers.zip build/gerbers/*
+zip -jq build/gerbers.zip build/gerbers/* -x '*.gbrjob'
 for v in Hub HubPD; do
   "$KICAD_CLI" sch export bom --variant $v --exclude-dnp --group-by LCSC --ref-range-delimiter '' -o build/bom-$v.csv \
     --fields 'Value,Reference,Footprint,LCSC,MPN,Manufacturer,${QUANTITY}' \

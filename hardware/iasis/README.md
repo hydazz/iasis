@@ -28,6 +28,8 @@ The task first runs `preview`, which renders the HubPD top side into `preview/bo
 
 Both previews are tracked so that history shows how the board changes; commit them with the change that moved them. A preview is rewritten only when its content changes. The layout, rasterised by resvg and packed by oxipng (both from mise), repeats byte for byte; the render differs by a few bytes between runs of an unchanged board, so it is replaced only when more than that changes.
 
+The upload ZIP contains Gerber and drill files. It excludes the optional Gerber job file, whose board-preview colour and impedance-control metadata differ from the order settings below.
+
 ## Visual diff
 
 ```bash
