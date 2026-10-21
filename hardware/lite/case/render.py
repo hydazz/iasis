@@ -2,7 +2,8 @@
 
 A numpy z-buffer rasteriser in parallel projection, so an unchanged case gives the same
 pixels. Each face is shaded smoothly; lines mark silhouettes and creases, where depth or
-surface direction jumps between neighbouring pixels.
+surface direction jumps between neighbouring pixels, and seams, where two parts of one
+colour meet. Inlays need no seam: their colour already sets them apart.
 """
 
 from pathlib import Path
@@ -28,8 +29,8 @@ def render(parts: list[tuple[Shape, tuple[int, int, int]]], view: tuple[float, f
     light = -d + 0.6 * up - 0.4 * right
     light /= np.linalg.norm(light)
 
-    tris, normals, colours = [], [], []
-    for shape, colour in parts:
+    tris, normals, colours, owners = [], [], [], []
+    for i, (shape, colour) in enumerate(parts):
         verts, faces = shape.tessellate(0.05, 0.2)
         v = np.array([(p.X, p.Y, p.Z) for p in verts])
         t = np.array(faces)
@@ -43,7 +44,9 @@ def render(parts: list[tuple[Shape, tuple[int, int, int]]], view: tuple[float, f
         tris.append(tri)
         normals.append(vn[t] * towards[:, None, None])
         colours.append(np.repeat([colour], len(t), axis=0))
+        owners.append(np.full(len(t), i))
     tri, nrm, col = np.concatenate(tris), np.concatenate(normals), np.concatenate(colours)
+    own = np.concatenate(owners)
 
     w, h = size[0] * supersample, size[1] * supersample
     xy = np.stack([tri @ right, -(tri @ up)], axis=-1)
@@ -55,7 +58,8 @@ def render(parts: list[tuple[Shape, tuple[int, int, int]]], view: tuple[float, f
     depth = np.full((h, w), np.inf)
     normal = np.zeros((h, w, 3), np.float32)
     base = np.zeros((h, w, 3), np.float32)
-    for (a, b, c), zt, nt, rgb in zip(xy, z, nrm, col):
+    part = np.full((h, w), -1)
+    for (a, b, c), zt, nt, rgb, k in zip(xy, z, nrm, col, own):
         x0, x1 = max(int(min(a[0], b[0], c[0])), 0), min(int(max(a[0], b[0], c[0])) + 1, w)
         y0, y1 = max(int(min(a[1], b[1], c[1])), 0), min(int(max(a[1], b[1], c[1])) + 1, h)
         den = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1])
@@ -74,6 +78,7 @@ def render(parts: list[tuple[Shape, tuple[int, int, int]]], view: tuple[float, f
         bary = np.stack([w0[hit], w1[hit], w2[hit]], axis=-1)
         normal[y0:y1, x0:x1][hit] = bary @ nt
         base[y0:y1, x0:x1][hit] = rgb
+        part[y0:y1, x0:x1][hit] = k
 
     covered = np.isfinite(depth)
     depth[~covered] = 0
@@ -88,6 +93,7 @@ def render(parts: list[tuple[Shape, tuple[int, int, int]]], view: tuple[float, f
         jump = (covered[one] != covered[other]) | both & (
             (np.abs(depth[one] - depth[other]) > STEP)
             | ((normal[one] * normal[other]).sum(-1) < CREASE)
+            | (part[one] != part[other]) & (base[one] == base[other]).all(-1)
         )
         line[one] |= jump
         line[other] |= jump

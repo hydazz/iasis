@@ -26,6 +26,7 @@ from build123d import (
     Face,
     FontStyle,
     GeomType,
+    Kind,
     Part,
     Plane,
     Pos,
@@ -38,6 +39,7 @@ from build123d import (
     Vector,
     chamfer,
     extrude,
+    fillet,
 )
 
 from artwork import icon, wordmark
@@ -59,6 +61,7 @@ FLOOR = 2.0
 STANDOFF = 3.0  # clear space under the board
 TOP_CHAMFER = 0.8  # 45 degrees, supported when the cover prints top down
 BASE_CHAMFER = 0.6
+PORT_EDGE_R = 0.5  # outer edge of each USB-C opening
 
 # Board support
 HOLE_D = 3.2  # the board's M3 drill, which identifies the case holes
@@ -273,7 +276,8 @@ def layout(board: Board, logo: Path | None = None) -> Layout:
     return Layout(
         board=board,
         seat=board.body.bounding_box().max.Z,
-        cavity=Face(board.outline().outer_wire().offset_2d(CLEARANCE)),
+        # Arc joins add zero-length arcs at the outline's tangent points, which mesh badly.
+        cavity=Face(board.outline().outer_wire().offset_2d(CLEARANCE, kind=Kind.INTERSECTION)),
         length=size.X + 2 * (CLEARANCE + WALL),
         width=size.Y + 2 * (CLEARANCE + port_wall),
         port_wall=port_wall,
@@ -474,8 +478,24 @@ def _display(
 
 def _wall_cut(o: Opening) -> Part:
     start = o.plane(o.y_wall - o.inward)  # 1 mm outside
-    profile = o.profile()
-    return extrude(start * profile, amount=-(WALL + 2))
+    cut = extrude(start * o.profile(), amount=-(WALL + 2))
+    if o.kind != "usb-c":
+        return cast(Part, cut)
+    # Round the outer edge on an unsplit slab of wall, then cut what the slab leaves of a
+    # block that stops inside it, so the tray and cover halves share one profile.
+    w, h = o.width + 2 * PORT_EDGE_R + 2, o.height + 2 * PORT_EDGE_R + 2
+    slab = extrude(o.plane(o.y_wall) * Rectangle(w, h), amount=-2 * PORT_EDGE_R) - cut
+    lip = [
+        e
+        for e in slab.edges()
+        if abs(e.bounding_box().min.Y - o.y_wall) < 1e-4
+        and abs(e.bounding_box().max.Y - o.y_wall) < 1e-4
+        and abs(e.center().X - o.x) < o.width / 2 + 1e-3
+        and abs(e.center().Z - o.z) < o.height / 2 + 1e-3
+    ]
+    slab = fillet(lip, PORT_EDGE_R)
+    block = extrude(start * Rectangle(w - 0.2, h - 0.2), amount=-(1 + 1.5 * PORT_EDGE_R))
+    return cast(Part, cut + (block - slab))
 
 
 def _artwork(lay: Layout) -> list[Sketch]:
