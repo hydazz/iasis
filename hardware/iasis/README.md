@@ -48,18 +48,18 @@ PCB options:
 | Thickness               | 1.6 mm                  | Economic assembly of six layers needs 1.6 mm, green and ENIG                                                  |
 | Specify stackup         | JLC06161H-3313          | The 90 Ω pairs (0.1356 mm tracks, 0.1501 mm gap) are sized for it; accept JLC's 1.54 mm actual thickness note |
 | Colour                  | Green                   | As thickness                                                                                                  |
-| Surface finish          | ENIG                    | As thickness; JLC offers no HASL on six layers                                                                |
+| Surface finish          | ENIG                    | As thickness. JLC preselects OSP, which rules out Economic assembly, and has no HASL                          |
 | Via covering            | Epoxy filled and capped | No charge on six layers; some vias sit in pads                                                                |
 | Min via hole / diameter | 0.3 / (0.4/0.45) mm     | No hole is smaller; 0.2 mm holes add a small-via charge and force TG155 and a 4-wire Kelvin test              |
 | Impedance control       | No requirement          | ±10 % control adds a charge and requires production-file confirmation                                         |
 | Mark on PCB             | Remove mark             |                                                                                                               |
 
-Assembly options: Economic PCBA, top side, tooling holes added by JLCPCB, Confirm Parts Placement on, parts selected by customer. PCBA quantity can be 2 or all 5 boards.
+Assembly options: Economic PCBA, top side, tooling holes added by JLCPCB, Confirm Parts Placement on (JLC confirms on its own after 72 hours unless "Do not confirm automatically" is ticked), parts selected by customer. PCBA quantity can be 2 or all 5 boards.
 
 Upload `gerbers.zip`, then the variant's BOM and CPL, and:
 
 1. Tick the USB-C rows (J1001, J401–J901). JLC charges a small fee for these parts and leaves them unticked after every upload.
-2. Check every row is matched and in stock. Replace a short part in the schematic and regenerate the files, rather than in JLC's table, so the BOM here stays the order's source.
+2. Check every row is matched, in stock and selectable; Economic cannot place a part JLC marks Standard Only. Replace such a part in the schematic and regenerate the files, rather than in JLC's table, so the BOM here stays the order's source.
 3. In Component Placements, every part should sit on its pads, and JLC's Align should change nothing. A part that Align turns or moves needs an entry in `jlc_cpl.py`.
 4. The closest customs description is Research/Education/DIY, Development Board (HS 847330).
 
