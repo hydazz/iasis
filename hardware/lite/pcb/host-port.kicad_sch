@@ -7472,7 +7472,7 @@
 			)
 		)
 	)
-	(global_label "HUB_RX_N"
+	(global_label "HUB_TX_N"
 		(shape bidirectional)
 		(at 325.12 185.42 180)
 		(effects
@@ -7560,7 +7560,7 @@
 			)
 		)
 	)
-	(global_label "SIDE_TX_P"
+	(global_label "SIDE_RX_P"
 		(shape bidirectional)
 		(at 360.68 187.96 0)
 		(effects
@@ -7582,7 +7582,7 @@
 			)
 		)
 	)
-	(global_label "HUB_TX_N"
+	(global_label "HUB_RX_N"
 		(shape bidirectional)
 		(at 325.12 180.34 180)
 		(effects
@@ -7604,7 +7604,7 @@
 			)
 		)
 	)
-	(global_label "SIDE_RX_P"
+	(global_label "SIDE_TX_P"
 		(shape bidirectional)
 		(at 360.68 193.04 0)
 		(effects
@@ -7802,7 +7802,7 @@
 			)
 		)
 	)
-	(global_label "EXT_TX_P"
+	(global_label "EXT_RX_P"
 		(shape input)
 		(at 360.68 177.8 0)
 		(effects
@@ -7824,7 +7824,7 @@
 			)
 		)
 	)
-	(global_label "HUB_RX_P"
+	(global_label "HUB_TX_P"
 		(shape bidirectional)
 		(at 325.12 182.88 180)
 		(effects
@@ -7934,7 +7934,7 @@
 			)
 		)
 	)
-	(global_label "SIDE_RX_N"
+	(global_label "SIDE_TX_N"
 		(shape bidirectional)
 		(at 360.68 195.58 0)
 		(effects
@@ -7956,7 +7956,7 @@
 			)
 		)
 	)
-	(global_label "EXT_TX_N"
+	(global_label "EXT_RX_N"
 		(shape input)
 		(at 360.68 180.34 0)
 		(effects
@@ -8044,7 +8044,7 @@
 			)
 		)
 	)
-	(global_label "SIDE_TX_N"
+	(global_label "SIDE_RX_N"
 		(shape bidirectional)
 		(at 360.68 190.5 0)
 		(effects
@@ -8066,7 +8066,7 @@
 			)
 		)
 	)
-	(global_label "EXT_RX_P"
+	(global_label "EXT_TX_P"
 		(shape input)
 		(at 360.68 182.88 0)
 		(effects
@@ -8110,7 +8110,7 @@
 			)
 		)
 	)
-	(global_label "EXT_RX_N"
+	(global_label "EXT_TX_N"
 		(shape input)
 		(at 360.68 185.42 0)
 		(effects
@@ -8132,7 +8132,7 @@
 			)
 		)
 	)
-	(global_label "HUB_TX_P"
+	(global_label "HUB_RX_P"
 		(shape bidirectional)
 		(at 325.12 177.8 180)
 		(effects
