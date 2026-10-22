@@ -2246,7 +2246,7 @@
 			)
 			(embedded_fonts no)
 		)
-		(symbol "Iasis:TMUX1511PWR"
+		(symbol "Iasis:TMUX1511RSVR"
 			(pin_names
 				(offset 1.016)
 			)
@@ -2265,7 +2265,7 @@
 					)
 				)
 			)
-			(property "Value" "TMUX1511PWR"
+			(property "Value" "TMUX1511RSVR"
 				(at 0 -25.4 0)
 				(show_name no)
 				(do_not_autoplace no)
@@ -2275,7 +2275,7 @@
 					)
 				)
 			)
-			(property "Footprint" ""
+			(property "Footprint" "Package_DFN_QFN:UQFN-16_1.8x2.6mm_P0.4mm"
 				(at 0 0 0)
 				(show_name no)
 				(do_not_autoplace no)
@@ -2308,7 +2308,7 @@
 					)
 				)
 			)
-			(symbol "TMUX1511PWR_0_1"
+			(symbol "TMUX1511RSVR_0_1"
 				(rectangle
 					(start -10.16 22.86)
 					(end 10.16 -22.86)
@@ -2428,6 +2428,24 @@
 						)
 					)
 				)
+				(pin no_connect line
+					(at 12.7 20.32 180)
+					(length 2.54)
+					(name "NC"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "7"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
 				(pin power_in line
 					(at 0 -25.4 90)
 					(length 2.54)
@@ -2438,7 +2456,7 @@
 							)
 						)
 					)
-					(number "7"
+					(number "8"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -2456,7 +2474,7 @@
 							)
 						)
 					)
-					(number "8"
+					(number "9"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -2474,7 +2492,7 @@
 							)
 						)
 					)
-					(number "9"
+					(number "10"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -2492,7 +2510,25 @@
 							)
 						)
 					)
-					(number "10"
+					(number "11"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin no_connect line
+					(at 12.7 -20.32 180)
+					(length 2.54)
+					(name "NC"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "12"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -2510,7 +2546,7 @@
 							)
 						)
 					)
-					(number "11"
+					(number "13"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -2528,7 +2564,7 @@
 							)
 						)
 					)
-					(number "12"
+					(number "14"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -2546,7 +2582,7 @@
 							)
 						)
 					)
-					(number "13"
+					(number "15"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -2564,7 +2600,7 @@
 							)
 						)
 					)
-					(number "14"
+					(number "16"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -5061,6 +5097,14 @@
 	(no_connect
 		(at 327.66 193.04)
 		(uuid "6aeb0092-abe2-46aa-b34e-7f3a460b5cbb")
+	)
+	(no_connect
+		(at 266.7 251.46)
+		(uuid "8d5a6d42-86b5-469b-a78a-adcb17012f3e")
+	)
+	(no_connect
+		(at 266.7 210.82)
+		(uuid "936e111d-30ea-46b8-8a70-b0c27ea4bcbb")
 	)
 	(no_connect
 		(at 241.3 88.9)
@@ -9161,7 +9205,7 @@
 		)
 	)
 	(symbol
-		(lib_id "Iasis:TMUX1511PWR")
+		(lib_id "Iasis:TMUX1511RSVR")
 		(at 254 231.14 0)
 		(unit 1)
 		(body_style 1)
@@ -9182,7 +9226,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "TMUX1511PWR"
+		(property "Value" "TMUX1511RSVR"
 			(at 251.46 205.74 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9193,7 +9237,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Package_SO:TSSOP-14_4.4x5mm_P0.65mm"
+		(property "Footprint" "Package_DFN_QFN:UQFN-16_1.8x2.6mm_P0.4mm"
 			(at 254 231.14 0)
 			(hide yes)
 			(show_name no)
@@ -9226,7 +9270,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C2866750"
+		(property "LCSC" "C2673275"
 			(at 254 231.14 0)
 			(hide yes)
 			(show_name no)
@@ -9237,7 +9281,7 @@
 				)
 			)
 		)
-		(property "MPN" "TMUX1511PWR"
+		(property "MPN" "TMUX1511RSVR"
 			(at 254 231.14 0)
 			(hide yes)
 			(show_name no)
@@ -9277,29 +9321,35 @@
 		(pin "6"
 			(uuid "8f9129c9-c2a7-4e08-abf2-15b0f6bcc146")
 		)
-		(pin "7"
+		(pin "8"
 			(uuid "bef9b7f1-f96f-4e98-92a0-45886a118307")
 		)
-		(pin "8"
+		(pin "9"
 			(uuid "64abca61-7e22-4561-8bf5-78c62e561d81")
 		)
-		(pin "9"
+		(pin "10"
 			(uuid "9f857aa4-b3b0-40ab-b78d-9fc125a63763")
 		)
-		(pin "10"
+		(pin "11"
 			(uuid "5bcc5810-2e9b-4f5e-929e-d26b10c9a1be")
 		)
-		(pin "11"
+		(pin "13"
 			(uuid "bdecb9d3-2f1f-45b8-80a9-d1dc97c68a7f")
 		)
-		(pin "12"
+		(pin "14"
 			(uuid "f34da3e1-f4be-4c88-ac4b-e3bcd175442c")
 		)
-		(pin "13"
+		(pin "15"
 			(uuid "328d8679-6c88-4015-99b6-284ecf722ec0")
 		)
-		(pin "14"
+		(pin "16"
 			(uuid "83eb5b22-19e8-477c-b05a-7724f695f798")
+		)
+		(pin "7"
+			(uuid "a473b0e4-4c46-4103-a54b-94317551dc85")
+		)
+		(pin "12"
+			(uuid "b813d02a-a2a2-446e-a67a-e44684b347ce")
 		)
 		(instances
 			(project "iasis"

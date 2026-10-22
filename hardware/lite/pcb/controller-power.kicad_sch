@@ -2367,7 +2367,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "74HC595D,118"
+		(property "Value" "74HC595PW"
 			(at 93.98 48.26 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2378,7 +2378,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Package_SO:SOIC-16_3.9x9.9mm_P1.27mm"
+		(property "Footprint" "Package_SO:TSSOP-16_4.4x5mm_P0.65mm"
 			(at 96.52 45.72 0)
 			(hide yes)
 			(show_name no)
@@ -2412,7 +2412,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C5947"
+		(property "LCSC" "C5948"
 			(at 96.52 45.72 0)
 			(hide yes)
 			(show_name no)
@@ -2424,7 +2424,7 @@
 				(justify left)
 			)
 		)
-		(property "MPN" "74HC595D,118"
+		(property "MPN" "74HC595PW,118"
 			(at 96.52 45.72 0)
 			(hide yes)
 			(show_name no)
@@ -3730,7 +3730,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "74HC595D,118"
+		(property "Value" "74HC595PW"
 			(at 93.98 139.7 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3741,7 +3741,7 @@
 				(justify right)
 			)
 		)
-		(property "Footprint" "Package_SO:SOIC-16_3.9x9.9mm_P1.27mm"
+		(property "Footprint" "Package_SO:TSSOP-16_4.4x5mm_P0.65mm"
 			(at 96.52 101.6 0)
 			(hide yes)
 			(show_name no)
@@ -3775,7 +3775,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C5947"
+		(property "LCSC" "C5948"
 			(at 96.52 101.6 0)
 			(hide yes)
 			(show_name no)
@@ -3787,7 +3787,7 @@
 				(justify left)
 			)
 		)
-		(property "MPN" "74HC595D,118"
+		(property "MPN" "74HC595PW,118"
 			(at 96.52 101.6 0)
 			(hide yes)
 			(show_name no)

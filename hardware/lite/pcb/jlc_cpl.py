@@ -14,9 +14,9 @@ import math
 import sys
 
 FIX = {
-    "C130026": (270, None),  # TCA9548APWR, TSSOP-24
-    "C2866750": (270, None),  # TMUX1511PWR, TSSOP-14
-    "C5947": (270, None),  # 74HC595D, SOIC-16
+    "C555456": (270, None),  # TCA9548ARGER, VQFN-24
+    "C2673275": (270, None),  # TMUX1511RSVR, UQFN-16
+    "C5948": (270, None),  # 74HC595PW, TSSOP-16
     "C548572": (270, None),  # 74LVC2G08DC-Q100H, VSSOP-8
     "C2070918": (270, None),  # AP3441SHE-7B, DFN-8
     "C544517": (270, None),  # HD3SS3212IRKSR, DHVQFN-20
