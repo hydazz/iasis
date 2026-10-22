@@ -28172,15 +28172,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/TritechMOS_DFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -30625,15 +30625,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/TritechMOS_DFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -31411,15 +31411,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/TritechMOS_DFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -53856,15 +53856,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/TritechMOS_DFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -57042,15 +57042,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/Siliup_PDFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -69455,15 +69455,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/Siliup_PDFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -76419,15 +76419,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/Siliup_PDFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -89445,15 +89445,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/Siliup_PDFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -102261,15 +102261,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/Siliup_PDFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -115663,15 +115663,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/Siliup_PDFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -118044,15 +118044,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/Siliup_PDFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -121503,15 +121503,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/Siliup_PDFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -123577,15 +123577,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/TritechMOS_DFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -126821,15 +126821,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/Siliup_PDFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -127832,15 +127832,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/Siliup_PDFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -147871,15 +147871,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/TritechMOS_DFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -153899,15 +153899,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/Siliup_PDFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -157023,15 +157023,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/TritechMOS_DFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -165161,15 +165161,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/Siliup_PDFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -165523,15 +165523,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/TritechMOS_DFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -178351,15 +178351,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/TritechMOS_DFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
@@ -182033,15 +182033,15 @@
 			(dnp yes)
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/Vishay_PowerPAK_1212-8_Single.step"
+		(model "${KIPRJMOD}/Iasis.3dshapes/TritechMOS_DFN3x3-8L.step"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 0 0.02)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 0)
+				(xyz 0 0 90)
 			)
 		)
 	)
