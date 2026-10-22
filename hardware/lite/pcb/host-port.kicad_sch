@@ -7560,7 +7560,7 @@
 			)
 		)
 	)
-	(global_label "SIDE_RX_P"
+	(global_label "SIDE_RX_N"
 		(shape bidirectional)
 		(at 360.68 187.96 0)
 		(effects
@@ -7604,7 +7604,7 @@
 			)
 		)
 	)
-	(global_label "SIDE_TX_P"
+	(global_label "SIDE_TX_N"
 		(shape bidirectional)
 		(at 360.68 193.04 0)
 		(effects
@@ -7934,7 +7934,7 @@
 			)
 		)
 	)
-	(global_label "SIDE_TX_N"
+	(global_label "SIDE_TX_P"
 		(shape bidirectional)
 		(at 360.68 195.58 0)
 		(effects
@@ -8044,7 +8044,7 @@
 			)
 		)
 	)
-	(global_label "SIDE_RX_N"
+	(global_label "SIDE_RX_P"
 		(shape bidirectional)
 		(at 360.68 190.5 0)
 		(effects
