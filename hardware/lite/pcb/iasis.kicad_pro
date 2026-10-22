@@ -699,23 +699,35 @@
       },
       {
         "netclass": "Power",
-        "pattern": "/Target ports/Target ?/Output and charging/Optional charging/SW"
+        "pattern": "/Target ports/Target ?/Output and charging/Optional charging/SW?"
       },
       {
         "netclass": "Power",
-        "pattern": "/Target ports/Target ?/Output and charging/Optional charging/BUCK_VOUT"
+        "pattern": "/Target ports/Target ?/Output and charging/Optional charging/STAGE_VOUT"
       },
       {
         "netclass": "Power",
-        "pattern": "/Optional USB-C charging input/PD_VBUS_RAW"
+        "pattern": "/Brick input and logic child/PD_VBUS_RAW"
       },
       {
         "netclass": "Power",
-        "pattern": "/Optional USB-C charging input/PD_COMMON_SOURCE"
+        "pattern": "/Brick input and logic child/PD_SRC"
       },
       {
         "netclass": "Power",
-        "pattern": "/Optional USB-C charging input/CH_PROTECTED"
+        "pattern": "/Target ports/Target ?/Output and charging/Optional charging/CONV"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "/Target ports/Target ?/Output and charging/Optional charging/OUT_SRC"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "/Brick input and logic child/LOGIC_5V2"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "/Side link/SIDE_BUS"
       },
       {
         "netclass": "USB_90",
