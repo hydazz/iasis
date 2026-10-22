@@ -36,3 +36,8 @@
 (rule "Heatsink pads connect solid"
 	(condition "A.Type == 'Pad' && A.Fabrication_Property == 'Heatsink pad'")
 	(constraint zone_connection solid))
+
+# TMUX1511 RSV: pads either side of each package corner sit 0.15mm apart, inside the USB_90 class clearance.
+(rule "UQFN-16 RSV corner pads"
+	(condition "A.Type == 'Pad' && B.Type == 'Pad' && A.memberOfFootprint('Package_DFN_QFN:UQFN-16_1.8x2.6mm_P0.4mm') && B.memberOfFootprint('Package_DFN_QFN:UQFN-16_1.8x2.6mm_P0.4mm')")
+	(constraint clearance (min 0.15mm)))

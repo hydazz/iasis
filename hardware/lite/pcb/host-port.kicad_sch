@@ -7450,7 +7450,7 @@
 			)
 		)
 	)
-	(global_label "SIDE_D_P"
+	(global_label "SIDE_D_N"
 		(shape bidirectional)
 		(at 238.76 215.9 180)
 		(effects
@@ -7494,7 +7494,7 @@
 			)
 		)
 	)
-	(global_label "HUB_D_P"
+	(global_label "HUB_D_N"
 		(shape bidirectional)
 		(at 269.24 215.9 0)
 		(effects
@@ -7626,7 +7626,7 @@
 			)
 		)
 	)
-	(global_label "HUB_D_N"
+	(global_label "HUB_D_P"
 		(shape bidirectional)
 		(at 269.24 226.06 0)
 		(effects
@@ -8242,7 +8242,7 @@
 			)
 		)
 	)
-	(global_label "SIDE_D_N"
+	(global_label "SIDE_D_P"
 		(shape bidirectional)
 		(at 238.76 226.06 180)
 		(effects

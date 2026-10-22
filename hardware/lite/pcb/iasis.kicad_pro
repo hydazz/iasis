@@ -627,6 +627,30 @@
       },
       {
         "netclass": "USB_90",
+        "pattern": "HUB_TX_?"
+      },
+      {
+        "netclass": "USB_90",
+        "pattern": "HUB_RX_?"
+      },
+      {
+        "netclass": "USB_90",
+        "pattern": "HUB_D_?"
+      },
+      {
+        "netclass": "USB_90",
+        "pattern": "SIDE_TX_?"
+      },
+      {
+        "netclass": "USB_90",
+        "pattern": "SIDE_RX_?"
+      },
+      {
+        "netclass": "USB_90",
+        "pattern": "SIDE_D_?"
+      },
+      {
+        "netclass": "USB_90",
         "pattern": "/Host port/TX?_?"
       },
       {
