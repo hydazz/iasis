@@ -3258,7 +3258,7 @@
 		(dnp no)
 		(uuid "478595b1-5474-4f2e-bfc4-8f339aa5485c")
 		(property "Reference" "U1131"
-			(at 92.71 91.44 0)
+			(at 99.06 66.04 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -3269,7 +3269,7 @@
 			)
 		)
 		(property "Value" "TCA9548ARGER"
-			(at 92.71 93.98 0)
+			(at 99.06 68.58 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
