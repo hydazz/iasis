@@ -295,7 +295,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "70353b70-eadb-4dee-a76a-350d1e5ccf89")
 			(effects
 				(font
@@ -507,7 +508,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "a64af1ff-eb66-454f-afbd-7751670dae33")
 			(effects
 				(font
@@ -719,7 +721,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "0e936c1d-6ac4-4508-8954-87aecc79ae94")
 			(effects
 				(font
@@ -9405,7 +9408,8 @@
 		)
 		(property "LCSC" "C2673275"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "3480c141-f5d9-457b-b18e-9e164123d670")
 			(effects
 				(font
@@ -9416,7 +9420,8 @@
 		)
 		(property "MPN" "TMUX1511RSVR"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "09a62b1f-2797-49f8-b919-7918c37299c4")
 			(effects
 				(font
@@ -9427,7 +9432,8 @@
 		)
 		(property "Manufacturer" "Texas Instruments"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "5186f97e-5eb1-4af4-ba3d-ac6ddca89e5c")
 			(effects
 				(font
@@ -12390,7 +12396,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "1ddd12ba-451d-4c74-88aa-e612afa8af01")
 			(effects
 				(font
@@ -13011,7 +13018,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "0e9b9f5e-cd69-462d-a45d-5d1616fa7fae")
 			(effects
 				(font
@@ -14287,7 +14295,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "63f333fa-5250-4426-9f04-ae6dd2d39774")
 			(effects
 				(font
@@ -15948,7 +15957,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "f7ca77aa-8e5a-455b-8679-41c5cd6852fe")
 			(effects
 				(font
@@ -17165,7 +17175,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "288294f9-bca4-45f3-8b14-e0469119f8c5")
 			(effects
 				(font
@@ -17970,7 +17981,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "7962a7c9-f922-4147-9bc0-2f7704d2eecb")
 			(effects
 				(font
@@ -19090,7 +19102,8 @@
 		)
 		(property "LCSC" "C2673275"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "05ca6110-b464-4f31-aa61-c5c1daaf6337")
 			(effects
 				(font
@@ -19101,7 +19114,8 @@
 		)
 		(property "MPN" "TMUX1511RSVR"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "93d31f6a-2819-459b-aaf4-909a33098144")
 			(effects
 				(font
@@ -19112,7 +19126,8 @@
 		)
 		(property "Manufacturer" "Texas Instruments"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "06cb1a5f-d1f5-408b-9895-ad61d7978ff5")
 			(effects
 				(font
@@ -20025,7 +20040,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "33d2af04-c5d9-4609-840d-4df9b1e78a75")
 			(effects
 				(font
@@ -20632,7 +20648,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "ddf63789-6a90-4e84-9364-762f90bcf107")
 			(effects
 				(font
@@ -21003,7 +21020,8 @@
 		)
 		(property "LCSC" "C555456"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "8a19456e-160b-4d5c-9b7f-c9cf069ef495")
 			(effects
 				(font
@@ -21014,7 +21032,8 @@
 		)
 		(property "MPN" "TCA9548ARGER"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "0e4e031d-12f4-4af9-9bfa-711a8921bed9")
 			(effects
 				(font
@@ -21025,7 +21044,8 @@
 		)
 		(property "Manufacturer" "Texas Instruments"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "174bcd6f-d403-4c93-be1a-b8d278eccb63")
 			(effects
 				(font
@@ -21961,7 +21981,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "cde8ec25-8b97-40e3-b3ff-7047c59b22e0")
 			(effects
 				(font
@@ -26178,7 +26199,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "d38b55c8-aa62-4ece-8cf6-1f4b919eb9e3")
 			(effects
 				(font
@@ -26390,7 +26412,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "b2e2142b-9cb3-4d4d-a552-bc3796e12096")
 			(effects
 				(font
@@ -26799,7 +26822,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "67dd4a21-ad40-445d-819e-cee1b0eed10d")
 			(effects
 				(font
@@ -28166,7 +28190,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "2f4d6973-b3a0-4f8b-99ce-4dc5e7263582")
 			(effects
 				(font
@@ -29121,7 +29146,8 @@
 		)
 		(property "Manufacturer" "Tritech-MOS"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "3f8b1254-b282-4907-a8fd-d45f9b1fb762")
 			(effects
 				(font
@@ -29132,7 +29158,8 @@
 		)
 		(property "LCSC" "C7422903"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "e1dfb352-4a78-4d41-8adc-e8c586f201a4")
 			(effects
 				(font
@@ -29143,7 +29170,8 @@
 		)
 		(property "MPN" "TMGN4060DF"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "f2f1cf77-0c9b-46dd-a17c-e72e69ed9f14")
 			(effects
 				(font
@@ -29154,7 +29182,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "13dd59a5-a2ce-4848-834f-1b54a0db22d0")
 			(effects
 				(font
@@ -29741,7 +29770,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "cc7499b9-e54d-403e-bf83-dc563390c904")
 			(effects
 				(font
@@ -30175,7 +30205,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "61f9102d-2ce1-4686-9eb2-ddca677d4354")
 			(effects
 				(font
@@ -31574,7 +31605,8 @@
 		)
 		(property "Manufacturer" "Tritech-MOS"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "82e287cc-c065-452b-9278-cfe5eb59dd68")
 			(effects
 				(font
@@ -31585,7 +31617,8 @@
 		)
 		(property "LCSC" "C7422903"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "bbef9b0b-06a4-421b-a0f4-a9ee96ec15b1")
 			(effects
 				(font
@@ -31596,7 +31629,8 @@
 		)
 		(property "MPN" "TMGN4060DF"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "76299d24-f689-4def-b40d-98ec6ada6ef2")
 			(effects
 				(font
@@ -31607,7 +31641,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "45fee4de-ed5a-4b05-bc7e-133994daf14f")
 			(effects
 				(font
@@ -31983,7 +32018,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "8c0aba5d-67cb-400e-9090-768515e0b787")
 			(effects
 				(font
@@ -32195,7 +32231,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "b289e917-5624-4a69-9f52-56fb64d27d13")
 			(effects
 				(font
@@ -32360,7 +32397,8 @@
 		)
 		(property "Manufacturer" "Tritech-MOS"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "5f5326e3-c7bf-4cf2-a125-94ec68dce814")
 			(effects
 				(font
@@ -32371,7 +32409,8 @@
 		)
 		(property "LCSC" "C7422903"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "f0984b46-2769-461d-acda-c7160f9bfe15")
 			(effects
 				(font
@@ -32382,7 +32421,8 @@
 		)
 		(property "MPN" "TMGN4060DF"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "d93bea5b-17d8-4b58-9bcc-60d7020408b5")
 			(effects
 				(font
@@ -32393,7 +32433,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "c022dffd-5245-4d82-8021-d5745a386264")
 			(effects
 				(font
@@ -34489,7 +34530,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "a5111ea2-c357-45ae-a3b4-8f5b74a45011")
 			(effects
 				(font
@@ -36038,7 +36080,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "6bce37c2-8957-4e3b-ba4f-943cbf11a1eb")
 			(effects
 				(font
@@ -36461,7 +36504,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "52321e65-4162-4947-bca7-8829f38e30d2")
 			(effects
 				(font
@@ -37240,7 +37284,8 @@
 		)
 		(property "LCSC" "C54425770"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "372efa5d-fc47-4ecf-9f67-36d0d1f56fc3")
 			(effects
 				(font
@@ -37251,7 +37296,8 @@
 		)
 		(property "MPN" "AAPS1050M4R7A"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "0368924e-c14b-4745-ac2d-78508764cb36")
 			(effects
 				(font
@@ -37262,7 +37308,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "7ec48bcd-c4f4-4106-9e63-2be8b8988d22")
 			(effects
 				(font
@@ -37273,7 +37320,8 @@
 		)
 		(property "Manufacturer" "Coilank"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "94ad19d8-331a-428f-bbc3-4be918676084")
 			(effects
 				(font
@@ -38023,7 +38071,8 @@
 		)
 		(property "LCSC" "C54425770"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "4964e382-07c6-4b62-80fd-dd332c14e6f3")
 			(effects
 				(font
@@ -38034,7 +38083,8 @@
 		)
 		(property "MPN" "AAPS1050M4R7A"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "03aa0990-ad94-49c0-b5c0-55a990bb0a1b")
 			(effects
 				(font
@@ -38045,7 +38095,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "c453c06c-cfd6-4464-a5f3-08e20f68b65f")
 			(effects
 				(font
@@ -38056,7 +38107,8 @@
 		)
 		(property "Manufacturer" "Coilank"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "167b26ca-f685-47f2-8378-509cb9202704")
 			(effects
 				(font
@@ -41347,7 +41399,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "a65189a6-be15-49fa-8cc5-61ca89c558cb")
 			(effects
 				(font
@@ -41981,7 +42034,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "25a609d6-12c2-4225-9850-75d67679f26e")
 			(effects
 				(font
@@ -42193,7 +42247,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "08dd8c01-78df-4eba-bb97-c6bf4dcdada7")
 			(effects
 				(font
@@ -42405,7 +42460,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "89b19621-5747-4f72-a3fd-fb79bfee4121")
 			(effects
 				(font
@@ -42617,7 +42673,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "f2e23cbf-abc1-4c5d-a408-98701c39f8ce")
 			(effects
 				(font
@@ -43027,7 +43084,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "523b2f73-8ca7-4be8-a93f-ab140bd5f458")
 			(effects
 				(font
@@ -44882,7 +44940,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "27964718-0c1f-47e6-ac07-980eb177975b")
 			(effects
 				(font
@@ -45902,7 +45961,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "a2578132-84ed-4599-bb5a-c82a96a2bdda")
 			(effects
 				(font
@@ -47570,7 +47630,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "d8112f50-3b85-4aba-bd32-4f3f4dcf7056")
 			(effects
 				(font
@@ -48428,7 +48489,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "720a2fb2-31a9-4de9-9fe0-ddcfce07c288")
 			(effects
 				(font
@@ -53257,7 +53319,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "8d887250-bddc-49c2-9f0a-532875e0c924")
 			(effects
 				(font
@@ -54185,7 +54248,8 @@
 		)
 		(property "Manufacturer" "Tritech-MOS"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "36797a9a-19f6-4f88-8a00-3c931c316341")
 			(effects
 				(font
@@ -54196,7 +54260,8 @@
 		)
 		(property "LCSC" "C7422903"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "ea00eb65-6bc4-4128-858e-9232d9af2b41")
 			(effects
 				(font
@@ -54207,7 +54272,8 @@
 		)
 		(property "MPN" "TMGN4060DF"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "94b9fed3-3711-43e0-9bb9-a5d1fc458322")
 			(effects
 				(font
@@ -54218,7 +54284,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "9d912e13-3ec9-4849-ab05-cea1f12c60ed")
 			(effects
 				(font
@@ -56991,7 +57058,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "338fa939-d9b4-4bd6-ae67-66fa8c472e54")
 			(effects
 				(font
@@ -57371,7 +57439,8 @@
 		)
 		(property "LCSC" "C22466768"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "5364894b-656e-485d-a18f-05b632292f84")
 			(effects
 				(font
@@ -57382,7 +57451,8 @@
 		)
 		(property "MPN" "SP60N05GNJ"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "43ac8dd3-9088-4813-9991-c90a31e629bb")
 			(effects
 				(font
@@ -57393,7 +57463,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "b04cccd2-f509-415a-b5da-e8a108422ea3")
 			(effects
 				(font
@@ -57404,7 +57475,8 @@
 		)
 		(property "Manufacturer" "Siliup"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "ee61b182-b7d5-4551-ade6-56a1a50d694f")
 			(effects
 				(font
@@ -59448,7 +59520,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "c2082e22-c33b-4c75-8afa-56311246e9b0")
 			(effects
 				(font
@@ -60816,7 +60889,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "7125e201-04cb-448b-8558-694962ca308a")
 			(effects
 				(font
@@ -61620,7 +61694,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "44555398-b61e-4de9-9786-d496ddaf817c")
 			(effects
 				(font
@@ -62030,7 +62105,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "8e0bada6-d80f-47cd-98ac-e086404b2955")
 			(effects
 				(font
@@ -68674,7 +68750,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "68cdd0f8-b373-418f-8243-1103854c0359")
 			(effects
 				(font
@@ -69281,7 +69358,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "1df3db59-c00f-4bad-afb1-c4c2d85cb853")
 			(effects
 				(font
@@ -69643,7 +69721,8 @@
 		)
 		(property "Manufacturer" "Siliup"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "ca494a02-f186-4150-a427-dc1f1f371451")
 			(effects
 				(font
@@ -69654,7 +69733,8 @@
 		)
 		(property "LCSC" "C22466768"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "cd115ca5-8fad-47f2-bddb-19078fd36652")
 			(effects
 				(font
@@ -69665,7 +69745,8 @@
 		)
 		(property "MPN" "SP60N05GNJ"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "04cd3e8b-0d81-425c-9770-b300b3c6655f")
 			(effects
 				(font
@@ -69676,7 +69757,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "12783090-039f-4934-91d7-3aeb2172dfcd")
 			(effects
 				(font
@@ -70675,7 +70757,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "c6b33ab2-fc7e-4452-bc5a-1409afb4530d")
 			(effects
 				(font
@@ -71095,7 +71178,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "9149b17f-288b-489c-be8c-2d35a513be70")
 			(effects
 				(font
@@ -72031,7 +72115,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "bfeb4fe3-7610-4d76-91ba-80ef5b3ad4a8")
 			(effects
 				(font
@@ -76015,7 +76100,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "717c5f4a-2482-4c4f-92d0-6e380743b671")
 			(effects
 				(font
@@ -76442,7 +76528,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "685c0f5d-5eba-48be-a912-cdd0ab221aef")
 			(effects
 				(font
@@ -76607,7 +76694,8 @@
 		)
 		(property "Population" "Common"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "a11bf884-37c2-4476-b9ef-1acf1c43debe")
 			(effects
 				(font
@@ -76618,7 +76706,8 @@
 		)
 		(property "LCSC" "C231329"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "d6bc0a22-f658-4a8b-a355-2e3edef5f46d")
 			(effects
 				(font
@@ -76629,7 +76718,8 @@
 		)
 		(property "MPN" "B3U-1000P"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "3d573473-d9bd-4f26-9ba4-53ce8d94fd53")
 			(effects
 				(font
@@ -76640,7 +76730,8 @@
 		)
 		(property "Manufacturer" "Omron Electronics"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "d7f5e5b0-eb7e-4227-b29f-476542418797")
 			(effects
 				(font
@@ -76903,7 +76994,8 @@
 		)
 		(property "Manufacturer" "Siliup"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "9534abdc-a59c-484b-8e6f-a26a037305f6")
 			(effects
 				(font
@@ -76914,7 +77006,8 @@
 		)
 		(property "LCSC" "C22466768"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "c6772ede-20dc-4024-b5b2-46d288a689cf")
 			(effects
 				(font
@@ -76925,7 +77018,8 @@
 		)
 		(property "MPN" "SP60N05GNJ"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "a8896d89-7962-4b1e-ba12-65d72497d617")
 			(effects
 				(font
@@ -76936,7 +77030,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "a2b38740-3c34-4dff-a8eb-b8ee73f66ce1")
 			(effects
 				(font
@@ -77312,7 +77407,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "5e731356-755b-4ef5-a708-5ca5bc26a88b")
 			(effects
 				(font
@@ -78077,7 +78173,8 @@
 		)
 		(property "LCSC" "C55172548"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "6321a0d8-bbe1-45ff-b529-64add318a27f")
 			(effects
 				(font
@@ -78088,7 +78185,8 @@
 		)
 		(property "MPN" "PSTMAA666460-6R8MB"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "d2bcda2b-da9d-4778-b4fe-d210ab6edf0c")
 			(effects
 				(font
@@ -78099,7 +78197,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "61ddd68b-201f-4249-8782-65661b5d814e")
 			(effects
 				(font
@@ -78110,7 +78209,8 @@
 		)
 		(property "Manufacturer" "PROD Tech"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "21306100-ed98-45ce-b350-bf99bc60d0ab")
 			(effects
 				(font
@@ -78528,7 +78628,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "270255a5-50fc-4db8-8bd4-c8c439cbd04f")
 			(effects
 				(font
@@ -79379,7 +79480,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "f08e03f4-8c8d-4e24-9e88-340ecc5022c5")
 			(effects
 				(font
@@ -80867,7 +80969,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "3875a2f8-e71c-41d6-bb5f-1bdf7ad91db6")
 			(effects
 				(font
@@ -81290,7 +81393,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "4dc6761a-7878-4b85-b6f9-9f9271c944c1")
 			(effects
 				(font
@@ -85038,7 +85142,8 @@
 		)
 		(property "LCSC" "C5948"
 			(at 0 0 90)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "e9303e4d-9eed-499e-97ff-4649b32a2adb")
 			(effects
 				(font
@@ -85049,7 +85154,8 @@
 		)
 		(property "MPN" "74HC595PW,118"
 			(at 0 0 90)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "0a44f20a-83e1-4118-b39a-016c6ad38d8c")
 			(effects
 				(font
@@ -85060,7 +85166,8 @@
 		)
 		(property "Population" "Common"
 			(at 0 0 90)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "771eb546-d75e-4ca8-99b1-7f11f43f453f")
 			(effects
 				(font
@@ -85071,7 +85178,8 @@
 		)
 		(property "Manufacturer" "Nexperia"
 			(at 0 0 90)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "d5c91a18-ce15-4e13-a7b7-7705b59bb404")
 			(effects
 				(font
@@ -85734,7 +85842,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "31b40665-4bc4-4b62-bd4e-d92bf1a73cce")
 			(effects
 				(font
@@ -86143,7 +86252,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "6a543e3f-c0b9-4a92-9c32-0b45333c4ad6")
 			(effects
 				(font
@@ -87515,7 +87625,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "c72b56d5-1f38-4efb-87b8-c7a5dcc0ce47")
 			(effects
 				(font
@@ -89142,7 +89253,8 @@
 		)
 		(property "LCSC" "C2864583"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "b0af29e6-798e-4cd4-b022-65f503bd5ea1")
 			(effects
 				(font
@@ -89153,7 +89265,8 @@
 		)
 		(property "MPN" "TPS55288RPMR"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "c38da0ab-1f33-418d-977a-19ed8b73c114")
 			(effects
 				(font
@@ -89164,7 +89277,8 @@
 		)
 		(property "Manufacturer" "Texas Instruments"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "3486b62d-7ac6-42d0-a320-2a3941bed80f")
 			(effects
 				(font
@@ -89175,7 +89289,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "a6a03177-ae3c-4199-aa46-579f5de47429")
 			(effects
 				(font
@@ -90389,7 +90504,8 @@
 		)
 		(property "Manufacturer" "Siliup"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "6b4c7085-63d7-4702-a3a8-0a6dc414ec65")
 			(effects
 				(font
@@ -90400,7 +90516,8 @@
 		)
 		(property "LCSC" "C22466768"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "dda4e7c8-7bf4-490d-ade6-670a3592af3a")
 			(effects
 				(font
@@ -90411,7 +90528,8 @@
 		)
 		(property "MPN" "SP60N05GNJ"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "87d4946c-e614-4153-9e8e-81e13e4a9296")
 			(effects
 				(font
@@ -90422,7 +90540,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "26fee9f2-c7df-4bf1-8685-8bd4d983fc42")
 			(effects
 				(font
@@ -91210,7 +91329,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "6a694fdf-d299-4e46-b8f4-95968f9cfeb4")
 			(effects
 				(font
@@ -92075,7 +92195,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "57f47874-16de-4201-8a2e-1f94f00e0d5c")
 			(effects
 				(font
@@ -92235,7 +92356,8 @@
 		)
 		(property "LCSC" "C2864583"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "05870390-51f1-4e25-90e1-52d621820cfb")
 			(effects
 				(font
@@ -92246,7 +92368,8 @@
 		)
 		(property "MPN" "TPS55288RPMR"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "f84d8025-86b3-4bce-a1af-47dcfbb89b27")
 			(effects
 				(font
@@ -92257,7 +92380,8 @@
 		)
 		(property "Manufacturer" "Texas Instruments"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "c8178c2b-fc96-4045-9162-19acf43350f9")
 			(effects
 				(font
@@ -92268,7 +92392,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "e45558cc-cff9-41e4-beb8-33ae064a18d7")
 			(effects
 				(font
@@ -92744,7 +92869,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "5766f579-1d96-4980-a19b-a25d81c86d08")
 			(effects
 				(font
@@ -93777,7 +93903,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "734b93af-94e9-4243-a7d1-597b7834098f")
 			(effects
 				(font
@@ -94749,7 +94876,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "09703dee-5c83-4258-a788-53dcc3f53a79")
 			(effects
 				(font
@@ -95891,7 +96019,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "a9dca416-e080-461d-b6de-d23e8803594b")
 			(effects
 				(font
@@ -97315,7 +97444,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "5e2aeaec-4a58-479c-a8c9-2b9aa07b262b")
 			(effects
 				(font
@@ -97742,7 +97872,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "2b4ede2f-ffef-46a3-824c-b1675a5940e8")
 			(effects
 				(font
@@ -98362,7 +98493,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "63eb9e88-c6d8-4a5a-87b3-881724d1b125")
 			(effects
 				(font
@@ -98535,7 +98667,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "df9606c1-fc91-4b70-a867-33e76328b362")
 			(effects
 				(font
@@ -98546,7 +98679,8 @@
 		)
 		(property "LCSC" "C188070"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "06938bdf-544c-476d-b5f2-266c8886c72b")
 			(effects
 				(font
@@ -98557,7 +98691,8 @@
 		)
 		(property "MPN" "RLM12FTCMR010"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "5d7ca2fc-de99-42c2-8c0b-7dbb12baaf64")
 			(effects
 				(font
@@ -98568,7 +98703,8 @@
 		)
 		(property "Manufacturer" "RALEC"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "9118161a-e4ec-4f67-b50b-cf4dd8ae464d")
 			(effects
 				(font
@@ -99188,7 +99324,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "8d32143f-dc81-41b0-9d6c-c6a002274e3b")
 			(effects
 				(font
@@ -100637,7 +100774,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "7fe00570-f9ff-4a79-b51a-c190ea3b8347")
 			(effects
 				(font
@@ -101245,7 +101383,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "a84b6a91-586c-4276-a982-ecf906bbe545")
 			(effects
 				(font
@@ -102491,7 +102630,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "69d91054-ec21-4d0c-8c3f-cb12cd88b324")
 			(effects
 				(font
@@ -102853,7 +102993,8 @@
 		)
 		(property "Manufacturer" "Siliup"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "0fe4663d-a0ad-48d8-a12d-5109f7578566")
 			(effects
 				(font
@@ -102864,7 +103005,8 @@
 		)
 		(property "LCSC" "C22466768"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "57eabdec-4908-4634-a88b-7031a1221162")
 			(effects
 				(font
@@ -102875,7 +103017,8 @@
 		)
 		(property "MPN" "SP60N05GNJ"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "05ae3871-1aa8-4970-a2e7-e2f76f5fffbb")
 			(effects
 				(font
@@ -102886,7 +103029,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "d1df9d5c-7ae1-4a95-b57f-76e2e1c3f2f4")
 			(effects
 				(font
@@ -108517,7 +108661,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "08fcbee9-a91e-427e-83fb-3b3f6699ca0a")
 			(effects
 				(font
@@ -109477,7 +109622,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "4a2da17b-cffa-40b0-987d-e53fe24dd2b6")
 			(effects
 				(font
@@ -110041,7 +110187,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "8d6b0bb7-f629-47e2-865e-6236af685ef2")
 			(effects
 				(font
@@ -113478,7 +113625,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "c09b36a1-f947-4871-a3fa-2ac9dc11b0d7")
 			(effects
 				(font
@@ -114578,7 +114726,8 @@
 		)
 		(property "LCSC" "C2864583"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "77429442-30b5-47eb-b0bc-46e592780a1f")
 			(effects
 				(font
@@ -114589,7 +114738,8 @@
 		)
 		(property "MPN" "TPS55288RPMR"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "34d2e4f5-afec-4e4a-9a41-ff00756b7bbf")
 			(effects
 				(font
@@ -114600,7 +114750,8 @@
 		)
 		(property "Manufacturer" "Texas Instruments"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "24ff9e5c-d7a0-4891-b2ba-95e7aed5ebc9")
 			(effects
 				(font
@@ -114611,7 +114762,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "1d300be8-1d70-449f-abe2-a5e151333a66")
 			(effects
 				(font
@@ -115739,7 +115891,8 @@
 		)
 		(property "Manufacturer" "Siliup"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "38c0eff9-1670-46ad-8ef2-508871839d87")
 			(effects
 				(font
@@ -115750,7 +115903,8 @@
 		)
 		(property "LCSC" "C22466768"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "9ff5afb5-6411-4cb6-abf3-dd2eb7060a47")
 			(effects
 				(font
@@ -115761,7 +115915,8 @@
 		)
 		(property "MPN" "SP60N05GNJ"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "2dbe7735-8603-4ac2-b658-c852efaa4212")
 			(effects
 				(font
@@ -115772,7 +115927,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "7b825577-efe7-4991-a77a-9f815f1e8a2f")
 			(effects
 				(font
@@ -118120,7 +118276,8 @@
 		)
 		(property "Manufacturer" "Siliup"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "eb6f1bf3-8180-499d-a986-9f2a1437742b")
 			(effects
 				(font
@@ -118131,7 +118288,8 @@
 		)
 		(property "LCSC" "C22466768"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "fe30301d-1de9-4e0b-91da-ac42503d84a4")
 			(effects
 				(font
@@ -118142,7 +118300,8 @@
 		)
 		(property "MPN" "SP60N05GNJ"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "d070f4c6-3fb6-44f3-8c77-c21ae415dfa1")
 			(effects
 				(font
@@ -118153,7 +118312,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "04fdac00-9a38-4161-bab5-fd8bec25ed91")
 			(effects
 				(font
@@ -120055,7 +120215,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "3d4f6c4c-63d1-433e-a199-fbe3ac70da7f")
 			(effects
 				(font
@@ -121579,7 +121740,8 @@
 		)
 		(property "Manufacturer" "Siliup"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "a57ddd8d-0c66-4adc-842c-87fb60daf1f9")
 			(effects
 				(font
@@ -121590,7 +121752,8 @@
 		)
 		(property "LCSC" "C22466768"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "63f8d017-3149-44bd-ae9b-6364385e2f30")
 			(effects
 				(font
@@ -121601,7 +121764,8 @@
 		)
 		(property "MPN" "SP60N05GNJ"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "219f8999-7ca6-484b-987c-6dee8e18450f")
 			(effects
 				(font
@@ -121612,7 +121776,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "c86be335-9ddb-41a9-b4b9-c729b68c831d")
 			(effects
 				(font
@@ -121988,7 +122153,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "352ed157-a54f-40e5-97f4-615cb0be01be")
 			(effects
 				(font
@@ -122200,7 +122366,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "909628f6-932b-4c3c-93bf-1ed9a7686864")
 			(effects
 				(font
@@ -122365,7 +122532,8 @@
 		)
 		(property "Population" "Common"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "a3350184-147d-4122-9145-fa556c727729")
 			(effects
 				(font
@@ -122376,7 +122544,8 @@
 		)
 		(property "LCSC" "C231329"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "6c2ac22a-f7c9-4c29-a026-b9839eaf5f93")
 			(effects
 				(font
@@ -122387,7 +122556,8 @@
 		)
 		(property "MPN" "B3U-1000P"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "9cfefd0d-1675-4ec3-b724-ebfcfedbccb3")
 			(effects
 				(font
@@ -122398,7 +122568,8 @@
 		)
 		(property "Manufacturer" "Omron Electronics"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "188ecfbb-4ef3-4baa-976b-39dec18019ba")
 			(effects
 				(font
@@ -122708,7 +122879,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "f4f21598-2b76-45f3-a59f-91d23c14c9ad")
 			(effects
 				(font
@@ -122881,7 +123053,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "4175be6b-754e-4595-b8ed-b7b6f810eb1a")
 			(effects
 				(font
@@ -122892,7 +123065,8 @@
 		)
 		(property "LCSC" "C188070"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "a3af274f-0bd1-4639-87d7-3ee4ab82129c")
 			(effects
 				(font
@@ -122903,7 +123077,8 @@
 		)
 		(property "MPN" "RLM12FTCMR010"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "667f68a9-e3b7-4dad-8faf-20a7420f5df9")
 			(effects
 				(font
@@ -122914,7 +123089,8 @@
 		)
 		(property "Manufacturer" "RALEC"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "37de9382-b2e9-4e92-a27c-176b6d3254b7")
 			(effects
 				(font
@@ -123074,7 +123250,8 @@
 		)
 		(property "LCSC" "C2864583"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "4e46304e-1776-4d9b-b0b6-c94a6be57f7c")
 			(effects
 				(font
@@ -123085,7 +123262,8 @@
 		)
 		(property "MPN" "TPS55288RPMR"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "2860501b-290e-47cd-85f3-67cfaed94dc7")
 			(effects
 				(font
@@ -123096,7 +123274,8 @@
 		)
 		(property "Manufacturer" "Texas Instruments"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "d5666b91-f11d-416a-8aea-0f5d6da43169")
 			(effects
 				(font
@@ -123107,7 +123286,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "09624838-e435-4cfa-b460-97adf859aca4")
 			(effects
 				(font
@@ -123949,7 +124129,8 @@
 		)
 		(property "Manufacturer" "Tritech-MOS"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "8c3e3f11-cc0a-4050-bd8d-6ef7cafc9f59")
 			(effects
 				(font
@@ -123960,7 +124141,8 @@
 		)
 		(property "LCSC" "C7422903"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "13fae259-ebe0-4f6e-8444-8d42775ec69a")
 			(effects
 				(font
@@ -123971,7 +124153,8 @@
 		)
 		(property "MPN" "TMGN4060DF"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "1cdc2959-548b-44fe-b8bd-d44b7abf1d6f")
 			(effects
 				(font
@@ -123982,7 +124165,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "bf770a40-410b-4a15-9c63-aa490fc8615c")
 			(effects
 				(font
@@ -124358,7 +124542,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "45bca588-b099-4ca6-a913-0a90a0ac2829")
 			(effects
 				(font
@@ -124570,7 +124755,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "6a58736a-a8f9-4ae0-87c0-a570f56af5e3")
 			(effects
 				(font
@@ -125178,7 +125364,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "d9bc316f-d90d-42f7-aebd-43f6f4bf79b2")
 			(effects
 				(font
@@ -125587,7 +125774,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "5ad424c2-d674-4de4-9c96-313764435325")
 			(effects
 				(font
@@ -126207,7 +126395,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "320d4711-a111-4ee1-be1b-463b8dbb97d5")
 			(effects
 				(font
@@ -127193,7 +127382,8 @@
 		)
 		(property "Manufacturer" "Siliup"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "e5b72d46-46af-452c-b533-95a51ac20a6d")
 			(effects
 				(font
@@ -127204,7 +127394,8 @@
 		)
 		(property "LCSC" "C22466768"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "5a657d00-916d-494b-93b8-ac80c62c4146")
 			(effects
 				(font
@@ -127215,7 +127406,8 @@
 		)
 		(property "MPN" "SP60N05GNJ"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "068d428b-9840-40f0-b852-494bd3a2ea8e")
 			(effects
 				(font
@@ -127226,7 +127418,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "df01dcfe-e4e6-402c-a8a7-265f3da8da84")
 			(effects
 				(font
@@ -128204,7 +128397,8 @@
 		)
 		(property "Manufacturer" "Siliup"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "06d90d07-eee0-4367-98d2-b11310420864")
 			(effects
 				(font
@@ -128215,7 +128409,8 @@
 		)
 		(property "LCSC" "C22466768"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "fc3973e6-f5d4-4895-a292-d23182491b48")
 			(effects
 				(font
@@ -128226,7 +128421,8 @@
 		)
 		(property "MPN" "SP60N05GNJ"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "68a288b0-663e-4e4d-af8a-5a79e006bbf9")
 			(effects
 				(font
@@ -128237,7 +128433,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "aaf3e94f-288c-45f9-9eec-10be6bed69c5")
 			(effects
 				(font
@@ -129233,7 +129430,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "89b2aff0-d840-439a-9316-28fea41e3609")
 			(effects
 				(font
@@ -129788,7 +129986,8 @@
 		)
 		(property "LCSC" "C2864583"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "a8fc6fc4-6566-4a9c-a52c-522e6a7d9dd3")
 			(effects
 				(font
@@ -129799,7 +129998,8 @@
 		)
 		(property "MPN" "TPS55288RPMR"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "79c0c362-24c0-4fe9-9087-76ea6e5784d4")
 			(effects
 				(font
@@ -129810,7 +130010,8 @@
 		)
 		(property "Manufacturer" "Texas Instruments"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "ee6f3d5e-10ef-40f1-be7c-a79a5fa642c9")
 			(effects
 				(font
@@ -129821,7 +130022,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "110abbd0-32b8-48f8-9e73-1785b50733fd")
 			(effects
 				(font
@@ -132127,7 +132329,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "770e0ebe-8bd5-4b17-8804-925f6d831d3e")
 			(effects
 				(font
@@ -132138,7 +132341,8 @@
 		)
 		(property "LCSC" "C188070"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "eb50d5ee-c1db-4a7e-83b3-a628ee4e8ba2")
 			(effects
 				(font
@@ -132149,7 +132353,8 @@
 		)
 		(property "MPN" "RLM12FTCMR010"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "57b08b7c-ce8e-4340-aa4c-f5124fab537c")
 			(effects
 				(font
@@ -132160,7 +132365,8 @@
 		)
 		(property "Manufacturer" "RALEC"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "9f3907ce-ff07-4114-818c-b8725d87c899")
 			(effects
 				(font
@@ -135084,7 +135290,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "88bd8328-15fd-4a42-b922-06cfdbbc5b2c")
 			(effects
 				(font
@@ -135296,7 +135503,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "d19b39b8-d65c-4595-b041-16bca2a5315e")
 			(effects
 				(font
@@ -140689,7 +140897,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "75d72536-f9ea-4043-99a7-280f6e33c1e6")
 			(effects
 				(font
@@ -141908,7 +142117,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "ae8848d8-fb56-4c79-beda-9e4062c3019e")
 			(effects
 				(font
@@ -144283,7 +144493,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "606571ff-1991-423f-8df5-9e7a7be3bb6b")
 			(effects
 				(font
@@ -144710,7 +144921,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "2278aa62-aef2-4ab3-891d-803f5d04877f")
 			(effects
 				(font
@@ -147763,7 +147975,8 @@
 		)
 		(property "Manufacturer" "Tritech-MOS"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "3f1fc61e-d0f5-4d0d-9d71-d73b61490e57")
 			(effects
 				(font
@@ -147774,7 +147987,8 @@
 		)
 		(property "LCSC" "C7422903"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "f4a77342-e13c-4605-891f-e721468ec2d6")
 			(effects
 				(font
@@ -147785,7 +147999,8 @@
 		)
 		(property "MPN" "TMGN4060DF"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "c6ff68e4-640e-4e5c-ac81-96ea8f214ddb")
 			(effects
 				(font
@@ -147796,7 +148011,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "e7055eab-b6bb-4fbb-873c-d4f2e166129c")
 			(effects
 				(font
@@ -149820,7 +150036,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "c4f702c4-7bdc-4b18-89f4-735895cdd5d6")
 			(effects
 				(font
@@ -153135,7 +153352,8 @@
 		)
 		(property "Manufacturer" "Siliup"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "d9ea822b-8cb4-45f0-ad69-840f7a4f2097")
 			(effects
 				(font
@@ -153146,7 +153364,8 @@
 		)
 		(property "LCSC" "C22466768"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "01b82227-6c70-4aa9-b8ee-8446b9532bdb")
 			(effects
 				(font
@@ -153157,7 +153376,8 @@
 		)
 		(property "MPN" "SP60N05GNJ"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "1b35fe02-105e-45ba-901a-79c6b4abf1ea")
 			(effects
 				(font
@@ -153168,7 +153388,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "e57f063c-8ddb-41a6-9eb6-e193bc66ae58")
 			(effects
 				(font
@@ -156127,7 +156348,8 @@
 		)
 		(property "LCSC" "C5948"
 			(at 0 0 90)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "a098a8da-b81c-42f6-ba88-7915724c5e82")
 			(effects
 				(font
@@ -156138,7 +156360,8 @@
 		)
 		(property "MPN" "74HC595PW,118"
 			(at 0 0 90)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "44378722-43b4-48fc-b58a-4abe9d684161")
 			(effects
 				(font
@@ -156149,7 +156372,8 @@
 		)
 		(property "Population" "Common"
 			(at 0 0 90)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "6c786000-0c25-4bba-b855-003559e886fe")
 			(effects
 				(font
@@ -156160,7 +156384,8 @@
 		)
 		(property "Manufacturer" "Nexperia"
 			(at 0 0 90)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "4dfd722c-9664-41f8-8432-93c66dc387e4")
 			(effects
 				(font
@@ -156579,7 +156804,8 @@
 		)
 		(property "Manufacturer" "Tritech-MOS"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "46aa6fed-f5ce-4acd-85aa-91b91181793a")
 			(effects
 				(font
@@ -156590,7 +156816,8 @@
 		)
 		(property "LCSC" "C7422903"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "5e4bff24-f368-487b-9257-c82337598e1c")
 			(effects
 				(font
@@ -156601,7 +156828,8 @@
 		)
 		(property "MPN" "TMGN4060DF"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "08ed6d1f-19d4-41ea-87b1-337cac4bfc8d")
 			(effects
 				(font
@@ -156612,7 +156840,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "17c23745-2adb-4c3a-9c61-f3fe6b4219a1")
 			(effects
 				(font
@@ -157810,7 +158039,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "6eef55fe-c0ba-4b48-b1af-21a8819558b1")
 			(effects
 				(font
@@ -157973,7 +158203,8 @@
 		)
 		(property "LCSC" "C5362158"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "01d340b3-2481-4641-abb4-b855f26e0f89")
 			(effects
 				(font
@@ -157984,7 +158215,8 @@
 		)
 		(property "MPN" "05A20L24P"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "09a6886b-89c0-4c1f-8001-c9162d9d8e92")
 			(effects
 				(font
@@ -157995,7 +158227,8 @@
 		)
 		(property "Manufacturer" "HanElectricity"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "ba1b4e93-cc88-4b77-80bb-de0e785eb021")
 			(effects
 				(font
@@ -158006,7 +158239,8 @@
 		)
 		(property "Population" "CM5"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "29fcb94f-ab5c-435d-aaa1-f4f7d8734fa3")
 			(effects
 				(font
@@ -158432,7 +158666,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "8fc1a493-7e36-4dd8-9712-573e82e68348")
 			(effects
 				(font
@@ -158443,7 +158678,8 @@
 		)
 		(property "LCSC" "C188070"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "bcb3eaa3-8473-4e24-be32-84189a06a69e")
 			(effects
 				(font
@@ -158454,7 +158690,8 @@
 		)
 		(property "MPN" "RLM12FTCMR010"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "5f28d006-1a1e-4d48-b5fb-53b724ce3870")
 			(effects
 				(font
@@ -158465,7 +158702,8 @@
 		)
 		(property "Manufacturer" "RALEC"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "3a9151cd-a2dc-48b3-921e-17ef689f9455")
 			(effects
 				(font
@@ -158677,7 +158915,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "0417cc77-4164-47ee-9fc4-52aab1215240")
 			(effects
 				(font
@@ -162226,7 +162465,8 @@
 		)
 		(property "LCSC" "C54425770"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "60023de9-1e4b-4b94-ad8b-8b9633ac49b4")
 			(effects
 				(font
@@ -162237,7 +162477,8 @@
 		)
 		(property "MPN" "AAPS1050M4R7A"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "c0b1d16e-dea3-4863-ad6a-f798a268581a")
 			(effects
 				(font
@@ -162248,7 +162489,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "a7154aaf-a85c-4e8f-ab3d-d11484c5a80a")
 			(effects
 				(font
@@ -162259,7 +162501,8 @@
 		)
 		(property "Manufacturer" "Coilank"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "75677dc3-e659-46ce-8ea7-1140f2e454bc")
 			(effects
 				(font
@@ -164009,7 +164252,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "10fa04ff-ed5c-40b7-a363-daa9c215e51b")
 			(effects
 				(font
@@ -164174,7 +164418,8 @@
 		)
 		(property "Manufacturer" "Siliup"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "47001c52-79fd-4ccb-89ec-b78b9455f199")
 			(effects
 				(font
@@ -164185,7 +164430,8 @@
 		)
 		(property "LCSC" "C22466768"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "85eec970-26dd-4495-a0c2-56e120669b24")
 			(effects
 				(font
@@ -164196,7 +164442,8 @@
 		)
 		(property "MPN" "SP60N05GNJ"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "4c48324b-778b-456d-858a-9de25018ad74")
 			(effects
 				(font
@@ -164207,7 +164454,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "a57aa53b-87fe-463d-8ed7-56d147c865df")
 			(effects
 				(font
@@ -164544,7 +164792,8 @@
 		)
 		(property "LCSC" "C2673275"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "bd5ac6f3-bf77-4c78-becd-c236f6e63c8a")
 			(effects
 				(font
@@ -164555,7 +164804,8 @@
 		)
 		(property "MPN" "TMUX1511RSVR"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "8b25fcc1-e419-43d1-a4b6-086f37232db6")
 			(effects
 				(font
@@ -164566,7 +164816,8 @@
 		)
 		(property "Manufacturer" "Texas Instruments"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "93e73b38-64b7-47d6-ae0e-efba4612a26a")
 			(effects
 				(font
@@ -165114,7 +165365,8 @@
 		)
 		(property "Manufacturer" "Tritech-MOS"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "6771cc09-53f5-44ce-a7eb-9cbcb8e4b39c")
 			(effects
 				(font
@@ -165125,7 +165377,8 @@
 		)
 		(property "LCSC" "C7422903"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "e8b1ea5b-3265-40be-bf0c-6c8c6b45a8fb")
 			(effects
 				(font
@@ -165136,7 +165389,8 @@
 		)
 		(property "MPN" "TMGN4060DF"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "6c791ce0-285b-4f50-be37-38cebae35ae1")
 			(effects
 				(font
@@ -165147,7 +165401,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "082b5d74-d160-4641-b97b-57b551843e24")
 			(effects
 				(font
@@ -168376,7 +168631,8 @@
 		)
 		(property "Population" "CM5"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "0a5e697d-ed35-4592-a143-37db0e653f81")
 			(effects
 				(font
@@ -168764,7 +169020,8 @@
 		)
 		(property "LCSC" "C54425770"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "4241b99e-48c2-4e9f-a188-e06d151e938c")
 			(effects
 				(font
@@ -168775,7 +169032,8 @@
 		)
 		(property "MPN" "AAPS1050M4R7A"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "df4fab9d-88f9-477d-8b59-a44663896e38")
 			(effects
 				(font
@@ -168786,7 +169044,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "b5decb15-c665-4b29-8be1-e8763f4a8e7d")
 			(effects
 				(font
@@ -168797,7 +169056,8 @@
 		)
 		(property "Manufacturer" "Coilank"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "3b342024-0f35-4aa6-ba1d-654724c1ab46")
 			(effects
 				(font
@@ -169160,7 +169420,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "9b201529-1eca-4f31-a9d5-b08eed52691e")
 			(effects
 				(font
@@ -169727,7 +169988,8 @@
 		)
 		(property "LCSC" "C54425770"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "deb9fff1-9014-4303-b889-b11bfc4fc6fd")
 			(effects
 				(font
@@ -169738,7 +170000,8 @@
 		)
 		(property "MPN" "AAPS1050M4R7A"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "d8a308f3-aff1-49c7-a379-513bda02917c")
 			(effects
 				(font
@@ -169749,7 +170012,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "dd1431e3-0e62-44a9-aaac-4f5ec5e93947")
 			(effects
 				(font
@@ -169760,7 +170024,8 @@
 		)
 		(property "Manufacturer" "Coilank"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "4d961277-d69c-4e0b-b767-11c0007af97c")
 			(effects
 				(font
@@ -171167,7 +171432,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "90d6449c-d5da-4795-a5cc-3e108e3083ef")
 			(effects
 				(font
@@ -171594,7 +171860,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "4d6ac39d-f7ef-49e4-8c6a-660e27ce16bf")
 			(effects
 				(font
@@ -177942,7 +178209,8 @@
 		)
 		(property "Manufacturer" "Tritech-MOS"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "4ac803a0-1cf3-4fc0-95a5-0ec758ff8bfc")
 			(effects
 				(font
@@ -177953,7 +178221,8 @@
 		)
 		(property "LCSC" "C7422903"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "a67c4ef7-78f7-4e09-8e5a-0f8fa9909832")
 			(effects
 				(font
@@ -177964,7 +178233,8 @@
 		)
 		(property "MPN" "TMGN4060DF"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "33d7e9f8-d5ec-4d27-8bbc-580a61f06871")
 			(effects
 				(font
@@ -177975,7 +178245,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "3e079d88-1eeb-4438-aca9-a897cc18325f")
 			(effects
 				(font
@@ -179562,7 +179833,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "dbd7ade2-bbbb-4ace-8c61-61d8455ac55f")
 			(effects
 				(font
@@ -180650,7 +180922,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "f625b497-9c6a-48d6-9aaf-153b10d21c56")
 			(effects
 				(font
@@ -180661,7 +180934,8 @@
 		)
 		(property "LCSC" "C188070"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "0249fa6e-e053-416a-8c6a-dbcdd6af6a7e")
 			(effects
 				(font
@@ -180672,7 +180946,8 @@
 		)
 		(property "MPN" "RLM12FTCMR010"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "57b37c7c-70ec-4ffc-968e-e9c84a572f21")
 			(effects
 				(font
@@ -180683,7 +180958,8 @@
 		)
 		(property "Manufacturer" "RALEC"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "97dbfe0c-caef-4403-b14a-65ad81fe6a76")
 			(effects
 				(font
@@ -181106,7 +181382,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "41e3bf51-0ae2-4b06-8248-1c8c30baf17c")
 			(effects
 				(font
@@ -181271,7 +181548,8 @@
 		)
 		(property "Manufacturer" "Tritech-MOS"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "8f640173-7408-46d3-8554-737fb2de990b")
 			(effects
 				(font
@@ -181282,7 +181560,8 @@
 		)
 		(property "LCSC" "C7422903"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "6bd3bf9e-cb56-461e-8c12-0c71d707398c")
 			(effects
 				(font
@@ -181293,7 +181572,8 @@
 		)
 		(property "MPN" "TMGN4060DF"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "3ef87690-5caa-4bb2-b7c3-484dfc4e5ffd")
 			(effects
 				(font
@@ -181304,7 +181584,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "35edd210-39d6-4706-ac0f-697e1c0e9a7f")
 			(effects
 				(font
@@ -182042,7 +182323,8 @@
 		)
 		(property "LCSC" "C6890985"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "a58dd941-fa62-41be-997b-68299806a2b1")
 			(effects
 				(font
@@ -182053,7 +182335,8 @@
 		)
 		(property "MPN" "LMR51450SDRRR"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "5acfcf1d-a31d-43de-a986-9e84456eb5d0")
 			(effects
 				(font
@@ -182064,7 +182347,8 @@
 		)
 		(property "Population" "PD"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "77805242-5e32-495d-bf5d-d849fe2ed6f8")
 			(effects
 				(font
@@ -182075,7 +182359,8 @@
 		)
 		(property "Manufacturer" "Texas Instruments"
 			(at 0 0 0)
-			(layer "F.SilkS")
+			(layer "F.Fab")
+			(hide yes)
 			(uuid "93853576-7444-4c33-ac3d-95c8e6f2e2d6")
 			(effects
 				(font
