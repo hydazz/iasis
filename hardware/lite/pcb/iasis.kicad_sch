@@ -229,7 +229,7 @@
 			(color 0 0 0 0)
 		)
 		(uuid "03c2519d-e43e-4e62-b36f-9d73983cf135")
-		(property "Sheetname" "Optional USB-C charging input"
+		(property "Sheetname" "Brick input and logic child"
 			(at 279.4 156.7684 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -492,6 +492,57 @@
 			(project "iasis"
 				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5"
 					(page "26")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 355.6 228.6)
+		(size 38.1 20.32)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "43596bee-318f-447c-b1d9-44ca766fe9e9")
+		(property "Sheetname" "Side link"
+			(at 355.6 227.8884 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Sheetfile" "side-link.kicad_sch"
+			(at 355.6 249.5084 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(instances
+			(project "iasis"
+				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5"
+					(page "34")
+					(variant
+						(name "Hub")
+						(dnp yes)
+					)
+					(variant
+						(name "HubPD")
+						(dnp yes)
+					)
 				)
 			)
 		)

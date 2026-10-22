@@ -843,11 +843,15 @@
     "used_designators": "",
     "variants": [
       {
+        "description": "HubPD with the CM5 side link fitted",
+        "name": "CM5"
+      },
+      {
         "description": "USB hub with host-powered target presence supplies",
         "name": "Hub"
       },
       {
-        "description": "USB hub with optional USB-C charging input and per-port supplies",
+        "description": "Hub with a USB-C brick input and pooled per-port PD stages",
         "name": "HubPD"
       }
     ]
@@ -979,11 +983,15 @@
     ],
     [
       "03c2519d-e43e-4e62-b36f-9d73983cf135",
-      "Optional USB-C charging input"
+      "Brick input and logic child"
     ],
     [
       "24d22e7d-274a-4a90-9b61-33ad319e8970",
       "Converter temperatures"
+    ],
+    [
+      "43596bee-318f-447c-b1d9-44ca766fe9e9",
+      "Side link"
     ]
   ],
   "text_variables": {},

@@ -39,9 +39,13 @@ Files are unmodified except for filenames. Applicable terms and redistribution r
 | Molex_105450-0101.step | Molex 105450-0101 | C134092 |
 | onsemi_MLP14_2.5x2.5mm.step | onsemi FUSB302BMPX | C132291 |
 | TI_RUK0020B.step | TI TPD6S300ARUKR | C2876380 |
+| TI_RPM0026A.step | TI TPS55288RPMR | C2864583 |
+| Siliup_PDFN3x3-8L.step | Siliup SP60N05GNJ | C22466768 |
+| TritechMOS_DFN3x3-8L.step | Tritech-MOS TMGN4060DF | C7422903 |
 | TI_RPW0010A.step | TI TPS259470LRPWR | C3662793 |
 | OPSCO_SK6812SIDE-A.step | OPSCO SK6812SIDE-A | C5378721 |
 | CK_PTS645SL50.step | C&K PTS645SL50SMTR92LFS | C221877 |
+| HanElectricity_05A20L24P.step | HanElectricity 05A20L24P | C5362158 |
 | TI_DRR0012G.step | TI LMR51450SDRRR | C6890985 |
 | WCH_CH224Q_DFN10.step | WCH CH224Q | C46061833 |
 

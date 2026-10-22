@@ -2,14 +2,14 @@
 
 Five-port USB-C hub with programmable DFU signalling for Apple devices.
 
-The host connects to a USB 3 hub and an RP2354 management controller. Restore traffic passes through the hub; the controller handles port orientation, power and DFU commands. A Mac can remain the restore host. A later Compute Module 5 appliance can use the same USB control interface.
+The host connects to a USB 3 hub and an RP2354 management controller. Restore traffic passes through the hub; the controller handles port orientation, power and DFU commands. A Mac can remain the restore host. A CM5 build adds a side board with a Raspberry Pi Compute Module 5 as the host, using the same USB control interface.
 
 One six-layer PCB supports two assembly variants:
 
 - **Hub:** host-powered logic and limited 5 V target presence supplies.
-- **HubPD:** the same hub with a separate USB-C charging input and per-port charging supplies. It also operates without a charging supply attached.
+- **HubPD:** the same hub with a USB-C power input. A connected power supply runs the whole board and its power is shared across the target ports at 5, 9, 15 or 20 V, so a lone device can take most of it. Without one, HubPD works like Hub.
 
-The charging input is optional in either population. Without it, the available upstream USB power limits the combined target supply; five simultaneous restores are a prototype test goal. Hub PD adds selectable 5 V and 9 V charging within the negotiated input budget.
+The CM5 build is HubPD plus the side board, joined by a short flex; it needs a power supply that offers 20 V. Without a power supply, the available upstream USB power limits the combined target supply; five simultaneous restores are a prototype test goal.
 
 The MCU connects to an internal USB2 hub port, so the same host cable supports management and RP2354 ROM programming. BOOTSEL and RESET buttons provide recovery without soldering; SWD and 3.3 V UART solder pads provide independent debugging. The optional display is independent of core operation. DFU, revive and erase are separate deliberate actions.
 
