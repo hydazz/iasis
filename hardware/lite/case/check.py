@@ -150,6 +150,7 @@ def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
             _display_retention(r, c, parts)
         _case_retention(r, c, tray, parts)
         _paths(r, lay, c.part, tray)
+        _side_link(r, lay, c.part, tray)
         if (overlap := _overlap(c.part, tray)) > 1e-3:
             r.fail(f"{name} overlaps tray by {overlap:.2f} mm3")
         else:
@@ -318,6 +319,23 @@ def _paths(r: Report, lay: case.Layout, cover: Part, tray: Part) -> None:
         r.fail("blocked from outside: " + ", ".join(blocked))
     else:
         r.ok("maximum plug metal passes; seated overmolds and LED paths clear")
+
+
+def _side_link(r: Report, lay: case.Layout, cover: Part, tray: Part) -> None:
+    if case.SIDE_LINK not in lay.board.parts:
+        return
+    b = lay.board.box(case.SIDE_LINK)
+    path = Pos(b.min.X - 5, b.center().Y, b.center().Z) * Box(10, b.size.Y, b.size.Z)
+    opened = Pos(b.center().X, b.center().Y, b.min.Z) * Box(
+        b.size.X, b.size.Y, 3.52, align=case.BASE
+    )
+    if any(_overlap(shape, body) > 1e-3 for shape in (path, opened) for body in (cover, tray)):
+        r.fail("side-link flex passage or open ZIF envelope blocked")
+    else:
+        r.ok(
+            f"side-link {b.size.Y + 2 * case.PORT_FIT:.2f} x "
+            f"{b.size.Z + 2 * case.PORT_FIT:.2f} mm passage; 3.52 mm open ZIF envelope clear"
+        )
 
 
 def main() -> int:

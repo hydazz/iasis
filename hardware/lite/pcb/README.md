@@ -1,6 +1,6 @@
 # Iasis board
 
-KiCad 10 project for the six-layer, 125 × 89 mm Iasis board. One layout carries two assembly variants, Hub and HubPD; the [repository README](../../../README.md) describes them.
+KiCad 10 project for the six-layer, 133 × 102 mm Iasis board. One layout carries three assembly variants, Hub, HubPD and CM5; the [repository README](../../../README.md) describes them.
 
 <img src="preview/board.png" alt="Hub PD, top side" width="400"> <img src="preview/layout.png" alt="Tracks on every copper layer, pads and top silkscreen outlines" width="400">
 
@@ -23,8 +23,8 @@ The task writes `build/`:
 | File                           | Contents                                                  |
 | ------------------------------ | --------------------------------------------------------- |
 | `gerbers.zip`                  | Gerber and drill files                                    |
-| `bom-Hub.csv`, `bom-HubPD.csv` | Bill of materials per variant, one row per LCSC part      |
-| `cpl-Hub.csv`, `cpl-HubPD.csv` | Placements per variant, corrected for JLCPCB's footprints |
+| `bom-Hub.csv`, `bom-HubPD.csv`, `bom-CM5.csv` | Bill of materials per variant, one row per LCSC part      |
+| `cpl-Hub.csv`, `cpl-HubPD.csv`, `cpl-CM5.csv` | Placements per variant, corrected for JLCPCB's footprints |
 
 Run `mise run //hardware/lite/pcb:preview` to refresh the tracked board and copper-layout images. Commit them with the design changes they show.
 
@@ -32,7 +32,7 @@ Run `mise run //hardware/lite/pcb:step` to export `build/board.step`, which the 
 
 The upload ZIP contains Gerber and drill files. It excludes the optional Gerber job file, whose board-preview colour and impedance-control metadata differ from the order settings below.
 
-The underside carries the name, repository URL and `REV ${REVISION}`, read from the board's title block. The PCB revision identifies a fabricated board design; tag its source commit (for example, `hw-rev-a`) and keep that release's fabrication files together. Hub and HubPD share the PCB revision.
+The underside carries the name, repository URL and `REV ${REVISION}`, read from the board's title block. The PCB revision identifies a fabricated board design; tag its source commit (for example, `hw-rev-a`) and keep that release's fabrication files together. All three assembly variants share the PCB revision.
 
 ### Logo
 
@@ -62,7 +62,7 @@ PCB options:
 
 | Option                  | Setting                 | Reason                                                                                                        |
 | ----------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Layers, size            | 6, 125 × 89 mm          |                                                                                                               |
+| Layers, size            | 6, 133 × 102 mm          |                                                                                                               |
 | Thickness               | 1.6 mm                  | Economic assembly of six layers needs 1.6 mm, green and ENIG                                                  |
 | Specify stackup         | JLC06161H-3313          | The 90 Ω pairs (0.1356 mm tracks, 0.1501 mm gap) are sized for it; accept JLC's 1.54 mm actual thickness note |
 | Colour                  | Green                   | As thickness                                                                                                  |

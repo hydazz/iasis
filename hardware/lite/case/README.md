@@ -1,6 +1,6 @@
 # Iasis case
 
-A screwless 3D-printable enclosure for Iasis, generated with [build123d](https://github.com/gumyr/build123d) from the populated board. Passive and OLED covers share a tray. Both bodies measure 128 × 91.6 × 20.1 mm.
+A screwless 3D-printable enclosure for Iasis, generated with [build123d](https://github.com/gumyr/build123d) from the populated board. Passive and OLED covers share a tray. The bodies measure 136 × 104.6 mm, with heights of 17.1 mm for the passive cover and 19.6 mm for the OLED cover. The button stands another 0.2 mm above the roof.
 
 <img src="preview/case.png" alt="Iasis enclosure" width="500">
 
@@ -42,6 +42,8 @@ Use a 0.4 mm nozzle and 0.20 mm layers, without supports. Print the button in th
 Place the board on the tray pegs, insert the button from inside the cover, and press the cover down until both end catches engage. To open, press the two round end-wall pads inward and lift the cover vertically.
 
 The OLED cover accepts an Adafruit 938 STEMMA QT display. Seat it on the cover's locating pins, slip the retaining frame into the two rear keepers, then press its front edge into the finger catch. To remove it, push the finger pad inward, lift the front edge and slide the frame out. Connect a Qwiic cable before closing the case, keeping the lead clear of the button and catches.
+
+A 17.02 × 2.62 mm opening in the left wall clears the optional J2001 side-link connector and its flat flex. Fit or release the flex with the cover removed. This enclosure holds the main board; the CM5 daughterboard needs its own support and enclosure.
 
 A dot marks target port 1; laptop and plug icons identify host and power. The activity icon marks the Iasis status LED. The button legend denotes a click for DFU and a hold to reboot connected targets. Firmware is not yet implemented. Remove the cover to reach BOOTSEL and RESET.
 

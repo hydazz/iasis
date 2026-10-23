@@ -9,7 +9,7 @@ the STEP does not contain.
 """
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 from typing import cast
@@ -95,6 +95,7 @@ BUTTON_FLANGE_D = 13.0
 BUTTON_FLANGE_H = (BUTTON_FLANGE_D - BUTTON_D) / 2  # printable 45 degree shoulder
 BUTTON_ROOF_GAP, BUTTON_PROUD, BUTTON_PIN = 0.2, 0.2, 4.0
 BUTTON_TRAVEL = 0.6  # case clearance envelope, not the switch's permitted stroke
+SIDE_LINK = "J2001"
 
 
 @dataclass(frozen=True)
@@ -198,6 +199,7 @@ class Layout:
     parts_top: float  # tallest placed part
     split: float
     logo: Path | None = None
+    _roofs: dict[Display | None, float] = field(default_factory=dict, init=False, repr=False)
 
     @property
     def y_front(self) -> float:
@@ -218,6 +220,8 @@ class Layout:
         return sum(self.board.box(ref).center().X for ref in DISPLAY_OVER) / len(DISPLAY_OVER)
 
     def top_inside(self, display: Display | None = None) -> float:
+        if display in self._roofs:
+            return self._roofs[display]
         top = self.parts_top + HEADROOM
         if display:
             # Only components beneath the module determine its required height.
@@ -237,7 +241,32 @@ class Layout:
             top = max(
                 top, local_top + MIN_GAP + display.back + thickness + display.glass[4] + GLASS_GAP
             )
-        return math.ceil(top * 2) / 2
+            rear = -GLASS_GAP - display.glass[4] - thickness
+            frame = DisplayFrame(self.display_x, rear, 0, display.holes)
+            # Frame rails and keeper toes hang below the display's rear components.
+            for shape in (frame.part, *frame.keepers):
+                envelope = shape.bounding_box()
+                under = [
+                    b.max.Z
+                    for b in boxes
+                    if b.min.X < envelope.max.X + MIN_GAP
+                    and b.max.X > envelope.min.X - MIN_GAP
+                    and b.min.Y < envelope.max.Y + MIN_GAP
+                    and b.max.Y > envelope.min.Y - MIN_GAP
+                ]
+                top = max(top, max(under, default=self.seat) + MIN_GAP - envelope.min.Z)
+        self._roofs[display] = math.ceil(top * 2) / 2
+        return self._roofs[display]
+
+    @cached_property
+    def side_link_passage(self) -> Part | None:
+        """Clear the closed ZIF and a straight flex through the left wall."""
+        if SIDE_LINK not in self.board.parts:
+            return None
+        b = self.board.box(SIDE_LINK)
+        return Pos(-self.length / 2, b.center().Y, b.center().Z) * Box(
+            2 * (WALL + CLEARANCE + 1), b.size.Y + 2 * PORT_FIT, b.size.Z + 2 * PORT_FIT
+        )
 
 
 @dataclass
@@ -364,6 +393,8 @@ def tray(lay: Layout) -> Part:
             LOCATOR_D / 2, LOCATOR_D / 2 - 0.4, 0.4, align=BASE
         )
     body -= Compound([_wall_cut(o) for o in lay.openings])
+    if lay.side_link_passage is not None:
+        body -= lay.side_link_passage
     joint = Joint(lay.length / 2, lay.split, lay.top_inside())
     body += Compound(joint.tray_parts())
     body -= Compound(joint.tray_cuts())
@@ -398,6 +429,8 @@ def cover(lay: Layout, name: str, display: Display | None) -> Cover:
     shell += Compound(list(intrusions.values()))
 
     cuts += [_wall_cut(o) for o in lay.openings]
+    if lay.side_link_passage is not None:
+        cuts.append(lay.side_link_passage)
     cuts += _top_slots(lay, top_in - 1, TOP + 2, display)
     sw = lay.board.box(BUTTON).center()
     cuts.append(
@@ -559,8 +592,10 @@ def _top_slots(lay: Layout, z: float, depth: float, display: Display | None) -> 
     slots = []
     rows: dict[int, list[tuple[int, Sketch]]] = {}
     # Short 12 mm vents leave cross ribs and bridge cleanly on the print bed.
-    for x in range(-48, 49, 4):
-        for y in (-16, 0, 16):
+    x_start, x_end = math.ceil((-lay.length / 2 + 10) / 4), math.floor((lay.length / 2 - 10) / 4)
+    y_start, y_end = math.ceil((-lay.width / 2 + 14) / 16), math.floor((lay.width / 2 - 14) / 16)
+    for x in range(4 * x_start, 4 * x_end + 1, 4):
+        for y in range(16 * y_start, 16 * y_end + 1, 16):
             profile = Pos(x, y, z) * Rot(Z=90) * SlotOverall(12, SLOT_W)
             b = profile.bounding_box()
             if any(

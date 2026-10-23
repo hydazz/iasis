@@ -4,12 +4,13 @@ Five-port USB-C hub with programmable DFU signalling for Apple devices.
 
 The host connects to a USB 3 hub and an RP2354 management controller. Restore traffic passes through the hub; the controller handles port orientation, power and DFU commands. A Mac can remain the restore host. A CM5 build adds a side board with a Raspberry Pi Compute Module 5 as the host, using the same USB control interface.
 
-One six-layer PCB supports two assembly variants:
+One six-layer PCB supports three assembly variants:
 
 - **Hub:** host-powered logic and limited 5 V target presence supplies.
 - **HubPD:** the same hub with a USB-C power input. A connected power supply runs the whole board and its power is shared across the target ports at 5, 9, 15 or 20 V, so a lone device can take most of it. Without one, HubPD works like Hub.
+- **CM5:** HubPD with the side-link connector and protection fitted. The separate CM5 board joins through a short flex and needs a power supply that offers 20 V.
 
-The CM5 build is HubPD plus the side board, joined by a short flex; it needs a power supply that offers 20 V. Without a power supply, the available upstream USB power limits the combined target supply; five simultaneous restores are a prototype test goal.
+The CM5 BOM and placements cover the main board; the daughterboard is a separate design. Without a power supply, the available upstream USB power limits the combined target supply; five simultaneous restores are a prototype test goal.
 
 The MCU connects to an internal USB2 hub port, so the same host cable supports management and RP2354 ROM programming. BOOTSEL and RESET buttons provide recovery without soldering; SWD and 3.3 V UART solder pads provide independent debugging. The optional display is independent of core operation. DFU, revive and erase are separate deliberate actions.
 
@@ -41,7 +42,7 @@ Tools come from mise (`mise install` at the repository root); KiCad 10 is needed
 mise run //hardware/lite/pcb:fab
 ```
 
-This writes `hardware/lite/pcb/build/`: `gerbers.zip` (gerbers and drill files for JLCPCB), and `bom-Hub.csv`, `bom-HubPD.csv`, `cpl-Hub.csv` and `cpl-HubPD.csv` for JLCPCB assembly of each variant, with placements corrected for JLCPCB's footprints. [hardware/lite/pcb](hardware/lite/pcb/README.md) lists the JLCPCB order options. The enclosure has its own tasks; see [hardware/lite/case](hardware/lite/case/README.md).
+This writes `hardware/lite/pcb/build/`: `gerbers.zip` (gerbers and drill files for JLCPCB), and `bom-Hub.csv`, `bom-HubPD.csv`, `bom-CM5.csv` and their matching `cpl-*.csv` files for JLCPCB assembly of each variant, with placements corrected for JLCPCB's footprints. [hardware/lite/pcb](hardware/lite/pcb/README.md) lists the JLCPCB order options. The enclosure has its own tasks; see [hardware/lite/case](hardware/lite/case/README.md).
 
 ## License
 
