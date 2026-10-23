@@ -11036,7 +11036,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "1M"
+		(property "Value" "10k"
 			(at 383.54 232.41 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11058,7 +11058,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2206010100_UNI-ROYAL-Uniroyal-Elec-0402WGF1003TCE_C25741.pdf"
+		(property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2411221126_UNI-ROYAL-Uniroyal-Elec-0402WGF1002TCE_C25744.pdf"
 			(at 381 231.14 0)
 			(hide yes)
 			(show_name no)
@@ -11080,7 +11080,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C26083"
+		(property "LCSC" "C25744"
 			(at 381 231.14 0)
 			(hide yes)
 			(show_name no)
@@ -11091,7 +11091,7 @@
 				)
 			)
 		)
-		(property "MPN" "0402WGF1004TCE"
+		(property "MPN" "0402WGF1002TCE"
 			(at 381 231.14 0)
 			(hide yes)
 			(show_name no)
