@@ -1,4 +1,4 @@
-"""Export Gerbers, drills, and the Hub/HubPD assembly files."""
+"""Export Gerbers, drills, and the Hub/HubPD/CM5 assembly files."""
 
 import argparse
 import os
@@ -81,7 +81,7 @@ def main():
             for file in sorted(gerbers.iterdir()):
                 if file.suffix != ".gbrjob":
                     archive.write(file, file.name)
-        for variant in ("Hub", "HubPD"):
+        for variant in ("Hub", "HubPD", "CM5"):
             bom = work / f"bom-{variant}.csv"
             run(
                 cli,
