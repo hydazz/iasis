@@ -9265,7 +9265,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "39k 1%"
+		(property "Value" "36.5k 1%"
 			(at 251.46 311.15 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9287,7 +9287,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2206010100_UNI-ROYAL-Uniroyal-Elec-0402WGF3902TCE_C25783.pdf"
+		(property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2206010045_UNI-ROYAL-Uniroyal-Elec-0402WGF3652TCE_C25887.pdf"
 			(at 248.92 311.15 0)
 			(hide yes)
 			(show_name no)
@@ -9320,7 +9320,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C25783"
+		(property "LCSC" "C25887"
 			(at 248.92 311.15 0)
 			(hide yes)
 			(show_name no)
@@ -9331,7 +9331,7 @@
 				)
 			)
 		)
-		(property "MPN" "0402WGF3902TCE"
+		(property "MPN" "0402WGF3652TCE"
 			(at 248.92 311.15 0)
 			(hide yes)
 			(show_name no)
