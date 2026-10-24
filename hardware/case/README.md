@@ -1,6 +1,6 @@
 # Iasis case
 
-A screwless 3D-printable enclosure for Iasis, generated with [build123d](https://github.com/gumyr/build123d) from the populated board. Passive and OLED covers share a tray. The bodies measure 136 × 104.6 mm, with heights of 17.1 mm for the passive cover and 19.6 mm for the OLED cover. The button stands another 0.2 mm above the roof. The CM5 build has its own enclosure, one tray and cover for the main board and the CM5 side board: 212.6 × 104.6 mm and 25.1 mm high, set by the CM5 cooler.
+A screwless 3D-printable enclosure for Iasis, generated with [build123d](https://github.com/gumyr/build123d) from the populated board. Passive and OLED covers share a tray. The bodies measure 136 × 104.6 mm, with heights of 17.1 mm for the passive cover and 19.6 mm for the OLED cover. The button stands another 0.2 mm above the roof. The CM5 build has its own enclosure, one tray and flat cover for the main board and the CM5 side board: 212.6 × 104.6 mm and 23.1 mm high, set by the Ethernet socket.
 
 <img src="preview/case.png" alt="Iasis enclosure" width="500">
 
@@ -41,7 +41,7 @@ Place the board on the tray pegs, insert the button from inside the cover, and p
 
 The OLED cover accepts an Adafruit 938 STEMMA QT display. Seat it on the cover's locating pins, slip the retaining frame into the two rear keepers, then press its front edge into the finger catch. To remove it, push the finger pad inward, lift the front edge and slide the frame out. Connect a Qwiic cable before closing the case, keeping the lead clear of the button and catches.
 
-The CM5 build's enclosure holds both boards on its tray pegs, the side board's RJ45, accessory and service USB-C ports and nRPIBOOT pinhole in the rear wall beside the host and power ports. Fit the CM5 cooler's screws from below before seating the side board, then fit the side-link flex into both vertical connectors, contacts toward the gap, and close their actuators, with the cover removed.
+The CM5 build's enclosure holds both boards on its tray pegs, the side board's RJ45, accessory and service USB-C ports and nRPIBOOT pinhole in the rear wall beside the host and power ports. It reserves space for the [Waveshare CM4-HEATSINK, SKU 19623](https://www.waveshare.com/cm4-heatsink.htm): a 55 × 40 × 5 mm body with a provisional 3 mm mounting allowance above the module PCB. Verify the supplied standoffs and thermal-pad contact with the CM5 before assembly; the clearance model does not establish thermal performance. Fit the cooler's screws from below before seating the side board, then fit the side-link flex into both vertical connectors, contacts toward the gap, and close their actuators, with the cover removed.
 
 A dot marks target port 1; laptop and plug icons identify host and power. The activity icon marks the Iasis status LED. The button legend denotes a click for DFU and a hold to reboot connected targets. Firmware is not yet implemented. Remove the cover to reach BOOTSEL and RESET.
 

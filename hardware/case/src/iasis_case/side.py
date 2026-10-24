@@ -1,5 +1,5 @@
-"""The CM5 side board beside the main board: its populated STEP, the Raspberry Pi Cooler
-for CM5, its screw heads and the side-link flex, and both boards as one for the CM5 build's
+"""The CM5 side board beside the main board: its populated STEP, the Waveshare CM4-HEATSINK
+envelope, its screw heads and the side-link flex, and both boards as one for the CM5 build's
 enclosure.
 
 Side geometry is in the main board's coordinates (board.py). The side board sits left of
@@ -38,10 +38,11 @@ TIP = 1.45  # FPC tip above the board top
 LEG = 4.2 + 0.5  # stiffener from the tip, then straight before the bend
 FLEX_W, FLEX_T = 12.5, 0.19
 
-# Raspberry Pi Cooler for CM5 (product brief): bosses on the module's four mounting
-# holes carry the fin block. The module sits 1.5 mm up on its sockets and is 1.24 mm thick.
-COOLER = (56.0, 41.0, 12.7)  # along the long hole pitch, across it, above the module
-MODULE_TOP, BOSS_H, BOSS_D = 1.5 + 1.24, 2.7, 5.0
+# Waveshare 19623 / CM4-HEATSINK: 55 x 40 x 5 mm body, excluding mounting hardware.
+# Reserve 3 mm between the module PCB and heatsink base. This is a fit allowance;
+# confirm the supplied standoffs and CM5 thermal-pad contact on the physical module.
+COOLER = (55.0, 40.0, 5.0)
+MODULE_TOP, BOSS_H, BOSS_D = 1.5 + 1.24, 3.0, 5.0
 CM5_HOLE_D = 2.7
 SCREW_HEAD = (4.5, 1.65)  # M2.5 pan head under the board, diameter and height
 
@@ -81,7 +82,7 @@ def assemble(main: Board, step: Path = STEP) -> Side:
     span = [max(getattr(h, a) for h in holes) - min(getattr(h, a) for h in holes) for a in "XY"]
     fins = COOLER[:2] if span[0] > span[1] else COOLER[1::-1]
     seat = side.body.bounding_box().max.Z
-    cooler = Pos(c.X, c.Y, seat + MODULE_TOP + BOSS_H) * Box(*fins, COOLER[2] - BOSS_H, align=BASE)
+    cooler = Pos(c.X, c.Y, seat + MODULE_TOP + BOSS_H) * Box(*fins, COOLER[2], align=BASE)
     for h in holes:
         cooler += Pos(h.X, h.Y, seat + MODULE_TOP) * Cylinder(BOSS_D / 2, BOSS_H, align=BASE)
     under = (Align.CENTER, Align.CENTER, Align.MAX)
