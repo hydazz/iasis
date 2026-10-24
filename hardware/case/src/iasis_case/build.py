@@ -39,14 +39,13 @@ def write(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--logo", type=Path, help="filled SVG placed beside the name")
     parser.add_argument("--output", type=Path, help="build output directory")
     args = parser.parse_args()
     output = args.output.resolve() if args.output else BUILD
     output.mkdir(parents=True, exist_ok=True)
     steps = [
-        write("", *case.assemble(args.logo), output),
-        write("cm5-", *case.assemble_cm5(args.logo), output),
+        write("", *case.assemble(), output),
+        write("cm5-", *case.assemble_cm5(), output),
     ]
     print(f"STLs: {output / 'print'}")
     print("Assemblies: " + ", ".join(str(s) for s in steps))

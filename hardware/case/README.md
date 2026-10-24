@@ -29,15 +29,7 @@ The task exports the populated boards from `../boards/iasis` and `../boards/cm5`
 
 Run `mise run //hardware/case:preview` to refresh `preview/case.png` and `preview/case-cm5.png`. Run `mise run //hardware/case:check` to check solid validity, component clearance, USB access and moving parts for both enclosures. Neither is part of the build task.
 
-To place a logo beside the name, supply a filled SVG:
-
-```bash
-mise run //hardware/case:build -- --logo ../../logos/logo.svg
-```
-
-The logo fits within 20 × 10.8 mm, with a 1.8 mm gap before the name; the pair is centred together. Both covers include it in the engraving and lettering STLs. Use filled paths with text and strokes converted to paths. Without `--logo`, only the name is used. The root `logos/` directory holds local SVG inputs and ignores them by default; any other path also works.
-
-The `preview` and `check` tasks accept the same `--logo` option. Use `--output DIR` on `build` or `preview` to change their output directories.
+Use `--output DIR` on `build` or `preview` to change their output directories.
 
 The installed package also provides `iasis-case-build`, `iasis-case-preview`, `iasis-case-check` and `iasis-case-view`; run them with `uv run --locked` from this directory.
 

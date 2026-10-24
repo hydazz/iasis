@@ -356,16 +356,14 @@ def _paths(r: Report, lay: case.Layout, cover: Part, tray: Part) -> None:
 
 def main() -> int:
     import argparse
-    from pathlib import Path
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--logo", type=Path, help="filled SVG placed beside the name")
     parser.add_argument("--cm5", action="store_true", help="check the CM5 build's enclosure")
     args = parser.parse_args()
     if args.cm5:
-        report = run(*case.assemble_cm5(args.logo), holes=2 * EXPECTED_HOLES)
+        report = run(*case.assemble_cm5(), holes=2 * EXPECTED_HOLES)
     else:
-        report = run(*case.assemble(args.logo))
+        report = run(*case.assemble())
     print("\n".join(report.lines))
     print(f"{len(report.failures)} failures" if report.failures else "all checks passed")
     return int(bool(report.failures))

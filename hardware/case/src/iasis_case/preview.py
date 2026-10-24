@@ -15,15 +15,14 @@ BODY, TEXT = (214, 216, 220), (35, 38, 42)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--logo", type=Path, help="filled SVG placed beside the name")
     parser.add_argument("--output", type=Path, help="preview output directory")
     args = parser.parse_args()
     output = args.output.resolve() if args.output else PREVIEW
     output.mkdir(parents=True, exist_ok=True)
     # The CM5 build is seen from the rear, where its side board ports are.
     for name, view, (lay, tray, covers) in (
-        ("case.png", VIEW, case.assemble(args.logo)),
-        ("case-cm5.png", REAR_VIEW, case.assemble_cm5(args.logo)),
+        ("case.png", VIEW, case.assemble()),
+        ("case-cm5.png", REAR_VIEW, case.assemble_cm5()),
     ):
         visible = Compound([lay.board.parts[ref] for ref in (*lay.ports, *case.LIGHTS)])
         c = covers["passive"]

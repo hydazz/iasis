@@ -44,7 +44,7 @@ from build123d import (
     fillet,
 )
 
-from .artwork import icon, wordmark
+from .artwork import icon
 from .board import Board, load
 from .retention import DisplayFrame, Joint
 from .side import assemble as side_board
@@ -213,7 +213,6 @@ class Layout:
     holes: list[Vector]
     parts_top: float  # tallest placed part
     split: float
-    logo: Path | None = None
     ports: dict[str, tuple[str, str]] = field(default_factory=lambda: dict(PORTS))
     main_x: float = 0.0  # the main board's centre, under the name
     _roofs: dict[Display | None, float] = field(default_factory=dict, init=False, repr=False)
@@ -289,7 +288,6 @@ class Cover:
 
 def layout(
     board: Board,
-    logo: Path | None = None,
     ports: dict[str, tuple[str, str]] = PORTS,
     main_x: float = 0.0,
 ) -> Layout:
@@ -328,7 +326,6 @@ def layout(
         holes=board.holes(HOLE_D),
         parts_top=max(board.box(ref, exact=False).max.Z for ref in board.parts),
         split=board.body.bounding_box().max.Z + 1.6,
-        logo=logo,
         ports=dict(ports),
         main_x=main_x,
     )
@@ -557,7 +554,8 @@ def _artwork(lay: Layout) -> list[Sketch]:
         Pos(power.X, lay.y_rear - 7) * icon("plug"),
         Pos(first.X, lay.y_front + 7) * Circle(1),
         Pos(status.X, lay.y_front + 7) * icon("activity", size=5.5),
-        Pos(lay.main_x, lay.y_front + 7) * wordmark(WORDMARK, WORDMARK_SIZE, lay.logo),
+        Pos(lay.main_x, lay.y_front + 7)
+        * Text(WORDMARK, font_size=WORDMARK_SIZE, font_style=FontStyle.BOLD),
         Pos(sw.X - 10.3, y) * Circle(0.7),
         Pos(sw.X - 3.8, y) * Text("DFU", font_size=TEXT_SIZE, font_style=FontStyle.BOLD),
         Pos(sw.X + 4.7, y) * SlotOverall(4, 1.4),
@@ -639,17 +637,17 @@ STEP = BOARDS / "board.step"  # HubPD, which fits Hub too; the side link is unfi
 CM5_STEP = BOARDS / "board-cm5.step"
 
 
-def assemble(logo: Path | None = None) -> tuple[Layout, Part, dict[str, Cover]]:
-    lay = layout(load(STEP), logo)
+def assemble() -> tuple[Layout, Part, dict[str, Cover]]:
+    lay = layout(load(STEP))
     covers = {name: cover(lay, name, display) for name, display in COVERS.items()}
     return lay, tray(lay), covers
 
 
-def assemble_cm5(logo: Path | None = None) -> tuple[Layout, Part, dict[str, Cover]]:
+def assemble_cm5() -> tuple[Layout, Part, dict[str, Cover]]:
     """The CM5 build: one tray and cover for the main board and the CM5 side board."""
     main = load(CM5_STEP)
     both = pair(main, side_board(main))
-    lay = layout(both, logo, PORTS | SIDE_PORTS, both.shift.position.X)
+    lay = layout(both, ports=PORTS | SIDE_PORTS, main_x=both.shift.position.X)
     covers = {name: cover(lay, name, display) for name, display in COVERS.items()}
     return lay, tray(lay), covers
 
