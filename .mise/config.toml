@@ -17,23 +17,23 @@ KICAD_CLI = "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli"
 KICAD_PYTHON = "/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3"
 
 [monorepo]
-config_roots = ["hardware/lite/case", "hardware/lite/pcb"]
+config_roots = ["hardware/case", "hardware/boards/iasis"]
 
 [tasks.deps]
 description = "Install Python dependencies"
-depends = ["//hardware/lite/case:deps"]
+depends = ["//hardware/case:deps"]
 
 [tasks.build]
 description = "Build the case and PCB fabrication files"
-depends = ["//hardware/lite/case:build", "//hardware/lite/pcb:fab"]
+depends = ["//hardware/case:build", "//hardware/boards/iasis:fab"]
 
 [tasks.preview]
 description = "Refresh the case and board previews"
-depends = ["//hardware/lite/case:preview", "//hardware/lite/pcb:preview"]
+depends = ["//hardware/case:preview", "//hardware/boards/iasis:preview"]
 
 [tasks.check]
 description = "Check Python sources, enclosure fit and KiCad designs"
-depends = ["lint", "fmt-check", "//hardware/lite/case:check", "//hardware/lite/pcb:check"]
+depends = ["lint", "fmt-check", "//hardware/case:check", "//hardware/boards/iasis:check"]
 
 [tasks.lint]
 description = "Lint Python sources"

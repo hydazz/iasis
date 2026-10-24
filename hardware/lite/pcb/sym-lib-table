@@ -1,4 +1,0 @@
-(sym_lib_table
-  (version 7)
-
-  (lib (name "Iasis") (type "KiCad") (uri "${KIPRJMOD}/Iasis.kicad_sym") (options "") (descr "")))

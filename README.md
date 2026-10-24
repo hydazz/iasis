@@ -18,7 +18,7 @@ In development. Firmware and host software are not yet implemented. Hardware and
 
 ## Development
 
-The current board and enclosure live in `hardware/lite/pcb` and `hardware/lite/case`.
+The main board is in `hardware/boards/iasis`, shared libraries in `hardware/shared`. The enclosure is in `hardware/case`.
 
 ```bash
 mise install
@@ -32,17 +32,17 @@ mise run deps
 | `mise run check` | Python lint/format checks, case fit checks, KiCad DRC and ERC |
 | `mise run format` | Formatted Python sources |
 
-Builds, previews and checks are independent. Component tasks can be run directly, for example `mise run //hardware/lite/case:build`.
+Builds, previews and checks are independent. Component tasks can be run directly, for example `mise run //hardware/case:build`.
 
 ## Fabrication
 
 Tools come from mise (`mise install` at the repository root); KiCad 10 is needed at the path `KICAD_CLI` names in `.mise/config.toml`.
 
 ```bash
-mise run //hardware/lite/pcb:fab
+mise run //hardware/boards/iasis:fab
 ```
 
-This writes `hardware/lite/pcb/build/`: `gerbers.zip` (gerbers and drill files for JLCPCB), and `bom-Hub.csv`, `bom-HubPD.csv`, `bom-CM5.csv` and their matching `cpl-*.csv` files for JLCPCB assembly of each variant, with placements corrected for JLCPCB's footprints. [hardware/lite/pcb](hardware/lite/pcb/README.md) lists the JLCPCB order options. The enclosure has its own tasks; see [hardware/lite/case](hardware/lite/case/README.md).
+This writes `build/boards/iasis/`: `gerbers.zip` (gerbers and drill files for JLCPCB), and `bom-Hub.csv`, `bom-HubPD.csv`, `bom-CM5.csv` and their matching `cpl-*.csv` files for JLCPCB assembly of each variant, with placements corrected for JLCPCB's footprints. [hardware/boards/iasis](hardware/boards/iasis/README.md) lists the JLCPCB order options. The enclosure has its own tasks; see [hardware/case](hardware/case/README.md).
 
 ## License
 
