@@ -1,0 +1,298 @@
+(footprint "RaspberryPi_CM5"
+	(version 20260206)
+	(generator "pcbnew")
+	(generator_version "10.0")
+	(layer "F.Cu")
+	(descr "Raspberry Pi Compute Module 5 on two 10164227-1001A1RLF sockets (1.5mm stack, nothing under the module), with the Raspberry Pi Cooler for CM5 (56x41x12.7mm, top 15.44mm above the board). Courtyard is the cooler outline less the socket courtyards. Holes take M2.5x8 screws from below.")
+	(tags "CM5 compute module cooler")
+	(property "Reference" "REF**"
+		(at 0 -29.2 0)
+		(layer "F.SilkS")
+		(uuid "1a52f589-f42d-4c7f-8269-4f35767607d7")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Value" "RaspberryPi_CM5"
+		(at 0 29.2 0)
+		(layer "F.Fab")
+		(uuid "411b2ee0-bd2a-4a37-ac76-74d96b88f260")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "f6331793-cbf4-48ca-a327-bf6948638ad9")
+		(effects
+			(font
+				(size 1.27 1.27)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Description" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "60395daf-4f33-4d25-8411-e522acc8156d")
+		(effects
+			(font
+				(size 1.27 1.27)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Cooler" "Raspberry Pi Cooler for CM5, 56 x 41 x 12.7 mm, top 15.44 mm above the board"
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "63a192b5-8609-4752-b74b-a830e7f35e18")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(attr board_only exclude_from_pos_files exclude_from_bom)
+	(duplicate_pad_numbers_are_jumpers no)
+	(fp_line
+		(start -20.1 -27.6)
+		(end -20.1 -24.6)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "8f09adde-83d6-4a06-ac4f-486b57387048")
+	)
+	(fp_line
+		(start -20.1 -27.6)
+		(end -17.1 -27.6)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "4a32e3df-2727-4d2c-9ae5-61dc26ad3356")
+	)
+	(fp_line
+		(start -20.1 27.6)
+		(end -20.1 24.6)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "175a3c06-4c35-40e6-9716-b2be4fc15b80")
+	)
+	(fp_line
+		(start -20.1 27.6)
+		(end -17.1 27.6)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "2c61a52c-4061-4de8-9212-d88546b74f1d")
+	)
+	(fp_line
+		(start 20.1 -27.6)
+		(end 17.1 -27.6)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "5a5b6730-b42f-43ce-900c-6a896d3b592f")
+	)
+	(fp_line
+		(start 20.1 -27.6)
+		(end 20.1 -24.6)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "2ee1b820-f33e-4e02-8295-941fb43321b9")
+	)
+	(fp_line
+		(start 20.1 27.6)
+		(end 17.1 27.6)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "93d2e966-2b32-4246-a603-baf51a998c87")
+	)
+	(fp_line
+		(start 20.1 27.6)
+		(end 20.1 24.6)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "1e470e96-6df0-43a1-9478-1b92ed7e321f")
+	)
+	(fp_rect
+		(start -20.5 -28)
+		(end 20.5 28)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.CrtYd")
+		(uuid "af3e629d-0147-407a-b82c-3e0630303a52")
+	)
+	(fp_rect
+		(start -19.465 -9.375)
+		(end -14.535 14.375)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.CrtYd")
+		(uuid "7c819820-807c-49a8-bebb-f8e1c3dfbc31")
+	)
+	(fp_rect
+		(start 14.535 -9.375)
+		(end 19.465 14.375)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.CrtYd")
+		(uuid "3fe2281c-ce1b-4ec5-8828-00fddadf81ae")
+	)
+	(fp_rect
+		(start -20.5 -28)
+		(end 20.5 28)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.Fab")
+		(uuid "ff9bb77c-dced-4591-9666-b742b9ae114e")
+	)
+	(fp_rect
+		(start -20 -27.5)
+		(end 20 27.5)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.Fab")
+		(uuid "f9d02a40-554b-45bd-bdde-324c7f1be061")
+	)
+	(fp_rect
+		(start -18.69 -8.8)
+		(end -15.31 13.8)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.Fab")
+		(uuid "b88ce332-faf3-409d-be97-be2f65d86437")
+	)
+	(fp_rect
+		(start 15.31 -8.8)
+		(end 18.69 13.8)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.Fab")
+		(uuid "c66a5e50-4da3-4207-ae8a-6539b244c0cc")
+	)
+	(fp_text user "${REFERENCE}"
+		(at 0 -16 0)
+		(layer "F.Fab")
+		(uuid "87d40c4e-502b-4010-a811-57f19061cc56")
+		(effects
+			(font
+				(size 1.5 1.5)
+				(thickness 0.2)
+			)
+		)
+	)
+	(fp_text user "CM5 cooler 56x41, top 15.44 above board"
+		(at 0 -12 0)
+		(layer "F.Fab")
+		(uuid "27ada407-8dca-400c-9dc0-a582f99f1822")
+		(effects
+			(font
+				(size 1.2 1.2)
+				(thickness 0.15)
+			)
+		)
+	)
+	(pad "" np_thru_hole circle
+		(at -16.5 -24)
+		(size 2.7 2.7)
+		(drill 2.7)
+		(layers "*.Cu" "*.Mask")
+		(uuid "7ebd3d69-ec7d-4fc4-891b-4646ec98e7a4")
+	)
+	(pad "" np_thru_hole circle
+		(at -16.5 24)
+		(size 2.7 2.7)
+		(drill 2.7)
+		(layers "*.Cu" "*.Mask")
+		(uuid "32144119-3661-49b5-95de-7c2de03ffc6c")
+	)
+	(pad "" np_thru_hole circle
+		(at 16.5 -24)
+		(size 2.7 2.7)
+		(drill 2.7)
+		(layers "*.Cu" "*.Mask")
+		(uuid "48855ec8-05e9-4940-8c11-dd568631159c")
+	)
+	(pad "" np_thru_hole circle
+		(at 16.5 24)
+		(size 2.7 2.7)
+		(drill 2.7)
+		(layers "*.Cu" "*.Mask")
+		(uuid "3859043f-442f-49b9-9991-75ec3cdd6a89")
+	)
+	(embedded_fonts no)
+	(model "${KIPRJMOD}/CM5.3dshapes/RaspberryPi_CM5.step"
+		(offset
+			(xyz 20 -27.5 1.5)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 -90)
+		)
+	)
+	(model "${KIPRJMOD}/CM5.3dshapes/RaspberryPi_CM5_Cooler.step"
+		(offset
+			(xyz 0 0 0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 0)
+		)
+	)
+)

@@ -1,0 +1,273 @@
+(kicad_sch
+	(version 20260306)
+	(generator "eeschema")
+	(generator_version "10.0")
+	(uuid "6a022b51-582b-478a-88ab-528b7c0cb8e3")
+	(paper "A3")
+	(title_block (title "IASIS CM5 — side board") (date "2026-10-24") (rev "A"))
+	(lib_symbols  )
+(text "Compute" (exclude_from_sim no) (at 25.4 45.72 0) (effects (font (size 1.778 1.778) (bold yes)) (justify left top)) (uuid "7731b501-4acf-4551-a897-2be0e4163a13"))
+(text "CM5 connectors, 5 V input, fan" (exclude_from_sim no) (at 30.48 67.31 0) (effects (font (size 1.27 1.27)) (justify left top)) (uuid "ed76bb87-4f80-46b8-aca2-d91db7097a2c"))
+(text "Main-board link and power" (exclude_from_sim no) (at 25.4 96.52 0) (effects (font (size 1.778 1.778) (bold yes)) (justify left top)) (uuid "eb069e77-e17b-4bba-a5bd-787fb22fb820"))
+(text "Flex to the main board, SIDE_BUS feed" (exclude_from_sim no) (at 30.48 118.11 0) (effects (font (size 1.27 1.27)) (justify left top)) (uuid "a6149ba0-a47e-43cf-9862-20d6c547f1b5"))
+(text "SIDE_BUS to 5 V, 8 A buck" (exclude_from_sim no) (at 157.48 118.11 0) (effects (font (size 1.27 1.27)) (justify left top)) (uuid "ba645b57-0ae8-4e2c-a6c2-b62d5a5af92d"))
+(text "External ports" (exclude_from_sim no) (at 25.4 147.32 0) (effects (font (size 1.778 1.778) (bold yes)) (justify left top)) (uuid "dd1ab443-194e-448b-a070-448deae86668"))
+(text "USB 3 Type-C host port" (exclude_from_sim no) (at 30.48 168.91 0) (effects (font (size 1.27 1.27)) (justify left top)) (uuid "daea319d-2e29-41a4-978a-521735999e46"))
+(text "USB 2 Type-C device port, RPIBOOT button" (exclude_from_sim no) (at 157.48 168.91 0) (effects (font (size 1.27 1.27)) (justify left top)) (uuid "905867b5-4a56-40f7-8247-0c788eaa4a0f"))
+(text "Gigabit RJ45" (exclude_from_sim no) (at 284.48 168.91 0) (effects (font (size 1.27 1.27)) (justify left top)) (uuid "c5fac942-0aa6-496c-bd6a-754a4bddbc45"))
+(text "Storage" (exclude_from_sim no) (at 25.4 198.12 0) (effects (font (size 1.778 1.778) (bold yes)) (justify left top)) (uuid "266a3b69-899c-44e7-8bf6-521769a81fa0"))
+(text "M.2 M-key socket and 3.3 V supply" (exclude_from_sim no) (at 30.48 219.71 0) (effects (font (size 1.27 1.27)) (justify left top)) (uuid "2ed1cb56-e892-4a0f-96ba-2b9f6d0b218e"))
+(text "IASIS CM5 — side board" (exclude_from_sim no) (at 25.4 20.32 0) (effects (font (size 2.54 2.54) (bold yes)) (justify left top)) (uuid "fd13eadf-c344-45a2-9abe-ced85a521c22"))
+(text "Raspberry Pi CM5 host for the main board, joined by the side-link flex" (exclude_from_sim no) (at 25.4 26.67 0) (effects (font (size 1.27 1.27)) (justify left top)) (uuid "c263bb69-c745-43bb-af23-e87ea4c3e55e"))
+(sheet
+		(at 25.4 55.88)
+		(size 101.6 25.4)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "da71f4b7-6c8d-4d71-8e77-4976c18cec12")
+		(property "Sheetname" "Compute module"
+			(at 25.4 55.1684 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects (font (size 1.27 1.27)) (justify left bottom))
+		)
+		(property "Sheetfile" "compute-module.kicad_sch"
+			(at 25.4 81.8684 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects (font (size 1.27 1.27)) (justify left top))
+		)
+		(instances
+			(project "cm5"
+				(path "/6a022b51-582b-478a-88ab-528b7c0cb8e3"
+					(page "2")
+				)
+			)
+		)
+	)
+(sheet
+		(at 25.4 106.68)
+		(size 101.6 25.4)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "bc70cf25-cc15-4bd4-9e05-555778e62ad0")
+		(property "Sheetname" "Side link"
+			(at 25.4 105.9684 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects (font (size 1.27 1.27)) (justify left bottom))
+		)
+		(property "Sheetfile" "side-link.kicad_sch"
+			(at 25.4 132.6684 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects (font (size 1.27 1.27)) (justify left top))
+		)
+		(instances
+			(project "cm5"
+				(path "/6a022b51-582b-478a-88ab-528b7c0cb8e3"
+					(page "3")
+				)
+			)
+		)
+	)
+(sheet
+		(at 152.4 106.68)
+		(size 101.6 25.4)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "a08cc935-e3a8-4122-a921-19ee83e76b61")
+		(property "Sheetname" "5 V supply"
+			(at 152.4 105.9684 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects (font (size 1.27 1.27)) (justify left bottom))
+		)
+		(property "Sheetfile" "power-5v.kicad_sch"
+			(at 152.4 132.6684 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects (font (size 1.27 1.27)) (justify left top))
+		)
+		(instances
+			(project "cm5"
+				(path "/6a022b51-582b-478a-88ab-528b7c0cb8e3"
+					(page "4")
+				)
+			)
+		)
+	)
+(sheet
+		(at 25.4 157.48)
+		(size 101.6 25.4)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "3ec70b0d-78ce-494d-9947-6692f8a8cf70")
+		(property "Sheetname" "Accessory port"
+			(at 25.4 156.7684 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects (font (size 1.27 1.27)) (justify left bottom))
+		)
+		(property "Sheetfile" "accessory-port.kicad_sch"
+			(at 25.4 183.4684 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects (font (size 1.27 1.27)) (justify left top))
+		)
+		(instances
+			(project "cm5"
+				(path "/6a022b51-582b-478a-88ab-528b7c0cb8e3"
+					(page "5")
+				)
+			)
+		)
+	)
+(sheet
+		(at 152.4 157.48)
+		(size 101.6 25.4)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "052aadde-694a-44cd-b662-4c245d93ec8c")
+		(property "Sheetname" "Service port"
+			(at 152.4 156.7684 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects (font (size 1.27 1.27)) (justify left bottom))
+		)
+		(property "Sheetfile" "service-port.kicad_sch"
+			(at 152.4 183.4684 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects (font (size 1.27 1.27)) (justify left top))
+		)
+		(instances
+			(project "cm5"
+				(path "/6a022b51-582b-478a-88ab-528b7c0cb8e3"
+					(page "6")
+				)
+			)
+		)
+	)
+(sheet
+		(at 279.4 157.48)
+		(size 101.6 25.4)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "84cbfa53-ede8-4f9f-a993-0a81c0e7251e")
+		(property "Sheetname" "Ethernet"
+			(at 279.4 156.7684 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects (font (size 1.27 1.27)) (justify left bottom))
+		)
+		(property "Sheetfile" "ethernet.kicad_sch"
+			(at 279.4 183.4684 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects (font (size 1.27 1.27)) (justify left top))
+		)
+		(instances
+			(project "cm5"
+				(path "/6a022b51-582b-478a-88ab-528b7c0cb8e3"
+					(page "7")
+				)
+			)
+		)
+	)
+(sheet
+		(at 25.4 208.28)
+		(size 101.6 25.4)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "cdfcfd2c-3c7a-4183-aa6d-700ec5c19d6e")
+		(property "Sheetname" "NVMe"
+			(at 25.4 207.5684 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects (font (size 1.27 1.27)) (justify left bottom))
+		)
+		(property "Sheetfile" "nvme.kicad_sch"
+			(at 25.4 234.2684 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects (font (size 1.27 1.27)) (justify left top))
+		)
+		(instances
+			(project "cm5"
+				(path "/6a022b51-582b-478a-88ab-528b7c0cb8e3"
+					(page "8")
+				)
+			)
+		)
+	)
+(sheet_instances
+		(path "/"
+			(page "1")
+		)
+	)
+(embedded_fonts no)
+)
