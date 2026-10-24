@@ -604,7 +604,9 @@ def _top_slots(lay: Layout, z: float, depth: float, display: Display | None) -> 
     return slots
 
 
-STEP = Path(__file__).resolve().parents[4] / "build" / "boards" / "iasis" / "board.step"
+BOARDS = Path(__file__).resolve().parents[4] / "build" / "boards" / "iasis"
+STEP = BOARDS / "board.step"  # HubPD, which fits Hub too; the side link is unfitted
+CM5_STEP = BOARDS / "board-cm5.step"
 
 
 def assemble(logo: Path | None = None) -> tuple[Layout, Part, dict[str, Cover]]:
@@ -625,7 +627,7 @@ def main() -> None:
         from .side import assemble as side_board
         from .viewer import show_cm5
 
-        board = load(STEP)
+        board = load(CM5_STEP)
         show_cm5(board, side_board(board))
         return
     show(*assemble())

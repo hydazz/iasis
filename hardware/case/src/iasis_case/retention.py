@@ -27,7 +27,7 @@ class Joint:
     edge: float
     split: float
     roof: float
-    y: float = -24.0
+    y: float = 8.0
     pad_z: float = 6.2
 
     @property
