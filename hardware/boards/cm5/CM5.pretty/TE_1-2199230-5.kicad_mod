@@ -3,7 +3,7 @@
 	(generator "pcbnew")
 	(generator_version "10.0")
 	(layer "F.Cu")
-	(descr "TE M.2 socket key M, 4.2mm height, 67 contacts; land from TE application spec 114-115006 rev B fig. 2; retention tabs share SH. 2230 standoff centre at (0, 28.25)")
+	(descr "TE M.2 socket key M, 4.2mm height, 67 contacts; land from TE application spec 114-115006 rev B fig. 2; retention tabs share SH. 2280 standoff centre at (0, 78.25)")
 	(tags "M.2 NGFF key M socket")
 	(property "Reference" "REF**"
 		(at 0 -7.3 0)
@@ -97,7 +97,7 @@
 	)
 	(fp_line
 		(start -11 0)
-		(end -11 30)
+		(end -11 78.25)
 		(stroke
 			(width 0.1)
 			(type solid)
@@ -106,8 +106,8 @@
 		(uuid "96226af4-fdcc-4427-a93e-058ffa46b29b")
 	)
 	(fp_line
-		(start -11 30)
-		(end 11 30)
+		(start -11 78.25)
+		(end 11 78.25)
 		(stroke
 			(width 0.1)
 			(type solid)
@@ -117,7 +117,7 @@
 	)
 	(fp_line
 		(start 11 0)
-		(end 11 30)
+		(end 11 78.25)
 		(stroke
 			(width 0.1)
 			(type solid)
@@ -136,8 +136,8 @@
 		(layer "F.Fab")
 		(uuid "bf69fbad-100a-47b8-b628-b26c21ee3361")
 	)
-	(fp_text user "2230 card"
-		(at 0 15 0)
+	(fp_text user "2280 card"
+		(at 0 39 0)
 		(layer "F.Fab")
 		(uuid "9ec623e5-51ef-473f-a73d-49e105a610ea")
 		(effects

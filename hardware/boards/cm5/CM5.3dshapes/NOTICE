@@ -26,5 +26,5 @@ Retrieved by LCSC part number from the EasyEDA component API (`https://easyeda.c
 
 These are approximate bodies for fit and appearance, not manufacturer CAD.
 
-- `M2_2230_card_envelope.step`: stand-in M.2 2230 card, 0.8 mm PCB with a controller and a NAND package, on a 2.5 mm standoff. No SSD maker publishes a STEP model.
+- `M2_2280_card_envelope.step`: stand-in M.2 2280 card, 0.8 mm PCB with a controller and two NAND packages, on a 2.5 mm standoff. No SSD maker publishes a STEP model.
 - `PROD_PSPMAA0805.step`: PROD Technology PSPMAA0805 body, 8.5 × 8.0 × 5.0 mm, with two 1.8 × 3.0 mm terminals (specification A3.0).

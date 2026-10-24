@@ -1,0 +1,16 @@
+[tasks.step]
+description = "Export the populated board STEP"
+sources = ["cm5.kicad_pcb", "cm5.kicad_pro", "CM5.3dshapes/*", "../../shared/Iasis.3dshapes/*", ".mise.toml"]
+outputs = ["../../../build/boards/cm5/board.step"]
+run = [
+  "mkdir -p ../../../build/boards/cm5",
+  '"$KICAD_CLI" pcb export step --subst-models --force -o ../../../build/boards/cm5/board.step cm5.kicad_pcb',
+]
+
+[tasks.check]
+description = "Run PCB design rules, schematic parity and ERC"
+run = [
+  "mkdir -p ../../../build/boards/cm5",
+  '"$KICAD_CLI" pcb drc --schematic-parity --format json -o ../../../build/boards/cm5/drc.json cm5.kicad_pcb',
+  '"$KICAD_CLI" sch erc --severity-error --exit-code-violations --format json -o ../../../build/boards/cm5/erc.json cm5.kicad_sch',
+]

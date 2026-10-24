@@ -17,7 +17,7 @@ KICAD_CLI = "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli"
 KICAD_PYTHON = "/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3"
 
 [monorepo]
-config_roots = ["hardware/case", "hardware/boards/iasis"]
+config_roots = ["hardware/case", "hardware/boards/iasis", "hardware/boards/cm5"]
 
 [tasks.deps]
 description = "Install Python dependencies"
