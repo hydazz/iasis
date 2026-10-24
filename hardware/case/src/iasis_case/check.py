@@ -17,6 +17,7 @@ EXPECTED_HOLES = 4
 USB_C_METAL = (8.28, 2.43)  # USB Type-C R2.5 Fig 3-3, maximum metal plug envelope
 USB_C_OVERMOLD = (12.85, 7.0)  # maximum straight cable body, stays outside the wall
 MIN_WEB = 1.0  # wall left between neighbouring openings
+MIN_CORNER_FLAT = 1.0  # flat wall between an opening's edge round and a corner radius
 
 Candidates = list[tuple[str, Shape, BoundBox]]
 
@@ -94,6 +95,7 @@ def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
         f"{case.CLEARANCE:.2f} mm board movement + {case.PORT_ERROR:.2f} mm print/placement error"
     )
     _webs(r, lay)
+    _corners(r, lay)
     for o in lay.openings:
         if o.kind == "usb-c":
             recess = (o.y_face - o.y_wall) * o.inward
@@ -296,6 +298,20 @@ def _webs(r: Report, lay: case.Layout) -> None:
         r.fail("thin wall between openings: " + ", ".join(thin))
     else:
         r.ok(f"openings leave {MIN_WEB} mm or more of wall between them")
+
+
+def _corners(r: Report, lay: case.Layout) -> None:
+    """Openings, edge rounds included, stay on the flat of the wall clear of the corner radii."""
+    flat = lay.length / 2 - lay.corner_r
+    near = []
+    for o in lay.openings:
+        edge = abs(o.x) + o.width / 2 + (case.PORT_EDGE_R if o.kind == "usb-c" else 0.0)
+        if flat - edge < MIN_CORNER_FLAT:
+            near.append(f"{o.ref} {flat - edge:.2f} mm")
+    if near:
+        r.fail("openings reach the corner radius: " + ", ".join(near))
+    else:
+        r.ok(f"openings leave {MIN_CORNER_FLAT} mm or more of flat wall before the corners")
 
 
 def _paths(r: Report, lay: case.Layout, cover: Part, tray: Part) -> None:
