@@ -17,17 +17,9 @@ def _coloured(shape: Shape, colour: str) -> Compound:
     return Compound([shape], color=Color(colour))
 
 
-def show(
-    lay: Layout,
-    tray: Shape,
-    covers: dict[str, Cover],
-    *,
-    active: str = "passive",
-) -> None:
-    """Show the tray, populated PCB and both cover variants as opaque layers."""
-    if active not in covers:
-        raise ValueError(f"Unknown cover: {active}")
-
+def show(lay: Layout, tray: Shape, covers: dict[str, Cover]) -> None:
+    """Show the tray, populated PCB and both cover variants as opaque layers, the OLED
+    cover hidden."""
     pcb = {
         "Components": _coloured(Compound(list(lay.board.parts.values())), "#9a9a9a"),
         "Board": _coloured(lay.board.body, "#1f5e3c"),
@@ -47,7 +39,7 @@ def show(
         variant = "OLED" if name == "display" else "Passive"
         variants[variant] = group
         for part in group:
-            states[f"/Group/Cover/{variant}/{part}"] = [1, 1] if name == active else [0, 0]
+            states[f"/Group/Cover/{variant}/{part}"] = [1, 1] if variant == "Passive" else [0, 0]
 
     show_cad(
         _coloured(tray, "#d6d8dc"),

@@ -619,8 +619,6 @@ def main() -> None:
     from .viewer import show
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("cover", nargs="?", choices=COVERS, default="passive")
-    parser.add_argument("--logo", type=Path, help="filled SVG placed beside the name")
     parser.add_argument("--cm5", action="store_true", help="show the CM5 build's boards instead")
     args = parser.parse_args()
     if args.cm5:
@@ -630,8 +628,7 @@ def main() -> None:
         board = load(STEP)
         show_cm5(board, side_board(board))
         return
-    lay, bottom, covers = assemble(args.logo)
-    show(lay, bottom, covers, active=args.cover)
+    show(*assemble())
 
 
 if __name__ == "__main__":
