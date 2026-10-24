@@ -1,10 +1,11 @@
 """The CM5 side board beside the main board: its populated STEP, the Raspberry Pi Cooler
-for CM5, its screw heads and the two side-link flex options, and both boards as one for
-the CM5 build's enclosure.
+for CM5, its screw heads and the side-link flex, and both boards as one for the CM5 build's
+enclosure.
 
 Side geometry is in the main board's coordinates (board.py). The side board sits left of
-the main board with the rear edges in line and both boards' bottom faces level, so the
-straight flex runs flat between two edge-facing ZIFs.
+the main board with the rear edges in line and both boards' bottom faces level. Each board
+carries a vertical Hirose FH12-24S-0.5SVA(54) at the facing edge, contacts toward the gap;
+the flex rises out of both and bends over the gap in a half circle.
 """
 
 from dataclasses import dataclass, field
@@ -31,11 +32,11 @@ from .board import Board, load
 
 STEP = Path(__file__).resolve().parents[4] / "build" / "boards" / "cm5" / "board.step"
 LINK = "J2001"
-GAP = 17.64  # main board left edge to side board right edge
-STOP = 2.75  # FPC stop inside each ZIF mouth
+GAP = 1.5  # main board left edge to side board right edge
+SLOT_IN = 1.78  # FPC slot centre inside each facing edge: contact-side lands 0.3 mm from it
+TIP = 1.45  # FPC tip above the board top
+LEG = 4.2 + 0.5  # stiffener from the tip, then straight before the bend
 FLEX_W, FLEX_T = 12.5, 0.19
-STIFF_L, STIFF_T = 6.0, 0.13  # stiffener over each tail from the tip, 0.32 mm there
-CONTACT = 0.6  # flex centre above the board top in a bottom-contact ZIF
 
 # Raspberry Pi Cooler for CM5 (product brief): bosses on the module's four mounting
 # holes carry the fin block. The module sits 1.5 mm up on its sockets and is 1.24 mm thick.
@@ -43,13 +44,6 @@ COOLER = (56.0, 41.0, 12.7)  # along the long hole pitch, across it, above the m
 MODULE_TOP, BOSS_H, BOSS_D = 1.5 + 1.24, 2.7, 5.0
 CM5_HOLE_D = 2.7
 SCREW_HEAD = (4.5, 1.65)  # M2.5 pan head under the board, diameter and height
-
-# Rainbow concept: a vertical 0.5 mm 24-pin ZIF on each board, such as SHOU HAN
-# FPC 0.5-24P LTH4.0-A (C53457113), with the flex arched over the gap.
-VZIF = (4.4, 16.4, 4.0)  # across the edge, along it, high
-VZIF_IN = 2.5  # slot centre inside each facing edge
-VZIF_DEPTH = 2.5  # flex inserted from above
-RISE, BEND = 2.0, 3.0  # straight leg above each connector, bend radius
 
 SIDE = "S:"  # the side board's reference prefix in the CM5 build
 
@@ -62,9 +56,7 @@ class Side:
     place: Location  # side board coordinates to main board coordinates
     cooler: Part
     screws: Part  # the cooler screws' heads under the side board
-    straight: Part
-    rainbow: Part
-    vertical_zifs: Part
+    flex: Part
 
     @property
     def body(self) -> Part:
@@ -77,7 +69,7 @@ class Side:
 
 def assemble(main: Board, step: Path = STEP) -> Side:
     side = load(step)
-    edge = -main.size.X / 2  # main board left edge, where both flex options start
+    edge = -main.size.X / 2  # main board left edge
     place = Location((edge - GAP - side.size.X / 2, (main.size.Y - side.size.Y) / 2, 0))
     top = main.body.bounding_box().max.Z
     y = main.box(LINK).center().Y
@@ -96,26 +88,21 @@ def assemble(main: Board, step: Path = STEP) -> Side:
     screws = Part() + [Pos(h.X, h.Y, 0) * Cylinder(SCREW_HEAD[0] / 2, SCREW_HEAD[1], align=under)
                        for h in holes]  # fmt: skip
 
-    tip_in, tip_out = edge + STOP, edge - GAP - STOP
-    z = top + CONTACT
-    straight = Pos((tip_in + tip_out) / 2, y, z) * Box(tip_in - tip_out, FLEX_W, FLEX_T)
-    for x in (tip_in - STIFF_L / 2, tip_out + STIFF_L / 2):
-        straight += Pos(x, y, z + FLEX_T / 2) * Box(STIFF_L, FLEX_W, STIFF_T, align=BASE)
+    xm, xs = edge + SLOT_IN, edge - GAP - SLOT_IN
+    bend = (xm - xs) / 2
+    z0, zb = top + TIP, top + TIP + LEG + bend
+    # A fillet of the full half-spacing would leave a zero-length top; 1 um of it stays.
+    path = FilletPolyline((xm, y, z0), (xm, y, zb), (xs, y, zb), (xs, y, z0), radius=bend - 0.001)
+    flex = sweep(Plane(origin=(xm, y, z0), z_dir=(0, 0, 1)) * Rectangle(FLEX_T, FLEX_W), path)
 
-    xm, xs = edge + VZIF_IN, edge - GAP - VZIF_IN
-    z0, zb = top + VZIF[2] - VZIF_DEPTH, top + VZIF[2] + RISE + BEND
-    path = FilletPolyline((xm, y, z0), (xm, y, zb), (xs, y, zb), (xs, y, z0), radius=BEND)
-    rainbow = sweep(Plane(origin=(xm, y, z0), z_dir=(0, 0, 1)) * Rectangle(FLEX_T, FLEX_W), path)
-    vertical = Pos(xm, y, top) * Box(*VZIF, align=BASE) + Pos(xs, y, top) * Box(*VZIF, align=BASE)
-
-    return Side(side, place, cooler.moved(place), screws.moved(place), straight, rainbow, vertical)
+    return Side(side, place, cooler.moved(place), screws.moved(place), flex)
 
 
 @dataclass
 class Pair(Board):
     """Both boards of the CM5 build as one board for the enclosure, centred on their common
     outline: the main board's references as they are, the side board's prefixed with SIDE,
-    and the cooler, its screw heads and the straight flex as parts."""
+    and the cooler, its screw heads and the flex as parts."""
 
     side: Side | None = None
     shift: Location = field(default_factory=Location)  # main board coordinates to these
@@ -141,7 +128,7 @@ def pair(main: Board, side: Side) -> Pair:
     shift = Location((-c.X, -c.Y, 0))
     parts = {ref: p.moved(shift) for ref, p in main.parts.items()}
     parts |= {SIDE + ref: p.moved(shift * side.place) for ref, p in side.board.parts.items()}
-    extra = {"cooler": side.cooler, "cooler screws": side.screws, "flex": side.straight}
+    extra = {"cooler": side.cooler, "cooler screws": side.screws, "flex": side.flex}
     parts |= {name: Compound([shape.moved(shift)], label=name) for name, shape in extra.items()}
     outlines = (main.outline(), side.board.outline())
     radii = [e.radius for o in outlines for e in o.edges() if e.geom_type == GeomType.CIRCLE]
