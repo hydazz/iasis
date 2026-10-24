@@ -7,19 +7,19 @@ description = "Install the CAD and viewer dependencies"
 run = "uv sync --locked"
 
 [tasks.build]
-description = "Export the case STLs and assembly STEP"
-depends = ["//hardware/boards/iasis:step"]
+description = "Export the case STLs and assembly STEPs, standalone and CM5 build"
+depends = ["//hardware/boards/iasis:step", "//hardware/boards/cm5:step"]
 run = "uv run --locked iasis-case-build"
 
 [tasks.preview]
-description = "Render the case preview"
-depends = ["//hardware/boards/iasis:step"]
+description = "Render the case previews"
+depends = ["//hardware/boards/iasis:step", "//hardware/boards/cm5:step"]
 run = "uv run --locked iasis-case-preview"
 
 [tasks.check]
-description = "Check enclosure fit and motion against the board"
-depends = ["//hardware/boards/iasis:step"]
-run = "uv run --locked iasis-case-check"
+description = "Check enclosure fit and motion against the boards, standalone and CM5 build"
+depends = ["//hardware/boards/iasis:step", "//hardware/boards/cm5:step"]
+run = ["uv run --locked iasis-case-check", "uv run --locked iasis-case-check --cm5"]
 
 [tasks.view]
 description = "Show the case and board in OCP CAD Viewer"
@@ -27,6 +27,6 @@ depends = ["//hardware/boards/iasis:step"]
 run = "uv run --locked iasis-case-view"
 
 [tasks.view-cm5]
-description = "Show the CM5 build's boards, cooler and both flex options in OCP CAD Viewer"
+description = "Show the CM5 build's case, both boards and both flex options in OCP CAD Viewer"
 depends = ["//hardware/boards/iasis:step", "//hardware/boards/cm5:step"]
 run = "uv run --locked iasis-case-view --cm5"

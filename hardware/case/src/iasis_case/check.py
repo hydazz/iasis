@@ -8,15 +8,27 @@ reserve room for board movement and printing error.
 from itertools import combinations
 from math import degrees
 
-from build123d import BoundBox, Box, Cylinder, Part, Pos, Rectangle, Rot, SlotOverall, extrude
+from build123d import (
+    BoundBox,
+    Box,
+    Circle,
+    Cylinder,
+    Part,
+    Pos,
+    Rectangle,
+    Rot,
+    SlotOverall,
+    extrude,
+)
 from build123d.topology.shape_core import Shape
 
 from . import case, retention
 
-EXPECTED_HOLES = 4
+EXPECTED_HOLES = 4  # 8 in the CM5 build
 USB_C_METAL = (8.28, 2.43)  # USB Type-C R2.5 Fig 3-3, maximum metal plug envelope
 USB_C_OVERMOLD = (12.85, 7.0)  # maximum straight cable body, stays outside the wall
 MIN_WEB = 1.0  # wall left between neighbouring openings
+PIN_TOOL = 1.0  # straightened paper clip through the nRPIBOOT pinhole
 MIN_CORNER_FLAT = 1.0  # flat wall between an opening's edge round and a corner radius
 
 Candidates = list[tuple[str, Shape, BoundBox]]
@@ -35,16 +47,18 @@ class Report:
         self.failures.append(msg)
 
 
-def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
+def run(
+    lay: case.Layout, tray: Part, covers: dict[str, case.Cover], holes: int = EXPECTED_HOLES
+) -> Report:
     r = Report()
     board = lay.board
     parts: Candidates = [(ref, p, board.box(ref, exact=False)) for ref, p in board.parts.items()]
 
     r.lines.append("board")
-    if len(lay.holes) == EXPECTED_HOLES:
+    if len(lay.holes) == holes:
         r.ok(f"{len(lay.holes)} mounting holes")
     else:
-        r.fail(f"{len(lay.holes)} mounting holes, expected {EXPECTED_HOLES}")
+        r.fail(f"{len(lay.holes)} mounting holes, expected {holes}")
 
     r.lines.append("solids")
     printed = [tray, *(c.part for c in covers.values()), *(c.button for c in covers.values())]
@@ -324,6 +338,11 @@ def _paths(r: Report, lay: case.Layout, cover: Part, tray: Part) -> None:
             shoulder = o.y_face - o.inward * gap
             plastic = extrude(o.plane(shoulder) * Rectangle(*USB_C_OVERMOLD), amount=20)
             paths = [metal, plastic]
+        elif o.kind == "rj45":  # the whole jack face: plug, latch and lights
+            face = Rectangle(o.width - 2 * case.PORT_FIT, o.height - 2 * case.PORT_FIT)
+            paths = [extrude(o.plane(o.y_face) * face, amount=10)]
+        elif o.kind == "pin":
+            paths = [extrude(o.plane(o.y_face) * Circle(PIN_TOOL / 2), amount=10)]
         else:
             profile = SlotOverall(o.width - 0.1, o.height - 0.1)
             paths = [extrude(o.plane(o.y_face) * profile, amount=10)]
@@ -341,8 +360,12 @@ def main() -> int:
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--logo", type=Path, help="filled SVG placed beside the name")
+    parser.add_argument("--cm5", action="store_true", help="check the CM5 build's enclosure")
     args = parser.parse_args()
-    report = run(*case.assemble(args.logo))
+    if args.cm5:
+        report = run(*case.assemble_cm5(args.logo), holes=2 * EXPECTED_HOLES)
+    else:
+        report = run(*case.assemble(args.logo))
     print("\n".join(report.lines))
     print(f"{len(report.failures)} failures" if report.failures else "all checks passed")
     return int(bool(report.failures))

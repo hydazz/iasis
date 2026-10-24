@@ -2,6 +2,8 @@
 
 The board sits on locating posts between a tray and removable cover. Passive and OLED
 covers share the tray. Flush top markings are separate solids for multicolour printing.
+The CM5 build's enclosure holds the main board and the CM5 side board the same way, as
+one board (side.py).
 
 Geometry is in board coordinates (board.py). The board STEP supplies the outline, the
 holes, every connector, light and button; the numbers here are fit, form and the parts
@@ -45,6 +47,8 @@ from build123d import (
 from .artwork import icon, wordmark
 from .board import Board, load
 from .retention import DisplayFrame, Joint
+from .side import assemble as side_board
+from .side import pair
 
 # Fit
 CLEARANCE = 0.3  # board edge to inner wall
@@ -84,6 +88,18 @@ PORTS = {  # reference: (kind, label)
 # Molex SD-105450-001: USB-IF exposed shell 6.51 min - mouth depth (4.70 + 0.20).
 # GCT USB4105 drawing: 1.85 min in the plug/receptacle mating view.
 MATED_SHOULDER = {ref: 1.85 if ref == "J1001" else 6.51 - 4.90 for ref in PORTS}
+
+# The CM5 build adds the side board's rear edge (side.py prefixes its references): the
+# accessory port is the Molex receptacle, the service port the GCT, and nRPIBOOT is a
+# side-actuated button behind a pinhole.
+SIDE_PORTS = {
+    "S:J401": ("usb-c", "ACCESSORY"),
+    "S:J501": ("usb-c", "SERVICE"),
+    "S:J601": ("rj45", "ETHERNET"),
+    "S:SW501": ("pin", "RPIBOOT"),
+}
+MATED_SHOULDER |= {"S:J401": 6.51 - 4.90, "S:J501": 1.85}
+PIN_D = 1.6
 
 # Side-emitting LEDs at the board edge shine through windows no larger than their
 # emitting face. A captive round cap operates the target-control switch.
@@ -151,7 +167,7 @@ class Opening:
     the part's face toward that wall, y_wall the wall's outer face."""
 
     ref: str
-    kind: str  # usb-c or light
+    kind: str  # usb-c, rj45, pin or light
     label: str | None
     x: float
     z: float
@@ -198,6 +214,7 @@ class Layout:
     parts_top: float  # tallest placed part
     split: float
     logo: Path | None = None
+    ports: dict[str, tuple[str, str]] = field(default_factory=lambda: dict(PORTS))
     _roofs: dict[Display | None, float] = field(default_factory=dict, init=False, repr=False)
 
     @property
@@ -210,7 +227,7 @@ class Layout:
 
     @cached_property
     def openings(self) -> list[Opening]:
-        out = [_port(self, ref, kind, label) for ref, (kind, label) in PORTS.items()]
+        out = [_port(self, ref, kind, label) for ref, (kind, label) in self.ports.items()]
         out += [_light(self, ref) for ref in LIGHTS]
         return out
 
@@ -269,8 +286,10 @@ class Cover:
     retainer: DisplayFrame | None
 
 
-def layout(board: Board, logo: Path | None = None) -> Layout:
-    required = set(PORTS) | set(LIGHTS) | {BUTTON}
+def layout(
+    board: Board, logo: Path | None = None, ports: dict[str, tuple[str, str]] = PORTS
+) -> Layout:
+    required = set(ports) | set(LIGHTS) | {BUTTON}
     missing = required - board.parts.keys()
     if missing:
         raise ValueError("board STEP lacks enclosure references: " + ", ".join(sorted(missing)))
@@ -286,7 +305,8 @@ def layout(board: Board, logo: Path | None = None) -> Layout:
         - size.Y / 2
         - 2 * CLEARANCE
         - PORT_ERROR
-        for ref in PORTS
+        for ref, (kind, _) in ports.items()
+        if kind == "usb-c"
     )
     port_wall = min(WALL, math.floor((wall_limit + 1e-6) * 10) / 10)
     if port_wall < 0.8:
@@ -305,6 +325,7 @@ def layout(board: Board, logo: Path | None = None) -> Layout:
         parts_top=max(board.box(ref, exact=False).max.Z for ref in board.parts),
         split=board.body.bounding_box().max.Z + 1.6,
         logo=logo,
+        ports=dict(ports),
     )
 
 
@@ -337,7 +358,11 @@ def _nose(board: Board, ref: str) -> BoundBox:
 def _port(lay: Layout, ref: str, kind: str, label: str) -> Opening:
     _, y_face, y_wall = _facing(lay, ref)
     nose = _nose(lay.board, ref)
-    w, h = nose.size.X + 2 * PORT_FIT, nose.size.Z + 2 * PORT_FIT
+    if kind == "pin":  # centred on the actuator
+        w = h = PIN_D
+    else:
+        w, h = nose.size.X + 2 * PORT_FIT, nose.size.Z + 2 * PORT_FIT
+    corner = {"usb-c": 1.5, "rj45": 0.5}.get(kind, h / 2)  # pinholes are round
     return Opening(
         ref,
         kind,
@@ -346,7 +371,7 @@ def _port(lay: Layout, ref: str, kind: str, label: str) -> Opening:
         nose.center().Z,
         w,
         h,
-        min(h / 2 - 0.01, 1.5),
+        min(h / 2 - 0.01, corner),
         y_face,
         y_wall,
     )
@@ -615,22 +640,23 @@ def assemble(logo: Path | None = None) -> tuple[Layout, Part, dict[str, Cover]]:
     return lay, tray(lay), covers
 
 
+def assemble_cm5(logo: Path | None = None) -> tuple[Layout, Part, dict[str, Cover]]:
+    """The CM5 build: one tray and cover for the main board and the CM5 side board."""
+    main = load(CM5_STEP)
+    lay = layout(pair(main, side_board(main)), logo, PORTS | SIDE_PORTS)
+    covers = {name: cover(lay, name, display) for name, display in COVERS.items()}
+    return lay, tray(lay), covers
+
+
 def main() -> None:
     import argparse
 
     from .viewer import show
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cm5", action="store_true", help="show the CM5 build's boards instead")
+    parser.add_argument("--cm5", action="store_true", help="show the CM5 build instead")
     args = parser.parse_args()
-    if args.cm5:
-        from .side import assemble as side_board
-        from .viewer import show_cm5
-
-        board = load(CM5_STEP)
-        show_cm5(board, side_board(board))
-        return
-    show(*assemble())
+    show(*(assemble_cm5() if args.cm5 else assemble()))
 
 
 if __name__ == "__main__":

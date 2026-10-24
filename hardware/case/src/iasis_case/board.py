@@ -88,12 +88,26 @@ def load(step: Path) -> Board:
     return Board(body.moved(origin), parts, step, origin)
 
 
-def export_assembly(board: Board, extra: list[Shape], out: Path) -> None:
-    """Write the board's own STEP with extra shapes (in board coordinates) added to it.
-    Re-reading the export keeps KiCad's shared part definitions; a STEP rebuilt from the
+def export_assembly(
+    board: Board,
+    extra: list[Shape],
+    out: Path,
+    attach: list[tuple[Path, Location]] | None = None,
+) -> None:
+    """Write the board's own STEP with extra shapes (in board coordinates) added to it, and
+    other KiCad STEPs placed under it (locations in the board STEP's coordinates).
+    Re-reading the exports keeps KiCad's shared part definitions; a STEP rebuilt from the
     loaded solids comes out about eight times larger."""
     doc, tool = _read(board.step)
     root = _first_root(tool)
+    for step, location in attach or []:
+        known = _roots(tool)
+        reader = STEPCAFControl_Reader()
+        if reader.ReadFile(str(step)) != 1 or not reader.Transfer(doc):
+            raise RuntimeError(f"cannot read {step}")
+        for label in _roots(tool):
+            if not any(label.IsEqual(k) for k in known):
+                tool.AddComponent(root, label, location.wrapped)
     for shape in extra:
         label = tool.AddShape(shape.moved(board.origin.inverse()).wrapped, False)
         TDataStd_Name.Set_s(label, TCollection_ExtendedString(shape.label))
@@ -114,10 +128,14 @@ def _read(step: Path) -> tuple[TDocStd_Document, XCAFDoc_ShapeTool]:
     return doc, XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
 
 
-def _first_root(tool: XCAFDoc_ShapeTool) -> TDF_Label:
+def _roots(tool: XCAFDoc_ShapeTool) -> list[TDF_Label]:
     roots = Sequence_TDF_Label()
     tool.GetFreeShapes(roots)
-    return roots.Value(1)
+    return [roots.Value(i) for i in range(1, roots.Length() + 1)]
+
+
+def _first_root(tool: XCAFDoc_ShapeTool) -> TDF_Label:
+    return _roots(tool)[0]
 
 
 def _children(tool: XCAFDoc_ShapeTool, label: TDF_Label) -> list[TDF_Label]:

@@ -1,4 +1,4 @@
-"""Render the case preview."""
+"""Render the case previews: the main board's case and the CM5 build's."""
 
 import argparse
 from pathlib import Path
@@ -9,7 +9,7 @@ from . import case
 from .render import render, save
 
 PREVIEW = Path(__file__).resolve().parents[2] / "preview"
-VIEW = (-300, -400, 250)
+VIEW, REAR_VIEW = (-300, -400, 250), (300, 400, 250)
 BODY, TEXT = (214, 216, 220), (35, 38, 42)
 
 
@@ -19,19 +19,23 @@ def main() -> None:
     parser.add_argument("--output", type=Path, help="preview output directory")
     args = parser.parse_args()
     output = args.output.resolve() if args.output else PREVIEW
-    lay, tray, covers = case.assemble(args.logo)
-    visible = Compound([lay.board.parts[ref] for ref in (*case.PORTS, *case.LIGHTS)])
-    c = covers["passive"]
-    shown = [
-        (tray, BODY),
-        (c.part, BODY),
-        (c.markings, TEXT),
-        (c.button, BODY),
-        (visible, (100, 106, 112)),
-    ]
     output.mkdir(parents=True, exist_ok=True)
-    if save(render(shown, VIEW), output / "case.png"):
-        print(f"{output / 'case.png'} written")
+    # The CM5 build is seen from the rear, where its side board ports are.
+    for name, view, (lay, tray, covers) in (
+        ("case.png", VIEW, case.assemble(args.logo)),
+        ("case-cm5.png", REAR_VIEW, case.assemble_cm5(args.logo)),
+    ):
+        visible = Compound([lay.board.parts[ref] for ref in (*lay.ports, *case.LIGHTS)])
+        c = covers["passive"]
+        shown = [
+            (tray, BODY),
+            (c.part, BODY),
+            (c.markings, TEXT),
+            (c.button, BODY),
+            (visible, (100, 106, 112)),
+        ]
+        if save(render(shown, view), output / name):
+            print(f"{output / name} written")
 
 
 if __name__ == "__main__":
