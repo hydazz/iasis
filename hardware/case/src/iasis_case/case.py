@@ -95,7 +95,6 @@ BUTTON_FLANGE_D = 13.0
 BUTTON_FLANGE_H = (BUTTON_FLANGE_D - BUTTON_D) / 2  # printable 45 degree shoulder
 BUTTON_ROOF_GAP, BUTTON_PROUD, BUTTON_PIN = 0.2, 0.2, 4.0
 BUTTON_TRAVEL = 0.6  # case clearance envelope, not the switch's permitted stroke
-SIDE_LINK = "J2001"
 
 
 @dataclass(frozen=True)
@@ -258,16 +257,6 @@ class Layout:
         self._roofs[display] = math.ceil(top * 2) / 2
         return self._roofs[display]
 
-    @cached_property
-    def side_link_passage(self) -> Part | None:
-        """Clear the closed ZIF and a straight flex through the left wall."""
-        if SIDE_LINK not in self.board.parts:
-            return None
-        b = self.board.box(SIDE_LINK)
-        return Pos(-self.length / 2, b.center().Y, b.center().Z) * Box(
-            2 * (WALL + CLEARANCE + 1), b.size.Y + 2 * PORT_FIT, b.size.Z + 2 * PORT_FIT
-        )
-
 
 @dataclass
 class Cover:
@@ -393,8 +382,6 @@ def tray(lay: Layout) -> Part:
             LOCATOR_D / 2, LOCATOR_D / 2 - 0.4, 0.4, align=BASE
         )
     body -= Compound([_wall_cut(o) for o in lay.openings])
-    if lay.side_link_passage is not None:
-        body -= lay.side_link_passage
     joint = Joint(lay.length / 2, lay.split, lay.top_inside())
     body += Compound(joint.tray_parts())
     body -= Compound(joint.tray_cuts())
@@ -429,8 +416,6 @@ def cover(lay: Layout, name: str, display: Display | None) -> Cover:
     shell += Compound(list(intrusions.values()))
 
     cuts += [_wall_cut(o) for o in lay.openings]
-    if lay.side_link_passage is not None:
-        cuts.append(lay.side_link_passage)
     cuts += _top_slots(lay, top_in - 1, TOP + 2, display)
     sw = lay.board.box(BUTTON).center()
     cuts.append(
@@ -619,9 +604,11 @@ def _top_slots(lay: Layout, z: float, depth: float, display: Display | None) -> 
     return slots
 
 
+STEP = Path(__file__).resolve().parents[4] / "build" / "boards" / "iasis" / "board.step"
+
+
 def assemble(logo: Path | None = None) -> tuple[Layout, Part, dict[str, Cover]]:
-    step = Path(__file__).resolve().parents[4] / "build" / "boards" / "iasis" / "board.step"
-    lay = layout(load(step), logo)
+    lay = layout(load(STEP), logo)
     covers = {name: cover(lay, name, display) for name, display in COVERS.items()}
     return lay, tray(lay), covers
 
@@ -634,7 +621,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("cover", nargs="?", choices=COVERS, default="passive")
     parser.add_argument("--logo", type=Path, help="filled SVG placed beside the name")
+    parser.add_argument("--cm5", action="store_true", help="show the CM5 build's boards instead")
     args = parser.parse_args()
+    if args.cm5:
+        from .side import assemble as side_board
+        from .viewer import show_cm5
+
+        board = load(STEP)
+        show_cm5(board, side_board(board))
+        return
     lay, bottom, covers = assemble(args.logo)
     show(lay, bottom, covers, active=args.cover)
 

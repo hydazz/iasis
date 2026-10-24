@@ -25,3 +25,8 @@ run = "uv run --locked iasis-case-check"
 description = "Show the case and board in OCP CAD Viewer"
 depends = ["//hardware/boards/iasis:step"]
 run = "uv run --locked iasis-case-view"
+
+[tasks.view-cm5]
+description = "Show the CM5 build's boards, cooler and both flex options in OCP CAD Viewer"
+depends = ["//hardware/boards/iasis:step", "//hardware/boards/cm5:step"]
+run = "uv run --locked iasis-case-view --cm5"
