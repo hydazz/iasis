@@ -16274,6 +16274,7 @@
 			)
 		)
 		(model "${KIPRJMOD}/CM5.3dshapes/M2_2230_card_envelope.step"
+			(opacity 0.4500)
 			(offset
 				(xyz 0 0 0)
 			)
@@ -18967,17 +18968,6 @@
 			)
 			(rotate
 				(xyz 0 0 -90)
-			)
-		)
-		(model "${KIPRJMOD}/CM5.3dshapes/RaspberryPi_CM5_Cooler.step"
-			(offset
-				(xyz 0 0 0)
-			)
-			(scale
-				(xyz 1 1 1)
-			)
-			(rotate
-				(xyz 0 0 0)
 			)
 		)
 	)

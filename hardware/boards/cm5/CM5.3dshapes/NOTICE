@@ -24,8 +24,7 @@ Retrieved by LCSC part number from the EasyEDA component API (`https://easyeda.c
 
 ## Generated geometry
 
-These are approximate envelopes for fit and clearance, not manufacturer CAD.
+These are approximate bodies for fit and appearance, not manufacturer CAD.
 
-- `RaspberryPi_CM5_Cooler.step`: Raspberry Pi Cooler for CM5, 56 × 41 × 12.7 mm, from the product brief. Four bosses stand on the module; the top is 15.44 mm above the carrier.
-- `M2_2230_card_envelope.step`: single-sided M.2 2230 card, 0.8 mm PCB with parts to 1.5 mm, on a 2.5 mm standoff.
+- `M2_2230_card_envelope.step`: stand-in M.2 2230 card, 0.8 mm PCB with a controller and a NAND package, on a 2.5 mm standoff. No SSD maker publishes a STEP model.
 - `PROD_PSPMAA0805.step`: PROD Technology PSPMAA0805 body, 8.5 × 8.0 × 5.0 mm, with two 1.8 × 3.0 mm terminals (specification A3.0).
