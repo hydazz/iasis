@@ -41,3 +41,13 @@
 (rule "Heatsink pads connect solid"
 	(condition "A.Type == 'Pad' && A.Fabrication_Property == 'Heatsink pad'")
 	(constraint zone_connection solid))
+
+# Molex 105450 B-row via in pad, as on the main board's ports: 0.45/0.30 vias staggered 0.15mm along the 0.30mm pads sit 0.125mm from the neighbouring pad and 0.133mm from each other; their holes keep the 0.2mm board minimum.
+(rule "Receptacle B-row via in pad"
+	(condition "A.Type == 'Via' && A.intersectsCourtyard('J401') && (B.Type == 'Via' || B.memberOfFootprint('J401'))")
+	(constraint clearance (min 0.12mm)))
+
+# Hirose FH12 vertical, as on the main board's J2001: the contact-side row escapes between the inboard row's 0.6mm lands at 1.0mm pitch, 0.125mm off them.
+(rule "FH12 contact-row escape"
+	(condition "A.Type == 'Track' && A.intersectsCourtyard('J201') && B.memberOfFootprint('J201')")
+	(constraint clearance (min 0.12mm)))
