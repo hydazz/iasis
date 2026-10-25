@@ -2,18 +2,13 @@
 preview/layout.png, every copper layer's tracks and pads with the top silkscreen's outlines,
 as KiCad's PCB editor shows them with zone fills hidden.
 
+The 3D image uses KiCad's camera fit, with transparent space trimmed to a 24-pixel margin.
 The layout is a KiCad SVG plot without text, rasterised by resvg without anti-aliasing and
-packed by oxipng: its few flat colours make a small palette PNG. A preview is rewritten only
-when its content changes. KiCad's basic-quality render of an unchanged board still differs
-in a few pixels by a level or two, under 10 bytes of pixel data, so the render is replaced
-only when more than NOISE bytes change. Unchanged files are touched so mise sees the task as
-up to date.
+packed by oxipng. Unchanged files are touched so mise sees the task as up to date.
 """
 
 import re
-import struct
 import tempfile
-import zlib
 from pathlib import Path
 
 import pcbnew as pcb
@@ -22,23 +17,16 @@ import wx
 from board import cli, copper_layers, parser, paths, run, variant_args
 
 BACKGROUND = "#001023"  # KiCad's PCB editor background
-NOISE = 64
 
 
-def pixel_data(png: Path) -> bytes:
-    data = png.read_bytes()
-    chunks, i = [], 8
-    while i < len(data):
-        size, kind = struct.unpack(">I4s", data[i : i + 8])
-        if kind == b"IDAT":
-            chunks.append(data[i + 8 : i + 8 + size])
-        i += 12 + size
-    return zlib.decompress(b"".join(chunks))
-
-
-def same_render(a: Path, b: Path) -> bool:
-    x, y = pixel_data(a), pixel_data(b)
-    return len(x) == len(y) and (x == y or sum(p != q for p, q in zip(x, y)) <= NOISE)
+def trim(path: Path) -> None:
+    image = wx.Image(str(path))
+    mask = image.Copy()
+    mask.ConvertAlphaToMask(1)
+    bounds = wx.Region(wx.Bitmap(mask)).GetBox()
+    image = image.GetSubImage(bounds)
+    image.Resize((bounds.width + 48, bounds.height + 48), (24, 24))
+    image.SaveFile(str(path), wx.BITMAP_TYPE_PNG)
 
 
 def without_text(svg: str) -> str:
@@ -47,8 +35,8 @@ def without_text(svg: str) -> str:
     return re.sub(r'<g class="stroked-text">.*?</g>\n?', "", svg, flags=re.DOTALL)
 
 
-def write(new: Path, out: Path, same) -> None:
-    if out.exists() and same(new, out):
+def write(new: Path, out: Path) -> None:
+    if out.exists() and new.read_bytes() == out.read_bytes():
         out.touch()
     else:
         new.replace(out)
@@ -79,12 +67,13 @@ def main() -> None:
         run("resvg", "--width", "2000", "--background", BACKGROUND,
             "--shape-rendering", "crispEdges", str(svg), str(layout))  # fmt: skip
         run("oxipng", "--quiet", "--opt", "4", "--strip", "safe", str(layout))
-        write(layout, output / "layout.png", lambda a, b: a.read_bytes() == b.read_bytes())
+        write(layout, output / "layout.png")
 
         cli("pcb", "render", *variant_args(args.variant), "--side", "top",
-            "--width", "1300", "--height", "1000", "--zoom", "1.25",
+            "--width", "1600", "--height", "1600", "--background", "transparent",
             "--quality", "basic", "--output", str(render), str(source))  # fmt: skip
-        write(render, output / "board.png", same_render)
+        trim(render)
+        write(render, output / "board.png")
 
 
 if __name__ == "__main__":

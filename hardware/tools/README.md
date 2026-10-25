@@ -20,6 +20,8 @@ mise run //hardware/boards/cm5:check
 
 Exports read the saved design. `check` refills zones in memory and runs native DRC with schematic parity and ERC, reporting errors. Both reports are produced even when a design check fails. Exports and previews do not run these checks or save changes to the source board.
 
+Board photos use KiCad's native top view with automatic camera fit. Transparent space is trimmed to a 24-pixel margin, so wide and tall boards need no individual framing settings.
+
 ## Fabrication
 
 Copper layers come from the board. Assembly populations come from the project's KiCad variants; a project with no named variants produces `bom.csv` and `cpl.csv`. Named variants produce `bom-VARIANT.csv` and `cpl-VARIANT.csv`. The BOM groups parts by LCSC code and footprint and excludes DNP parts; the CPL includes placements belonging to that BOM.

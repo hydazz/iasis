@@ -64,7 +64,7 @@ These are intended actions; firmware and host restore handling are not yet imple
 
 ## Viewer
 
-`mise run //hardware/case:preview` renders PNGs and exits. It reports geometry and rendering phases for each case and skips unchanged inputs. Use `mise run --force //hardware/case:preview` to regenerate the images. Only the following `view` tasks connect to OCP CAD Viewer.
+`mise run //hardware/case:preview` renders PNGs and exits. It uses OCCT's native offscreen renderer on macOS, reports geometry and rendering phases for each case and skips unchanged inputs. Use `mise run --force //hardware/case:preview` to regenerate the images. Only the following `view` tasks connect to OCP CAD Viewer.
 
 Run `mise run //hardware/case:view` with [OCP CAD Viewer](https://marketplace.visualstudio.com/items?itemName=bernhard-42.ocp-cad-viewer) to show Tray, PCB and Cover layers. Both cover variants are under Cover, the OLED one hidden; show one at a time. Run `mise run //hardware/case:view-cm5` for the CM5 build.
 
