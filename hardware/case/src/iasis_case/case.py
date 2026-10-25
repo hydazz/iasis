@@ -590,17 +590,22 @@ def _artwork(lay: Layout) -> list[Sketch]:
         Pos(lay.control_left + 15, sw.Y)
         * Text(WORDMARK, font_size=WORDMARK_SIZE),
     ]
-    x = sw.X - 36
+    gesture_x = sw.X - (BUTTON_D / 2 + BUTTON_FIT) - 3 - 4.1
+    label_right = gesture_x - 4.1 - 3
     for action, y in (("DFU", sw.Y + 6), ("REBOOT", sw.Y), ("RESTORE", sw.Y - 6)):
-        marks.append(Pos(x + 10, y) * Text(
-            action, font_size=TEXT_SIZE, font_style=FontStyle.BOLD, align=(Align.MIN, Align.CENTER)
+        marks.append(Pos(label_right, y) * Text(
+            action, font_size=TEXT_SIZE, font_style=FontStyle.BOLD, align=(Align.MAX, Align.CENTER)
         ))
-        if action == "REBOOT":
-            marks.append(Pos(x + 0.9, y) * SlotOverall(3, 1.2))
+        if action == "DFU":
+            marks.append(Pos(gesture_x, y) * Circle(0.6))
+        elif action == "REBOOT":
+            marks.append(Pos(gesture_x, y) * SlotOverall(3, 1.2))
         else:
-            marks.append(Pos(x, y) * Circle(0.6))
-            if action == "RESTORE":
-                marks += [Pos(x + 2.4, y) * Circle(0.6), Pos(x + 6.1, y) * SlotOverall(3, 1.2)]
+            marks += [
+                Pos(gesture_x - 3.5, y) * Circle(0.6),
+                Pos(gesture_x - 1.1, y) * Circle(0.6),
+                Pos(gesture_x + 2.6, y) * SlotOverall(3, 1.2),
+            ]
     for ref, symbol in (("S:J401", "usb"), ("S:J501", "square-terminal")):
         if ref in lay.ports:
             marks.append(Pos(lay.board.box(ref).center().X, lay.y_rear - 7)
@@ -688,7 +693,7 @@ def _top_slots(lay: Layout, z: float, depth: float, display: Display | None) -> 
     rows = (12, 18, 24, 30, 36, -32, -37)
     left, right = -lay.length / 2 + 12, lay.length / 2 - 12
     zones = [(left, right, rows)] if lay.divider_x is None else [
-        (left, lay.divider_x - 5, (*rows, 6, 0, -6, -12, -18, -24)),
+        (left, lay.divider_x - 5, range(-24, 25, 6)),
         (lay.divider_x + 5, right, rows),
     ]
     for left, right, bands in zones:
