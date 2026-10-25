@@ -30,12 +30,12 @@ def main() -> None:
         visible = Compound([lay.board.parts[ref] for ref in (*lay.ports, *case.LIGHTS)])
         c = covers["passive"]
         shown = [
-            (tray, BODY),
-            *[(foot, (53, 59, 57)) for foot in case.feet(lay)],
-            (c.part, BODY),
-            (c.markings, TEXT),
-            (c.button, BODY),
-            (visible, (100, 106, 112)),
+            (tray, BODY, True),
+            *[(foot, (53, 59, 57), False) for foot in case.feet(lay)],
+            (c.part, BODY, True),
+            (c.markings, TEXT, False),
+            (c.button, BODY, True),
+            (visible, (100, 106, 112), False),
         ]
         print(f"{name}: rendering ({monotonic() - start:.1f}s building geometry)", flush=True)
         changed = save(render(shown, VIEW), output / name)
