@@ -1,4 +1,5 @@
 {
+  "diffEditor.maxFileSize": 5,
   "python.useEnvironmentsExtension": true,
   "python.defaultInterpreterPath": "${workspaceFolder}/hardware/case/.venv/bin/python"
 }
