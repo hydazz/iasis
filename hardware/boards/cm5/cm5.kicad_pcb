@@ -291,7 +291,7 @@
 		(at 181.4 131 -90)
 		(descr "Bourns SRP5030CC shielded inductor, 5.7x5.2mm; manufacturer recommended 6.5x2.8mm land envelope")
 		(property "Reference" "L701"
-			(at 0 -3.519999 90)
+			(at 0 3.52 90)
 			(layer "F.SilkS")
 			(uuid "ad528e02-f0cd-4035-85a0-045df333f24f")
 			(effects
@@ -465,6 +465,7 @@
 		(property "Reference" "SW501"
 			(at 0 -2.719999 0)
 			(layer "F.SilkS")
+			(hide yes)
 			(uuid "3a41c048-85fc-4ebc-8ff4-c41a5ac468b9")
 			(effects
 				(font
@@ -5766,7 +5767,7 @@
 		(descr "Texas RNH0030A WQFN, 30 Pin (https://www.ti.com/lit/ds/symlink/hd3ss3220.pdf#page=44)")
 		(tags "Texas WQFN NoLead")
 		(property "Reference" "U401"
-			(at 2.573515 -0.5 0)
+			(at 2.573515 0 0)
 			(layer "F.SilkS")
 			(uuid "08f1e1c3-e7b5-43b1-8138-0467e9d9bff8")
 			(effects
@@ -8726,9 +8727,8 @@
 		(descr "Resistor SMD 0402 (1005 Metric), square (rectangular) end terminal, IPC-7351 nominal, (Body size source: IPC-SM-782 page 72, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf)")
 		(tags "resistor")
 		(property "Reference" "R201"
-			(at 0 -1.17 0)
+			(at -0.25 -1.49 0)
 			(layer "F.SilkS")
-			(hide yes)
 			(uuid "294ee6a2-cc29-46c2-8dbd-a43ca771f0d0")
 			(effects
 				(font
@@ -9815,7 +9815,7 @@
 		(descr "JST SH series connector, BM04B-SRSS-TB (http://www.jst-mfg.com/product/pdf/eng/eSH.pdf)")
 		(tags "connector JST SH vertical")
 		(property "Reference" "J103"
-			(at 5.712136 0 0)
+			(at 4.5 3.269999 0)
 			(layer "F.SilkS")
 			(uuid "333b5978-98ac-4797-9ddb-5519f831626a")
 			(effects
@@ -10635,7 +10635,7 @@
 		(descr "Capacitor SMD 1210 (3225 Metric), square (rectangular) end terminal, IPC-7351 nominal, (Body size source: IPC-SM-782 page 76, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf)")
 		(tags "capacitor")
 		(property "Reference" "C705"
-			(at -2.97 1 90)
+			(at -4.208095 0 0)
 			(layer "F.SilkS")
 			(uuid "3052f475-4f06-4f0a-87e6-5da54b00da63")
 			(effects
@@ -13024,6 +13024,7 @@
 		(property "Reference" "U403"
 			(at -1.953515 -0.000001 0)
 			(layer "F.SilkS")
+			(hide yes)
 			(uuid "c0313e01-f708-476e-852c-ed65693eb8c8")
 			(effects
 				(font
@@ -13343,7 +13344,7 @@
 		(descr "Resistor SMD 0402 (1005 Metric), square (rectangular) end terminal, IPC-7351 nominal, (Body size source: IPC-SM-782 page 72, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf)")
 		(tags "resistor")
 		(property "Reference" "R502"
-			(at 0 1.14 90)
+			(at 0.25 1.14 90)
 			(layer "F.SilkS")
 			(uuid "a209e73c-4fe9-4fc0-a2a5-a7a56f8a3e74")
 			(effects
@@ -13528,7 +13529,7 @@
 		(descr "Resistor SMD 0402 (1005 Metric), square (rectangular) end terminal, IPC-7351 nominal, (Body size source: IPC-SM-782 page 72, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf)")
 		(tags "resistor")
 		(property "Reference" "R101"
-			(at 0 1.139999 90)
+			(at -0.25 -1.14 90)
 			(layer "F.SilkS")
 			(uuid "fb69ee38-eaab-464f-a577-37e54ff84019")
 			(effects
@@ -13713,7 +13714,7 @@
 		(descr "Capacitor SMD 1210 (3225 Metric), square (rectangular) end terminal, IPC-7351 nominal, (Body size source: IPC-SM-782 page 76, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf)")
 		(tags "capacitor")
 		(property "Reference" "C704"
-			(at -2.993515 0 90)
+			(at -4.231184 0 0)
 			(layer "F.SilkS")
 			(uuid "5a163136-1604-422e-896f-d4d79426c765")
 			(effects
@@ -14269,7 +14270,7 @@
 		(descr "Capacitor SMD 1210 (3225 Metric), square (rectangular) end terminal, IPC-7351 nominal, (Body size source: IPC-SM-782 page 76, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf)")
 		(tags "capacitor")
 		(property "Reference" "C312"
-			(at 0 2.269999 90)
+			(at -2.969999 -0.000001 0)
 			(layer "F.SilkS")
 			(uuid "6e1f80f7-6122-4dc3-8e81-7e6dfa5d737f")
 			(effects
@@ -15947,9 +15948,8 @@
 		(descr "Capacitor SMD 1210 (3225 Metric), square (rectangular) end terminal, IPC-7351 nominal, (Body size source: IPC-SM-782 page 76, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf)")
 		(tags "capacitor")
 		(property "Reference" "C706"
-			(at 0 -2.3 0)
+			(at -4.208095 -0.000001 0)
 			(layer "F.SilkS")
-			(hide yes)
 			(uuid "8b57c861-6f86-4462-ab70-b379107f2228")
 			(effects
 				(font
@@ -21181,6 +21181,7 @@
 		(property "Reference" "U404"
 			(at -1.603515 0.749999 0)
 			(layer "F.SilkS")
+			(hide yes)
 			(uuid "6b31f7ca-698b-424f-96d5-e3e9cb2a2944")
 			(effects
 				(font
@@ -21500,7 +21501,7 @@
 		(descr "USB 2.0 Type C Receptacle, GCT, 16P, top mounted, horizontal, 5A: https://gct.co/files/drawings/usb4105.pdf")
 		(tags "USB C Type-C Receptacle SMD USB 2.0 16P 16C USB4105-15-A USB4105-15-A-060 USB4105-15-A-120 USB4105-GF-A USB4105-GF-A-060 USB4105-GF-A-120")
 		(property "Reference" "J501"
-			(at 2.75 -5.429999 0)
+			(at -7.131415 -4.29 0)
 			(unlocked yes)
 			(layer "F.SilkS")
 			(uuid "3407cef0-eee3-4b15-b1f9-34f9e7dbc835")
@@ -22044,9 +22045,8 @@
 		(descr "Capacitor SMD 0402 (1005 Metric), square (rectangular) end terminal, IPC-7351 nominal, (Body size source: IPC-SM-782 page 76, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf)")
 		(tags "capacitor")
 		(property "Reference" "C703"
-			(at 0 -1.16 180)
+			(at 2.818095 0.75 0)
 			(layer "F.SilkS")
-			(hide yes)
 			(uuid "49dc84f9-807f-4747-bd3f-a818f42404a3")
 			(effects
 				(font
@@ -22306,6 +22306,130 @@
 		)
 		(layer "Edge.Cuts")
 		(uuid "54ed11d4-486c-4813-9221-7bedc1e78e01")
+	)
+	(gr_text "ACCESSORY"
+		(at 148.84 65.55 0)
+		(layer "F.SilkS")
+		(uuid "94ceddb3-4682-4ecc-affc-40f159d7e579")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(gr_text "SERVICE"
+		(at 162.74 63.079999 0)
+		(layer "F.SilkS")
+		(uuid "94b97b91-2b7e-4923-9306-9ed02a2b2231")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(gr_text "2280"
+		(at 167.468728 74.971268 0)
+		(layer "F.SilkS")
+		(uuid "88c71e5d-8421-4428-bec8-77da28ab83aa")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(gr_text "2242"
+		(at 167.468728 112.994784 0)
+		(layer "F.SilkS")
+		(uuid "2404cb17-bcdd-455f-9a26-2142bdccb809")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(gr_text "2230"
+		(at 167.468728 124.971268 0)
+		(layer "F.SilkS")
+		(uuid "453401ad-ced8-43e8-ba18-c1ddf5cbd5bf")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(gr_text "RPIBOOT"
+		(at 175.079999 59.069999 0)
+		(layer "F.SilkS")
+		(uuid "c38d6b84-b0ae-47ce-a881-bba1e1901ae3")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(gr_text "MAIN"
+		(at 180.220208 98.78 90)
+		(layer "F.SilkS")
+		(uuid "a48b1d4f-229e-462c-901a-6a8a3f98e314")
+		(effects
+			(font
+				(size 1.1 1.1)
+				(thickness 0.17)
+			)
+		)
+	)
+	(gr_text "FAN"
+		(at 154.056427 135 0)
+		(layer "F.SilkS")
+		(uuid "0309b7e4-80c7-4977-ae98-47d623f22458")
+		(effects
+			(font
+				(size 1.2 1.2)
+				(thickness 0.18)
+			)
+		)
+	)
+	(gr_text "github.com/hydazz/iasis"
+		(at 183 83.699999 0)
+		(layer "B.SilkS")
+		(uuid "d781c6f7-a2aa-4dac-9738-90b23036899a")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.18)
+			)
+			(justify left top mirror)
+		)
+	)
+	(gr_text "REV ${REVISION}"
+		(at 164.983332 80.2 0)
+		(layer "B.SilkS")
+		(uuid "cc1d97dd-1949-4463-a933-c6c03e13a760")
+		(effects
+			(font
+				(size 1.2 1.2)
+				(thickness 0.2)
+			)
+			(justify left top mirror)
+		)
+	)
+	(gr_text "iasis CM5"
+		(at 183 79.5 0)
+		(layer "B.SilkS")
+		(uuid "16e4fa27-8dd6-4229-85ec-aee75214e903")
+		(effects
+			(font
+				(size 2 2)
+				(thickness 0.25)
+			)
+			(justify left top mirror)
+		)
 	)
 	(segment
 		(start 181.15 125.6)
