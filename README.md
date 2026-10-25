@@ -34,6 +34,8 @@ mise run deps
 
 Builds, previews and checks are independent. Component tasks can be run directly, for example `mise run //hardware/case:build`.
 
+`mise run typecheck` checks the case package with its uv environment and the board tools with KiCad's bundled Python. It is included in `mise run check`.
+
 `mise install` installs the local Lefthook pre-commit hook. It formats staged Python, Markdown and configuration files, lints Python, and refreshes the mise lock when tool configuration changes. CAD checks run through mise when requested.
 
 ## Fabrication

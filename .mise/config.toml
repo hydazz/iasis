@@ -9,6 +9,7 @@ oxipng = "10.2.1"
 lefthook = "2.2.2"
 oxfmt = "0.74.0"
 node = "26.12.1"
+"npm:pyright" = "1.1.414"
 
 [settings]
 experimental = true
@@ -41,6 +42,7 @@ depends = ["//hardware/case:preview", "//hardware/boards/...:preview"]
 description = "Check sources, enclosure fit and KiCad designs"
 depends = [
   "lint",
+  "typecheck",
   "fmt-check",
   "test",
   "//hardware/case:check",
@@ -50,6 +52,13 @@ depends = [
 [tasks.lint]
 description = "Lint Python sources"
 run = "ruff check hardware"
+
+[tasks.typecheck]
+description = "Check Python types in the case and KiCad environments"
+run = [
+  'uv run --locked --project hardware/case pyright --pythonpath hardware/case/.venv/bin/python --pythonversion 3.14 hardware/case/src',
+  'pyright --pythonpath "$KICAD_PYTHON" --pythonversion 3.9 hardware/tools',
+]
 
 [tasks.test]
 description = "Test JLCPCB placement conversion"

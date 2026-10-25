@@ -29,7 +29,7 @@ from OCP.OCP.XCAFDoc import XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
 
 @dataclass
 class Board:
-    body: Solid
+    body: Solid | Compound
     parts: dict[str, Compound]
     step: Path
     origin: Location  # STEP coordinates to board coordinates

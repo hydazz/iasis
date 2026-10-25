@@ -408,7 +408,7 @@ def foot() -> Part:
     body = Cylinder(FOOT_D / 2, FOOT_H, align=BASE)
     body = chamfer(body.edges().group_by(Axis.Z)[0], FOOT_CHAMFER)
     body.label = "TPU foot"
-    return body
+    return cast(Part, body)
 
 
 def feet(lay: Layout) -> list[Part]:
@@ -674,7 +674,7 @@ def _control_grooves(lay: Layout, top: float, display: Display | None) -> list[P
     for y in (2, -21):
         profile = Pos((left + right) / 2, y) * SlotOverall(right - left, 0.8)
         if display:
-            profile -= _display_keepout(lay, display)
+            profile = Sketch((profile - _display_keepout(lay, display)).faces())
         grooves.append(extrude(Pos(0, 0, top - 0.4) * profile, amount=0.6))
     if lay.divider_x is not None:
         profile = Pos(lay.divider_x, 0) * RectangleRounded(0.8, lay.width - 20, 0.39)

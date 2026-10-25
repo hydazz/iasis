@@ -10,6 +10,7 @@ the flex rises out of both and bends over the gap in a half circle.
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 from build123d import (
     Align,
@@ -25,6 +26,7 @@ from build123d import (
     Pos,
     Rectangle,
     RectangleRounded,
+    Solid,
     sweep,
 )
 
@@ -60,7 +62,7 @@ class Side:
     flex: Part
 
     @property
-    def body(self) -> Part:
+    def body(self) -> Solid | Compound:
         return self.board.body.moved(self.place)
 
     @property
@@ -82,12 +84,16 @@ def assemble(main: Board, step: Path = STEP) -> Side:
     span = [max(getattr(h, a) for h in holes) - min(getattr(h, a) for h in holes) for a in "XY"]
     fins = COOLER[:2] if span[0] > span[1] else COOLER[1::-1]
     seat = side.body.bounding_box().max.Z
-    cooler = Pos(c.X, c.Y, seat + MODULE_TOP + BOSS_H) * Box(*fins, COOLER[2], align=BASE)
+    cooler = Pos(c.X, c.Y, seat + MODULE_TOP + BOSS_H) * Box(
+        fins[0], fins[1], COOLER[2], align=BASE
+    )
     for h in holes:
         cooler += Pos(h.X, h.Y, seat + MODULE_TOP) * Cylinder(BOSS_D / 2, BOSS_H, align=BASE)
     under = (Align.CENTER, Align.CENTER, Align.MAX)
-    screws = Part() + [Pos(h.X, h.Y, 0) * Cylinder(SCREW_HEAD[0] / 2, SCREW_HEAD[1], align=under)
-                       for h in holes]  # fmt: skip
+    screws = Part([
+        Pos(h.X, h.Y, 0) * Cylinder(SCREW_HEAD[0] / 2, SCREW_HEAD[1], align=under)
+        for h in holes
+    ])  # fmt: skip
 
     xm, xs = edge + SLOT_IN, edge - GAP - SLOT_IN
     bend = (xm - xs) / 2
@@ -96,7 +102,7 @@ def assemble(main: Board, step: Path = STEP) -> Side:
     path = FilletPolyline((xm, y, z0), (xm, y, zb), (xs, y, zb), (xs, y, z0), radius=bend - 0.001)
     flex = sweep(Plane(origin=(xm, y, z0), z_dir=(0, 0, 1)) * Rectangle(FLEX_T, FLEX_W), path)
 
-    return Side(side, place, cooler.moved(place), screws.moved(place), flex)
+    return Side(side, place, cooler.moved(place), screws.moved(place), cast(Part, flex))
 
 
 @dataclass

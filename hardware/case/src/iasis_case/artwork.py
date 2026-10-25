@@ -4,8 +4,8 @@ from functools import lru_cache
 from pathlib import Path
 
 from build123d import Align, Compound, Face, Pos, Sketch, Wire, import_svg
-from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeOffset
-from OCP.GeomAbs import GeomAbs_Arc
+from OCP.OCP.BRepOffsetAPI import BRepOffsetAPI_MakeOffset
+from OCP.OCP.GeomAbs import GeomAbs_Arc
 
 
 @lru_cache

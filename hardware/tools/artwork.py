@@ -1,12 +1,12 @@
 """Fit a filled SVG into the back-silkscreen logo slot on a board copy."""
 
 import pcbnew as pcb
-from wx.svg import (
+from wx.svg import SVGimage
+from wx.svg._nanosvg import (
     SVG_FILLRULE_EVENODD,
     SVG_FLAGS_VISIBLE,
     SVG_PAINT_COLOR,
     SVG_PAINT_NONE,
-    SVGimage,
 )
 
 

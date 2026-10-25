@@ -42,6 +42,12 @@ url = "https://nodejs.org/dist/v26.12.1/node-v26.12.1-linux-x64.tar.gz"
 checksum = "sha256:1901d539912c02afa10d1cc126943a8855a7eedebe830119463470db5e6c59e8"
 url = "https://nodejs.org/dist/v26.12.1/node-v26.12.1-darwin-arm64.tar.gz"
 
+[[tools."npm:pyright"]]
+version = "1.1.414"
+aube = { path = "locks/npm-pyright/1.1.414", digest = "sha256:69cd62e5613c907964fbb78b05a85eb9d12a503285d716f6529144cc884cf656" }
+backend = "npm:pyright"
+specifiers = ["1.1.414"]
+
 [[tools.oxfmt]]
 version = "0.74.0"
 aube = { path = "locks/oxfmt/0.74.0", digest = "sha256:b7977a181c0e11736ab44f83b24a4b862754204c253477e29d1758b0f898aad7" }
