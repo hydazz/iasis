@@ -47,7 +47,7 @@ from .artwork import icon
 from .board import Board, load
 from .retention import DisplayFrame, Joint
 from .side import assemble as side_board
-from .side import pair
+from .side import Pair, pair
 
 # Fit
 CLEARANCE = 0.3  # board edge to inner wall
@@ -224,6 +224,14 @@ class Layout:
     @property
     def y_rear(self) -> float:
         return self.width / 2
+
+    @property
+    def divider_x(self) -> float | None:
+        return self.board.join_x if isinstance(self.board, Pair) else None
+
+    @property
+    def control_left(self) -> float:
+        return self.divider_x + 6 if self.divider_x is not None else -self.length / 2 + 10
 
     @cached_property
     def openings(self) -> list[Opening]:
@@ -579,7 +587,7 @@ def _artwork(lay: Layout) -> list[Sketch]:
         Pos(power.X, lay.y_rear - 7) * icon("plug"),
         Pos(first.X, lay.y_front + 7) * Circle(1),
         Pos(status.X, lay.y_front + 7) * icon("activity", size=5.5),
-        Pos(-lay.length / 2 + 25, sw.Y)
+        Pos(lay.control_left + 15, sw.Y)
         * Text(WORDMARK, font_size=WORDMARK_SIZE),
     ]
     x = sw.X - 36
@@ -593,13 +601,10 @@ def _artwork(lay: Layout) -> list[Sketch]:
             marks.append(Pos(x, y) * Circle(0.6))
             if action == "RESTORE":
                 marks += [Pos(x + 2.4, y) * Circle(0.6), Pos(x + 6.1, y) * SlotOverall(3, 1.2)]
-    for ref, label, inset in (("S:J401", "USB", 6), ("S:J501", "SERVICE", 12)):
+    for ref, symbol in (("S:J401", "usb"), ("S:J501", "square-terminal")):
         if ref in lay.ports:
-            marks.append(Pos(lay.board.box(ref).center().X, lay.y_rear - inset)
-                         * Text(label, font_size=TEXT_SIZE, font_style=FontStyle.BOLD))
-    if "S:J501" in lay.ports:
-        marks.append(Pos(lay.board.box("S:J501").center().X, lay.y_rear - 8.6)
-                     * RectangleRounded(0.7, 2, 0.34))
+            marks.append(Pos(lay.board.box(ref).center().X, lay.y_rear - 7)
+                         * icon(symbol, size=8))
     return marks
 
 
@@ -648,10 +653,14 @@ def _display_keepout(lay: Layout, display: Display) -> Sketch:
 
 def _control_grooves(lay: Layout, top: float, display: Display | None) -> list[Part]:
     grooves = []
+    left, right = lay.control_left, lay.length / 2 - 10
     for y in (2, -21):
-        profile = Pos(0, y) * SlotOverall(lay.length - 20, 0.8)
+        profile = Pos((left + right) / 2, y) * SlotOverall(right - left, 0.8)
         if display:
             profile -= _display_keepout(lay, display)
+        grooves.append(extrude(Pos(0, 0, top - 0.4) * profile, amount=0.6))
+    if lay.divider_x is not None:
+        profile = Pos(lay.divider_x, 0) * RectangleRounded(0.8, lay.width - 20, 0.39)
         grooves.append(extrude(Pos(0, 0, top - 0.4) * profile, amount=0.6))
     return grooves
 
@@ -676,23 +685,30 @@ def _top_slots(lay: Layout, z: float, depth: float, display: Display | None) -> 
     if display:
         avoid.append(_display_keepout(lay, display).bounding_box())
     slots = []
-    span = lay.length - 24
-    count = math.ceil(span / 18)
-    length = (span - 2 * (count - 1)) / count
-    for y in (12, 18, 24, 30, 36, -32, -37):
-        for i in range(count):
-            x = -span / 2 + length / 2 + i * (length + 2)
-            profile = Pos(x, y, z) * SlotOverall(length, SLOT_W)
-            b = profile.bounding_box()
-            if any(
-                b.min.X < a.max.X + 2
-                and b.max.X > a.min.X - 2
-                and b.min.Y < a.max.Y + 2
-                and b.max.Y > a.min.Y - 2
-                for a in avoid
-            ):
-                continue
-            slots.append(extrude(profile, amount=depth))
+    rows = (12, 18, 24, 30, 36, -32, -37)
+    left, right = -lay.length / 2 + 12, lay.length / 2 - 12
+    zones = [(left, right, rows)] if lay.divider_x is None else [
+        (left, lay.divider_x - 5, (*rows, 6, 0, -6, -12, -18, -24)),
+        (lay.divider_x + 5, right, rows),
+    ]
+    for left, right, bands in zones:
+        span = right - left
+        count = math.ceil(span / 18)
+        length = (span - 2 * (count - 1)) / count
+        for y in bands:
+            for i in range(count):
+                x = left + length / 2 + i * (length + 2)
+                profile = Pos(x, y, z) * SlotOverall(length, SLOT_W)
+                b = profile.bounding_box()
+                if any(
+                    b.min.X < a.max.X + 2
+                    and b.max.X > a.min.X - 2
+                    and b.min.Y < a.max.Y + 2
+                    and b.max.Y > a.min.Y - 2
+                    for a in avoid
+                ):
+                    continue
+                slots.append(extrude(profile, amount=depth))
     return slots
 
 

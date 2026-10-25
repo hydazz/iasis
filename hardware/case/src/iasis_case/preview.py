@@ -9,7 +9,7 @@ from . import case
 from .render import render, save
 
 PREVIEW = Path(__file__).resolve().parents[2] / "preview"
-VIEW, REAR_VIEW = (-300, -400, 250), (300, 400, 250)
+VIEW = (-300, -400, 250)
 BODY, TEXT = (214, 216, 220), (35, 38, 42)
 
 
@@ -19,10 +19,9 @@ def main() -> None:
     args = parser.parse_args()
     output = args.output.resolve() if args.output else PREVIEW
     output.mkdir(parents=True, exist_ok=True)
-    # The CM5 build is seen from the rear, where its side board ports are.
-    for name, view, (lay, tray, covers) in (
-        ("case.png", VIEW, case.assemble()),
-        ("case-cm5.png", REAR_VIEW, case.assemble_cm5()),
+    for name, (lay, tray, covers) in (
+        ("case.png", case.assemble()),
+        ("case-cm5.png", case.assemble_cm5()),
     ):
         visible = Compound([lay.board.parts[ref] for ref in (*lay.ports, *case.LIGHTS)])
         c = covers["passive"]
@@ -34,7 +33,7 @@ def main() -> None:
             (c.button, BODY),
             (visible, (100, 106, 112)),
         ]
-        if save(render(shown, view), output / name):
+        if save(render(shown, VIEW), output / name):
             print(f"{output / name} written")
 
 

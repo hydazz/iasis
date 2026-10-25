@@ -109,6 +109,12 @@ class Pair(Board):
     shift: Location = field(default_factory=Location)  # main board coordinates to these
     corner: float = 0.0
 
+    @property
+    def join_x(self) -> float:
+        """Centre of the gap between the boards, in enclosure coordinates."""
+        assert self.side is not None
+        return self.side.body.bounding_box().max.X + GAP / 2 + self.shift.position.X
+
     def outline(self) -> Face:
         bb = self.body.bounding_box()
         return (

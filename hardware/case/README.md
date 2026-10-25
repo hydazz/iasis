@@ -4,7 +4,7 @@ A screwless 3D-printable enclosure for Iasis, generated with [build123d](https:/
 
 <img src="preview/case.png" alt="Iasis enclosure" width="500">
 
-<img src="preview/case-cm5.png" alt="Iasis CM5 build enclosure from the rear" width="500">
+<img src="preview/case-cm5.png" alt="Iasis CM5 build enclosure" width="500">
 
 ## Build
 
@@ -38,7 +38,7 @@ The installed package also provides `iasis-case-build`, `iasis-case-preview`, `i
 
 Use a 0.4 mm nozzle and 0.20 mm layers, without supports. Print the button in the body colour. For multicolour covers, import the cover and its matching lettering STL together as parts of one object, preserving their positions, then assign filaments. Leave the lettering out for recessed markings.
 
-Print four TPU feet separately and secure them with adhesive in the underside recesses. Each foot is 12 mm diameter × 2 mm thick, with a 0.4 mm bottom chamfer. The recesses are 12.4 mm diameter × 0.8 mm deep, leaving 1.2 mm exposed before adhesive thickness. The floor is solid; side inlets above the board and top slot bands provide ventilation.
+Print four TPU feet separately and secure them with adhesive in the underside recesses. Each foot is 12 mm diameter × 2 mm thick, with a 0.4 mm bottom chamfer. The recesses are 12.4 mm diameter × 0.8 mm deep, leaving 1.2 mm exposed before adhesive thickness. The floor is solid; side inlets above the board and top slot bands provide ventilation. The CM5 side has additional vent rows above the cooler, separated from the hub controls by a shallow divider groove.
 
 Place the board on the tray pegs, insert the button from inside the cover, and press the cover down until both end catches engage. To open, press the two round end-wall pads inward and lift the cover vertically.
 
@@ -52,7 +52,7 @@ The cooler envelope reaches 12.21 mm above the carrier board underside. The inne
 
 Verify the supplied standoffs and thermal-pad contact with the CM5 before assembly; the clearance model does not establish thermal performance. Fit the cooler's screws from below before seating the side board, then fit the side-link flex into both vertical connectors, contacts toward the gap, and close their actuators, with the cover removed.
 
-A dot marks target port 1; laptop and plug icons identify host and power. The activity icon marks the Iasis status LED. The CM5 accessory port is labelled USB and its device/service port SERVICE; Ethernet has no top label. The action and CM5 port labels use 4.5 mm bold type, with approximately 3.3 mm capital height. USB and SERVICE sit on staggered rows, with a short leader for SERVICE. The three button rows use text with gesture marks:
+A dot marks target port 1; laptop and plug icons identify host and power. The activity icon marks the Iasis status LED. Lucide USB and terminal icons identify the CM5 accessory and service ports; Ethernet has no top label. The action labels use 4.5 mm bold type, with approximately 3.3 mm capital height. The three button rows use text with gesture marks:
 
 | Mark               | Gesture               | Action                   |
 | ------------------ | --------------------- | ------------------------ |
