@@ -34,7 +34,6 @@ from build123d import (
     Pos,
     Rectangle,
     RectangleRounded,
-    Rot,
     Sketch,
     SlotOverall,
     Text,
@@ -66,6 +65,8 @@ STANDOFF = 3.0  # clear space under the board
 TOP_CHAMFER = 0.8  # 45 degrees, supported when the cover prints top down
 BASE_CHAMFER = 0.6
 PORT_EDGE_R = 0.5  # outer edge of each USB-C opening
+FOOT_D, FOOT_H, FOOT_RECESS, FOOT_CHAMFER = 12.0, 2.0, 0.8, 0.4
+FOOT_FIT = 0.2  # radial clearance for adhesive-mounted TPU feet
 
 # Board support
 HOLE_D = 3.2  # the board's M3 drill, which identifies the case holes
@@ -149,11 +150,11 @@ DISPLAY_PIN_OVER = 0.2
 COVERS = {"passive": None, "display": OLED}
 
 # Top ventilation.
-SLOT_W = 2.0
+SLOT_W = 2.6
 
 # Marks
-TEXT_DEPTH = 0.6  # three 0.20 mm layers, flush with the top
-TEXT_SIZE = 4.0
+TEXT_DEPTH = 0.4  # two 0.20 mm layers, flush with the top
+TEXT_SIZE = 4.5
 WORDMARK = "iasis"
 WORDMARK_SIZE = 8.0
 
@@ -211,10 +212,9 @@ class Layout:
     z_bottom: float  # tray underside
     corner_r: float  # outer vertical corners: the board's plus clearance and wall
     holes: list[Vector]
-    parts_top: float  # tallest placed part
+    parts_top: float  # tallest part beneath the roof; the RJ45 passes through it
     split: float
     ports: dict[str, tuple[str, str]] = field(default_factory=lambda: dict(PORTS))
-    main_x: float = 0.0  # the main board's centre, under the name
     _roofs: dict[Display | None, float] = field(default_factory=dict, init=False, repr=False)
 
     @property
@@ -289,7 +289,6 @@ class Cover:
 def layout(
     board: Board,
     ports: dict[str, tuple[str, str]] = PORTS,
-    main_x: float = 0.0,
 ) -> Layout:
     required = set(ports) | set(LIGHTS) | {BUTTON}
     missing = required - board.parts.keys()
@@ -324,10 +323,13 @@ def layout(
         z_bottom=-(STANDOFF + FLOOR),
         corner_r=corner + CLEARANCE + min(WALL, port_wall),
         holes=board.holes(HOLE_D),
-        parts_top=max(board.box(ref, exact=False).max.Z for ref in board.parts),
+        parts_top=max(
+            board.box(ref, exact=False).max.Z
+            for ref in board.parts
+            if ports.get(ref, (None, None))[0] != "rj45"
+        ),
         split=board.body.bounding_box().max.Z + 1.6,
         ports=dict(ports),
-        main_x=main_x,
     )
 
 
@@ -389,6 +391,23 @@ def _outline(lay: Layout) -> Sketch:
     return RectangleRounded(lay.length, lay.width, lay.corner_r)
 
 
+def _foot_centres(lay: Layout) -> list[tuple[float, float]]:
+    return [(x, y) for x in (-lay.length / 2 + 15, lay.length / 2 - 15) for y in (-43, 43)]
+
+
+def foot() -> Part:
+    """Flat-bottomed TPU foot, standing on the print bed."""
+    body = Cylinder(FOOT_D / 2, FOOT_H, align=BASE)
+    body = chamfer(body.edges().group_by(Axis.Z)[0], FOOT_CHAMFER)
+    body.label = "TPU foot"
+    return body
+
+
+def feet(lay: Layout) -> list[Part]:
+    body = foot()
+    return [Pos(x, y, lay.z_bottom - FOOT_H + FOOT_RECESS) * body for x, y in _foot_centres(lay)]
+
+
 def tray(lay: Layout) -> Part:
     """Lower tray, printed floor down, with open-top halves of the port openings."""
     z0 = lay.z_bottom
@@ -412,6 +431,10 @@ def tray(lay: Layout) -> Part:
     joint = Joint(lay.length / 2, lay.split, lay.top_inside())
     body += Compound(joint.tray_parts())
     body -= Compound(joint.tray_cuts())
+    body -= Compound([
+        Pos(x, y, z0 - 0.1) * Cylinder(FOOT_D / 2 + FOOT_FIT, FOOT_RECESS + 0.1, align=BASE)
+        for x, y in _foot_centres(lay)
+    ])
     body.label = "tray"
     # build123d's boolean annotations lose the result's dimensional subtype.
     return cast(Part, body)
@@ -443,7 +466,10 @@ def cover(lay: Layout, name: str, display: Display | None) -> Cover:
     shell += Compound(list(intrusions.values()))
 
     cuts += [_wall_cut(o) for o in lay.openings]
+    cuts += [extrude(Pos(0, 0, top_in - 1) * p, amount=TOP + 2) for p in _roof_openings(lay)]
     cuts += _top_slots(lay, top_in - 1, TOP + 2, display)
+    cuts += _side_intakes(lay)
+    cuts += _control_grooves(lay, top_out, display)
     sw = lay.board.box(BUTTON).center()
     cuts.append(
         Pos(sw.X, sw.Y, top_in - 1) * Cylinder(BUTTON_D / 2 + BUTTON_FIT, TOP + 2, align=BASE)
@@ -548,19 +574,33 @@ def _artwork(lay: Layout) -> list[Sketch]:
     host, power, first = (lay.board.box(ref).center() for ref in ("J901", "J1001", "J401"))
     status = lay.board.box("D1170").center()
     sw = lay.board.box(BUTTON).center()
-    y = sw.Y - 10.5
-    return [
+    marks = [
         Pos(host.X, lay.y_rear - 7) * icon("laptop-minimal"),
         Pos(power.X, lay.y_rear - 7) * icon("plug"),
         Pos(first.X, lay.y_front + 7) * Circle(1),
         Pos(status.X, lay.y_front + 7) * icon("activity", size=5.5),
-        Pos(lay.main_x, lay.y_front + 7)
-        * Text(WORDMARK, font_size=WORDMARK_SIZE, font_style=FontStyle.BOLD),
-        Pos(sw.X - 10.3, y) * Circle(0.7),
-        Pos(sw.X - 3.8, y) * Text("DFU", font_size=TEXT_SIZE, font_style=FontStyle.BOLD),
-        Pos(sw.X + 4.7, y) * SlotOverall(4, 1.4),
-        Pos(sw.X + 11.2, y) * icon("rotate-ccw", size=5.5),
+        Pos(-lay.length / 2 + 25, sw.Y)
+        * Text(WORDMARK, font_size=WORDMARK_SIZE),
     ]
+    x = sw.X - 36
+    for action, y in (("DFU", sw.Y + 6), ("REBOOT", sw.Y), ("RESTORE", sw.Y - 6)):
+        marks.append(Pos(x + 10, y) * Text(
+            action, font_size=TEXT_SIZE, font_style=FontStyle.BOLD, align=(Align.MIN, Align.CENTER)
+        ))
+        if action == "REBOOT":
+            marks.append(Pos(x + 0.9, y) * SlotOverall(3, 1.2))
+        else:
+            marks.append(Pos(x, y) * Circle(0.6))
+            if action == "RESTORE":
+                marks += [Pos(x + 2.4, y) * Circle(0.6), Pos(x + 6.1, y) * SlotOverall(3, 1.2)]
+    for ref, label, inset in (("S:J401", "USB", 6), ("S:J501", "SERVICE", 12)):
+        if ref in lay.ports:
+            marks.append(Pos(lay.board.box(ref).center().X, lay.y_rear - inset)
+                         * Text(label, font_size=TEXT_SIZE, font_style=FontStyle.BOLD))
+    if "S:J501" in lay.ports:
+        marks.append(Pos(lay.board.box("S:J501").center().X, lay.y_rear - 8.6)
+                     * RectangleRounded(0.7, 2, 0.34))
+    return marks
 
 
 def _markings(lay: Layout, top: float) -> Compound:
@@ -589,27 +629,60 @@ def _button(lay: Layout, name: str, top_in: float, top_out: float) -> Part:
     return cast(Part, cap)
 
 
+def _roof_openings(lay: Layout) -> list[Sketch]:
+    """Open rear notches let the Ethernet shell reach the top plane."""
+    openings = []
+    for ref, (kind, _) in lay.ports.items():
+        if kind != "rj45":
+            continue
+        bb = lay.board.box(ref)
+        front, rear = bb.min.Y - PORT_FIT, lay.y_rear + 1
+        openings.append(Pos(bb.center().X, (front + rear) / 2)
+                        * Rectangle(bb.size.X + 2 * PORT_FIT, rear - front))
+    return openings
+
+
+def _display_keepout(lay: Layout, display: Display) -> Sketch:
+    return Pos(lay.display_x, 0) * Rectangle(display.pcb[0] + 10, display.pcb[1] + 10)
+
+
+def _control_grooves(lay: Layout, top: float, display: Display | None) -> list[Part]:
+    grooves = []
+    for y in (2, -21):
+        profile = Pos(0, y) * SlotOverall(lay.length - 20, 0.8)
+        if display:
+            profile -= _display_keepout(lay, display)
+        grooves.append(extrude(Pos(0, 0, top - 0.4) * profile, amount=0.6))
+    return grooves
+
+
+def _side_intakes(lay: Layout) -> list[Part]:
+    cuts = []
+    for x in (-lay.length / 2, lay.length / 2):
+        for y in (-32, -20, 20, 32):
+            plane = Plane(origin=(x - 2, y, 6), x_dir=(0, 1, 0), z_dir=(1, 0, 0))
+            cuts.append(extrude(plane * SlotOverall(10, 2.8), amount=4))
+    return cuts
+
+
 def _top_slots(lay: Layout, z: float, depth: float, display: Display | None) -> list[Part]:
-    """Whole slots on a regular grid; no clipped slots around controls or the display."""
+    """Horizontal vent bands around a continuous control strip."""
     avoid = [f.bounding_box() for f in _artwork(lay)]
+    avoid += [p.bounding_box() for p in _roof_openings(lay)]
     bb = lay.board.box(BUTTON)
     avoid.append(
         (Pos(bb.center().X, bb.center().Y) * Circle(BUTTON_FLANGE_D / 2 + MIN_GAP)).bounding_box()
     )
     if display:
-        avoid.append(
-            (
-                Pos(lay.display_x, 0) * Rectangle(display.pcb[0] + 8, display.pcb[1] + 8)
-            ).bounding_box()
-        )
+        avoid.append(_display_keepout(lay, display).bounding_box())
     slots = []
-    rows: dict[int, list[tuple[int, Sketch]]] = {}
-    # Short 12 mm vents leave cross ribs and bridge cleanly on the print bed.
-    x_start, x_end = math.ceil((-lay.length / 2 + 10) / 4), math.floor((lay.length / 2 - 10) / 4)
-    y_start, y_end = math.ceil((-lay.width / 2 + 14) / 16), math.floor((lay.width / 2 - 14) / 16)
-    for x in range(4 * x_start, 4 * x_end + 1, 4):
-        for y in range(16 * y_start, 16 * y_end + 1, 16):
-            profile = Pos(x, y, z) * Rot(Z=90) * SlotOverall(12, SLOT_W)
+    span = lay.length - 24
+    count = math.ceil(span / 18)
+    length = (span - 2 * (count - 1)) / count
+    for y in (12, 18, 24, 30, 36, -32, -37):
+        for i in range(count):
+            x = -span / 2 + length / 2 + i * (length + 2)
+            profile = Pos(x, y, z) * SlotOverall(length, SLOT_W)
             b = profile.bounding_box()
             if any(
                 b.min.X < a.max.X + 2
@@ -619,16 +692,7 @@ def _top_slots(lay: Layout, z: float, depth: float, display: Display | None) -> 
                 for a in avoid
             ):
                 continue
-            rows.setdefault(y, []).append((x, profile))
-    for row in rows.values():
-        groups: list[list[tuple[int, Sketch]]] = []
-        for x, profile in row:
-            if not groups or x - groups[-1][-1][0] > 4:
-                groups.append([])
-            groups[-1].append((x, profile))
-        for group in groups:
-            if len(group) >= 3:
-                slots.extend(extrude(profile, amount=depth) for _, profile in group)
+            slots.append(extrude(profile, amount=depth))
     return slots
 
 
@@ -647,7 +711,7 @@ def assemble_cm5() -> tuple[Layout, Part, dict[str, Cover]]:
     """The CM5 build: one tray and cover for the main board and the CM5 side board."""
     main = load(CM5_STEP)
     both = pair(main, side_board(main))
-    lay = layout(both, ports=PORTS | SIDE_PORTS, main_x=both.shift.position.X)
+    lay = layout(both, ports=PORTS | SIDE_PORTS)
     covers = {name: cover(lay, name, display) for name, display in COVERS.items()}
     return lay, tray(lay), covers
 

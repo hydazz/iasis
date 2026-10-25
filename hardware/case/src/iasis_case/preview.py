@@ -28,6 +28,7 @@ def main() -> None:
         c = covers["passive"]
         shown = [
             (tray, BODY),
+            *[(foot, (53, 59, 57)) for foot in case.feet(lay)],
             (c.part, BODY),
             (c.markings, TEXT),
             (c.button, BODY),

@@ -61,7 +61,8 @@ def run(
         r.fail(f"{len(lay.holes)} mounting holes, expected {holes}")
 
     r.lines.append("solids")
-    printed = [tray, *(c.part for c in covers.values()), *(c.button for c in covers.values())]
+    feet = case.feet(lay)
+    printed = [tray, *(c.part for c in covers.values()), *(c.button for c in covers.values()), *feet]
     printed += [c.retainer.part for c in covers.values() if c.retainer is not None]
     for part in printed:
         if part.is_valid and len(part.solids()) == 1 and part.volume > 0:
@@ -72,6 +73,11 @@ def run(
             r.fail(f"{part.label}: valid={part.is_valid}, {len(part.solids())} solids")
         if (overlap := _overlap(part, board.body)) > 1e-3:
             r.fail(f"{part.label} overlaps the board by {overlap:.0f} mm3")
+
+    for foot in feet:
+        if _overlap(foot, tray) > 1e-3:
+            r.fail("TPU foot overlaps its tray recess")
+    r.ok(f"foot recesses leave {case.FLOOR - case.FOOT_RECESS:.1f} mm of floor")
 
     r.lines.append("walls and floor")
     outline = board.body.bounding_box()
@@ -127,7 +133,16 @@ def run(
         r.lines.append(f"cover {name}")
         top = lay.top_inside(case.COVERS[name])
         r.ok(f"inside height {top - lay.seat:.1f} mm above the board, "
-             f"{top - lay.parts_top:.1f} mm over the tallest part")  # fmt: skip
+             f"{top - lay.parts_top:.1f} mm over the tallest enclosed part")  # fmt: skip
+        roof = c.part & (Pos(0, 0, top) * Box(lay.length + 2, lay.width + 2, case.TOP + 1, align=case.BASE))
+        _clear(r, "roof and exposed-port edges", roof, parts)
+        for ref, (kind, _) in lay.ports.items():
+            if kind == "rj45":
+                jack = board.parts[ref]
+                if any(_overlap(Pos(0, 0, dz) * c.part, jack) > 1e-3 for dz in (0, 1, 3, 6)):
+                    r.fail(f"cover cannot lift clear of {ref}")
+                else:
+                    r.ok(f"{ref} clears the roof notch during cover removal")
         for label, solid in c.intrusions.items():
             _clear(r, label, solid, parts)
         switch = board.parts[case.BUTTON]

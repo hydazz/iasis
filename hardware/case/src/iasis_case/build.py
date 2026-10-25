@@ -25,7 +25,7 @@ def write(
         if c.retainer is not None:
             printing.export(f"{prefix}display-retainer", c.retainer.part, print_dir)
 
-    extra: list[Shape] = [tray]
+    extra: list[Shape] = [tray, *case.feet(lay)]
     for c in covers.values():
         extra += [c.part, c.markings, c.button]
         if c.display is not None:
@@ -43,6 +43,7 @@ def main() -> None:
     args = parser.parse_args()
     output = args.output.resolve() if args.output else BUILD
     output.mkdir(parents=True, exist_ok=True)
+    printing.export("tpu-foot", case.foot(), output / "print")
     steps = [
         write("", *case.assemble(), output),
         write("cm5-", *case.assemble_cm5(), output),

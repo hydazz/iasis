@@ -7,6 +7,8 @@ from build123d.topology.shape_core import Shape
 from ocp_vscode import Collapse, Render, set_viewer_config
 from ocp_vscode import show as show_cad
 
+from .case import feet
+
 if TYPE_CHECKING:
     from .case import Cover, Layout
 
@@ -23,7 +25,12 @@ def show(lay: Layout, tray: Shape, covers: dict[str, Cover]) -> None:
         "Board": _coloured(lay.board.body, "#1f5e3c"),
     }
     variants = {}
-    states = {"/Group/Tray": [1, 1], **{f"/Group/PCB/{part}": [1, 1] for part in pcb}}
+    base = {
+        "Body": _coloured(tray, "#d6d8dc"),
+        "Feet": _coloured(Compound(feet(lay)), "#353b39"),
+    }
+    states = {**{f"/Group/Tray/{part}": [1, 1] for part in base},
+              **{f"/Group/PCB/{part}": [1, 1] for part in pcb}}
     for name, cover in covers.items():
         group = {
             "Body": _coloured(cover.part, "#d6d8dc"),
@@ -40,7 +47,7 @@ def show(lay: Layout, tray: Shape, covers: dict[str, Cover]) -> None:
             states[f"/Group/Cover/{variant}/{part}"] = [1, 1] if variant == "Passive" else [0, 0]
 
     show_cad(
-        _coloured(tray, "#d6d8dc"),
+        base,
         pcb,
         variants,
         names=["Tray", "PCB", "Cover"],
