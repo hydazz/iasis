@@ -2887,7 +2887,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "05A20L24P"
+		(property "Value" "FH12-24S-0.5SVA(54)"
 			(at 238.76 101.6 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2898,7 +2898,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Iasis:HanElectricity_05A20L24P"
+		(property "Footprint" "Iasis:Hirose_FH12-24S-0.5SVA_1x24-1MP_P0.50mm_Vertical"
 			(at 236.22 99.06 0)
 			(hide yes)
 			(show_name no)
@@ -2931,7 +2931,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C5362158"
+		(property "LCSC" "C3169218"
 			(at 236.22 99.06 0)
 			(hide yes)
 			(show_name no)
@@ -2942,7 +2942,7 @@
 				)
 			)
 		)
-		(property "MPN" "05A20L24P"
+		(property "MPN" "FH12-24S-0.5SVA(54)"
 			(at 236.22 99.06 0)
 			(hide yes)
 			(show_name no)
@@ -2953,7 +2953,7 @@
 				)
 			)
 		)
-		(property "Manufacturer" "HanElectricity"
+		(property "Manufacturer" "Hirose"
 			(at 236.22 99.06 0)
 			(hide yes)
 			(show_name no)

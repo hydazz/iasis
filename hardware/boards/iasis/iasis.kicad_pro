@@ -555,6 +555,25 @@
         "wire_width": 6
       },
       {
+        "bus_width": 12,
+        "clearance": 0.1,
+        "diff_pair_gap": 0.25,
+        "diff_pair_via_gap": 0.25,
+        "diff_pair_width": 0.2,
+        "line_style": 0,
+        "microvia_diameter": 0.3,
+        "microvia_drill": 0.1,
+        "name": "MCU_IO",
+        "pcb_color": "rgba(0, 0, 0, 0.000)",
+        "priority": 3,
+        "schematic_color": "rgba(0, 0, 0, 0.000)",
+        "track_width": 0.1,
+        "tuning_profile": "",
+        "via_diameter": 0.45,
+        "via_drill": 0.3,
+        "wire_width": 6
+      },
+      {
         "clearance": 0.15,
         "name": "Power",
         "pcb_color": "rgba(0, 0, 0, 0.000)",
@@ -732,6 +751,278 @@
       {
         "netclass": "USB_90",
         "pattern": "/RP2354 controller/MCU_USB_D_RAW_?"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "/RP2354 controller/MCU_QSPI_SS_N"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "/RP2354 controller/MCU_SWCLK"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "/RP2354 controller/MCU_SWDIO"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "AON_RESET_N"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "AUX_SCL"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "AUX_SDA"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "CONFIRM_N"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "EXP_RESET_N"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "EXT_SCL"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "EXT_SDA"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "HOST_BUDGET_FAULT_N"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "HUB_SCL"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "HUB_SDA"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "LED_DATA"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "MCU_I2C_SCL"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "MCU_I2C_SDA"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "MCU_UART_RX"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "MCU_UART_TX"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P1_CC_FAULT_MCU"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P1_CHARGE_EN_REQ"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P1_HOST_EN_REQ"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P1_ORIENTATION"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P1_PD_IRQ_N"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P1_POWER_FAULT_N"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P1_SCL"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P1_SDA"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P1_VBUS_ADC"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P2_CC_FAULT_MCU"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P2_CHARGE_EN_REQ"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P2_HOST_EN_REQ"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P2_ORIENTATION"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P2_PD_IRQ_N"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P2_POWER_FAULT_N"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P2_SCL"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P2_SDA"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P2_VBUS_ADC"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P3_CC_FAULT_MCU"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P3_CHARGE_EN_REQ"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P3_HOST_EN_REQ"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P3_ORIENTATION"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P3_PD_IRQ_N"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P3_POWER_FAULT_N"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P3_SCL"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P3_SDA"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P3_VBUS_ADC"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P4_CC_FAULT_MCU"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P4_CHARGE_EN_REQ"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P4_HOST_EN_REQ"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P4_ORIENTATION"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P4_PD_IRQ_N"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P4_POWER_FAULT_N"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P4_SCL"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P4_SDA"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P4_VBUS_ADC"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P5_CC_FAULT_MCU"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P5_CHARGE_EN_REQ"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P5_HOST_EN_REQ"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P5_ORIENTATION"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P5_PD_IRQ_N"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P5_POWER_FAULT_N"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P5_SCL"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P5_SDA"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "P5_VBUS_ADC"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "SHIFT_OE_N"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "SIDE_POWER_EN"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "TEMP_BANK_A"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "TEMP_BANK_B"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "VSYS_SENSE"
       }
     ]
   },

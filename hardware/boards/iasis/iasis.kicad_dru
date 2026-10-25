@@ -41,3 +41,8 @@
 (rule "UQFN-16 RSV corner pads"
 	(condition "A.Type == 'Pad' && B.Type == 'Pad' && A.memberOfFootprint('Package_DFN_QFN:UQFN-16_1.8x2.6mm_P0.4mm') && B.memberOfFootprint('Package_DFN_QFN:UQFN-16_1.8x2.6mm_P0.4mm')")
 	(constraint clearance (min 0.15mm)))
+
+# Hirose FH12 vertical: the contact-side row escapes between the inboard row's 0.6mm lands at 1.0mm pitch, 0.125mm off them.
+(rule "FH12 contact-row escape"
+	(condition "A.Type == 'Track' && A.intersectsCourtyard('J2001') && B.memberOfFootprint('J2001')")
+	(constraint clearance (min 0.12mm)))
