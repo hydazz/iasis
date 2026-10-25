@@ -466,13 +466,17 @@ def cover(lay: Layout, name: str, display: Display | None) -> Cover:
     shell -= Compound(joint.cover_cuts())
     intrusions |= {f"latch {i + 1}": p for i, p in enumerate(joint.cover_parts())}
     cuts: list[Part] = []
+    # A hole nearer the edge than the pillar's radius gets a pillar cut flush with the board edge,
+    # clear of the tray wall that rises beyond it.
+    board_edge = Face(lay.cavity.outer_wire().offset_2d(-CLEARANCE, kind=Kind.INTERSECTION))
+    edge = extrude(Pos(0, 0, lay.seat) * board_edge, amount=top_in - lay.seat + 1, dir=Z_UP)
     for i, h in enumerate(lay.holes):
         bottom = lay.seat + BOARD_HOLD_GAP
         pillar = Pos(h.X, h.Y, bottom) * Cylinder(PILLAR_D / 2, top_in - bottom + 0.5, align=BASE)
         pillar -= Pos(h.X, h.Y, bottom - 0.1) * Cylinder(
             (LOCATOR_D + 2 * CLEARANCE) / 2, LOCATOR_OVER + CLEARANCE, align=BASE
         )
-        intrusions[f"pillar {i + 1}"] = cast(Part, pillar)
+        intrusions[f"pillar {i + 1}"] = cast(Part, pillar & edge)
     shell += Compound(list(intrusions.values()))
 
     cuts += [_wall_cut(o) for o in lay.openings]
