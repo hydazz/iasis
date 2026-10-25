@@ -27,9 +27,9 @@
 	(condition "A.Type == 'Pad' && B.Type == 'Pad' && A.memberOfFootprint('J501') && B.memberOfFootprint('J501') && A.Pad_Type == 'NPTH, mechanical' && A.Hole_Size_X == 0.65mm && (B.Pad_Number == 'A1' || B.Pad_Number == 'B12' || B.Pad_Number == 'A12' || B.Pad_Number == 'B1')")
 	(constraint hole_clearance (min 0.20mm)))
 
-# Wurth WA-SMSI spacer: its GND ring surrounds the spacer's own 3.0mm NPTH.
+# Wurth WA-SMSI spacers: each GND ring surrounds its spacer's own 3.0mm NPTH.
 (rule "Spacer ring around its NPTH"
-	(condition "A.memberOfFootprint('H701') && B.memberOfFootprint('H701')")
+	(condition "(A.memberOfFootprint('H701') && B.memberOfFootprint('H701')) || (A.memberOfFootprint('H702') && B.memberOfFootprint('H702')) || (A.memberOfFootprint('H703') && B.memberOfFootprint('H703'))")
 	(constraint hole_clearance (min 0mm)))
 
 # Alps SKRTLAE010 land pattern: its locating-peg NPTH sit 0.1mm from the switch's own pads.
