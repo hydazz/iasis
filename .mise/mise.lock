@@ -2,10 +2,74 @@
 
 lockfile_version = 3
 
+[[tools.lefthook]]
+version = "2.2.2"
+backend = "aqua:evilmartians/lefthook"
+specifiers = ["2.2.2"]
+
+[tools.lefthook."platforms.linux-arm64"]
+checksum = "sha256:5e11944542e9889078d2300495882aa854d63854a664d09c5637df0bbc21c0e1"
+url = "https://github.com/evilmartians/lefthook/releases/download/v2.2.2/lefthook_2.2.2_Linux_aarch64.gz"
+url_api = "https://api.github.com/repos/evilmartians/lefthook/releases/assets/636518953"
+provenance = "github-attestations"
+
+[tools.lefthook."platforms.linux-x64"]
+checksum = "sha256:2b8d7fd52771f26d7a50260ef10cd6fe704d66f60102e566362b84da09884ab7"
+url = "https://github.com/evilmartians/lefthook/releases/download/v2.2.2/lefthook_2.2.2_Linux_x86_64.gz"
+url_api = "https://api.github.com/repos/evilmartians/lefthook/releases/assets/636518865"
+provenance = "github-attestations"
+
+[tools.lefthook."platforms.macos-arm64"]
+checksum = "sha256:aef03ff2faaf87594068ec3ab794dcc1acd8d64f2aa3109785244c8359fbf15b"
+url = "https://github.com/evilmartians/lefthook/releases/download/v2.2.2/lefthook_2.2.2_MacOS_arm64.gz"
+url_api = "https://api.github.com/repos/evilmartians/lefthook/releases/assets/636518817"
+provenance = "github-attestations"
+
+[[tools.node]]
+version = "26.12.1"
+backend = "core:node"
+specifiers = ["26.12.1"]
+
+[tools.node."platforms.linux-arm64"]
+checksum = "sha256:a6c01af459dd8972ab3fb08ee5da81244d26ba8c4944a62d5bbba8c597ae154f"
+url = "https://nodejs.org/dist/v26.12.1/node-v26.12.1-linux-arm64.tar.gz"
+
+[tools.node."platforms.linux-x64"]
+checksum = "sha256:0fd1eb7770598f52a21995edf6ed35fc690400fa437c2386af329519e9143132"
+url = "https://nodejs.org/dist/v26.12.1/node-v26.12.1-linux-x64.tar.gz"
+
+[tools.node."platforms.macos-arm64"]
+checksum = "sha256:1901d539912c02afa10d1cc126943a8855a7eedebe830119463470db5e6c59e8"
+url = "https://nodejs.org/dist/v26.12.1/node-v26.12.1-darwin-arm64.tar.gz"
+
+[[tools.oxfmt]]
+version = "0.74.0"
+aube = { path = "locks/oxfmt/0.74.0", digest = "sha256:b7977a181c0e11736ab44f83b24a4b862754204c253477e29d1758b0f898aad7" }
+backend = "npm:oxfmt"
+specifiers = ["0.74.0"]
+
 [[tools.oxipng]]
 version = "10.2.1"
 backend = "aqua:oxipng/oxipng"
 specifiers = ["10.2.1"]
+
+[tools.oxipng."platforms.linux-arm64"]
+checksum = "sha256:f51bb7c9836202da52a8181549641940662aa87ec2e3ae68115d822d893015b3"
+checksum_source = "mise-versions"
+url = "https://github.com/oxipng/oxipng/releases/download/v10.2.1/oxipng-10.2.1-aarch64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/oxipng/oxipng/releases/assets/541677736"
+
+[tools.oxipng."platforms.linux-x64"]
+checksum = "sha256:46e3c4beb9aae57290ad809dd3374b07153579d3322a3778c53900633618b7c6"
+checksum_source = "mise-versions"
+url = "https://github.com/oxipng/oxipng/releases/download/v10.2.1/oxipng-10.2.1-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/oxipng/oxipng/releases/assets/541676037"
+
+[tools.oxipng."platforms.macos-arm64"]
+checksum = "sha256:7039fcfc78e8aa1ed2b57d848057a0296f082e92b3e1807ac65402d10d926764"
+checksum_source = "mise-versions"
+url = "https://github.com/oxipng/oxipng/releases/download/v10.2.1/oxipng-10.2.1-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/oxipng/oxipng/releases/assets/541682884"
 
 [[tools.python]]
 version = "3.14.7"
@@ -31,6 +95,18 @@ provenance = "github-attestations"
 version = "0.48.1"
 backend = "aqua:linebender/resvg"
 specifiers = ["0.48.1"]
+
+[tools.resvg."platforms.linux-x64"]
+checksum = "sha256:fa8c26495a187e592c501db15bf9e8a9fdc051d4b2b336b39703d5b59f912b9d"
+checksum_source = "mise-versions"
+url = "https://github.com/linebender/resvg/releases/download/v0.48.1/resvg-linux-x86_64.tar.gz"
+url_api = "https://api.github.com/repos/linebender/resvg/releases/assets/498966811"
+
+[tools.resvg."platforms.macos-arm64"]
+checksum = "sha256:06440eb5aa14a28cbfc7e40ae39e1ffa71adc051b89fbaa913b4f1d9b905d09f"
+checksum_source = "mise-versions"
+url = "https://github.com/linebender/resvg/releases/download/v0.48.1/resvg-macos-aarch64.zip"
+url_api = "https://api.github.com/repos/linebender/resvg/releases/assets/498965947"
 
 [[tools.ruff]]
 version = "0.17.1"

@@ -46,8 +46,8 @@ from build123d import (
 from .artwork import icon
 from .board import Board, load
 from .retention import DisplayFrame, Joint
-from .side import assemble as side_board
 from .side import Pair, pair
+from .side import assemble as side_board
 
 # Fit
 CLEARANCE = 0.3  # board edge to inner wall
@@ -439,10 +439,12 @@ def tray(lay: Layout) -> Part:
     joint = Joint(lay.length / 2, lay.split, lay.top_inside())
     body += Compound(joint.tray_parts())
     body -= Compound(joint.tray_cuts())
-    body -= Compound([
-        Pos(x, y, z0 - 0.1) * Cylinder(FOOT_D / 2 + FOOT_FIT, FOOT_RECESS + 0.1, align=BASE)
-        for x, y in _foot_centres(lay)
-    ])
+    body -= Compound(
+        [
+            Pos(x, y, z0 - 0.1) * Cylinder(FOOT_D / 2 + FOOT_FIT, FOOT_RECESS + 0.1, align=BASE)
+            for x, y in _foot_centres(lay)
+        ]
+    )
     body.label = "tray"
     # build123d's boolean annotations lose the result's dimensional subtype.
     return cast(Part, body)
@@ -587,15 +589,20 @@ def _artwork(lay: Layout) -> list[Sketch]:
         Pos(power.X, lay.y_rear - 7) * icon("plug"),
         Pos(first.X, lay.y_front + 7) * Circle(1),
         Pos(status.X, lay.y_front + 7) * icon("activity", size=5.5),
-        Pos(lay.control_left + 15, sw.Y)
-        * Text(WORDMARK, font_size=WORDMARK_SIZE),
+        Pos(lay.control_left + 15, sw.Y) * Text(WORDMARK, font_size=WORDMARK_SIZE),
     ]
     gesture_x = sw.X - (BUTTON_D / 2 + BUTTON_FIT) - 3 - 4.1
     label_right = gesture_x - 4.1 - 3
     for action, y in (("DFU", sw.Y + 6), ("REBOOT", sw.Y), ("RESTORE", sw.Y - 6)):
-        marks.append(Pos(label_right, y) * Text(
-            action, font_size=TEXT_SIZE, font_style=FontStyle.BOLD, align=(Align.MAX, Align.CENTER)
-        ))
+        marks.append(
+            Pos(label_right, y)
+            * Text(
+                action,
+                font_size=TEXT_SIZE,
+                font_style=FontStyle.BOLD,
+                align=(Align.MAX, Align.CENTER),
+            )
+        )
         if action == "DFU":
             marks.append(Pos(gesture_x, y) * Circle(0.6))
         elif action == "REBOOT":
@@ -608,8 +615,7 @@ def _artwork(lay: Layout) -> list[Sketch]:
             ]
     for ref, symbol in (("S:J401", "usb"), ("S:J501", "square-terminal")):
         if ref in lay.ports:
-            marks.append(Pos(lay.board.box(ref).center().X, lay.y_rear - 7)
-                         * icon(symbol, size=8))
+            marks.append(Pos(lay.board.box(ref).center().X, lay.y_rear - 7) * icon(symbol, size=8))
     return marks
 
 
@@ -647,8 +653,10 @@ def _roof_openings(lay: Layout) -> list[Sketch]:
             continue
         bb = lay.board.box(ref)
         front, rear = bb.min.Y - PORT_FIT, lay.y_rear + 1
-        openings.append(Pos(bb.center().X, (front + rear) / 2)
-                        * Rectangle(bb.size.X + 2 * PORT_FIT, rear - front))
+        openings.append(
+            Pos(bb.center().X, (front + rear) / 2)
+            * Rectangle(bb.size.X + 2 * PORT_FIT, rear - front)
+        )
     return openings
 
 
@@ -692,10 +700,14 @@ def _top_slots(lay: Layout, z: float, depth: float, display: Display | None) -> 
     slots = []
     rows = (12, 18, 24, 30, 36, -32, -37)
     left, right = -lay.length / 2 + 12, lay.length / 2 - 12
-    zones = [(left, right, rows)] if lay.divider_x is None else [
-        (left, lay.divider_x - 5, range(-24, 25, 6)),
-        (lay.divider_x + 5, right, rows),
-    ]
+    zones = (
+        [(left, right, rows)]
+        if lay.divider_x is None
+        else [
+            (left, lay.divider_x - 5, range(-24, 25, 6)),
+            (lay.divider_x + 5, right, rows),
+        ]
+    )
     for left, right, bands in zones:
         span = right - left
         count = math.ceil(span / 18)
@@ -722,18 +734,22 @@ STEP = BOARDS / "board.step"  # HubPD, which fits Hub too; the side link is unfi
 CM5_STEP = BOARDS / "board-cm5.step"
 
 
-def assemble() -> tuple[Layout, Part, dict[str, Cover]]:
+def assemble(
+    *, cover_names: tuple[str, ...] = tuple(COVERS)
+) -> tuple[Layout, Part, dict[str, Cover]]:
     lay = layout(load(STEP))
-    covers = {name: cover(lay, name, display) for name, display in COVERS.items()}
+    covers = {name: cover(lay, name, COVERS[name]) for name in cover_names}
     return lay, tray(lay), covers
 
 
-def assemble_cm5() -> tuple[Layout, Part, dict[str, Cover]]:
+def assemble_cm5(
+    *, cover_names: tuple[str, ...] = tuple(COVERS)
+) -> tuple[Layout, Part, dict[str, Cover]]:
     """The CM5 build: one tray and cover for the main board and the CM5 side board."""
     main = load(CM5_STEP)
     both = pair(main, side_board(main))
     lay = layout(both, ports=PORTS | SIDE_PORTS)
-    covers = {name: cover(lay, name, display) for name, display in COVERS.items()}
+    covers = {name: cover(lay, name, COVERS[name]) for name in cover_names}
     return lay, tray(lay), covers
 
 

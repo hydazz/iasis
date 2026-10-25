@@ -14,12 +14,28 @@ run = "uv run --locked iasis-case-build"
 [tasks.preview]
 description = "Render the case previews"
 depends = ["//hardware/boards/iasis:step", "//hardware/boards/cm5:step"]
+sources = [
+  "src/**/*.json",
+  "src/**/*.py",
+  "src/**/*.svg",
+  "../../.mise/config.toml",
+  "../../build/boards/cm5/board.step",
+  "../../build/boards/iasis/board-cm5.step",
+  "../../build/boards/iasis/board.step",
+  ".mise.toml",
+  "pyproject.toml",
+  "uv.lock",
+]
+outputs = ["preview/case-cm5.png", "preview/case.png"]
 run = "uv run --locked iasis-case-preview"
 
 [tasks.check]
 description = "Check enclosure fit and motion against the boards, standalone and CM5 build"
 depends = ["//hardware/boards/iasis:step", "//hardware/boards/cm5:step"]
-run = ["uv run --locked iasis-case-check", "uv run --locked iasis-case-check --cm5"]
+run = [
+  "uv run --locked iasis-case-check",
+  "uv run --locked iasis-case-check --cm5",
+]
 
 [tasks.view]
 description = "Show the case and board in OCP CAD Viewer"
@@ -30,3 +46,9 @@ run = "uv run --locked iasis-case-view"
 description = "Show the CM5 build's case and both boards in OCP CAD Viewer"
 depends = ["//hardware/boards/iasis:step", "//hardware/boards/cm5:step"]
 run = "uv run --locked iasis-case-view --cm5"
+
+[tasks.format]
+extends = "project:format"
+
+[tasks.fmt-check]
+extends = "project:fmt-check"

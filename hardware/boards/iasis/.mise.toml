@@ -1,31 +1,24 @@
 [tasks.step]
-description = "Export the populated board STEPs: HubPD (fits Hub too) and CM5"
-sources = ["iasis.kicad_pcb", "iasis.kicad_pro", "../../shared/Iasis.3dshapes/*", ".mise.toml"]
-outputs = ["../../../build/boards/iasis/board.step", "../../../build/boards/iasis/board-cm5.step"]
-run = [
-  "mkdir -p ../../../build/boards/iasis",
-  '"$KICAD_CLI" pcb export step --subst-models --force --variant HubPD --no-dnp -o ../../../build/boards/iasis/board.step iasis.kicad_pcb',
-  '"$KICAD_CLI" pcb export step --subst-models --force --variant CM5 --no-dnp -o ../../../build/boards/iasis/board-cm5.step iasis.kicad_pcb',
+extends = "pcb:step"
+vars = { args = "--variant HubPD --extra-variant CM5" }
+outputs = [
+  "../../../build/boards/iasis/board-cm5.step",
+  "../../../build/boards/iasis/board.step",
 ]
 
 [tasks.fab]
-description = "Export Gerbers, drills, BOMs and placements"
-run = "python3 fab.py"
+extends = "pcb:fab"
+vars = { args = "--logo-slot 45 45 --logo-centre 82 42.5" }
 
 [tasks.preview]
-description = "Render the board and plot the copper layout"
-sources = ["iasis.kicad_pcb", "iasis.kicad_pro", "../../shared/Iasis.3dshapes/*", "preview.py"]
-outputs = ["preview/board.png", "preview/layout.png"]
-run = "python3 preview.py"
+extends = "pcb:preview"
+vars = { args = "--variant HubPD" }
 
 [tasks.check]
-description = "Run PCB design rules, schematic parity and electrical checks"
-run = [
-  "mkdir -p ../../../build/boards/iasis",
-  '"$KICAD_CLI" pcb drc --schematic-parity --exit-code-violations --format json -o ../../../build/boards/iasis/drc.json iasis.kicad_pcb',
-  '"$KICAD_CLI" sch erc --severity-error --exit-code-violations --format json -o ../../../build/boards/iasis/erc.json iasis.kicad_sch',
-]
+extends = "pcb:check"
 
-[tasks.diff]
-description = "Show board changes against a git revision"
-run = "python3 diff.py"
+[tasks.format]
+extends = "project:format"
+
+[tasks.fmt-check]
+extends = "project:fmt-check"

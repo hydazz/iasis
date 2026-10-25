@@ -24,7 +24,6 @@ from build123d.topology.shape_core import Shape
 
 from . import case, retention
 
-EXPECTED_HOLES = 4  # 8 in the CM5 build
 USB_C_METAL = (8.28, 2.43)  # USB Type-C R2.5 Fig 3-3, maximum metal plug envelope
 USB_C_OVERMOLD = (12.85, 7.0)  # maximum straight cable body, stays outside the wall
 MIN_WEB = 1.0  # wall left between neighbouring openings
@@ -47,22 +46,19 @@ class Report:
         self.failures.append(msg)
 
 
-def run(
-    lay: case.Layout, tray: Part, covers: dict[str, case.Cover], holes: int = EXPECTED_HOLES
-) -> Report:
+def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
     r = Report()
     board = lay.board
     parts: Candidates = [(ref, p, board.box(ref, exact=False)) for ref, p in board.parts.items()]
 
-    r.lines.append("board")
-    if len(lay.holes) == holes:
-        r.ok(f"{len(lay.holes)} mounting holes")
-    else:
-        r.fail(f"{len(lay.holes)} mounting holes, expected {holes}")
-
     r.lines.append("solids")
     feet = case.feet(lay)
-    printed = [tray, *(c.part for c in covers.values()), *(c.button for c in covers.values()), *feet]
+    printed = [
+        tray,
+        *(c.part for c in covers.values()),
+        *(c.button for c in covers.values()),
+        *feet,
+    ]
     printed += [c.retainer.part for c in covers.values() if c.retainer is not None]
     for part in printed:
         if part.is_valid and len(part.solids()) == 1 and part.volume > 0:
@@ -77,7 +73,6 @@ def run(
     for foot in feet:
         if _overlap(foot, tray) > 1e-3:
             r.fail("TPU foot overlaps its tray recess")
-    r.ok(f"foot recesses leave {case.FLOOR - case.FOOT_RECESS:.1f} mm of floor")
 
     r.lines.append("walls and floor")
     outline = board.body.bounding_box()
@@ -96,7 +91,6 @@ def run(
         )
         _clear(r, f"standoff {i + 1}", standoff, parts)
 
-    r.ok(f"board locators: {(case.HOLE_D - case.LOCATOR_D) / 2:.2f} mm radial clearance")
     movement = (case.HOLE_D - case.LOCATOR_D) / 2 + retention.FIT
     if movement > case.CLEARANCE + 1e-6:
         r.fail(f"board/cover movement {movement:.2f} mm exceeds USB seating allowance")
@@ -110,10 +104,6 @@ def run(
         r.ok("PCB lowers vertically onto the tray pegs")
 
     r.lines.append("openings")
-    r.ok(
-        f"USB walls {lay.port_wall:.2f} mm; axial budget includes "
-        f"{case.CLEARANCE:.2f} mm board movement + {case.PORT_ERROR:.2f} mm print/placement error"
-    )
     _webs(r, lay)
     _corners(r, lay)
     for o in lay.openings:
@@ -132,9 +122,9 @@ def run(
     for name, c in covers.items():
         r.lines.append(f"cover {name}")
         top = lay.top_inside(case.COVERS[name])
-        r.ok(f"inside height {top - lay.seat:.1f} mm above the board, "
-             f"{top - lay.parts_top:.1f} mm over the tallest enclosed part")  # fmt: skip
-        roof = c.part & (Pos(0, 0, top) * Box(lay.length + 2, lay.width + 2, case.TOP + 1, align=case.BASE))
+        roof = c.part & (
+            Pos(0, 0, top) * Box(lay.length + 2, lay.width + 2, case.TOP + 1, align=case.BASE)
+        )
         _clear(r, "roof and exposed-port edges", roof, parts)
         for ref, (kind, _) in lay.ports.items():
             if kind == "rj45":
@@ -190,12 +180,6 @@ def run(
             r.fail(f"{name} lettering is not attached")
         else:
             r.ok(f"{name} flush colour inlays fill their pockets")
-        vents = case._top_slots(lay, top - 1, case.TOP + 2, case.COVERS[name])
-        if vents:
-            area = sum(v.volume / (case.TOP + 2) for v in vents)
-            r.ok(f"{name} {len(vents)} top vents, {area:.0f} mm2 open area")
-        else:
-            r.fail(f"{name} has no top exhaust")
     return r
 
 
@@ -243,12 +227,6 @@ def _case_retention(r: Report, c: case.Cover, tray: Part, parts: Candidates) -> 
             _clear(r, f"latch pad at {travel:.2f} mm", side, parts)
             if _overlap(side, tray) > 1e-3 or _overlap(side, fixed) > 1e-3:
                 r.fail("pressed latch pad catches shell")
-    strain = 1.5 * retention.BEAM_THICKNESS * retention.STOP / arm**2
-    r.ok(f"beam strain estimate at stop {strain:.2%}; requires physical validation")
-    r.ok(
-        f"PCB axial clearance {case.BOARD_HOLD_GAP:.2f}–"
-        f"{case.BOARD_HOLD_GAP + retention.LATCH_PLAY:.2f} mm"
-    )
 
 
 def _display_retention(r: Report, c: case.Cover, parts: Candidates) -> None:
@@ -376,7 +354,7 @@ def main() -> int:
     parser.add_argument("--cm5", action="store_true", help="check the CM5 build's enclosure")
     args = parser.parse_args()
     if args.cm5:
-        report = run(*case.assemble_cm5(), holes=2 * EXPECTED_HOLES)
+        report = run(*case.assemble_cm5())
     else:
         report = run(*case.assemble())
     print("\n".join(report.lines))

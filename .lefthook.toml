@@ -1,0 +1,51 @@
+[pre-commit]
+parallel = true
+skip = ["merge", "rebase"]
+
+[[pre-commit.jobs]]
+name = "python"
+glob = ["*.py"]
+
+[pre-commit.jobs.group]
+piped = true
+
+[[pre-commit.jobs.group.jobs]]
+name = "format-python"
+run = "mise exec -- ruff format {staged_files}"
+stage_fixed = true
+
+[[pre-commit.jobs.group.jobs]]
+name = "lint-python"
+run = "mise exec -- ruff check {staged_files}"
+
+[pre-commit.commands.format-text]
+glob = ["*.md", "*.markdown", "*.mdx", "*.json", "*.jsonc", "*.yaml", "*.yml", "*.toml"]
+exclude = [".mise/**", "**/.mise.toml"]
+run = "mise exec -- oxfmt --no-error-on-unmatched-pattern {staged_files}"
+stage_fixed = true
+
+[[pre-commit.jobs]]
+name = "mise"
+glob = [".mise/config.toml", "**/.mise.toml"]
+
+[pre-commit.jobs.group]
+piped = true
+
+[[pre-commit.jobs.group.jobs]]
+name = "format-mise"
+run = '''
+for file in {staged_files}; do
+    directory=$(dirname "$file")
+    if [ "$file" = .mise/config.toml ]; then directory=.; fi
+    mise -C "$directory" fmt
+done
+'''
+stage_fixed = true
+
+[[pre-commit.jobs.group.jobs]]
+name = "lock-mise"
+glob = [".mise/config.toml"]
+run = '''
+mise lock && git ls-files -z --cached --others --exclude-standard -- .mise/mise.lock .mise/locks |
+    git --literal-pathspecs add -A --pathspec-from-file=- --pathspec-file-nul
+'''

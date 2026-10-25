@@ -1,3 +1,13 @@
 {
   "printWidth": 100,
+  "ignorePatterns": [
+    ".mise/",
+    "**/.mise.toml",
+    ".work/",
+    ".local/",
+    "AGENTS.md",
+    "build/",
+    "**/uv.lock",
+    "**/KICAD-LICENSE.md",
+  ],
 }

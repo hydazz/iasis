@@ -2,6 +2,7 @@
 
 import argparse
 from pathlib import Path
+from time import monotonic
 
 from build123d import Compound
 
@@ -19,10 +20,13 @@ def main() -> None:
     args = parser.parse_args()
     output = args.output.resolve() if args.output else PREVIEW
     output.mkdir(parents=True, exist_ok=True)
-    for name, (lay, tray, covers) in (
-        ("case.png", case.assemble()),
-        ("case-cm5.png", case.assemble_cm5()),
+    for name, assemble in (
+        ("case.png", case.assemble),
+        ("case-cm5.png", case.assemble_cm5),
     ):
+        start = monotonic()
+        print(f"{name}: building geometry", flush=True)
+        lay, tray, covers = assemble(cover_names=("passive",))
         visible = Compound([lay.board.parts[ref] for ref in (*lay.ports, *case.LIGHTS)])
         c = covers["passive"]
         shown = [
@@ -33,8 +37,12 @@ def main() -> None:
             (c.button, BODY),
             (visible, (100, 106, 112)),
         ]
-        if save(render(shown, VIEW), output / name):
-            print(f"{output / name} written")
+        print(f"{name}: rendering ({monotonic() - start:.1f}s building geometry)", flush=True)
+        changed = save(render(shown, VIEW), output / name)
+        print(
+            f"{name}: {'written' if changed else 'unchanged'} in {monotonic() - start:.1f}s",
+            flush=True,
+        )
 
 
 if __name__ == "__main__":

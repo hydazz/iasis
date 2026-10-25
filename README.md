@@ -18,21 +18,23 @@ In development. Firmware and host software are not yet implemented. Hardware and
 
 ## Development
 
-The main board is in `hardware/boards/iasis`, shared libraries in `hardware/shared`. The enclosure is in `hardware/case`.
+The main board is in `hardware/boards/iasis`, the CM5 side board in `hardware/boards/cm5`, and the joining flex in `hardware/boards/flex`. Shared libraries are in `hardware/shared`, board tools in `hardware/tools`, and the enclosure in `hardware/case`.
 
 ```bash
 mise install
 mise run deps
 ```
 
-| Task | Output |
-| --- | --- |
-| `mise run build` | Case STLs, assembly STEP and PCB fabrication files |
-| `mise run preview` | Tracked board and case images |
-| `mise run check` | Python lint/format checks, case fit checks, KiCad DRC and ERC |
-| `mise run format` | Formatted Python sources |
+| Task               | Output                                                                                    |
+| ------------------ | ----------------------------------------------------------------------------------------- |
+| `mise run build`   | Case STLs, assembly STEP and PCB fabrication files                                        |
+| `mise run preview` | Tracked board and case images                                                             |
+| `mise run check`   | Source checks, placement-conversion tests, case fit, and every board's DRC/parity and ERC |
+| `mise run format`  | Formatted Python, Markdown and configuration                                              |
 
 Builds, previews and checks are independent. Component tasks can be run directly, for example `mise run //hardware/case:build`.
+
+`mise install` installs the local Lefthook pre-commit hook. It formats staged Python, Markdown and configuration files, lints Python, and refreshes the mise lock when tool configuration changes. CAD checks run through mise when requested.
 
 ## Fabrication
 
@@ -42,7 +44,9 @@ Tools come from mise (`mise install` at the repository root); KiCad 10 is needed
 mise run //hardware/boards/iasis:fab
 ```
 
-This writes `build/boards/iasis/`: `gerbers.zip` (gerbers and drill files for JLCPCB), and `bom-Hub.csv`, `bom-HubPD.csv`, `bom-CM5.csv` and their matching `cpl-*.csv` files for JLCPCB assembly of each variant, with placements corrected for JLCPCB's footprints. [hardware/boards/iasis](hardware/boards/iasis/README.md) lists the JLCPCB order options. The enclosure has its own tasks; see [hardware/case](hardware/case/README.md).
+This writes `build/boards/iasis/`: `gerbers.zip` (Gerbers and drill files for JLCPCB), and `bom-Hub.csv`, `bom-HubPD.csv`, `bom-CM5.csv` and their matching `cpl-*.csv` files for JLCPCB assembly of each variant, with placements corrected for JLCPCB's footprints. [hardware/boards/iasis](hardware/boards/iasis/README.md) lists the main board's JLCPCB order options.
+
+CM5 and flex have the same `fab`, `step`, `preview` and `check` tasks. CM5 exports one assembly population; flex exports bare-board fabrication files including its stiffener drawing. See [board tooling](hardware/tools/README.md) for inputs and outputs and [the enclosure](hardware/case/README.md) for printing and assembly.
 
 ## License
 

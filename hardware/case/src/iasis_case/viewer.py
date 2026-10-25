@@ -29,8 +29,10 @@ def show(lay: Layout, tray: Shape, covers: dict[str, Cover]) -> None:
         "Body": _coloured(tray, "#d6d8dc"),
         "Feet": _coloured(Compound(feet(lay)), "#353b39"),
     }
-    states = {**{f"/Group/Tray/{part}": [1, 1] for part in base},
-              **{f"/Group/PCB/{part}": [1, 1] for part in pcb}}
+    states = {
+        **{f"/Group/Tray/{part}": [1, 1] for part in base},
+        **{f"/Group/PCB/{part}": [1, 1] for part in pcb},
+    }
     for name, cover in covers.items():
         group = {
             "Body": _coloured(cover.part, "#d6d8dc"),

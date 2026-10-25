@@ -1,10 +1,6 @@
 """Fit a filled SVG into the back-silkscreen logo slot on a board copy."""
 
-import argparse
-from pathlib import Path
-
 import pcbnew as pcb
-import wx
 from wx.svg import (
     SVG_FILLRULE_EVENODD,
     SVG_FLAGS_VISIBLE,
@@ -12,9 +8,6 @@ from wx.svg import (
     SVG_PAINT_NONE,
     SVGimage,
 )
-
-SLOT = (45, 45)
-CENTRE = (82, 42.5)  # Millimetres from the left/top, viewed from below.
 
 
 def filled_paths(paths, evenodd):
@@ -51,7 +44,7 @@ def filled_paths(paths, evenodd):
     return result
 
 
-def load_logo(filename, x0, y0):
+def load_logo(filename, x0, y0, slot):
     svg = SVGimage.CreateFromFile(str(filename))
     shapes = [shape for shape in svg.shapes if shape.flags & SVG_FLAGS_VISIBLE and shape.opacity]
     if not shapes:
@@ -64,7 +57,7 @@ def load_logo(filename, x0, y0):
     right, bottom = max(b[2] for b in bounds), max(b[3] for b in bounds)
     if right <= left or bottom <= top:
         raise ValueError("logo must have positive width and height")
-    scale = min(SLOT[0] / (right - left), SLOT[1] / (bottom - top))
+    scale = min(slot[0] / (right - left), slot[1] / (bottom - top))
     cx, cy = (left + right) / 2, (top + bottom) / 2
 
     def point(xy):
@@ -96,22 +89,11 @@ def load_logo(filename, x0, y0):
     return result
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("board", type=Path)
-    parser.add_argument("logo", type=Path)
-    parser.add_argument("output", type=Path)
-    args = parser.parse_args()
-    if args.output.resolve() in (args.board.resolve(), args.logo.resolve()):
-        parser.error("output must be separate from the source files")
-    board = pcb.LoadBoard(str(args.board))
+def add_logo(board, logo, slot, centre):
     edge = board.GetBoardEdgesBoundingBox()
-    try:
-        polygon = load_logo(
-            args.logo, pcb.ToMM(edge.GetRight()) - CENTRE[0], pcb.ToMM(edge.GetTop()) + CENTRE[1]
-        )
-    except ValueError as error:
-        parser.error(str(error))
+    polygon = load_logo(
+        logo, pcb.ToMM(edge.GetRight()) - centre[0], pcb.ToMM(edge.GetTop()) + centre[1], slot
+    )
     polygon.Fracture()
     group = pcb.PCB_GROUP(board)
     group.SetName("Logo")
@@ -126,13 +108,6 @@ def main():
         shape.SetLayer(pcb.B_SilkS)
         shape.SetLocked(True)
         if not edge.Contains(shape.GetBoundingBox()):
-            parser.error("logo extends beyond the board")
+            raise ValueError("logo extends beyond the board")
         board.Add(shape)
         group.AddItem(shape)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    pcb.SaveBoard(str(args.output), board)
-
-
-if __name__ == "__main__":
-    app = wx.App(False)
-    main()

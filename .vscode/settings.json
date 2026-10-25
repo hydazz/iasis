@@ -1,4 +1,4 @@
 {
-	"python.useEnvironmentsExtension": true,
-	"python.defaultInterpreterPath": "${workspaceFolder}/hardware/case/.venv/bin/python"
+  "python.useEnvironmentsExtension": true,
+  "python.defaultInterpreterPath": "${workspaceFolder}/hardware/case/.venv/bin/python"
 }
