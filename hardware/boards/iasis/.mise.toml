@@ -8,7 +8,6 @@ outputs = [
 
 [tasks.fab]
 extends = "pcb:fab"
-vars = { args = "--logo-slot 45 45 --logo-centre 82 42.5" }
 
 [tasks.preview]
 extends = "pcb:preview"

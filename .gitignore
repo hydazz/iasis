@@ -1,5 +1,7 @@
 .DS_Store
 /.local/
+/.mise/config.local.toml
+/.mise/mise.local.lock
 
 # Python
 .venv/

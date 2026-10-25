@@ -2,7 +2,7 @@
 
 KiCad 10 project for the six-layer, 133 × 102 mm Iasis board. One layout carries three assembly variants, Hub, HubPD and CM5; the [repository README](../../../README.md) describes them.
 
-<img src="preview/board.png" alt="Hub PD, top side" width="400"> <img src="preview/layout.png" alt="Tracks on every copper layer, pads and top silkscreen outlines" width="400">
+<img src="board.png" alt="Hub PD, top side" width="400">
 
 ## Files
 
@@ -12,7 +12,7 @@ KiCad 10 project for the six-layer, 133 × 102 mm Iasis board. One layout carrie
 
 ## Fab files
 
-Tools come from mise (`mise install` at the repository root); KiCad 10 must be at the path `KICAD_CLI` names in `.mise/config.toml`.
+Install the [development dependencies](../../../README.md#development), including KiCad 10, then run:
 
 ```bash
 mise run //hardware/boards/iasis:fab
@@ -26,7 +26,7 @@ The task writes `build/boards/iasis/` at the repository root:
 | `bom-Hub.csv`, `bom-HubPD.csv`, `bom-CM5.csv` | Bill of materials per variant, one row per LCSC part      |
 | `cpl-Hub.csv`, `cpl-HubPD.csv`, `cpl-CM5.csv` | Placements per variant, corrected for JLCPCB's footprints |
 
-Run `mise run //hardware/boards/iasis:preview` to refresh the tracked board and copper-layout images. Commit them with the design changes they show.
+Run `mise run //hardware/boards/iasis:preview` to refresh `board.png`. Commit it with the design changes it shows.
 
 Run `mise run //hardware/boards/iasis:step` to export `build/boards/iasis/board.step`, which the case tasks consume. Run `mise run //hardware/boards/iasis:check` for DRC with schematic parity and ERC errors; reports are written to `build/boards/iasis/drc.json` and `build/boards/iasis/erc.json`.
 
@@ -34,19 +34,7 @@ The upload ZIP contains Gerber and drill files. It excludes the optional Gerber 
 
 The underside carries the name, repository URL and `REV ${REVISION}`, read from the board's title block. The PCB revision identifies a fabricated board design; tag its source commit (for example, `hw-rev-a`) and keep that release's fabrication files together. All three assembly variants share the PCB revision.
 
-### Logo
-
-Supply a filled SVG to place a logo on the back silkscreen:
-
-```bash
-mise run //hardware/boards/iasis:fab -- --logo ../../../logos/logo.svg
-```
-
-The logo fits within a 45 × 45 mm slot centred 82 mm from the left and 42.5 mm from the top, viewed from below. Its proportions and viewing orientation are preserved. Use solid filled paths; convert text and strokes to paths before exporting the SVG. KiCad's bundled Python, selected by `KICAD_PYTHON`, handles the import.
-
-Without `--logo`, the board has only its identity text. The source board is never modified. Outputs include a board copy, project settings and `bottom.svg` alongside the fabrication files. Use `--output DIR` to change the output directory.
-
-The root `logos/` directory holds local SVG inputs and ignores them by default. A logo can also be supplied from any other path.
+Exports use the saved design, including its silkscreen artwork. Outputs include a board copy, project settings and `bottom.svg` alongside the fabrication files. Use `--output DIR` to change the output directory.
 
 ## JLCPCB order
 

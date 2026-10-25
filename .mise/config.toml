@@ -4,8 +4,6 @@ monorepo_root = true
 python = "3.14.7"
 uv = "0.12.20"
 ruff = "0.17.1"
-resvg = "0.48.1"
-oxipng = "10.2.1"
 lefthook = "2.2.2"
 oxfmt = "0.74.0"
 node = "26.12.1"
@@ -17,8 +15,9 @@ pin = true
 lockfile = true
 
 [env]
-KICAD_CLI = "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli"
-KICAD_PYTHON = "/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3"
+# tf ur not using macos
+_.path = ["/Applications/KiCad/KiCad.app/Contents/MacOS"]
+UV_PYTHON = { value = "{{ tools.python.path }}", tools = true }
 
 [monorepo]
 config_roots = ["hardware/case", "hardware/boards/*"]
@@ -27,8 +26,8 @@ config_roots = ["hardware/case", "hardware/boards/*"]
 postinstall = "lefthook install"
 
 [tasks.deps]
-description = "Install the CAD and viewer dependencies"
-depends = ["//hardware/case:deps"]
+description = "Install the Python workspace dependencies"
+run = "uv sync --locked"
 
 [tasks.build]
 description = "Build the case and each board's fabrication files"
@@ -54,15 +53,12 @@ description = "Lint Python sources"
 run = "ruff check hardware"
 
 [tasks.typecheck]
-description = "Check Python types in the case and KiCad environments"
-run = [
-  'uv run --locked --project hardware/case pyright --pythonpath hardware/case/.venv/bin/python --pythonversion 3.14 hardware/case/src',
-  'pyright --pythonpath "$KICAD_PYTHON" --pythonversion 3.9 hardware/tools',
-]
+description = "Check Python types"
+run = "uv run --locked pyright"
 
 [tasks.test]
 description = "Test JLCPCB placement conversion"
-run = '"$KICAD_PYTHON" -m unittest discover -s hardware/tools -p "test_*.py"'
+run = 'uv run --locked python -m unittest discover -s hardware/tools -p "test_*.py"'
 
 [tasks.format]
 description = "Format Python, Markdown and configuration"
@@ -83,19 +79,21 @@ sources = [
   "*.kicad_pro",
   "../../shared/Iasis.3dshapes/*",
   "../../../.mise/config.toml",
+  "../../../pyproject.toml",
+  "../../../uv.lock",
   "../../tools/board.py",
   ".mise.toml",
 ]
 outputs = ["../../../build/boards/{{ config_root | basename }}/board.step"]
-run = '"$KICAD_PYTHON" "$MISE_MONOREPO_ROOT/hardware/tools/board.py" {{ vars.args }}'
+run = 'uv run --locked python "{{ config_root }}/../../tools/board.py" {{ vars.args }}'
 
 [task_templates."pcb:fab"]
 description = "Export JLCPCB fabrication and assembly files"
 vars = { args = "" }
-run = '"$KICAD_PYTHON" "$MISE_MONOREPO_ROOT/hardware/tools/fab.py" {{ vars.args }}'
+run = 'uv run --locked python "{{ config_root }}/../../tools/fab.py" {{ vars.args }}'
 
 [task_templates."pcb:preview"]
-description = "Render the board and plot its copper layout"
+description = "Render the board photo"
 vars = { args = "" }
 sources = [
   "*.3dshapes/*",
@@ -103,16 +101,18 @@ sources = [
   "*.kicad_pro",
   "../../shared/Iasis.3dshapes/*",
   "../../../.mise/config.toml",
+  "../../../pyproject.toml",
+  "../../../uv.lock",
   "../../tools/board.py",
   "../../tools/preview.py",
   ".mise.toml",
 ]
-outputs = ["preview/board.png", "preview/layout.png"]
-run = '"$KICAD_PYTHON" "$MISE_MONOREPO_ROOT/hardware/tools/preview.py" {{ vars.args }}'
+outputs = ["board.png"]
+run = 'uv run --locked python "{{ config_root }}/../../tools/preview.py" {{ vars.args }}'
 
 [task_templates."pcb:check"]
 description = "Run DRC, schematic parity and ERC"
-run = '"$KICAD_PYTHON" "$MISE_MONOREPO_ROOT/hardware/tools/board.py" --check'
+run = 'uv run --locked python "{{ config_root }}/../../tools/board.py" --check'
 
 [task_templates."project:format"]
 description = "Format mise configuration"

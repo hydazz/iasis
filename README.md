@@ -34,13 +34,15 @@ mise run deps
 
 Builds, previews and checks are independent. Component tasks can be run directly, for example `mise run //hardware/case:build`.
 
-`mise run typecheck` checks the case package with its uv environment and the board tools with KiCad's bundled Python. It is included in `mise run check`.
+Python dependencies and commands use the root `pyproject.toml`, `uv.lock` and `.venv`. Open the repository root in your editor and select that environment. `mise run typecheck` checks the case and board tools together and is included in `mise run check`.
+
+Install KiCad 10 with its standard libraries. Tasks invoke `kicad-cli` through `PATH`; the mise configuration includes the usual macOS application directory. For another installation, set `_.path` in the ignored `.mise/config.local.toml`, or set `KICAD_CLI` to the executable. Board scripts use ordinary Python and do not require KiCad's Python bindings.
 
 `mise install` installs the local Lefthook pre-commit hook. It formats staged Python, Markdown and configuration files, lints Python, and refreshes the mise lock when tool configuration changes. CAD checks run through mise when requested.
 
 ## Fabrication
 
-Tools come from mise (`mise install` at the repository root); KiCad 10 is needed at the path `KICAD_CLI` names in `.mise/config.toml`.
+Install the development dependencies above, then export a board:
 
 ```bash
 mise run //hardware/boards/iasis:fab

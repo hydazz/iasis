@@ -6,9 +6,6 @@ import os
 import subprocess
 from pathlib import Path
 
-import pcbnew as pcb
-import wx
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -38,11 +35,7 @@ def run(*args, **kwargs):
 
 
 def cli(*args, **kwargs):
-    return run(os.environ["KICAD_CLI"], *args, **kwargs)
-
-
-def copper_layers(board):
-    return [pcb.BOARD.GetStandardLayerName(layer) for layer in board.GetEnabledLayers().CuStack()]
+    return run(os.environ.get("KICAD_CLI", "kicad-cli"), *args, **kwargs)
 
 
 def variants(board):
@@ -118,5 +111,4 @@ def main():
 
 
 if __name__ == "__main__":
-    app = wx.App(False)
     main()

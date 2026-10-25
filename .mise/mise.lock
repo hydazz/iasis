@@ -54,29 +54,6 @@ aube = { path = "locks/oxfmt/0.74.0", digest = "sha256:b7977a181c0e11736ab44f83b
 backend = "npm:oxfmt"
 specifiers = ["0.74.0"]
 
-[[tools.oxipng]]
-version = "10.2.1"
-backend = "aqua:oxipng/oxipng"
-specifiers = ["10.2.1"]
-
-[tools.oxipng."platforms.linux-arm64"]
-checksum = "sha256:f51bb7c9836202da52a8181549641940662aa87ec2e3ae68115d822d893015b3"
-checksum_source = "mise-versions"
-url = "https://github.com/oxipng/oxipng/releases/download/v10.2.1/oxipng-10.2.1-aarch64-unknown-linux-gnu.tar.gz"
-url_api = "https://api.github.com/repos/oxipng/oxipng/releases/assets/541677736"
-
-[tools.oxipng."platforms.linux-x64"]
-checksum = "sha256:46e3c4beb9aae57290ad809dd3374b07153579d3322a3778c53900633618b7c6"
-checksum_source = "mise-versions"
-url = "https://github.com/oxipng/oxipng/releases/download/v10.2.1/oxipng-10.2.1-x86_64-unknown-linux-gnu.tar.gz"
-url_api = "https://api.github.com/repos/oxipng/oxipng/releases/assets/541676037"
-
-[tools.oxipng."platforms.macos-arm64"]
-checksum = "sha256:7039fcfc78e8aa1ed2b57d848057a0296f082e92b3e1807ac65402d10d926764"
-checksum_source = "mise-versions"
-url = "https://github.com/oxipng/oxipng/releases/download/v10.2.1/oxipng-10.2.1-aarch64-apple-darwin.tar.gz"
-url_api = "https://api.github.com/repos/oxipng/oxipng/releases/assets/541682884"
-
 [[tools.python]]
 version = "3.14.7"
 backend = "core:python"
@@ -96,23 +73,6 @@ provenance = "github-attestations"
 checksum = "sha256:44b4716f4e63bc85e1c07ea2aca730d13a0ec3557d06526d84a13b1d111cf4f9"
 url = "https://github.com/astral-sh/python-build-standalone/releases/download/20260929/cpython-3.14.7+20260929-aarch64-apple-darwin-install_only_stripped.tar.gz"
 provenance = "github-attestations"
-
-[[tools.resvg]]
-version = "0.48.1"
-backend = "aqua:linebender/resvg"
-specifiers = ["0.48.1"]
-
-[tools.resvg."platforms.linux-x64"]
-checksum = "sha256:fa8c26495a187e592c501db15bf9e8a9fdc051d4b2b336b39703d5b59f912b9d"
-checksum_source = "mise-versions"
-url = "https://github.com/linebender/resvg/releases/download/v0.48.1/resvg-linux-x86_64.tar.gz"
-url_api = "https://api.github.com/repos/linebender/resvg/releases/assets/498966811"
-
-[tools.resvg."platforms.macos-arm64"]
-checksum = "sha256:06440eb5aa14a28cbfc7e40ae39e1ffa71adc051b89fbaa913b4f1d9b905d09f"
-checksum_source = "mise-versions"
-url = "https://github.com/linebender/resvg/releases/download/v0.48.1/resvg-macos-aarch64.zip"
-url_api = "https://api.github.com/repos/linebender/resvg/releases/assets/498965947"
 
 [[tools.ruff]]
 version = "0.17.1"

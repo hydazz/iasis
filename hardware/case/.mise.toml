@@ -1,11 +1,3 @@
-[env]
-_.python.venv = { path = ".venv", create = true }
-UV_PYTHON = { value = "{{ tools.python.path }}", tools = true }
-
-[tasks.deps]
-description = "Install the CAD and viewer dependencies"
-run = "uv sync --locked"
-
 [tasks.build]
 description = "Export the case STLs and assembly STEPs, standalone and CM5 build"
 depends = ["//hardware/boards/iasis:step", "//hardware/boards/cm5:step"]
@@ -22,9 +14,9 @@ sources = [
   "../../build/boards/cm5/board.step",
   "../../build/boards/iasis/board-cm5.step",
   "../../build/boards/iasis/board.step",
+  "../../pyproject.toml",
+  "../../uv.lock",
   ".mise.toml",
-  "pyproject.toml",
-  "uv.lock",
 ]
 outputs = ["preview/case-cm5.png", "preview/case.png"]
 run = "uv run --locked iasis-case-preview"

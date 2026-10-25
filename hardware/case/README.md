@@ -32,7 +32,7 @@ Run `mise run //hardware/case:preview` to refresh `preview/case.png` and `previe
 
 Use `--output DIR` on `build` or `preview` to change their output directories.
 
-The installed package also provides `iasis-case-build`, `iasis-case-preview`, `iasis-case-check` and `iasis-case-view`; run them with `uv run --locked` from this directory.
+The root Python environment provides `iasis-case-build`, `iasis-case-preview`, `iasis-case-check` and `iasis-case-view`; run them with `uv run --locked` from the repository root or this directory.
 
 ## Print and assemble
 
@@ -64,10 +64,10 @@ These are intended actions; firmware and host restore handling are not yet imple
 
 ## Viewer
 
-`mise run //hardware/case:preview` renders PNGs and exits. It uses OCCT's native offscreen renderer on macOS, reports geometry and rendering phases for each case and skips unchanged inputs. Use `mise run --force //hardware/case:preview` to regenerate the images. Only the following `view` tasks connect to OCP CAD Viewer.
+`mise run //hardware/case:preview` renders PNGs and exits. It uses pygfx's offscreen WebGPU renderer, reports geometry and rendering phases for each case and skips unchanged inputs. A working graphics driver is required. Use `mise run --force //hardware/case:preview` to regenerate the images. Only the following `view` tasks connect to OCP CAD Viewer.
 
 Run `mise run //hardware/case:view` with [OCP CAD Viewer](https://marketplace.visualstudio.com/items?itemName=bernhard-42.ocp-cad-viewer) to show Tray, PCB and Cover layers. Both cover variants are under Cover, the OLED one hidden; show one at a time. Run `mise run //hardware/case:view-cm5` for the CM5 build.
 
-Use this directory's `.venv`, configured in `.vscode/settings.json`. Update the viewer library with `uv lock --upgrade-package ocp-vscode` when the extension requires a newer version.
+Use the repository root's `.venv`, configured in `.vscode/settings.json`. Update the viewer library with `uv lock --upgrade-package ocp-vscode` when the extension requires a newer version.
 
 Icons are from [Lucide](https://lucide.dev/); source SVGs and licences are in `src/iasis_case/icons/`. Verify cable fit, button movement and latch operation on a physical print.
