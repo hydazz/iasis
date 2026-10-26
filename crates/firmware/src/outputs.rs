@@ -7,6 +7,20 @@ pub struct Outputs {
 }
 
 impl Outputs {
+    pub async fn host_budget(
+        &mut self,
+        bus: &mut Bus,
+        controls: &mut Controls,
+        tier: Option<iasis_pd::power::HostLimit>,
+    ) -> Result<(), PortError> {
+        let bits = tier.map_or(0, |tier| (u16::from(tier.bits) << 11) | (1 << 13));
+        let value = (controls.shift & !(7 << 11)) | bits;
+        if value != controls.shift {
+            self.latch(bus, controls, value).await?;
+        }
+        Ok(())
+    }
+
     pub async fn upstream_orientation(
         &mut self,
         bus: &mut Bus,

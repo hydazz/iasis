@@ -9,6 +9,9 @@ pub struct Upstream {
     candidate: Option<Orientation>,
     since: u64,
     applied: Option<Orientation>,
+    level: u8,
+    candidate_level: u8,
+    valid_until: u64,
 }
 
 impl Upstream {
@@ -18,6 +21,23 @@ impl Upstream {
         status.upstream_error = self.observe(bus, outputs, status).await.err();
         if status.upstream_error.is_some() {
             self.candidate = None;
+            self.level = 0;
+        }
+    }
+
+    pub fn cc_level(&self) -> u8 {
+        if Instant::now().as_millis() < self.valid_until {
+            self.level
+        } else {
+            0
+        }
+    }
+
+    pub fn allowance_deadline(&self) -> u64 {
+        if self.cc_level() > 0 {
+            self.valid_until
+        } else {
+            0
         }
     }
 
@@ -48,7 +68,8 @@ impl Upstream {
         fusb::write(bus, 0x02, 3).await?;
         // BC_LVL is not valid during BMC signalling (FUSB302B table 37).
         if active {
-            self.candidate = None;
+            // Keep the previous observation only until its existing deadline.
+            // BMC traffic cannot refresh the allowance or its debounce timer.
             return Ok(());
         }
         status.upstream_cc = Some(cc);
@@ -58,9 +79,20 @@ impl Upstream {
             [0, 0] => None,
             _ => return Err(PortError::Protocol),
         };
+        let level = match orientation {
+            Some(Orientation::Cc1) => cc[0],
+            Some(Orientation::Cc2) => cc[1],
+            None => 0,
+        };
         let now = Instant::now().as_millis();
-        if orientation != self.candidate {
+        // Withdraw a reduced allowance immediately; only increases debounce.
+        if level < self.level || orientation != self.applied {
+            self.level = 0;
+        }
+        self.valid_until = now + 50;
+        if orientation != self.candidate || level != self.candidate_level {
             self.candidate = orientation;
+            self.candidate_level = level;
             self.since = now;
         }
         if let Some(orientation) = orientation
@@ -73,6 +105,7 @@ impl Upstream {
                 self.applied = Some(orientation);
             }
             status.upstream_orientation = Some(orientation);
+            self.level = level;
         }
         // Leave the routing pin at its last value while detached or uncertain.
         // Neither HUB_RUN nor the shift-register clock/latch is touched here.

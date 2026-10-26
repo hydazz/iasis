@@ -101,6 +101,7 @@ run = [
   "cargo clippy --locked --all-targets -- -D warnings",
   "cargo clippy --locked --release -p iasis-firmware --target thumbv8m.main-none-eabihf -- -D warnings",
   "cargo test --locked",
+  "cargo test --locked -p iasis-firmware --lib",
 ]
 
 [task_templates."pcb:step"]

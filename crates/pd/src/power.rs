@@ -1,4 +1,73 @@
-//! Fixed-5 V policy for the Iasis board's brick-powered charging stages.
+//! Fixed-5 V charging and protected host-presence power budgets.
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HostLimit {
+    /// QD/QE, selecting the parallel 68k/22k ILIM resistors.
+    pub bits: u8,
+    /// Rounded-up threshold, not a promised target contract.
+    pub upper_ma: u16,
+}
+
+/// Reserve 3.5 W at 4.5 V, rounded up to 800 mA, before target presence.
+/// AP22653 upper bounds include 1% resistors and manufacturer limit curves.
+pub fn host_limit(allowance_ma: u16) -> Option<HostLimit> {
+    [
+        HostLimit {
+            bits: 3,
+            upper_ma: 1890,
+        },
+        HostLimit {
+            bits: 2,
+            upper_ma: 1450,
+        },
+        HostLimit {
+            bits: 1,
+            upper_ma: 550,
+        },
+        HostLimit {
+            bits: 0,
+            upper_ma: 170,
+        },
+    ]
+    .into_iter()
+    .find(|tier| u32::from(allowance_ma) >= 800 + u32::from(tier.upper_ma))
+}
+
+/// Default Rp carries no evidence of a Pi's shared allowance. The explicit
+/// hint includes this board's load and is used only on a configured USB link.
+pub fn host_allowance(cc_level: u8, configured: bool, hint_ma: u16) -> u16 {
+    if !configured {
+        return 0;
+    }
+    match cc_level {
+        3 => 3000,
+        2 => 1500,
+        1 if hint_ma <= 1600 => hint_ma,
+        _ => 0,
+    }
+}
+
+/// Host presence tolerates bus-powered hub drop; it is not a regulated source.
+pub fn safe_presence(raw: Option<u16>) -> bool {
+    raw.and_then(millivolts)
+        .is_some_and(|mv| (4400..=5350).contains(&mv))
+}
+
+/// Keep existing attached users, then admit waiting attachments in port order.
+/// Empty connectors never reserve a charging stage.
+pub fn admit_ports(eligible: [bool; 5], reserved: [bool; 5], capacity: u8) -> [bool; 5] {
+    let mut remaining = capacity;
+    let mut grants = [false; 5];
+    for active in [true, false] {
+        for index in 0..5 {
+            if remaining > 0 && eligible[index] && reserved[index] == active {
+                grants[index] = true;
+                remaining -= 1;
+            }
+        }
+    }
+    grants
+}
 
 /// Nominal ADC conversion including the 47k load on the 90.9k/10k divider.
 /// This is not a calibrated voltage measurement.
@@ -41,6 +110,58 @@ mod tests {
 
     fn adc(mv: u32) -> u16 {
         (mv * 4095 / 39_679) as u16
+    }
+
+    #[test]
+    fn empty_connectors_cannot_starve_a_later_attachment() {
+        assert_eq!(
+            admit_ports([false, false, false, false, true], [false; 5], 3),
+            [false, false, false, false, true]
+        );
+        assert_eq!(admit_ports([false; 5], [true; 5], 3), [false; 5]);
+        assert_eq!(admit_ports([true; 5], [false; 5], 0), [false; 5]);
+    }
+
+    #[test]
+    fn existing_attachments_keep_grants_until_they_leave_or_capacity_falls() {
+        assert_eq!(
+            admit_ports([true; 5], [false, false, true, false, true], 2),
+            [false, false, true, false, true]
+        );
+        assert_eq!(
+            admit_ports(
+                [true, true, false, true, true],
+                [false, false, false, false, true],
+                2
+            ),
+            [true, false, false, false, true]
+        );
+        assert_eq!(
+            admit_ports([true; 5], [false, false, true, false, true], 1),
+            [false, false, true, false, false]
+        );
+    }
+
+    #[test]
+    fn host_tiers_never_spend_the_board_reservation_or_guess_legacy_power() {
+        assert_eq!(host_limit(900), None);
+        assert_eq!(host_limit(1200).unwrap().bits, 0);
+        assert_eq!(host_limit(1500).unwrap().bits, 1);
+        assert_eq!(host_limit(3000).unwrap().bits, 3);
+        for allowance in 0..=3000 {
+            if let Some(tier) = host_limit(allowance) {
+                assert!(tier.upper_ma + 800 <= allowance);
+            }
+        }
+        assert_eq!(host_allowance(1, true, 0), 0);
+        assert_eq!(host_allowance(1, true, 1200), 1200);
+        assert_eq!(host_allowance(2, true, 1600), 1500);
+        assert_eq!(host_allowance(3, false, 1600), 0);
+        assert_eq!(host_allowance(0, true, 1600), 0);
+        assert_eq!(host_allowance(1, true, 1601), 0);
+        assert!(safe_presence(Some(adc(4500))));
+        assert!(!safe_presence(Some(adc(4300))));
+        assert!(!safe_presence(None));
     }
 
     #[test]

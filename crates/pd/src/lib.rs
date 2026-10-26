@@ -13,7 +13,7 @@ mod source;
 
 pub use apple::{APPLE_REBOOT, APPLE_SILICON_DFU, APPLE_T2_DFU};
 pub use link::Link;
-pub use source::{FixedRequest, RequestError, fixed_5v_500ma, validate_fixed_5v_request};
+pub use source::{FixedRequest, RequestError, fixed_5v, validate_fixed_5v_request};
 
 pub const MAX_OBJECTS: usize = 7;
 /// SOP tokens, PACKSYM, header, seven objects and four trailing TX commands.
@@ -282,7 +282,7 @@ mod tests {
             encode_tx(
                 Sop::Sop,
                 Header::source(1, 0, 1).unwrap(),
-                &[fixed_5v_500ma(true, true)],
+                &[fixed_5v(500, true)],
                 &mut output
             )
             .unwrap(),

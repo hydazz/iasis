@@ -1,7 +1,7 @@
 use super::{Port, now};
 use crate::{bus::Bus, fusb};
 use iasis_pd::{ReceivedPacket, Sop};
-use iasis_protocol::{CommandError, CommandResult, PortError, PortState};
+use iasis_protocol::{CommandError, CommandResult, PortError, PortState, Supply};
 
 #[derive(Clone, Copy)]
 pub(super) enum TxKind {
@@ -104,6 +104,14 @@ impl Port {
         Ok(())
     }
 
+    fn offered_ma(&self) -> u16 {
+        if self.status.supply == Supply::Brick {
+            500
+        } else {
+            0
+        }
+    }
+
     pub(super) async fn capabilities(&mut self, bus: &mut Bus) -> Result<(), PortError> {
         self.caps_sent = self.caps_sent.saturating_add(1);
         self.transmit(
@@ -111,7 +119,10 @@ impl Port {
             TxKind::Capabilities,
             false,
             1,
-            &[iasis_pd::fixed_5v_500ma(true, true)],
+            &[iasis_pd::fixed_5v(
+                self.offered_ma(),
+                self.status.supply == Supply::Brick,
+            )],
         )
         .await
     }
@@ -153,7 +164,9 @@ impl Port {
         }
         match (count, kind) {
             (1, 2) => {
-                if iasis_pd::validate_fixed_5v_request(packet.objects()[0]).is_ok() {
+                if iasis_pd::validate_fixed_5v_request(packet.objects()[0], self.offered_ma())
+                    .is_ok()
+                {
                     self.ready_due = None;
                     self.status.state = PortState::Ready;
                     self.transmit(bus, TxKind::Accept, false, 3, &[]).await

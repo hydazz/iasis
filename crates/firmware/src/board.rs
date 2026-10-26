@@ -91,6 +91,19 @@ impl Controls {
         output(TARGET_ENABLES[index * 2], enabled);
     }
 
+    pub fn host(&mut self, index: usize, enabled: bool) {
+        output(TARGET_ENABLES[index * 2], false);
+        output(TARGET_ENABLES[index * 2 + 1], enabled);
+    }
+
+    pub fn target(&mut self, index: usize, supply: iasis_protocol::Supply) {
+        match supply {
+            iasis_protocol::Supply::HostPresence => self.host(index, true),
+            iasis_protocol::Supply::Brick => self.charge(index, true),
+            iasis_protocol::Supply::Off => self.charge(index, false),
+        }
+    }
+
     pub fn orientation(&mut self, index: usize, cc1: bool) {
         // CC1 uses the mux's C bank; SEL=1 selects C (CC2 uses B).
         output(self._orientation[index].pin().into(), cc1);
@@ -177,6 +190,18 @@ pub fn configure_failure_reset() {
     pac::PSM
         .wdsel()
         .write_value(pac::psm::regs::Wdsel(u32::MAX));
+}
+
+/// This can only withdraw host requests; it never changes a pin's owner/mux.
+pub fn host_requests_off() {
+    pac::SIO
+        .gpio_out(0)
+        .value_clr()
+        .write_value((1 << 27) | (1 << 31));
+    pac::SIO
+        .gpio_out(1)
+        .value_clr()
+        .write_value((1 << 3) | (1 << 5) | (1 << 7));
 }
 
 pub fn panic_reset() -> ! {

@@ -880,6 +880,7 @@ dependencies = [
  "heapless",
  "iasis-pd",
  "iasis-protocol",
+ "smart-leds",
 ]
 
 [[package]]

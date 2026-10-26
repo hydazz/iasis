@@ -3,13 +3,15 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 2;
-pub const MAX_PACKET: usize = 256;
+pub const VERSION: u16 = 3;
+pub const MAX_PACKET: usize = 512;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
 pub const GET_STATUS: u8 = 2;
 pub const ENTER_BOOTLOADER: u8 = 3;
 pub const PORT_COMMAND: u8 = 4;
+pub const HOST_BUDGET: u8 = 5;
+pub const RESTORE_FEEDBACK: u8 = 6;
 
 // pid.codes private experimentation IDs, replace for distributed firmware.
 pub const DEVELOPMENT_VID: u16 = 0x1209;
@@ -18,6 +20,8 @@ pub const DEVELOPMENT_PID: u16 = 0x0001;
 pub const CAP_TELEMETRY: u32 = 1;
 pub const CAP_ROM_UPDATE: u32 = 1 << 1;
 pub const CAP_PORT_CONTROL: u32 = 1 << 2;
+pub const CAP_HOST_POWER: u32 = 1 << 3;
+pub const CAP_BATCH_BUTTON: u32 = 1 << 4;
 
 const MAGIC: [u8; 4] = *b"IASI";
 const HEADER_SIZE: usize = 6;
@@ -81,6 +85,64 @@ pub struct PortStatus {
     pub error: Option<PortError>,
     pub command_id: u32,
     pub command_result: CommandResult,
+    pub supply: Supply,
+    pub restore: Option<RestoreStatus>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum Gesture {
+    Dfu,
+    Reboot,
+    Restore,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ButtonEvent {
+    pub id: u32,
+    pub gesture: Gesture,
+    pub ports: u8,
+    pub generations: [u32; PORT_COUNT],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum RestorePhase {
+    Preparing,
+    Running,
+    Reported,
+    Unconfirmed,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RestoreStatus {
+    pub ecid: u64,
+    pub phase: RestorePhase,
+    /// Current idevicerestore stage, not a percentage of the whole restore.
+    pub progress: u8,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RestoreFeedback {
+    pub serial: u64,
+    pub port: Port,
+    pub generation: u32,
+    pub status: RestoreStatus,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum Supply {
+    #[default]
+    Off,
+    HostPresence,
+    Brick,
+}
+
+/// Remaining upstream allowance, including Iasis itself. Zero clears the hint.
+/// Applies only to Default-current legacy connections, never over native Rp.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct HostBudget {
+    pub serial: u64,
+    pub milliamps: u16,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -88,7 +150,6 @@ pub enum PortState {
     #[default]
     Disabled,
     WaitingPower,
-    Preparing,
     Unattached,
     Debouncing,
     Starting,
@@ -108,6 +169,8 @@ pub enum Orientation {
 pub enum PortError {
     I2c,
     BusStopped,
+    Isolated,
+    HostAllowanceExpired,
     Adc,
     Protection,
     UnexpectedVbus,
@@ -175,12 +238,18 @@ pub struct Status {
     pub upstream_cc: Option<[u8; 2]>,
     pub upstream_orientation: Option<Orientation>,
     pub upstream_error: Option<PortError>,
+    pub host_allowance_ma: u16,
+    pub host_limit_ma: u16,
     pub ch224_status: Option<u8>,
     pub ch224_current_50ma: Option<u8>,
     pub i2c_timeouts: u32,
+    pub i2c_recoveries: u32,
+    pub i2c_isolated: u8,
     pub i2c_root_fault: bool,
-    /// Number of 5 V ports the observed brick contract can reserve power for.
+    /// Ports admitted by the active supply policy; host presence is not charging.
     pub available_ports: u8,
+    pub supply: Supply,
+    pub button: Option<ButtonEvent>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -262,6 +331,12 @@ mod tests {
                 error: Some(PortError::PdTimeout),
                 command_id: u32::MAX,
                 command_result: CommandResult::Failed(CommandError::Transmission),
+                supply: Supply::Brick,
+                restore: Some(RestoreStatus {
+                    ecid: u64::MAX,
+                    phase: RestorePhase::Failed,
+                    progress: 100,
+                }),
             }; PORT_COUNT],
             bus_voltage_adc: Some(u16::MAX),
             thermistor_adc: [Some(u16::MAX); 2],
@@ -270,11 +345,22 @@ mod tests {
             upstream_cc: Some([u8::MAX; 2]),
             upstream_orientation: Some(Orientation::Cc2),
             upstream_error: Some(PortError::I2c),
+            host_allowance_ma: u16::MAX,
+            host_limit_ma: u16::MAX,
             ch224_status: Some(u8::MAX),
             ch224_current_50ma: Some(u8::MAX),
             i2c_timeouts: u32::MAX,
+            i2c_recoveries: u32::MAX,
+            i2c_isolated: u8::MAX,
             i2c_root_fault: true,
             available_ports: u8::MAX,
+            supply: Supply::Brick,
+            button: Some(ButtonEvent {
+                id: u32::MAX,
+                gesture: Gesture::Restore,
+                ports: 31,
+                generations: [u32::MAX; PORT_COUNT],
+            }),
         };
         let mut buffer = [0; MAX_PACKET];
         let packet = encode(&status, &mut buffer).unwrap();
@@ -297,7 +383,7 @@ mod tests {
         assert_eq!(
             packet,
             &[
-                b'I', b'A', b'S', b'I', 2, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
+                b'I', b'A', b'S', b'I', 3, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
             ]
         );
         let length = packet.len();
