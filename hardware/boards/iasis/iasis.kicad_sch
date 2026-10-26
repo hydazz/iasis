@@ -539,10 +539,6 @@
 						(name "Hub")
 						(dnp yes)
 					)
-					(variant
-						(name "HubPD")
-						(dnp yes)
-					)
 				)
 			)
 		)

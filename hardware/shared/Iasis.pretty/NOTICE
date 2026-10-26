@@ -59,7 +59,6 @@ The RP2354 regulator, decoupling and crystal component placement and associated 
 These are original project work under the repository's Apache-2.0 license. Each footprint's description names its source.
 
 - `Bourns_SRP5030CC.kicad_mod`: Bourns SRP5030CC recommended land.
-- `HanElectricity_05A20L24P.kicad_mod`: HanElectricity H-05A20LXX drawing rev A, recommended PCB layout.
 - `L_Coilank_AAPS0530.kicad_mod`: Coilank AAPS-F datasheet, page 2.
 - `OPSCO_SK6812SIDE-A.kicad_mod`: OPSCO OSK-SPC-SK6812SIDEI-A-S rev A/1.
 - `PSTMAA666460.kicad_mod`: PROD Technology PSTMAA666460-6R8MB specification A2.0, page 3.

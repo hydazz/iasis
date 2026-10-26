@@ -27,12 +27,12 @@ class Joint:
     edge: float
     split: float
     roof: float
-    y: float = 0.0
-    pad_z: float = 6.2
+    y: float = -21.0
+    pad_z: float = 6.7
 
     @property
     def shoulder(self) -> float:
-        return self.split + 0.7
+        return self.split + 0.9
 
     @property
     def root(self) -> float:

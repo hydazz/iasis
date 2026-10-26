@@ -1,16 +1,14 @@
 """The CM5 side board beside the main board: its populated STEP, the Waveshare CM4-HEATSINK
-envelope, its screw heads and the side-link flex, and both boards as one for the CM5 build's
+envelope, its screw heads, and both boards as one for the CM5 build's
 enclosure.
 
 Side geometry is in the main board's coordinates (board.py). The side board sits left of
 the main board with the rear edges in line and both boards' bottom faces level. Each board
-carries a vertical Hirose FH12-24S-0.5SVA(54) at the facing edge, contacts toward the gap;
-the flex rises out of both and bends over the gap in a half circle.
+carries one half of the coplanar right-angle header/socket pair at the facing edge.
 """
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
 
 from build123d import (
     Align,
@@ -18,27 +16,19 @@ from build123d import (
     Compound,
     Cylinder,
     Face,
-    FilletPolyline,
     GeomType,
     Location,
     Part,
-    Plane,
     Pos,
-    Rectangle,
     RectangleRounded,
     Solid,
-    sweep,
 )
 
 from .board import Board, load
 
 STEP = Path(__file__).resolve().parents[4] / "build" / "boards" / "cm5" / "board.step"
-LINK = "J2001"
 GAP = 1.5  # main board left edge to side board right edge
-SLOT_IN = 1.78  # FPC slot centre inside each facing edge: contact-side lands 0.3 mm from it
-TIP = 1.45  # FPC tip above the board top
-LEG = 4.2 + 0.5  # stiffener from the tip, then straight before the bend
-FLEX_W, FLEX_T = 12.5, 0.19
+
 
 # Waveshare 19623 / CM4-HEATSINK: 55 x 40 x 5 mm body, excluding mounting hardware.
 # Reserve 3 mm between the module PCB and heatsink base. This is a fit allowance;
@@ -59,7 +49,6 @@ class Side:
     place: Location  # side board coordinates to main board coordinates
     cooler: Part
     screws: Part  # the cooler screws' heads under the side board
-    flex: Part
 
     @property
     def body(self) -> Solid | Compound:
@@ -74,8 +63,6 @@ def assemble(main: Board, step: Path = STEP) -> Side:
     side = load(step)
     edge = -main.size.X / 2  # main board left edge
     place = Location((edge - GAP - side.size.X / 2, (main.size.Y - side.size.Y) / 2, 0))
-    top = main.body.bounding_box().max.Z
-    y = main.box(LINK).center().Y
 
     holes = side.holes(CM5_HOLE_D)
     if len(holes) != 4:
@@ -95,21 +82,14 @@ def assemble(main: Board, step: Path = STEP) -> Side:
         for h in holes
     ])  # fmt: skip
 
-    xm, xs = edge + SLOT_IN, edge - GAP - SLOT_IN
-    bend = (xm - xs) / 2
-    z0, zb = top + TIP, top + TIP + LEG + bend
-    # A fillet of the full half-spacing would leave a zero-length top; 1 um of it stays.
-    path = FilletPolyline((xm, y, z0), (xm, y, zb), (xs, y, zb), (xs, y, z0), radius=bend - 0.001)
-    flex = sweep(Plane(origin=(xm, y, z0), z_dir=(0, 0, 1)) * Rectangle(FLEX_T, FLEX_W), path)
-
-    return Side(side, place, cooler.moved(place), screws.moved(place), cast(Part, flex))
+    return Side(side, place, cooler.moved(place), screws.moved(place))
 
 
 @dataclass
 class Pair(Board):
     """Both boards of the CM5 build as one board for the enclosure, centred on their common
     outline: the main board's references as they are, the side board's prefixed with SIDE,
-    and the cooler, its screw heads and the flex as parts."""
+    and the cooler and its screw heads as parts."""
 
     side: Side | None = None
     shift: Location = field(default_factory=Location)  # main board coordinates to these
@@ -141,7 +121,7 @@ def pair(main: Board, side: Side) -> Pair:
     shift = Location((-c.X, -c.Y, 0))
     parts = {ref: p.moved(shift) for ref, p in main.parts.items()}
     parts |= {SIDE + ref: p.moved(shift * side.place) for ref, p in side.board.parts.items()}
-    extra = {"cooler": side.cooler, "cooler screws": side.screws, "flex": side.flex}
+    extra = {"cooler": side.cooler, "cooler screws": side.screws}
     parts |= {name: Compound([shape.moved(shift)], label=name) for name, shape in extra.items()}
     outlines = (main.outline(), side.board.outline())
     radii = [e.radius for o in outlines for e in o.edges() if e.geom_type == GeomType.CIRCLE]

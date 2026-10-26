@@ -50,7 +50,7 @@ The specified cooler is the [Waveshare CM4-HEATSINK, SKU 19623](https://www.wave
 
 The cooler envelope reaches 12.21 mm above the carrier board underside. The inner roof is at 13.5 mm, leaving 1.29 mm above it; the 1.6 mm roof and 5 mm underside-to-base stack give the 20.1 mm body height. The Ethernet shell reaches 15.05 mm, approximately 0.05 mm below the top face at 15.1 mm. A taller spacer stack would require more case height. Lowering the lid further to expose more Ethernet would reduce the cooler clearance.
 
-Verify the supplied standoffs and thermal-pad contact with the CM5 before assembly; the clearance model does not establish thermal performance. Fit the cooler's screws from below before seating the side board, then fit the side-link flex into both vertical connectors, contacts toward the gap, and close their actuators, with the cover removed.
+Verify the supplied standoffs and thermal-pad contact with the CM5 before assembly; the clearance model does not establish thermal performance. With all power disconnected, fit the cooler's screws from below. Align the boards' rear edges, keep both boards flat, and slide the CM5 header into the hub socket before lowering the joined boards onto the tray locators. The unshrouded connector relies on the board edges and tray locators for alignment.
 
 A dot marks target port 1; laptop and plug icons identify host and power. The activity icon marks the Iasis status LED. Lucide USB and terminal icons identify the CM5 accessory and service ports; Ethernet has no top label. The action labels use 4.5 mm bold type, with approximately 3.3 mm capital height. The three button rows have right-aligned text and centred gesture marks beside the button:
 

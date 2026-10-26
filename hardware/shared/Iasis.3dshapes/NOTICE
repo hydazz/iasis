@@ -4,8 +4,8 @@ This project includes third-party CAD models and locally generated geometry. Thi
 
 ## Generated geometry
 
-**Coilank_AAPS0530.step**  
-Approximate package geometry generated from page 2 of the AAPS-F datasheet:  
+**Coilank_AAPS0530.step**
+Approximate package geometry generated from page 2 of the AAPS-F datasheet:
 https://datasheet.lcsc.com/datasheet/pdf/db0306ba92d8c07b239ddfd67f0cd388.pdf
 
 - Body: 5.3 × 5.5 mm, 3.1 mm maximum overall height
@@ -15,8 +15,8 @@ https://datasheet.lcsc.com/datasheet/pdf/db0306ba92d8c07b239ddfd67f0cd388.pdf
 
 This is not manufacturer-supplied CAD.
 
-**PROD_PSTMAA666460.step**  
-Approximate package geometry generated from page 3 of PROD Technology's PSTMAA666460-6R8MB specification (A2.0):  
+**PROD_PSTMAA666460.step**
+Approximate package geometry generated from page 3 of PROD Technology's PSTMAA666460-6R8MB specification (A2.0):
 https://datasheet.lcsc.com/datasheet/pdf/eae0dbe4b558713dce5995c355b822c6.pdf
 
 - Body: 6.4 × 6.6 mm, 6.0 mm maximum overall height
@@ -25,9 +25,15 @@ https://datasheet.lcsc.com/datasheet/pdf/eae0dbe4b558713dce5995c355b822c6.pdf
 
 This is not manufacturer-supplied CAD.
 
+**Kinghelm_KH-2FH90-2X10P-H6.35.step**
+Simplified body, contact openings and solder tails generated from Kinghelm drawing 2.0FH H6.35 2xNPin 90°, revision A, 2022-06-14:
+https://datasheet.lcsc.com/datasheet/pdf/93c2b2909b9753ec38e6ff3bb3d03fed.pdf
+
+The model uses nominal dimensions and omits internal spring detail. It is project-generated geometry.
+
 ## EasyEDA / LCSC models
 
-The following models were retrieved using LCSC part numbers from the EasyEDA component API and model server:
+The following models were retrieved using LCSC part numbers from the JLCEDA/EasyEDA Official Library (https://lceda.cn/ and https://easyeda.com), through its component API and model server:
 
 - https://easyeda.com/api/products/`<LCSC>`/components
 - https://modules.easyeda.com/
@@ -46,10 +52,9 @@ Files are unmodified except for filenames. Applicable terms and redistribution r
 | TI_RPW0010A.step | TI TPS259470LRPWR | C3662793 |
 | OPSCO_SK6812SIDE-A.step | OPSCO SK6812SIDE-A | C5378721 |
 | CK_PTS645SL50.step | C&K PTS645SL50SMTR92LFS | C221877 |
-| HanElectricity_05A20L24P.step | HanElectricity 05A20L24P | C5362158 |
-| Hirose_FH12-24S-0.5SVA.step | Hirose FH12-24S-0.5SVA(54) | C3169218 |
 | TI_DRR0012G.step | TI LMR51450SDRRR | C6890985 |
 | WCH_CH224Q_DFN10.step | WCH CH224Q | C46061833 |
+| HCTL_PZ200-2-10-W.step | HCTL PZ200-2-10-W | C2906016 |
 
 ## Reference-design model
 

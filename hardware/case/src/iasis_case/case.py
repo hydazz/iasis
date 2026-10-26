@@ -685,7 +685,7 @@ def _control_grooves(lay: Layout, top: float, display: Display | None) -> list[P
 def _side_intakes(lay: Layout) -> list[Part]:
     cuts = []
     for x in (-lay.length / 2, lay.length / 2):
-        for y in (-32, -20, 20, 32):
+        for y in (-32, 20, 32):
             plane = Plane(origin=(x - 2, y, 6), x_dir=(0, 1, 0), z_dir=(1, 0, 0))
             cuts.append(extrude(plane * SlotOverall(10, 2.8), amount=4))
     return cuts
@@ -734,7 +734,7 @@ def _top_slots(lay: Layout, z: float, depth: float, display: Display | None) -> 
 
 
 BOARDS = Path(__file__).resolve().parents[4] / "build" / "boards" / "iasis"
-STEP = BOARDS / "board.step"  # HubPD, which fits Hub too; the side link is unfitted
+STEP = BOARDS / "board.step"  # HubPD, which fits Hub too
 CM5_STEP = BOARDS / "board-cm5.step"
 
 
