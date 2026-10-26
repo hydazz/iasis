@@ -6006,7 +6006,7 @@
 			)
 		)
 	)
-	(global_label "MCU_UART_RX"
+	(global_label "MUX_RUN"
 		(shape bidirectional)
 		(at 231.14 106.68 0)
 		(effects

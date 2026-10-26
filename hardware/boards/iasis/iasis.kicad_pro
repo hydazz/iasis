@@ -818,7 +818,7 @@
       },
       {
         "netclass": "MCU_IO",
-        "pattern": "MCU_UART_RX"
+        "pattern": "MUX_RUN"
       },
       {
         "netclass": "MCU_IO",
@@ -1023,6 +1023,10 @@
       {
         "netclass": "MCU_IO",
         "pattern": "VSYS_SENSE"
+      },
+      {
+        "netclass": "MCU_IO",
+        "pattern": "TCA_RESET_N"
       }
     ]
   },
@@ -1194,7 +1198,7 @@
     ],
     [
       "9e9db2bb-c526-4c6a-ba4d-d8b25b5f251b",
-      "USB hub — ports 1–5"
+      "USB hub \u2014 ports 1\u20135"
     ],
     [
       "eda5d45e-e86d-4d58-83d3-d3aa1de94feb",
