@@ -3,6 +3,11 @@
 
 mod board;
 mod bus;
+mod fusb;
+mod outputs;
+mod ports;
+mod stage;
+mod upstream;
 mod usb;
 
 use core::{cell::Cell, fmt::Write};
@@ -48,6 +53,13 @@ async fn main(_spawner: Spawner) {
         ],
         [p.PIN_22.into(), p.PIN_30.into(), p.PIN_32.into()],
         &handoff,
+        [
+            p.PIN_6.into(),
+            p.PIN_9.into(),
+            p.PIN_12.into(),
+            p.PIN_15.into(),
+            p.PIN_18.into(),
+        ],
     );
     let mut watchdog = Watchdog::new(p.WATCHDOG);
     watchdog.start(Duration::from_secs(2));
@@ -85,6 +97,7 @@ async fn main(_spawner: Spawner) {
     let mut i2c_config = i2c::Config::default();
     i2c_config.sda_pullup = false;
     i2c_config.scl_pullup = false;
+    i2c_config.frequency = 400_000;
     let mut bus = bus::Bus::new(i2c::I2c::new_async(
         p.I2C0, p.PIN_25, p.PIN_24, Irqs, i2c_config,
     ));
@@ -96,7 +109,9 @@ async fn main(_spawner: Spawner) {
         serial,
         firmware_version: FIRMWARE_VERSION,
         flash_bytes: 2 * 1024 * 1024,
-        capabilities: protocol::CAP_TELEMETRY | protocol::CAP_ROM_UPDATE,
+        capabilities: protocol::CAP_TELEMETRY
+            | protocol::CAP_ROM_UPDATE
+            | protocol::CAP_PORT_CONTROL,
     };
     let initial = Status {
         reset_reason: handoff.reset_reason,
@@ -108,10 +123,12 @@ async fn main(_spawner: Spawner) {
     };
     let status = Cell::new(initial);
     let update = Cell::new(false);
+    let command = Cell::new(None);
     let mut management = usb::Management {
         info,
         status: &status,
         update: &update,
+        command: &command,
     };
 
     let mut config = Config::new(USB_VID, USB_PID);
@@ -144,13 +161,23 @@ async fn main(_spawner: Spawner) {
 
     let sample = async {
         let mut sequence = 0u32;
+        let mut ports = ports::Ports::new();
+        let mut outputs = outputs::Outputs::new(&mut bus, &mut controls).await;
+        let mut metadata_due = 0;
+        let mut upstream = upstream::Upstream::default();
         loop {
             if update.get() {
                 // Give the control status stage time to complete before disconnecting.
                 Timer::after_millis(100).await;
+                ports.shutdown(&mut bus, &mut controls).await;
                 controls.enter_bootloader();
             }
-            let mut next = initial;
+            if let Some(request) = command.take() {
+                let mut next = status.get();
+                next.ports[request.port.index()] = ports.command(request);
+                status.set(next);
+            }
+            let mut next = status.get();
             sequence = sequence.wrapping_add(1);
             next.sequence = sequence;
             next.aggregate_power_fault = aggregate_fault.is_low();
@@ -164,11 +191,43 @@ async fn main(_spawner: Spawner) {
             next.bus_voltage_adc = adc.read(&mut channels[5]).await.ok();
             next.thermistor_adc[0] = adc.read(&mut channels[6]).await.ok();
             next.thermistor_adc[1] = adc.read(&mut channels[7]).await.ok();
-            bus.sample(&mut next).await;
+            if Instant::now().as_millis() >= metadata_due {
+                bus.sample(&mut next).await;
+                if let Ok(outputs) = &mut outputs {
+                    upstream.sample(&mut bus, outputs, &mut next).await;
+                }
+                metadata_due = Instant::now().as_millis() + 50;
+            }
+            next.aggregate_power_fault |= next
+                .expander_inputs
+                .is_some_and(|inputs| inputs & 0x20 == 0);
+            next.available_ports = if next.i2c_root_fault || next.aggregate_power_fault {
+                0
+            } else {
+                iasis_pd::power::available_ports(
+                    next.bus_voltage_adc,
+                    next.ch224_status,
+                    next.ch224_current_50ma,
+                    next.expander_inputs
+                        .is_some_and(|inputs| inputs & 0x40 == 0),
+                    controls.side_power_enabled(),
+                )
+            };
+            match &mut outputs {
+                Ok(outputs) => {
+                    ports
+                        .tick(&mut bus, &mut controls, outputs, &mut next)
+                        .await
+                }
+                Err(error) => ports.fail_all(&mut controls, &mut next, *error),
+            }
+            next.i2c_root_fault |= bus.faulted();
+            next.side_power_enabled = controls.side_power_enabled();
+            next.shift_outputs_enabled = controls.shift_outputs_enabled();
             next.uptime_ms = Instant::now().as_millis();
             status.set(next);
             watchdog.feed(Duration::from_secs(2));
-            Timer::after_millis(250).await;
+            Timer::after_millis(2).await;
         }
     };
     join(usb.run(), sample).await;

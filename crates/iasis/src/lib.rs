@@ -1,8 +1,16 @@
 //! USB management of an Iasis board.
 
-use std::time::Duration;
+pub mod topology;
 
-use iasis_protocol::{self as protocol, BootloaderRequest, Info, Status};
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
+
+use iasis_protocol::{
+    self as protocol, BootloaderRequest, CommandError, CommandResult, Info, Port, PortAction,
+    PortCommand, Status,
+};
 use nusb::{
     DeviceInfo, Interface, MaybeFuture,
     transfer::{ControlIn, ControlOut, ControlType, Recipient},
@@ -24,6 +32,12 @@ pub enum Error {
     Encode,
     #[error("board does not support ROM updates")]
     UpdateUnsupported,
+    #[error("board does not support port control")]
+    PortControlUnsupported,
+    #[error("port command failed: {0:?}")]
+    Command(CommandError),
+    #[error("port command result was not observed before the deadline")]
+    CommandTimeout,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -94,26 +108,65 @@ impl Board {
         read(&self.interface, protocol::GET_STATUS)
     }
 
+    /// Execute against the observed attachment generation. Enable reserves
+    /// power asynchronously; Acknowledged means PD transport only, not DFU.
+    pub fn command(&self, port: Port, action: PortAction) -> Result<CommandResult, Error> {
+        if self.info.capabilities & protocol::CAP_PORT_CONTROL == 0 {
+            return Err(Error::PortControlUnsupported);
+        }
+        let status = self.status()?.ports[port.index()];
+        let command = PortCommand {
+            serial: self.info.serial,
+            port,
+            generation: status.generation,
+            id: status.command_id.wrapping_add(1).max(1),
+            action,
+        };
+        self.write(protocol::PORT_COMMAND, &command)?;
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let status = self.status()?.ports[port.index()];
+            if status.command_id == command.id {
+                match status.command_result {
+                    CommandResult::Failed(error) => return Err(Error::Command(error)),
+                    CommandResult::Complete
+                    | CommandResult::Acknowledged
+                    | CommandResult::Unconfirmed => {
+                        return Ok(status.command_result);
+                    }
+                    _ => {}
+                }
+            }
+            if Instant::now() >= deadline {
+                return Err(Error::CommandTimeout);
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     /// Quiesce target power and request the RP2350 ROM's PICOBOOT interface.
     /// The accepted transfer is not proof that the ROM subsequently enumerated.
     pub fn enter_bootloader(&self) -> Result<(), Error> {
         if self.info.capabilities & protocol::CAP_ROM_UPDATE == 0 {
             return Err(Error::UpdateUnsupported);
         }
-        let mut buffer = [0; protocol::MAX_PACKET];
-        let data = protocol::encode(
+        self.write(
+            protocol::ENTER_BOOTLOADER,
             &BootloaderRequest {
                 serial: self.info.serial,
             },
-            &mut buffer,
         )
-        .map_err(|_| Error::Encode)?;
+    }
+
+    fn write(&self, request: u8, value: &impl Serialize) -> Result<(), Error> {
+        let mut buffer = [0; protocol::MAX_PACKET];
+        let data = protocol::encode(value, &mut buffer).map_err(|_| Error::Encode)?;
         self.interface
             .control_out(
                 ControlOut {
                     control_type: ControlType::Vendor,
                     recipient: Recipient::Interface,
-                    request: protocol::ENTER_BOOTLOADER,
+                    request,
                     value: protocol::VERSION,
                     index: protocol::INTERFACE.into(),
                     data,

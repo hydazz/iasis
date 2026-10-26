@@ -878,8 +878,13 @@ dependencies = [
  "embassy-time",
  "embassy-usb",
  "heapless",
+ "iasis-pd",
  "iasis-protocol",
 ]
+
+[[package]]
+name = "iasis-pd"
+version = "0.1.0"
 
 [[package]]
 name = "iasis-protocol"

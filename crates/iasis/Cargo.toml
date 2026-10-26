@@ -7,7 +7,7 @@ publish.workspace = true
 
 [dependencies]
 anyhow = "1.0"
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.6", features = ["derive"] }
 iasis-protocol.workspace = true
 nusb = "0.2.9"
 serde = { workspace = true, features = ["std"] }

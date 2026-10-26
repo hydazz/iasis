@@ -5,7 +5,7 @@ use embassy_rp::{
 };
 
 const PASSWORD: u32 = 0x5afe_0000;
-const HANDOFF: u32 = 0x4941_5301;
+const HANDOFF: u32 = 0x4941_5302;
 const TARGET_ENABLES: [usize; 10] = [3, 39, 38, 37, 34, 35, 29, 31, 26, 27];
 const RETAINED_PINS: [usize; 3] = [22, 30, 32];
 
@@ -14,6 +14,7 @@ pub struct Handoff {
     pub levels: u32,
     pub reset_reason: u32,
     pub watchdog_reason: u8,
+    pub shift: u16,
 }
 
 impl Handoff {
@@ -22,9 +23,12 @@ impl Handoff {
         let reason = power.chip_reset().read();
         let watchdog = pac::WATCHDOG.reason().read();
         let levels = power.scratch(1).read();
+        let shift = power.scratch(3).read();
         let retained = power.scratch(0).read() == HANDOFF
             && power.scratch(2).read() == !levels
             && levels & !7 == 0
+            && shift <= u32::from(u16::MAX)
+            && power.scratch(4).read() == !shift
             // Ordinary ROM reboots do not update POWMAN.CHIP_RESET.
             // Chip-level resets clear WATCHDOG.REASON; RUN also clears scratch.
             && watchdog.timer();
@@ -34,6 +38,7 @@ impl Handoff {
             levels: if retained { levels } else { 2 },
             reset_reason: reason.0,
             watchdog_reason: watchdog.0 as u8,
+            shift: if retained { shift as u16 } else { 0 },
         }
     }
 }
@@ -42,6 +47,8 @@ pub struct Controls {
     _targets: [Peri<'static, AnyPin>; 10],
     retained: [Peri<'static, AnyPin>; 3],
     levels: u32,
+    _orientation: [Peri<'static, AnyPin>; 5],
+    pub shift: u16,
 }
 
 impl Controls {
@@ -49,6 +56,7 @@ impl Controls {
         targets: [Peri<'static, AnyPin>; 10],
         retained: [Peri<'static, AnyPin>; 3],
         handoff: &Handoff,
+        orientation: [Peri<'static, AnyPin>; 5],
     ) -> Self {
         // The shared external VCORE rail powers both the hub and RP2354B.
         pac::POWMAN.vreg_ctrl().modify(|w| {
@@ -66,11 +74,31 @@ impl Controls {
         for (index, pin) in retained.iter().enumerate() {
             output(pin.pin().into(), handoff.levels & (1 << index) != 0);
         }
+        for pin in &orientation {
+            output(pin.pin().into(), false);
+        }
         Self {
             _targets: targets,
             retained,
             levels: handoff.levels,
+            _orientation: orientation,
+            shift: handoff.shift,
         }
+    }
+
+    pub fn charge(&mut self, index: usize, enabled: bool) {
+        output(TARGET_ENABLES[index * 2 + 1], false);
+        output(TARGET_ENABLES[index * 2], enabled);
+    }
+
+    pub fn orientation(&mut self, index: usize, cc1: bool) {
+        // CC1 uses the mux's C bank; SEL=1 selects C (CC2 uses B).
+        output(self._orientation[index].pin().into(), cc1);
+    }
+
+    pub fn enable_shift(&mut self) {
+        output(30, false);
+        self.levels &= !2;
     }
 
     pub fn release_expander(&mut self) {
@@ -102,6 +130,8 @@ impl Controls {
             .write_value(pac::powman::regs::Wdsel(PASSWORD));
         pac::POWMAN.scratch(1).write_value(self.levels);
         pac::POWMAN.scratch(2).write_value(!self.levels);
+        pac::POWMAN.scratch(3).write_value(self.shift.into());
+        pac::POWMAN.scratch(4).write_value(!u32::from(self.shift));
         pac::POWMAN.scratch(0).write_value(HANDOFF);
         cortex_m::asm::dsb();
         // Normal ROM reboot, BOOTSEL, PICOBOOT only; explicitly disable even

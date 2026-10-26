@@ -3,12 +3,13 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 1;
+pub const VERSION: u16 = 2;
 pub const MAX_PACKET: usize = 256;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
 pub const GET_STATUS: u8 = 2;
 pub const ENTER_BOOTLOADER: u8 = 3;
+pub const PORT_COMMAND: u8 = 4;
 
 // pid.codes private experimentation IDs, replace for distributed firmware.
 pub const DEVELOPMENT_VID: u16 = 0x1209;
@@ -16,6 +17,7 @@ pub const DEVELOPMENT_PID: u16 = 0x0001;
 
 pub const CAP_TELEMETRY: u32 = 1;
 pub const CAP_ROM_UPDATE: u32 = 1 << 1;
+pub const CAP_PORT_CONTROL: u32 = 1 << 2;
 
 const MAGIC: [u8; 4] = *b"IASI";
 const HEADER_SIZE: usize = 6;
@@ -72,6 +74,87 @@ pub struct PortStatus {
     pub vbus_adc: Option<u16>,
     pub faults: Option<PortFaults>,
     pub fusb_device_id: Option<u8>,
+    pub enabled: bool,
+    pub generation: u32,
+    pub state: PortState,
+    pub orientation: Option<Orientation>,
+    pub error: Option<PortError>,
+    pub command_id: u32,
+    pub command_result: CommandResult,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum PortState {
+    #[default]
+    Disabled,
+    WaitingPower,
+    Preparing,
+    Unattached,
+    Debouncing,
+    Starting,
+    Ready,
+    Contract,
+    Discharging,
+    Fault,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum Orientation {
+    Cc1,
+    Cc2,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum PortError {
+    I2c,
+    BusStopped,
+    Adc,
+    Protection,
+    UnexpectedVbus,
+    Voltage,
+    DischargeTimeout,
+    Protocol,
+    PdTimeout,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum PortAction {
+    Enable,
+    Disable,
+    DfuAppleSilicon,
+    DfuT2,
+    Reboot,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum CommandError {
+    StaleAttachment,
+    NotReady,
+    Busy,
+    Hardware,
+    Transmission,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum CommandResult {
+    #[default]
+    Idle,
+    Pending,
+    Complete,
+    /// The PD partner acknowledged transport, not completion of a DFU/reboot.
+    Acknowledged,
+    /// The VDM was attempted without GoodCRC; its effect is unknown.
+    Unconfirmed,
+    Failed(CommandError),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PortCommand {
+    pub serial: u64,
+    pub port: Port,
+    pub generation: u32,
+    pub id: u32,
+    pub action: PortAction,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -89,10 +172,15 @@ pub struct Status {
     pub thermistor_adc: [Option<u16>; 2],
     pub expander_inputs: Option<u8>,
     pub upstream_fusb_device_id: Option<u8>,
+    pub upstream_cc: Option<[u8; 2]>,
+    pub upstream_orientation: Option<Orientation>,
+    pub upstream_error: Option<PortError>,
     pub ch224_status: Option<u8>,
     pub ch224_current_50ma: Option<u8>,
     pub i2c_timeouts: u32,
     pub i2c_root_fault: bool,
+    /// Number of 5 V ports the observed brick contract can reserve power for.
+    pub available_ports: u8,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -167,15 +255,26 @@ mod tests {
                     cc: true,
                 }),
                 fusb_device_id: Some(u8::MAX),
+                enabled: true,
+                generation: u32::MAX,
+                state: PortState::Contract,
+                orientation: Some(Orientation::Cc2),
+                error: Some(PortError::PdTimeout),
+                command_id: u32::MAX,
+                command_result: CommandResult::Failed(CommandError::Transmission),
             }; PORT_COUNT],
             bus_voltage_adc: Some(u16::MAX),
             thermistor_adc: [Some(u16::MAX); 2],
             expander_inputs: Some(u8::MAX),
             upstream_fusb_device_id: Some(u8::MAX),
+            upstream_cc: Some([u8::MAX; 2]),
+            upstream_orientation: Some(Orientation::Cc2),
+            upstream_error: Some(PortError::I2c),
             ch224_status: Some(u8::MAX),
             ch224_current_50ma: Some(u8::MAX),
             i2c_timeouts: u32::MAX,
             i2c_root_fault: true,
+            available_ports: u8::MAX,
         };
         let mut buffer = [0; MAX_PACKET];
         let packet = encode(&status, &mut buffer).unwrap();
@@ -198,7 +297,7 @@ mod tests {
         assert_eq!(
             packet,
             &[
-                b'I', b'A', b'S', b'I', 1, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
+                b'I', b'A', b'S', b'I', 2, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
             ]
         );
         let length = packet.len();
@@ -206,10 +305,10 @@ mod tests {
             decode::<Info>(&buffer[..length + 1]),
             Err(DecodeError::Payload)
         );
-        buffer[4] = 2;
+        buffer[4] = 1;
         assert_eq!(
             decode::<Info>(&buffer[..length]),
-            Err(DecodeError::Version(2))
+            Err(DecodeError::Version(1))
         );
         buffer[0] = 0;
         assert_eq!(decode::<Info>(&buffer[..length]), Err(DecodeError::Header));

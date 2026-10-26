@@ -4,12 +4,13 @@ use embassy_usb::{
     Handler,
     control::{InResponse, OutResponse, Recipient, Request, RequestType},
 };
-use iasis_protocol::{self as protocol, BootloaderRequest, Info, Status};
+use iasis_protocol::{self as protocol, BootloaderRequest, Info, PortCommand, Status};
 
 pub struct Management<'a> {
     pub info: Info,
     pub status: &'a Cell<Status>,
     pub update: &'a Cell<bool>,
+    pub command: &'a Cell<Option<PortCommand>>,
 }
 
 fn matches(request: &Request) -> bool {
@@ -45,13 +46,32 @@ impl Handler for Management<'_> {
         if !matches(&request) {
             return None;
         }
-        if request.value != protocol::VERSION || request.request != protocol::ENTER_BOOTLOADER {
+        if request.value != protocol::VERSION || self.update.get() {
             return Some(OutResponse::Rejected);
         }
-        match protocol::decode::<BootloaderRequest>(data) {
-            Ok(command) if command.serial == self.info.serial => {
-                self.update.set(true);
-                Some(OutResponse::Accepted)
+        match request.request {
+            protocol::ENTER_BOOTLOADER if self.command.get().is_none() => {
+                match protocol::decode::<BootloaderRequest>(data) {
+                    Ok(command) if command.serial == self.info.serial => {
+                        self.update.set(true);
+                        Some(OutResponse::Accepted)
+                    }
+                    _ => Some(OutResponse::Rejected),
+                }
+            }
+            protocol::PORT_COMMAND if self.command.get().is_none() => {
+                match protocol::decode::<PortCommand>(data) {
+                    Ok(command)
+                        if command.serial == self.info.serial
+                            && command.id != 0
+                            && self.status.get().ports[command.port.index()].command_result
+                                != protocol::CommandResult::Pending =>
+                    {
+                        self.command.set(Some(command));
+                        Some(OutResponse::Accepted)
+                    }
+                    _ => Some(OutResponse::Rejected),
+                }
             }
             _ => Some(OutResponse::Rejected),
         }
