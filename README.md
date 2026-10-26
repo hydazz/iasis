@@ -12,9 +12,9 @@ One six-layer PCB supports three assembly variants:
 
 The CM5 BOM and placements cover the main board; the daughterboard is a separate design. Without a power supply, the available upstream USB power limits the combined target supply; five simultaneous restores are a prototype test goal.
 
-The MCU connects to an internal USB2 hub port, so the same host cable supports management and RP2354 ROM programming. BOOTSEL and RESET buttons provide recovery without soldering; SWD and 3.3 V UART solder pads provide independent debugging. The optional display is independent of core operation. DFU, revive and erase are separate deliberate actions.
+The MCU connects to an internal USB2 hub port, so the same host cable supports management and RP2354 ROM programming. BOOTSEL and RESET buttons provide recovery without soldering; SWD and 3.3 V UART TX solder pads provide independent debugging. The optional display is independent of core operation. DFU, revive and erase are separate deliberate actions.
 
-In development. Rust firmware and a host library/CLI provide telemetry, fixed-5 V port control, PD and Apple DFU/reboot signalling. Hardware operation is not yet validated. Higher-voltage charging, host-powered target supplies and restore orchestration remain unimplemented.
+In development. Rust firmware and a macOS/Linux CLI provide host-powered attachment, fixed-5 V brick power, PD/Apple signalling, physical-port discovery and a headless restore workflow. Hardware operation and simultaneous restores are not yet validated. Higher-voltage charging and automatic CM5 cold start remain unimplemented.
 
 ## Development
 
@@ -57,11 +57,35 @@ cargo run -p iasis -- --serial 0123456789abcdef ports --watch
 cargo run -p iasis -- --serial 0123456789abcdef power 1 off
 ```
 
-Ports start disabled. `power <port> on` enables a physical port when the confirmed brick contract has enough reserved power. Each port detects attachment and orientation independently, prepares its TPS55288 stage, checks VBUS and advertises one 5 V / 500 mA PDO. Insufficient supply leaves the port waiting; missing or unsafe readings leave it faulted. Status exposes both conditions. The current policy uses the brick's existing contract; it does not negotiate a higher input voltage. CM5 power remains off at cold boot.
+Ports start enabled for attachment. Native USB-C current advertisement or an explicit legacy-host allowance determines the protected host-presence budget. Hub and HubPD without a brick use the same 5 V path; charging converters are not required. `power <port> off` disables a port, and `on` retries a fault. The fixed-5 V brick path reserves power only for detected attachments. Missing or unsafe readings remain visible as errors. CM5 power stays off at cold boot.
 
-`dfu <port>` sends Apple Silicon signalling; `--device t2` selects T2. `reboot <port>` sends the reboot VDM. These require an enabled, attached port with valid 5 V power; wait for `Ready` or `Contract` in status before signalling. A PD acknowledgement confirms transport only. An unacknowledged attempt has an unknown effect: Apple devices can act without GoodCRC. Observe USB enumeration to confirm DFU or reboot. Neither command starts a restore. Button gestures are not implemented.
+On a dedicated Pi 4, declare up to its 1200 mA shared USB allowance after subtracting other loads. A Pi 5 with its recommended 5 A supply has 1600 mA shared with USB and its fan; for example, 1500 mA reserves 100 mA for the fan when no other USB loads exist. These are deployment declarations, not values inferred from an A-to-C cable. Native USB-C Rp takes precedence. The firmware reserves board/UI power before choosing its aggregate limiter; host presence requests no charging and depends on charged targets. See [firmware](crates/firmware/README.md) for limits and sequencing.
 
-`ports` groups USB2 devices beneath hub ports 1–5, anchored by the management controller on port 6. It follows physical paths through USB2 re-enumeration and nested hubs. An empty entry means no USB2 enumeration, not cable detachment. SuperSpeed companion mapping and persistent ECID correlation are not implemented.
+```sh
+iasis --serial 0123456789abcdef host-budget 1200
+```
+
+`dfu <port>` sends Apple Silicon signalling; `--device t2` selects T2. `reboot <port>` sends reboot. Wait for `Ready` or `Contract` before signalling. A PD acknowledgement confirms transport only; USB enumeration confirms DFU. Neither command starts a restore. The physical button sends DFU with one click and reboot with a hold. Two clicks followed by a hold request a host restore.
+
+`ports` maps USB2 and SuperSpeed descendants to physical ports 1–5. Companion links come from Linux sysfs or macOS IOKit; missing or contradictory links remain explicit. ECID comes from DFU/recovery descriptors or read-only restored/lockdown queries through system usbmuxd. A tracked target keeps its board, connector and ECID through re-enumeration. Missing identity, movement and replacement are separate outcomes; an empty USB listing does not prove cable detachment.
+
+### Headless restores
+
+Install upstream [idevicerestore](https://github.com/libimobiledevice/idevicerestore) with its libimobiledevice/libirecovery dependencies. Use the normal system usbmuxd service: macOS provides it; Linux needs the service running and suitable USB device permissions. Iasis checks the executable's required options and daemon availability before target actions. It does not start a private daemon or detach kernel drivers.
+
+Prepare a local IPSW, then select physical ports or wait for the button:
+
+```sh
+iasis ipsw /path/to/UniversalMac.ipsw
+iasis --serial 0123456789abcdef restore /path/to/UniversalMac.ipsw --ports 1,2,3,4,5 --erase
+iasis --serial 0123456789abcdef restore /path/to/UniversalMac.ipsw --button --erase --host-ma 1500
+```
+
+**`--erase` authorizes erasing the selected targets.** Button mode waits for a new Restore gesture after preparation and exits when that batch finishes. Existing or missed events do not trigger a restore. Selected attachments and ordinary DFU ECIDs are checked again immediately before launch; Port DFU controller identities cannot select a restore target. Concurrent restore commands claim individual board connectors, preventing overlapping batches on the same ports. Explicit power, DFU and reboot controls remain available during a batch.
+
+Preparation streams the archive for ZIP CRC validation and checks its BuildManifest. It does not download firmware or establish current signing eligibility; idevicerestore checks target compatibility and Apple's signing response. One archive is shared by up to five concurrent ECID-selected processes on either OS. Each worker has a separate writable cache, working directory and stdout/stderr logs under `restores/` (override with `--logs`). Compressed OS images may need one extracted copy per worker; allow disk space accordingly.
+
+The foreground command monitors each worker independently and sends stage progress and outcomes to the RP2354 LEDs. Exit zero alone is Unconfirmed; RestoreReported requires the backend's final restore status too. It does not independently establish that the OS booted or verify erasure. Losing feedback marks the port Unconfirmed after five seconds without switching its power. No automatic retries, native GUI or background service are included. Five real simultaneous restores on macOS and Linux remain validation goals; tests exercise five concurrent child processes, identity transitions, archive integrity and process outcomes without attached hardware.
 
 Telemetry includes eight ADC inputs, fault pins, expander inputs, CH224 status and external-host CC/orientation. Stable upstream CC measurements set the external-host USB3 orientation without changing hub run or host selection. ADC values are raw counts; firmware voltage checks use the nominal divider ratio. CH224 current is the negotiated ceiling, not measured consumption.
 

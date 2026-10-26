@@ -4,6 +4,8 @@ use std::{
     time::Duration,
 };
 
+mod batch;
+
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use iasis::{Board, UsbIds};
@@ -27,6 +29,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Validate a local IPSW without opening USB devices
+    Ipsw { path: std::path::PathBuf },
+    /// Erase a selected batch using independent idevicerestore workers
+    Restore(batch::Options),
     /// List boards, firmware versions and USB paths
     List,
     /// Read ADC counts, faults and bus observations
@@ -39,14 +45,19 @@ enum Command {
     },
     /// Disable target power and enter the ROM updater; requires --serial
     Bootloader,
-    /// Enumerate USB2 devices by physical connector (SuperSpeed is separate)
+    /// Enumerate USB2 and SuperSpeed devices by physical connector
     Ports {
         #[arg(long)]
         json: bool,
         #[arg(long)]
         watch: bool,
     },
-    /// Enable fixed-5 V brick power or disable a port; requires --serial
+    /// Declare remaining USB-A host current, including Iasis; zero clears it
+    HostBudget {
+        #[arg(value_parser = clap::value_parser!(u16).range(0..=1600))]
+        milliamps: u16,
+    },
+    /// Enable attachment power or disable a port; requires --serial
     Power {
         #[arg(value_parser = parse_port)]
         port: Port,
@@ -96,9 +107,19 @@ fn parse_id(value: &str) -> Result<u16, String> {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    if let Command::Ipsw { path } = &cli.command {
+        let prepared = iasis::restore::PreparedIpsw::open(path)?;
+        println!("{}", serde_json::to_string_pretty(&prepared)?);
+        return Ok(());
+    }
     if matches!(
         cli.command,
-        Command::Bootloader | Command::Power { .. } | Command::Dfu { .. } | Command::Reboot { .. }
+        Command::Bootloader
+            | Command::Power { .. }
+            | Command::Dfu { .. }
+            | Command::Reboot { .. }
+            | Command::HostBudget { .. }
+            | Command::Restore(_)
     ) && cli.serial.is_none()
     {
         bail!("this command requires --serial; use `iasis list` to select the board");
@@ -147,7 +168,14 @@ fn main() -> Result<()> {
     }
     let board = &boards[0];
     match cli.command {
-        Command::List => unreachable!(),
+        Command::List | Command::Ipsw { .. } => unreachable!(),
+        Command::Restore(options) => batch::run(board, options)?,
+        Command::HostBudget { milliamps } => {
+            board.host_budget(milliamps)?;
+            println!(
+                "Legacy allowance set to {milliamps} mA including Iasis; native USB-C advertisement takes priority."
+            );
+        }
         Command::Bootloader => {
             board.enter_bootloader()?;
             println!(
@@ -169,23 +197,30 @@ fn main() -> Result<()> {
             thread::sleep(Duration::from_secs(1));
         },
         Command::Ports { json, watch } => loop {
-            let snapshot = iasis::topology::discover_usb2(board.topology())?;
+            let mut snapshot = iasis::topology::discover(board.topology())?;
+            snapshot.query_identities();
             if json {
                 println!("{}", serde_json::to_string(&snapshot)?);
             } else {
                 for port in snapshot.ports {
+                    println!(
+                        "port {} SuperSpeed companion {:?}",
+                        port.port.number(),
+                        port.superspeed
+                    );
                     if port.devices.is_empty() {
-                        println!("port {}  no USB2 enumeration", port.port.number());
+                        println!("port {}  no USB enumeration", port.port.number());
                     }
                     for device in port.devices {
                         println!(
-                            "port {}  {:04x}:{:04x}  {:?}  {:?}  {:?}",
+                            "port {}  {:04x}:{:04x}  {:?}  {:?}  {:?}  {:?}",
                             port.port.number(),
                             device.vendor_id,
                             device.product_id,
                             device.topology.port_chain,
                             device.product,
-                            device.serial_number
+                            device.serial_number,
+                            device.apple
                         );
                     }
                 }
@@ -243,6 +278,15 @@ fn signal_result(result: CommandResult) -> &'static str {
 }
 
 fn print_status(status: &Status) {
+    println!(
+        "supply {:?}  host allowance {} mA  aggregate limit {} mA  isolated I²C branches {:02x}  recoveries {}  button {:?}",
+        status.supply,
+        status.host_allowance_ma,
+        status.host_limit_ma,
+        status.i2c_isolated,
+        status.i2c_recoveries,
+        status.button
+    );
     println!(
         "uptime {} ms  sample {}  reset 0x{:08x}  watchdog {}  retained update {}",
         status.uptime_ms,

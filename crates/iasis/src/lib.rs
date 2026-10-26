@@ -1,5 +1,7 @@
 //! USB management of an Iasis board.
 
+pub mod identity;
+pub mod restore;
 pub mod topology;
 
 use std::{
@@ -38,6 +40,8 @@ pub enum Error {
     Command(CommandError),
     #[error("port command result was not observed before the deadline")]
     CommandTimeout,
+    #[error("legacy host allowance must be at most 1600 mA")]
+    HostAllowance,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -55,7 +59,7 @@ impl Default for UsbIds {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct Topology {
     pub bus: String,
     pub port_chain: Vec<u8>,
@@ -108,17 +112,62 @@ impl Board {
         read(&self.interface, protocol::GET_STATUS)
     }
 
-    /// Execute against the observed attachment generation. Enable reserves
-    /// power asynchronously; Acknowledged means PD transport only, not DFU.
+    /// Declare the remaining legacy host budget, including Iasis itself.
+    /// Native USB-C Rp is authoritative; zero clears this boot's hint.
+    pub fn host_budget(&self, milliamps: u16) -> Result<(), Error> {
+        if milliamps > 1600 {
+            return Err(Error::HostAllowance);
+        }
+        self.write(
+            protocol::HOST_BUDGET,
+            &protocol::HostBudget {
+                serial: self.info.serial,
+                milliamps,
+            },
+        )
+    }
+
+    pub fn restore_feedback(
+        &self,
+        port: Port,
+        generation: u32,
+        status: protocol::RestoreStatus,
+    ) -> Result<(), Error> {
+        self.write(
+            protocol::RESTORE_FEEDBACK,
+            &protocol::RestoreFeedback {
+                serial: self.info.serial,
+                port,
+                generation,
+                status,
+            },
+        )
+    }
+
+    /// Execute against the observed attachment generation. Enable permits
+    /// attachment; Acknowledged means PD transport only, not DFU.
     pub fn command(&self, port: Port, action: PortAction) -> Result<CommandResult, Error> {
+        self.command_for_generation(port, self.status()?.ports[port.index()].generation, action)
+    }
+
+    /// Preserve a batch's attachment selection through command submission.
+    pub fn command_for_generation(
+        &self,
+        port: Port,
+        generation: u32,
+        action: PortAction,
+    ) -> Result<CommandResult, Error> {
         if self.info.capabilities & protocol::CAP_PORT_CONTROL == 0 {
             return Err(Error::PortControlUnsupported);
         }
         let status = self.status()?.ports[port.index()];
+        if status.generation != generation {
+            return Err(Error::Command(CommandError::StaleAttachment));
+        }
         let command = PortCommand {
             serial: self.info.serial,
             port,
-            generation: status.generation,
+            generation,
             id: status.command_id.wrapping_add(1).max(1),
             action,
         };
@@ -126,6 +175,9 @@ impl Board {
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
             let status = self.status()?.ports[port.index()];
+            if status.generation != generation {
+                return Err(Error::Command(CommandError::StaleAttachment));
+            }
             if status.command_id == command.id {
                 match status.command_result {
                     CommandResult::Failed(error) => return Err(Error::Command(error)),

@@ -1,14 +1,16 @@
-//! USB2 enumeration beneath the Iasis hub, grouped by physical connector.
-//!
-//! SuperSpeed uses a separate USB topology. Its companion hub is not inferred
-//! from a similar path, device identity or enumeration order.
+//! Physical connector discovery using host USB port relationships.
+
+#[cfg(any(target_os = "linux", test))]
+mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
 
 use iasis_protocol::{PORT_COUNT, Port};
 use nusb::{DeviceInfo, MaybeFuture};
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::Topology;
+use crate::{Topology, identity::AppleDevice};
 
 const MANAGEMENT_PORT: u8 = 6;
 
@@ -18,18 +20,25 @@ pub enum Error {
     InvalidManagementTopology,
     #[error("USB enumeration: {0}")]
     Usb(#[from] nusb::Error),
+    #[error("host USB port enumeration: {0}")]
+    Host(#[from] std::io::Error),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Speed {
-    /// The host supplied no recognized speed; the USB path remains available.
     Unknown,
     Low,
     Full,
     High,
     Super,
     SuperPlus,
+}
+
+impl Speed {
+    fn is_superspeed(self) -> bool {
+        matches!(self, Self::Super | Self::SuperPlus)
+    }
 }
 
 impl From<Option<nusb::Speed>> for Speed {
@@ -45,7 +54,6 @@ impl From<Option<nusb::Speed>> for Speed {
     }
 }
 
-/// Information cached by the host, without opening the target device.
 #[derive(Clone, Debug, Serialize)]
 pub struct UsbDevice {
     pub topology: Topology,
@@ -54,6 +62,7 @@ pub struct UsbDevice {
     pub serial_number: Option<String>,
     pub product: Option<String>,
     pub speed: Speed,
+    pub apple: Option<AppleDevice>,
 }
 
 impl From<DeviceInfo> for UsbDevice {
@@ -68,46 +77,75 @@ impl From<DeviceInfo> for UsbDevice {
             serial_number: device.serial_number().map(str::to_owned),
             product: device.product_string().map(str::to_owned),
             speed: device.speed().into(),
+            apple: AppleDevice::from_usb(
+                device.vendor_id(),
+                device.product_id(),
+                device.serial_number(),
+            ),
         }
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum Companion {
+    Mapped {
+        topology: Topology,
+    },
+    /// The host has no reciprocal companion-port relationship.
+    Unavailable,
+    /// The host records disagree. No SuperSpeed device is assigned.
+    Ambiguous,
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct PortDevices {
     pub port: Port,
-    /// Includes downstream hubs and their descendants. An empty list means no
-    /// USB2 device was enumerated; physical attachment remains unknown.
+    pub usb2: Topology,
+    pub superspeed: Companion,
+    /// An empty list does not establish physical detachment.
     pub devices: Vec<UsbDevice>,
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct Usb2Snapshot {
+pub struct Snapshot {
     pub hub: Topology,
     pub ports: [PortDevices; PORT_COUNT],
 }
 
-/// Map a device path to the connector below the management device's parent hub.
-/// A device may be several hubs deep below that connector.
+impl Snapshot {
+    /// Read ECID from the existing system usbmuxd service for mapped Apple
+    /// devices. This only queries identity; it never pairs or starts a restore.
+    pub fn query_identities(&mut self) {
+        crate::identity::query_mux_identities(self);
+    }
+}
+
+/// Map USB2 descendants to the first connector below the Iasis hub.
 pub fn physical_port(management: &Topology, device: &Topology) -> Result<Option<Port>, Error> {
-    let hub_path = hub_path(management)?;
+    let hub = hub_path(management)?;
     if device.bus != management.bus || device.port_chain.contains(&0) {
         return Ok(None);
     }
     Ok(device
         .port_chain
-        .strip_prefix(hub_path)
+        .strip_prefix(hub)
         .and_then(|suffix| suffix.first())
         .and_then(|port| Port::try_from(*port).ok()))
 }
 
-/// Read the current host enumeration. This does not probe target interfaces or
-/// establish CC attachment, DFU state, or the separate SuperSpeed topology.
-pub fn discover_usb2(management: &Topology) -> Result<Usb2Snapshot, Error> {
+/// Read cached USB descriptors and authoritative USB2/SuperSpeed port links.
+/// Missing companion metadata remains visible instead of guessing a hub.
+pub fn discover(management: &Topology) -> Result<Snapshot, Error> {
     hub_path(management)?;
-    group_devices(
-        management,
-        nusb::list_devices().wait()?.map(UsbDevice::from),
-    )
+    let devices: Vec<_> = nusb::list_devices().wait()?.collect();
+    #[cfg(target_os = "linux")]
+    let ports = linux::ports(management, &devices)?;
+    #[cfg(target_os = "macos")]
+    let ports = macos::ports()?;
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    let ports = Vec::new();
+    group_devices(management, devices.into_iter().map(UsbDevice::from), &ports)
 }
 
 fn hub_path(management: &Topology) -> Result<&[u8], Error> {
@@ -121,183 +159,224 @@ fn hub_path(management: &Topology) -> Result<&[u8], Error> {
     }
 }
 
+#[derive(Debug)]
+struct HostPort {
+    path: String,
+    topology: Topology,
+    peer: Option<String>,
+}
+
+fn companion(usb2: &Topology, records: &[HostPort]) -> Companion {
+    let candidates: Vec<_> = records
+        .iter()
+        .filter(|port| port.topology == *usb2)
+        .collect();
+    let [source] = candidates.as_slice() else {
+        return if candidates.is_empty() {
+            Companion::Unavailable
+        } else {
+            Companion::Ambiguous
+        };
+    };
+    let Some(peer_path) = &source.peer else {
+        return Companion::Unavailable;
+    };
+    let peers: Vec<_> = records
+        .iter()
+        .filter(|port| port.path == *peer_path)
+        .collect();
+    let [peer] = peers.as_slice() else {
+        return if peers.is_empty() {
+            Companion::Unavailable
+        } else {
+            Companion::Ambiguous
+        };
+    };
+    if peer.peer.as_ref() != Some(&source.path) || peer.topology == *usb2 {
+        return Companion::Ambiguous;
+    }
+    Companion::Mapped {
+        topology: peer.topology.clone(),
+    }
+}
+
+fn below(device: &Topology, connector: &Topology) -> bool {
+    device.bus == connector.bus
+        && !device.port_chain.contains(&0)
+        && device.port_chain.starts_with(&connector.port_chain)
+}
+
 fn group_devices(
     management: &Topology,
     devices: impl IntoIterator<Item = UsbDevice>,
-) -> Result<Usb2Snapshot, Error> {
+    records: &[HostPort],
+) -> Result<Snapshot, Error> {
     let hub = Topology {
         bus: management.bus.clone(),
         port_chain: hub_path(management)?.to_vec(),
     };
-    let mut ports = Port::ALL.map(|port| PortDevices {
-        port,
-        devices: Vec::new(),
-    });
-    for device in devices {
-        if matches!(device.speed, Speed::Super | Speed::SuperPlus) {
-            continue;
+    let mut ports = Port::ALL.map(|port| {
+        let mut usb2 = hub.clone();
+        usb2.port_chain.push(port.number());
+        PortDevices {
+            port,
+            superspeed: companion(&usb2, records),
+            usb2,
+            devices: Vec::new(),
         }
-        if let Some(port) = physical_port(management, &device.topology)? {
-            ports[port.index()].devices.push(device);
+    });
+    // No two physical connectors may claim the same companion path.
+    for a in 0..PORT_COUNT {
+        for b in a + 1..PORT_COUNT {
+            if let (Companion::Mapped { topology: left }, Companion::Mapped { topology: right }) =
+                (&ports[a].superspeed, &ports[b].superspeed)
+                && left == right
+            {
+                ports[a].superspeed = Companion::Ambiguous;
+                ports[b].superspeed = Companion::Ambiguous;
+            }
+        }
+    }
+    for device in devices {
+        let matches: Vec<_> = ports.iter().enumerate().filter(|(_, port)| {
+            let usb2 = !device.speed.is_superspeed() && below(&device.topology, &port.usb2);
+            let superspeed = (device.speed.is_superspeed() || device.speed == Speed::Unknown)
+                && matches!(&port.superspeed, Companion::Mapped { topology } if below(&device.topology, topology));
+            usb2 || superspeed
+        }).map(|(index, _)| index).collect();
+        if let [index] = matches.as_slice() {
+            ports[*index].devices.push(device);
         }
     }
     for port in &mut ports {
-        port.devices
-            .sort_by(|left, right| left.topology.port_chain.cmp(&right.topology.port_chain));
+        port.devices.sort_by(|a, b| {
+            (&a.topology.bus, &a.topology.port_chain)
+                .cmp(&(&b.topology.bus, &b.topology.port_chain))
+        });
     }
-    Ok(Usb2Snapshot { hub, ports })
+    Ok(Snapshot { hub, ports })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn topology(bus: &str, port_chain: &[u8]) -> Topology {
+    fn location(bus: &str, chain: &[u8]) -> Topology {
         Topology {
             bus: bus.to_owned(),
-            port_chain: port_chain.to_vec(),
+            port_chain: chain.to_vec(),
+        }
+    }
+
+    fn pair() -> [HostPort; 2] {
+        [
+            HostPort {
+                path: "usb2".into(),
+                topology: location("1", &[4, 2]),
+                peer: Some("usb3".into()),
+            },
+            HostPort {
+                path: "usb3".into(),
+                topology: location("2", &[7, 2]),
+                peer: Some("usb2".into()),
+            },
+        ]
+    }
+
+    fn device(bus: &str, chain: &[u8], speed: Speed) -> UsbDevice {
+        UsbDevice {
+            topology: location(bus, chain),
+            vendor_id: 0,
+            product_id: 0,
+            serial_number: None,
+            product: None,
+            speed,
+            apple: None,
         }
     }
 
     #[test]
-    fn management_port_siblings_map_to_the_five_connectors() {
-        let management = topology("1", &[4, 6]);
+    fn usb2_siblings_and_nested_hubs_retain_the_physical_connector() {
+        let management = location("1", &[4, 6]);
         for port in Port::ALL {
             assert_eq!(
-                physical_port(&management, &topology("1", &[4, port.number()])).unwrap(),
+                physical_port(&management, &location("1", &[4, port.number(), 3])).unwrap(),
                 Some(port)
             );
         }
-        for path in [&[][..], &[4], &[4, 6], &[4, 6, 1], &[4, 7]] {
+        for path in [
+            &[][..],
+            &[4],
+            &[4, 6],
+            &[4, 6, 1],
+            &[4, 7],
+            &[4, 0, 1],
+            &[5, 2],
+        ] {
             assert_eq!(
-                physical_port(&management, &topology("1", path)).unwrap(),
+                physical_port(&management, &location("1", path)).unwrap(),
                 None
             );
         }
-    }
-
-    #[test]
-    fn nested_hubs_retain_the_first_connector_below_the_iasis_hub() {
-        let management = topology("2", &[3, 2, 6]);
         assert_eq!(
-            physical_port(&management, &topology("2", &[3, 2, 5, 4, 1])).unwrap(),
-            Some(Port::try_from(5).unwrap())
-        );
-        for path in [&[3, 5][..], &[3, 3, 5], &[3, 2], &[3, 2, 0, 5]] {
-            assert_eq!(
-                physical_port(&management, &topology("2", path)).unwrap(),
-                None
-            );
-        }
-    }
-
-    #[test]
-    fn other_boards_and_buses_do_not_match() {
-        let first = topology("1", &[2, 6]);
-        let second = topology("1", &[3, 6]);
-        let target = topology("1", &[3, 4]);
-        assert_eq!(physical_port(&first, &target).unwrap(), None);
-        assert_eq!(
-            physical_port(&second, &target).unwrap(),
-            Some(Port::try_from(4).unwrap())
-        );
-        assert_eq!(
-            physical_port(&second, &topology("2", &[3, 4])).unwrap(),
+            physical_port(&management, &location("2", &[4, 2])).unwrap(),
             None
         );
     }
 
     #[test]
-    fn an_unknown_or_non_management_location_cannot_anchor_discovery() {
+    fn rejects_unknown_management_location() {
         for management in [
-            topology("1", &[]),
-            topology("1", &[6]),
-            topology("1", &[2, 5]),
-            topology("1", &[0, 6]),
-            topology("", &[2, 6]),
+            location("1", &[]),
+            location("1", &[6]),
+            location("1", &[2, 5]),
+            location("1", &[0, 6]),
+            location("", &[2, 6]),
         ] {
             assert!(matches!(
-                physical_port(&management, &topology("1", &[2, 1])),
+                physical_port(&management, &location("1", &[2, 1])),
                 Err(Error::InvalidManagementTopology)
             ));
         }
     }
 
     #[test]
-    fn grouping_retains_descriptors_and_empty_ports_without_inventing_attachment() {
-        let management = topology("1", &[2, 6]);
-        let device = |bus, path: &[u8], serial: &str| UsbDevice {
-            topology: topology(bus, path),
-            vendor_id: 0x05ac,
-            product_id: 0x1227,
-            serial_number: Some(serial.to_owned()),
-            product: None,
-            speed: Speed::Unknown,
-        };
+    fn superspeed_uses_reciprocal_os_links_not_similar_paths() {
         let snapshot = group_devices(
-            &management,
+            &location("1", &[4, 6]),
             [
-                device("1", &[2, 3, 4], "child"),
-                device("2", &[2, 3], "other bus"),
-                device("1", &[2, 3], "parent"),
-                device("1", &[5, 3], "other hub"),
-                device("1", &[2, 6], "management"),
+                device("2", &[7, 2], Speed::Super),
+                device("2", &[7, 2, 3], Speed::SuperPlus),
+                device("2", &[7, 2, 4], Speed::Unknown),
+                device("1", &[4, 2], Speed::High),
+                device("1", &[4, 2], Speed::Super),
+                device("2", &[4, 2], Speed::Super),
+                device("2", &[7, 1], Speed::Super),
             ],
+            &pair(),
         )
         .unwrap();
-        assert_eq!(snapshot.hub.bus, "1");
-        assert_eq!(snapshot.hub.port_chain, [2]);
-        for port in Port::ALL {
-            assert_eq!(snapshot.ports[port.index()].port, port);
-            if port.number() != 3 {
-                assert!(snapshot.ports[port.index()].devices.is_empty());
-            }
-        }
-        let devices = &snapshot.ports[2].devices;
-        assert_eq!(devices.len(), 2);
-        assert_eq!(devices[0].serial_number.as_deref(), Some("parent"));
-        assert_eq!(devices[1].serial_number.as_deref(), Some("child"));
-        assert_eq!(devices[1].vendor_id, 0x05ac);
-        assert_eq!(devices[1].product_id, 0x1227);
-        assert_eq!(devices[1].product, None);
-        assert_eq!(devices[1].speed, Speed::Unknown);
+        assert_eq!(snapshot.ports[1].devices.len(), 4);
+        assert!(snapshot.ports[0].devices.is_empty());
+        assert_eq!(snapshot.ports[0].superspeed, Companion::Unavailable);
     }
 
     #[test]
-    fn usb2_grouping_excludes_superspeed_even_when_its_path_matches() {
-        let management = topology("1", &[2, 6]);
-        let device = |bus, path: &[u8], speed| UsbDevice {
-            topology: topology(bus, path),
-            vendor_id: 0x05ac,
-            product_id: 0x1227,
-            serial_number: None,
-            product: None,
-            speed,
-        };
-        let snapshot = group_devices(
-            &management,
-            [
-                device("1", &[2, 3], Speed::Super),
-                device("1", &[2, 3], Speed::SuperPlus),
-                device("2", &[2, 3], Speed::Super),
-                device("2", &[2, 3], Speed::High),
-                device("2", &[2, 3], Speed::Unknown),
-                device("1", &[2, 3], Speed::High),
-                device("1", &[2, 3, 1], Speed::Unknown),
-            ],
-        )
-        .unwrap();
-        let devices = &snapshot.ports[2].devices;
-        assert_eq!(devices.len(), 2);
-        assert_eq!(devices[0].speed, Speed::High);
-        assert_eq!(devices[1].speed, Speed::Unknown);
+    fn conflicting_or_one_way_links_do_not_map() {
+        let mut records = pair();
+        records[1].peer = Some("another board".into());
         assert_eq!(
-            snapshot
-                .ports
-                .iter()
-                .map(|port| port.devices.len())
-                .sum::<usize>(),
-            2
+            companion(&location("1", &[4, 2]), &records),
+            Companion::Ambiguous
+        );
+        records[1].peer = None;
+        assert_eq!(
+            companion(&location("1", &[4, 2]), &records),
+            Companion::Ambiguous
+        );
+        assert_eq!(
+            companion(&location("1", &[4, 2]), &records[..1]),
+            Companion::Unavailable
         );
     }
 }
