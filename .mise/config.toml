@@ -2,6 +2,7 @@ monorepo_root = true
 
 [tools]
 python = "3.14.7"
+rust = "1.99.1"
 uv = "0.12.20"
 ruff = "0.17.1"
 lefthook = "2.2.2"
@@ -26,12 +27,21 @@ config_roots = ["hardware/case", "hardware/boards/*"]
 postinstall = "lefthook install"
 
 [tasks.deps]
-description = "Install the Python workspace dependencies"
-run = "uv sync --locked"
+description = "Install workspace dependencies and the firmware target"
+run = [
+  "uv sync --locked",
+  "rustup target add thumbv8m.main-none-eabihf",
+  "cargo fetch --locked",
+]
 
 [tasks.build]
-description = "Build the case and each board's fabrication files"
-depends = ["//hardware/case:build", "//hardware/boards/...:fab"]
+description = "Build software, the case and board fabrication files"
+depends = [
+  "host:build",
+  "firmware:build",
+  "//hardware/case:build",
+  "//hardware/boards/...:fab",
+]
 
 [tasks.preview]
 description = "Refresh the case and board previews"
@@ -44,6 +54,7 @@ depends = [
   "typecheck",
   "fmt-check",
   "test",
+  "software:check",
   "//hardware/case:check",
   "//hardware/boards/...:check",
 ]
@@ -61,14 +72,36 @@ description = "Test JLCPCB placement conversion"
 run = 'uv run --locked python -m unittest discover -s hardware/tools -p "test_*.py"'
 
 [tasks.format]
-description = "Format Python, Markdown and configuration"
+description = "Format sources, Markdown and configuration"
 depends = ["//hardware/case:format", "//hardware/boards/...:format"]
-run = ["mise fmt", "ruff format hardware", "oxfmt"]
+run = ["mise fmt", "ruff format hardware", "cargo fmt --all", "oxfmt"]
 
 [tasks.fmt-check]
 description = "Check repository formatting"
 depends = ["//hardware/case:fmt-check", "//hardware/boards/...:fmt-check"]
-run = ["mise fmt --check", "ruff format --check hardware", "oxfmt --check"]
+run = [
+  "mise fmt --check",
+  "ruff format --check hardware",
+  "cargo fmt --all -- --check",
+  "oxfmt --check",
+]
+
+[tasks."host:build"]
+description = "Build the Iasis host library and CLI"
+run = "cargo build --locked --release -p iasis"
+
+[tasks."firmware:build"]
+description = "Build the RP2354B firmware ELF"
+run = "cargo build --locked --release -p iasis-firmware --target thumbv8m.main-none-eabihf"
+
+[tasks."software:check"]
+description = "Check host and firmware sources and test the wire protocol"
+run = [
+  "cargo fmt --all -- --check",
+  "cargo clippy --locked --all-targets -- -D warnings",
+  "cargo clippy --locked --release -p iasis-firmware --target thumbv8m.main-none-eabihf -- -D warnings",
+  "cargo test --locked",
+]
 
 [task_templates."pcb:step"]
 description = "Export the populated board STEP"

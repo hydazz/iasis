@@ -97,6 +97,11 @@ url = "https://github.com/astral-sh/ruff/releases/download/0.17.1/ruff-aarch64-a
 url_api = "https://api.github.com/repos/astral-sh/ruff/releases/assets/644283324"
 provenance = "github-attestations"
 
+[[tools.rust]]
+version = "1.99.1"
+backend = "core:rust"
+specifiers = ["1.99.1"]
+
 [[tools.uv]]
 version = "0.12.20"
 backend = "aqua:astral-sh/uv"

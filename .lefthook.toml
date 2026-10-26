@@ -24,6 +24,11 @@ exclude = [".mise/**", "**/.mise.toml"]
 run = "mise exec -- oxfmt --no-error-on-unmatched-pattern {staged_files}"
 stage_fixed = true
 
+[pre-commit.commands.format-rust]
+glob = ["*.rs"]
+run = "mise exec -- rustfmt --edition 2024 {staged_files}"
+stage_fixed = true
+
 [[pre-commit.jobs]]
 name = "mise"
 glob = [".mise/config.toml", "**/.mise.toml"]
