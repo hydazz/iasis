@@ -2,6 +2,11 @@ use iasis_protocol::PortError;
 
 use crate::{board::Controls, bus::Bus};
 
+// Bits 0..7 are U1181 QA..QH, 8..15 U1182 QA..QH. U1181 QH is HOST_EXT;
+// U1182 QA and QE..QH discharge ports 1..5, QB..QD set the host budget.
+const HOST_EXT: u16 = 1 << 7;
+const DISCHARGE: [u16; 5] = [1 << 8, 1 << 12, 1 << 13, 1 << 14, 1 << 15];
+
 pub struct Outputs {
     expander: u8,
 }
@@ -13,8 +18,8 @@ impl Outputs {
         controls: &mut Controls,
         tier: Option<iasis_pd::power::HostLimit>,
     ) -> Result<(), PortError> {
-        let bits = tier.map_or(0, |tier| (u16::from(tier.bits) << 11) | (1 << 13));
-        let value = (controls.shift & !(7 << 11)) | bits;
+        let bits = tier.map_or(0, |tier| (u16::from(tier.bits) << 9) | (1 << 11));
+        let value = (controls.shift & !(7 << 9)) | bits;
         if value != controls.shift {
             self.latch(bus, controls, value).await?;
         }
@@ -45,7 +50,7 @@ impl Outputs {
         bus.write(0x20, &[3, direction & !0x0b]).await?;
         let mut outputs = Self { expander: value };
         outputs
-            .latch(bus, controls, controls.shift & 0x8000)
+            .latch(bus, controls, controls.shift & HOST_EXT)
             .await?;
         controls.enable_shift();
         Ok(outputs)
@@ -81,7 +86,7 @@ impl Outputs {
         port: usize,
         enabled: bool,
     ) -> Result<(), PortError> {
-        let bit = 1 << (5 + port);
+        let bit = DISCHARGE[port];
         let value = if enabled {
             controls.shift | bit
         } else {
