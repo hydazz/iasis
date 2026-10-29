@@ -6,7 +6,7 @@ uv = "0.12.20"
 ruff = "0.17.1"
 lefthook = "2.2.2"
 oxfmt = "0.74.0"
-node = "26.12.1"
+node = "26.13.0"
 "npm:pyright" = "1.1.414"
 
 [settings]
