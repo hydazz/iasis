@@ -1,0 +1,17 @@
+[tasks.step]
+extends = "pcb:step"
+
+[tasks.fab]
+extends = "pcb:fab"
+
+[tasks.preview]
+extends = "pcb:preview"
+
+[tasks.lint]
+extends = "pcb:lint"
+
+[tasks.format]
+extends = "project:format"
+
+[tasks.fmt-check]
+extends = "project:fmt-check"

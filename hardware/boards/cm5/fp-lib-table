@@ -1,0 +1,5 @@
+(fp_lib_table
+  (version 7)
+
+  (lib (name "Iasis") (type "KiCad") (uri "${KIPRJMOD}/../../shared/Iasis.pretty") (options "") (descr ""))
+  (lib (name "CM5") (type "KiCad") (uri "${KIPRJMOD}/CM5.pretty") (options "") (descr "")))
