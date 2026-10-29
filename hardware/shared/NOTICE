@@ -1,0 +1,10 @@
+The TPD4E02B04DQA symbol in Iasis.kicad_sym uses the drawing and pin placement
+of the KiCad community's Power_Protection:TPD4EUSB30 symbol. Its part metadata
+is for TI TPD4E02B04DQAR; the DQA package has the same protected-pad, ground
+and flow-through-pad numbering.
+Source: https://gitlab.com/kicad/libraries/kicad-symbols
+License: CC-BY-SA 4.0 with KiCad's design exception; see
+Iasis.pretty/KICAD-LICENSE.md.
+
+Footprint and 3D-model attributions are in Iasis.pretty/NOTICE and
+Iasis.3dshapes/NOTICE.

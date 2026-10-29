@@ -1,0 +1,67 @@
+# NOTICE
+
+This project includes modified KiCad community footprints, geometry derived from Raspberry Pi reference designs and footprints drawn from manufacturer documents. Attribution and licensing details follow.
+
+## Sources and licenses
+
+**KiCad footprint library**  
+https://gitlab.com/kicad/libraries/kicad-footprints
+
+License: CC-BY-SA 4.0 with the KiCad library design exception. See `KICAD-LICENSE.md`.
+
+**Raspberry Pi RP2350B Minimal KiCad Design**  
+RP-010329-CA-1, revision R4  
+https://pip-assets.raspberrypi.com/categories/1214-rp2350/documents/RP-010329-CA-1-RP2350B%20Minimal%20KiCAD.zip
+
+License: MIT, Copyright (c) 2026 Raspberry Pi Ltd. Full license text is included in `../Iasis.3dshapes/NOTICE`.
+
+## Modified KiCad footprints
+
+The following footprints incorporate geometry from the KiCad community library and retain its CC-BY-SA 4.0 license and design exception.
+
+**GCT_USB4105_GF_A_120.kicad_mod**
+
+- Based on `Connector_USB:USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal`.
+- GND lands use 0.20 mm corner radii.
+- Land extents, locating holes and shell slots follow GCT drawing B4:  
+  https://gct.co/files/drawings/usb4105.pdf
+
+**HTSSOP-16-1EP_4.4x5mm_P0.65mm_EP3.4x5mm_Mask2.66x2.46mm_ThermalVias.kicad_mod**, **VQFN-100-1EP_12x12mm_P0.4mm_EP8x8mm_ThermalVias.kicad_mod**, **WQFN-20-1EP_3x3mm_P0.4mm_EP1.7x1.7mm_ThermalVias.kicad_mod**
+
+- The `Package_SO` and `Package_DFN_QFN` footprints of the same names, distributed with KiCad 10.0.7.
+- Thermal via drill 0.3 mm instead of 0.2 mm, so every hole on the board stays in JLC's standard via tier.
+- 3D model entries match the board instances.
+
+**TestPoint_Pad_D0.5mm**
+
+- Derived from `TestPoint:TestPoint_Pad_D1.0mm`, distributed with KiCad 10.0.7.
+- Copper diameter reduced to 0.5 mm; mask opening 0.6 mm; courtyard diameter 1.0 mm.
+- Paste and silkscreen circle removed; reference hidden by default.
+- Original: https://gitlab.com/kicad/libraries/kicad-footprints/-/blob/master/TestPoint.pretty/TestPoint_Pad_D1.0mm.kicad_mod
+
+## Raspberry Pi-derived geometry
+
+The following geometry originates from the RP2350B Minimal KiCad Design identified above and is covered by its MIT license.
+
+**C_0402_1005Metric_WideGap.kicad_mod**
+
+- Based on KiCad's `Capacitor_SMD:C_0402_1005Metric` footprint.
+- Land pattern from Raspberry Pi's `generic_capc1005x50_wide`.
+- Pads: 0.47 × 0.55 mm at 1.03 mm pitch.
+- The KiCad-derived geometry retains CC-BY-SA 4.0 with the KiCad library design exception; the Raspberry Pi land pattern is MIT-licensed.
+
+**iasis.kicad_pcb**
+
+The RP2354 regulator, decoupling and crystal component placement and associated copper geometry are copied from the Raspberry Pi reference design.
+
+## Footprints drawn from manufacturer documents
+
+These are original project work under the repository's Apache-2.0 license. Each footprint's description names its source.
+
+- `Bourns_SRP5030CC.kicad_mod`: Bourns SRP5030CC recommended land.
+- `OPSCO_SK6812SIDE-A.kicad_mod`: OPSCO OSK-SPC-SK6812SIDEI-A-S rev A/1.
+- `PSTMAA666460.kicad_mod`: PROD Technology PSTMAA666460-6R8MB specification A2.0, page 3.
+- `SolderPads_1x03_P2.54mm.kicad_mod`: three wire or header solder pads; no source document.
+- `TI_DRR0012G.kicad_mod`: TI DRR0012G land (LMR51450 datasheet).
+- `TI_RPM0026A.kicad_mod`: TI package drawing 4224618/A, example board layout and stencil (TPS55288 datasheet SLVSF01B).
+- `TI_RPW0010A.kicad_mod`: TI package drawing 4225183A.

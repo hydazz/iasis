@@ -1,0 +1,146 @@
+(footprint "OPSCO_SK6812SIDE-A"
+	(version 20260206)
+	(generator "pcbnew")
+	(generator_version "10.0")
+	(layer "F.Cu")
+	(descr "OPSCO SK6812SIDE-A side-emitting addressable RGB LED, 4.0x1.6x2.0mm, land pattern from OSK-SPC-SK6812SIDEI-A-S rev A/1")
+	(property "Reference" "REF**"
+		(at 0 -1.85 0)
+		(layer "F.SilkS")
+		(uuid "fb0aa68a-d069-4a8b-94ce-a241765cfb43")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Value" "OPSCO_SK6812SIDE-A"
+		(at 0 1.85 0)
+		(layer "F.Fab")
+		(uuid "366191a6-6a52-4f4c-955f-f26a2d89a89f")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "3694a99f-4419-4c6e-b3f4-24a5a4904c07")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(property "Description" ""
+		(at 0 0 0)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "7291d4dc-6b6f-4cce-84f7-3f3d0a02f718")
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+	)
+	(attr smd)
+	(duplicate_pad_numbers_are_jumpers no)
+	(fp_rect
+		(start -2.45 -0.75)
+		(end 2.45 0.75)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.SilkS")
+		(uuid "fb73bf56-9089-4642-b52f-95bf9aaea837")
+	)
+	(fp_circle
+		(center -2.85 0)
+		(end -2.7 0)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(fill yes)
+		(layer "F.SilkS")
+		(uuid "bb1b7de5-640f-4f0c-a897-03715c5573d0")
+	)
+	(fp_rect
+		(start -2.55 -0.85)
+		(end 2.55 0.85)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.CrtYd")
+		(uuid "7b3fe6aa-8bfc-42ba-a420-cc5ca6f01043")
+	)
+	(fp_poly
+		(pts
+			(xy -2 -0.4) (xy -1.6 -0.8) (xy 2 -0.8) (xy 2 0.8) (xy -2 0.8)
+		)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.Fab")
+		(uuid "de3abed6-f553-454e-8aa5-84266b82f3d1")
+	)
+	(pad "1" smd rect
+		(at -2.075 -0.075)
+		(size 0.45 0.55)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(uuid "824df375-8143-4da0-af59-6f21fadaf632")
+	)
+	(pad "1" smd rect
+		(at -1.575 0)
+		(size 0.55 1.2)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(uuid "68d8602e-6ed2-482e-bbcd-9671e91bac52")
+	)
+	(pad "2" smd rect
+		(at -0.45 0)
+		(size 0.7 1.2)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(uuid "14ea1605-a19c-400d-bba0-cfa8b7f3acb2")
+	)
+	(pad "3" smd rect
+		(at 0.575 0)
+		(size 0.45 1.2)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(uuid "09cb0371-7c65-4ac8-9647-e63e8db20ae3")
+	)
+	(pad "4" smd rect
+		(at 1.575 0)
+		(size 0.55 1.2)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(uuid "b7fd4d46-ef60-4c87-8742-2662efa010b1")
+	)
+	(pad "4" smd rect
+		(at 2.075 -0.075)
+		(size 0.45 0.55)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(uuid "a4bad113-5776-455c-bd1e-0f27502389d4")
+	)
+	(embedded_fonts no)
+	(model "${KIPRJMOD}/../../shared/Iasis.3dshapes/OPSCO_SK6812SIDE-A.step"
+		(offset
+			(xyz 0 0 1.02)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 180)
+		)
+	)
+)
