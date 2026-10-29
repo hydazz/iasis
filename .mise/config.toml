@@ -1,7 +1,7 @@
 monorepo_root = true
 
 [tools]
-python = "3.14.7"
+python = "3.15.2"
 rust = "1.99.1"
 uv = "0.12.20"
 ruff = "0.17.1"
