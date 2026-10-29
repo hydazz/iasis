@@ -13,3 +13,4 @@
 *.yaml linguist-detectable linguist-language=YAML
 *.yaml.j2 linguist-detectable linguist-language=YAML
 *.step -diff
+*.stp -diff
