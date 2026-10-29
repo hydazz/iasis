@@ -1,0 +1,117 @@
+"""Export JLCPCB Gerbers, drills, and assembly files for a KiCad project."""
+
+import shutil
+import tempfile
+import zipfile
+from pathlib import Path
+
+from board import cli, parser, paths, variant_args, variants
+from jlc_cpl import convert
+
+
+def main():
+    ap = parser(__doc__)
+    args = ap.parse_args()
+    source, output = paths(args)
+    if output == source.parent:
+        ap.error("output must be separate from the source directory")
+    output.mkdir(parents=True, exist_ok=True)
+    layers = "*.Cu,F.Paste,B.Paste,F.Silkscreen,B.Silkscreen,F.Mask,B.Mask,Edge.Cuts"
+    with tempfile.TemporaryDirectory(dir=output) as directory:
+        work = Path(directory)
+        for suffix in (".kicad_pro", ".kicad_dru"):
+            file = source.with_suffix(suffix)
+            if file.exists():
+                shutil.copy2(file, work / file.name)
+        cli(
+            "pcb",
+            "export",
+            "svg",
+            "--mode-single",
+            "--layers",
+            "B.Mask,B.Silkscreen,Edge.Cuts",
+            "--mirror",
+            "--page-size-mode",
+            "2",
+            "--exclude-drawing-sheet",
+            "--output",
+            work / "bottom.svg",
+            source,
+        )
+        gerbers = work / "gerbers"
+        cli("pcb", "export", "gerbers", "--check-zones", "-o", gerbers, "-l", layers, source)
+        cli("pcb", "export", "drill", "--excellon-separate-th", "-o", gerbers, source)
+        with zipfile.ZipFile(work / "gerbers.zip", "w", zipfile.ZIP_DEFLATED) as archive:
+            for file in sorted(gerbers.iterdir()):
+                if file.suffix != ".gbrjob":
+                    archive.write(file, file.name)
+        for variant in variants(source):
+            suffix = f"-{variant}" if variant else ""
+            bom, parts, pos = work / f"bom{suffix}.csv", work / "parts.csv", work / "pos.csv"
+            # JLCPCB deselects BOM lines that share a part, so the BOM has one line per
+            # LCSC code; the per-reference table keeps each footprint for the CPL.
+            cli(
+                "sch",
+                "export",
+                "bom",
+                *variant_args(variant),
+                "--exclude-dnp",
+                "--group-by",
+                "LCSC",
+                "--ref-range-delimiter",
+                "",
+                "-o",
+                bom,
+                "--fields",
+                "Value,Reference,Footprint,LCSC,MPN,Manufacturer,${QUANTITY}",
+                "--labels",
+                "Comment,Designator,Footprint,LCSC Part #,MPN,Manufacturer,Quantity",
+                source.with_suffix(".kicad_sch"),
+            )
+            cli(
+                "sch",
+                "export",
+                "bom",
+                *variant_args(variant),
+                "--exclude-dnp",
+                "-o",
+                parts,
+                "--fields",
+                "Reference,LCSC,Footprint",
+                "--labels",
+                "Designator,LCSC Part #,Footprint",
+                source.with_suffix(".kicad_sch"),
+            )
+            cli(
+                "pcb",
+                "export",
+                "pos",
+                *variant_args(variant),
+                "--exclude-dnp",
+                "--format",
+                "csv",
+                "--units",
+                "mm",
+                "-o",
+                pos,
+                source,
+            )
+            convert(pos, parts, work / f"cpl{suffix}.csv")
+        for pattern in ("bom.csv", "bom-*.csv", "cpl.csv", "cpl-*.csv"):
+            for old in output.glob(pattern):
+                old.unlink()
+        for pattern in (
+            "gerbers.zip",
+            "bottom.svg",
+            "bom*.csv",
+            "cpl*.csv",
+            "*.kicad_pro",
+            "*.kicad_dru",
+        ):
+            for file in work.glob(pattern):
+                file.replace(output / file.name)
+        shutil.copy2(source, output / source.name)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,32 @@
+(version 1)
+
+# JLC 6-layer: PTH holes keep 0.3mm to inner copper; vias use the 0.2mm board minimum.
+(rule "JLC PTH hole to copper"
+	(condition "A.Type == 'Pad' && A.Pad_Type == 'Through-hole' && A.Hole_Size_X >= 0.5mm")
+	(constraint hole_clearance (min 0.3mm)))
+
+# JLC 6-layer: 0.45mm between pad holes; vias use the 0.2mm board minimum.
+(rule "JLC pad hole to pad hole"
+	(condition "A.Type == 'Pad' && B.Type == 'Pad' && A.Hole_Size_X >= 0.5mm && B.Hole_Size_X >= 0.5mm")
+	(constraint hole_to_hole (min 0.45mm)))
+
+# Pair geometry was solved without coplanar copper: keep outer-layer pours 0.6mm back.
+(rule "Pours clear of controlled pairs"
+	(layer outer)
+	(condition "A.hasNetclass('USB_90') && B.Type == 'Zone'")
+	(constraint clearance (min 0.6mm)))
+
+# Molex 105450 B-row via in pad: 0.45/0.30 vias staggered 0.15mm along the 0.30mm pads sit 0.125mm from the neighbouring pad and 0.133mm from each other; their holes keep the 0.2mm board minimum.
+(rule "Receptacle B-row via in pad"
+	(condition "A.Type == 'Via' && A.intersectsCourtyard('Connector_USB:USB_C_Receptacle_Molex_105450-0101') && (B.Type == 'Via' || B.memberOfFootprint('Connector_USB:USB_C_Receptacle_Molex_105450-0101'))")
+	(constraint clearance (min 0.12mm)))
+
+# Exposed pads and their thermal vias tie solidly into the planes; KiCad tags them as heatsink pads.
+(rule "Heatsink pads connect solid"
+	(condition "A.Type == 'Pad' && A.Fabrication_Property == 'Heatsink pad'")
+	(constraint zone_connection solid))
+
+# TMUX1511 RSV: pads either side of each package corner sit 0.15mm apart, inside the USB_90 class clearance.
+(rule "UQFN-16 RSV corner pads"
+	(condition "A.Type == 'Pad' && B.Type == 'Pad' && A.memberOfFootprint('Package_DFN_QFN:UQFN-16_1.8x2.6mm_P0.4mm') && B.memberOfFootprint('Package_DFN_QFN:UQFN-16_1.8x2.6mm_P0.4mm')")
+	(constraint clearance (min 0.15mm)))

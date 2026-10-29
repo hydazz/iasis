@@ -1,0 +1,19 @@
+# NOTICE
+
+Footprints for the CM5 side board. Shared parts come from `../../../shared/Iasis.pretty` and the KiCad library.
+
+## Raspberry Pi-derived geometry
+
+**RaspberryPi_CM5.kicad_mod**
+
+- Mounting-hole and socket positions follow the `Raspberry-Pi-5-Compute-Module` footprint in Raspberry Pi's CM5 IO board KiCad design files (`cm5io-KiCAD.zip`) and the Compute Module 5 datasheet (40 × 55 mm, M2.5 holes 3.5 mm from the edges).
+- The courtyard is the outline of the Raspberry Pi Cooler for CM5 (56 × 41 mm, product brief published December 2024) with the two socket courtyards cut out.
+- The design files carry no separate licence statement; terms for the geometry remain with Raspberry Pi Ltd.
+
+## Footprints drawn from manufacturer documents
+
+These are original project work under the repository's Apache-2.0 license. Each footprint's description names its source.
+
+- `HanRun_HR911130A.kicad_mod`: HanRun HR911130A drawing rev A, mounting pattern.
+- `L_PROD_PSPMAA0805.kicad_mod`: PROD Technology PSPMAA series specification A3.0, recommended land.
+- `TI_RPH0016A.kicad_mod`: TI drawing 4224442/C, land pattern example (LM61480 datasheet).

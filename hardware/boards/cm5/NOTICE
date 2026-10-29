@@ -1,0 +1,15 @@
+The Bus_M.2_Socket_M_SH symbol in CM5.kicad_sym is the KiCad community's
+Connector:Bus_M.2_Socket_M symbol with the connector's hold-down tabs added as
+pin SH and the signal pins typed passive.
+Source: https://gitlab.com/kicad/libraries/kicad-symbols
+License: CC-BY-SA 4.0 with KiCad's design exception; see
+../../shared/Iasis.pretty/KICAD-LICENSE.md.
+
+The other CM5.kicad_sym symbols are original project work drawn from the
+manufacturers' documents: CM5_Connector_1 and CM5_Connector_2 from the
+Raspberry Pi Compute Module 5 datasheet, LM61480RPHR and HD3SS3220RNHR from
+the TI datasheets, HR911130A from the HanRun drawing, AP22652W6-7 from the
+Diodes AP22652/AP22653 datasheet.
+
+Footprint and 3D-model attributions are in CM5.pretty/NOTICE and
+CM5.3dshapes/NOTICE.

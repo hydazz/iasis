@@ -1,0 +1,30 @@
+# NOTICE
+
+Third-party CAD models keep their original ownership and terms. Downloaded models are unmodified except for filenames.
+
+## Raspberry Pi models
+
+- `RaspberryPi_CM5.step`: Raspberry Pi Compute Module 5 (CM5R5), Raspberry Pi Product Information Portal document RP-007222-DD-2.
+- `Amphenol_10164227-1001A1RLF.step`: Amphenol 10164227-1001A1RLF, from Raspberry Pi's CM5 IO board KiCad design files (`cm5io-KiCAD.zip`).
+
+## Manufacturer models
+
+- `TE_1-2199230-4.step`: TE Connectivity customer view model CVM_1-2199230-4. The 1-2199230-5 fitted here differs only in gold thickness.
+
+## EasyEDA / LCSC models
+
+Retrieved by LCSC part number from the EasyEDA component API (`https://easyeda.com/api/products/<LCSC>/components`) and model server (`https://modules.easyeda.com/`).
+
+| File | Component | LCSC |
+|---|---|---|
+| Alps_SKRTLAE010.step | Alps Alpine SKRTLAE010 | C110293 |
+| HanRun_HR911130A.step | HanRun HR911130A | C54408 |
+| TI_RNH0030A.step | TI HD3SS3220RNHR | C165155 |
+| TI_RPH0016A.step | TI LM61480RPHR | C3198089 |
+
+## Generated geometry
+
+These are approximate bodies for fit and appearance, not manufacturer CAD.
+
+- `M2_2280_card_envelope.step`: stand-in M.2 2280 card, a bare 0.8 mm PCB on a 2.5 mm standoff. No SSD maker publishes a STEP model.
+- `PROD_PSPMAA0805.step`: PROD Technology PSPMAA0805 body, 8.5 × 8.0 × 5.0 mm, with two 1.8 × 3.0 mm terminals (specification A3.0).
