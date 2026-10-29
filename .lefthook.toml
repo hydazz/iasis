@@ -1,0 +1,38 @@
+[[remotes]]
+git_url = "https://github.com/hydazz/.github"
+ref = "main"
+configs = ["lefthook.common.toml"]
+
+[[pre-commit.jobs]]
+name = "python"
+glob = ["*.py"]
+
+[pre-commit.jobs.group]
+piped = true
+
+[[pre-commit.jobs.group.jobs]]
+name = "format-python"
+run = "mise exec -- ruff format {staged_files}"
+stage_fixed = true
+
+[[pre-commit.jobs.group.jobs]]
+name = "lint-python"
+run = "mise exec -- ruff check {staged_files}"
+
+[pre-commit.commands.format-toml]
+glob = ["*.toml"]
+exclude = [".mise/**", "**/.mise.toml"]
+run = "oxfmt --no-error-on-unmatched-pattern {staged_files}"
+stage_fixed = true
+
+# Component configs live outside the shared root mise hook's paths.
+[[pre-commit.jobs]]
+name = "component-mise"
+glob = ["**/.mise.toml"]
+run = '''
+for file in {staged_files}; do
+    directory=$(dirname "$file")
+    mise -C "$directory" fmt
+done
+'''
+stage_fixed = true
