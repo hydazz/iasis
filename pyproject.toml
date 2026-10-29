@@ -1,7 +1,7 @@
 [project]
 name = "iasis"
 version = "0.1.0"
-requires-python = ">=3.14,<3.15"
+requires-python = ">=3.15,<3.16"
 dependencies = [
   "build123d>=0.13.0",
   "numpy>=2.5.4",
