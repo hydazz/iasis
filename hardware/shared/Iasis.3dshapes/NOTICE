@@ -1,0 +1,73 @@
+# NOTICE
+
+This project includes third-party CAD models and locally generated geometry. Third-party models retain their original ownership and applicable licensing terms. Unless otherwise noted, downloaded models are unmodified except for filenames.
+
+## Generated geometry
+
+**Coilank_AAPS0530.step**
+Approximate package geometry generated from page 2 of the AAPS-F datasheet:
+https://datasheet.lcsc.com/datasheet/pdf/db0306ba92d8c07b239ddfd67f0cd388.pdf
+
+- Body: 5.3 × 5.5 mm, 3.1 mm maximum overall height
+- Terminals: two bottom pads, 1.1 × 4.3 mm, separated by 2.3 mm
+- Terminal thickness (0.1 mm) is illustrative
+- Corner radii and markings are omitted
+
+This is not manufacturer-supplied CAD.
+
+**PROD_PSTMAA666460.step**
+Approximate package geometry generated from page 3 of PROD Technology's PSTMAA666460-6R8MB specification (A2.0):
+https://datasheet.lcsc.com/datasheet/pdf/eae0dbe4b558713dce5995c355b822c6.pdf
+
+- Body: 6.4 × 6.6 mm, 6.0 mm maximum overall height
+- Terminals: two bottom pads, 1.9 × 3.6 mm, at the body ends
+- Terminal thickness (0.1 mm) is illustrative
+
+This is not manufacturer-supplied CAD.
+
+**Kinghelm_KH-2FH90-2X10P-H6.35.step**
+Simplified body, contact openings and solder tails generated from Kinghelm drawing 2.0FH H6.35 2xNPin 90°, revision A, 2022-06-14:
+https://datasheet.lcsc.com/datasheet/pdf/93c2b2909b9753ec38e6ff3bb3d03fed.pdf
+
+The model uses nominal dimensions and omits internal spring detail. It is project-generated geometry.
+
+## EasyEDA / LCSC models
+
+The following models were retrieved using LCSC part numbers from the JLCEDA/EasyEDA Official Library (https://lceda.cn/ and https://easyeda.com), through its component API and model server:
+
+- https://easyeda.com/api/products/`<LCSC>`/components
+- https://modules.easyeda.com/
+
+Files are unmodified except for filenames. Applicable terms and redistribution rights are determined by their respective owners and providers.
+
+| File | Component | LCSC |
+|---|---|---|
+| Molex_105450-0101.step | Molex 105450-0101 | C134092 |
+| onsemi_MLP14_2.5x2.5mm.step | onsemi FUSB302BMPX | C132291 |
+| TI_RUK0020B.step | TI TPD6S300ARUKR | C2876380 |
+| TI_RPM0026A.step | TI TPS55288RPMR | C2864583 |
+| Siliup_PDFN3x3-8L.step | Siliup SP60N05GNJ | C22466768 |
+| TritechMOS_DFN3x3-8L.step | Tritech-MOS TMGN4060DF | C7422903 |
+| TI_RSV0016A.step | TI TMUX1511RSVR | C2673275 |
+| TI_RPW0010A.step | TI TPS259470LRPWR | C3662793 |
+| OPSCO_SK6812SIDE-A.step | OPSCO SK6812SIDE-A | C5378721 |
+| CK_PTS645SL50.step | C&K PTS645SL50SMTR92LFS | C221877 |
+| TI_DRR0012G.step | TI LMR51450SDRRR | C6890985 |
+| WCH_CH224Q_DFN10.step | WCH CH224Q | C46061833 |
+| HCTL_PZ200-2-10-W.step | HCTL PZ200-2-10-W | C2906016 |
+
+## Reference-design model
+
+`SRP5030CC.stp` (Bourns SRP5030CC) comes from Raspberry Pi's published CM5 IO board design files (`cm5io-KiCAD.zip`). It is unmodified except for its filename and remains subject to its applicable terms.
+
+## MIT-licensed Raspberry Pi model
+
+`rpi_rp2350b.step` is Raspberry Pi's RP2350B QFN-80 model, obtained from the RP2350B Minimal KiCad Design (RP-010329-CA-1), distributed under the MIT license.
+
+Copyright (c) 2026 Raspberry Pi Ltd
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

@@ -1,0 +1,34 @@
+[project]
+name = "iasis"
+version = "0.1.0"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+  "build123d>=0.13.0",
+  "numpy>=2.5.4",
+  "ocp-tessellate>=3.6.3",
+  "pillow>=13.0.0",
+  "pygfx>=0.17.0",
+  "rendercanvas>=2.7.2",
+]
+
+[dependency-groups]
+dev = ["ocp-vscode>=4.2.0"]
+
+[project.scripts]
+iasis-case-build = "iasis_case.build:main"
+iasis-case-preview = "iasis_case.preview:main"
+iasis-case-check = "iasis_case.check:main"
+iasis-case-view = "iasis_case.case:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["hardware/case/src/iasis_case"]
+
+[tool.pyright]
+include = ["hardware/case/src", "hardware/tools"]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.14"

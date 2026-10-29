@@ -1,0 +1,32 @@
+[package]
+name = "iasis-firmware"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "iasis-firmware"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+iasis-protocol.workspace = true
+
+[target.'cfg(target_arch = "arm")'.dependencies]
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+embassy-executor = { version = "0.10", features = ["platform-cortex-m", "executor-thread"] }
+embassy-futures = "0.1"
+embassy-rp = { version = "0.10", features = [
+  "rp235xb",
+  "time-driver",
+  "critical-section-impl",
+  "unstable-pac",
+] }
+embassy-time = "0.5"
+embassy-usb = { version = "0.6", default-features = false }
+heapless = "0.9"
+iasis-pd.workspace = true
+smart-leds = "0.4"

@@ -1,0 +1,48 @@
+(version 1)
+
+# JLC 6-layer: PTH holes keep 0.3mm to inner copper; vias use the 0.2mm board minimum.
+(rule "JLC PTH hole to copper"
+	(condition "A.Type == 'Pad' && A.Pad_Type == 'Through-hole' && A.Hole_Size_X >= 0.5mm")
+	(constraint hole_clearance (min 0.3mm)))
+
+# JLC 6-layer: 0.45mm between pad holes; vias use the 0.2mm board minimum.
+(rule "JLC pad hole to pad hole"
+	(condition "A.Type == 'Pad' && B.Type == 'Pad' && A.Hole_Size_X >= 0.5mm && B.Hole_Size_X >= 0.5mm")
+	(constraint hole_to_hole (min 0.45mm)))
+
+# Coupled pairs run at their solved gap, inside their class clearance.
+(rule "Coupled pair gap"
+	(condition "A.isCoupledDiffPair()")
+	(constraint clearance (min 0.15mm)))
+
+# Pair geometry was solved without coplanar copper: keep outer-layer pours 0.6mm back.
+(rule "Pours clear of controlled pairs"
+	(layer outer)
+	(condition "(A.hasNetclass('USB_90') || A.hasNetclass('ETH_100')) && B.Type == 'Zone'")
+	(constraint clearance (min 0.6mm)))
+
+# GCT USB4105 B4: two 0.65mm locating holes near the four aliased GND lands.
+# Rounded 0.20mm land corners retain 0.2058mm nominal clearance; JLC NPTH minimum is 0.20mm.
+(rule "GCT USB4105 locating holes to GND lands"
+	(condition "A.Type == 'Pad' && B.Type == 'Pad' && A.memberOfFootprint('J501') && B.memberOfFootprint('J501') && A.Pad_Type == 'NPTH, mechanical' && A.Hole_Size_X == 0.65mm && (B.Pad_Number == 'A1' || B.Pad_Number == 'B12' || B.Pad_Number == 'A12' || B.Pad_Number == 'B1')")
+	(constraint hole_clearance (min 0.20mm)))
+
+# Wurth WA-SMSI spacers: each GND ring surrounds its spacer's own 3.0mm NPTH.
+(rule "Spacer ring around its NPTH"
+	(condition "(A.memberOfFootprint('H701') && B.memberOfFootprint('H701')) || (A.memberOfFootprint('H702') && B.memberOfFootprint('H702')) || (A.memberOfFootprint('H703') && B.memberOfFootprint('H703'))")
+	(constraint hole_clearance (min 0mm)))
+
+# Alps SKRTLAE010 land pattern: its locating-peg NPTH sit 0.1mm from the switch's own pads.
+(rule "SKRT pegs in their own land pattern"
+	(condition "A.memberOfFootprint('SW501') && B.memberOfFootprint('SW501')")
+	(constraint hole_clearance (min 0.09mm)))
+
+# Exposed pads and their thermal vias tie solidly into the planes; KiCad tags them as heatsink pads.
+(rule "Heatsink pads connect solid"
+	(condition "A.Type == 'Pad' && A.Fabrication_Property == 'Heatsink pad'")
+	(constraint zone_connection solid))
+
+# Molex 105450 B-row via in pad, as on the main board's ports: 0.45/0.30 vias staggered 0.15mm along the 0.30mm pads sit 0.125mm from the neighbouring pad and 0.133mm from each other; their holes keep the 0.2mm board minimum.
+(rule "Receptacle B-row via in pad"
+	(condition "A.Type == 'Via' && A.intersectsCourtyard('J401') && (B.Type == 'Via' || B.memberOfFootprint('J401'))")
+	(constraint clearance (min 0.12mm)))

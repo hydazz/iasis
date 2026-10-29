@@ -1,0 +1,23 @@
+[tasks.step]
+extends = "pcb:step"
+vars = { args = "--variant HubPD --extra-variant CM5" }
+outputs = [
+  "../../../build/boards/iasis/board-cm5.step",
+  "../../../build/boards/iasis/board.step",
+]
+
+[tasks.fab]
+extends = "pcb:fab"
+
+[tasks.preview]
+extends = "pcb:preview"
+vars = { args = "--variant HubPD" }
+
+[tasks.lint]
+extends = "pcb:lint"
+
+[tasks.format]
+extends = "project:format"
+
+[tasks.fmt-check]
+extends = "project:fmt-check"

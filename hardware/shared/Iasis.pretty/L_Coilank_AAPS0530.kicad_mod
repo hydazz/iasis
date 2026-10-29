@@ -1,0 +1,13 @@
+(footprint "L_Coilank_AAPS0530"
+ (version 20240108) (generator "konnect") (layer "F.Cu")
+ (descr "Coilank AAPS0530, 5.3x5.5mm, height 3.1mm; AAPS-F datasheet page 2")
+ (attr smd)
+ (pad "1" smd rect (at -1.625 0) (size 1.25 4.7) (layers "F.Cu" "F.Paste" "F.Mask"))
+ (pad "2" smd rect (at 1.625 0) (size 1.25 4.7) (layers "F.Cu" "F.Paste" "F.Mask"))
+ (fp_rect (start -3 -3.1) (end 3 3.1) (stroke (width 0.05) (type solid)) (fill none) (layer "F.CrtYd"))
+ (fp_rect (start -2.87 -2.97) (end 2.87 2.97) (stroke (width 0.12) (type solid)) (fill none) (layer "F.SilkS"))
+ (fp_rect (start -2.65 -2.75) (end 2.65 2.75) (stroke (width 0.1) (type solid)) (fill none) (layer "F.Fab"))
+ (fp_text reference "REF**" (at 0 -3.7) (layer "F.SilkS") (effects (font (size 1 1) (thickness 0.15))))
+ (fp_text value "L_Coilank_AAPS0530" (at 0 3.7) (layer "F.Fab") (effects (font (size 1 1) (thickness 0.15))))
+ (model "${KIPRJMOD}/../../shared/Iasis.3dshapes/Coilank_AAPS0530.step" (offset (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0)))
+)
