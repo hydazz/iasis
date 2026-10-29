@@ -9,5 +9,10 @@
       groupName: "embassy",
       groupSlug: "embassy",
     },
+    {
+      description: "cadquery-ocp has no Python 3.15 wheels",
+      matchDepNames: ["python"],
+      allowedVersions: "<3.15",
+    },
   ],
 }
