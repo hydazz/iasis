@@ -19,7 +19,7 @@ lockfile = true
 [env]
 # tf ur not using macos
 _.path = ["/Applications/KiCad/KiCad.app/Contents/MacOS"]
-UV_PYTHON = { value = "{{ tools.python.path }}", tools = true }
+UV_PYTHON = "python"
 
 [monorepo]
 config_roots = ["hardware/case", "hardware/boards/*"]
