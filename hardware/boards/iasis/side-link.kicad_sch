@@ -2468,7 +2468,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "KH-2FH90-2X10P-H6.35"
+		(property "Value" "XDM200-2-10-W-6.35-G0"
 			(at 238.76 101.6 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2490,7 +2490,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.lcsc.com/datasheet/C49424687.pdf"
+		(property "Datasheet" "https://www.lcsc.com/datasheet/C19268939.pdf"
 			(at 236.22 99.06 0)
 			(hide yes)
 			(show_name no)
@@ -2512,7 +2512,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C49424687"
+		(property "LCSC" "C19268939"
 			(at 236.22 99.06 0)
 			(hide yes)
 			(show_name no)
@@ -2523,7 +2523,7 @@
 				)
 			)
 		)
-		(property "MPN" "KH-2FH90-2X10P-H6.35"
+		(property "MPN" "XDM200-2-10-W-6.35-G0"
 			(at 236.22 99.06 0)
 			(hide yes)
 			(show_name no)
@@ -2534,7 +2534,7 @@
 				)
 			)
 		)
-		(property "Manufacturer" "Kinghelm"
+		(property "Manufacturer" "chxunda"
 			(at 236.22 99.06 0)
 			(hide yes)
 			(show_name no)

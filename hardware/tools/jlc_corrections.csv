@@ -26,6 +26,6 @@ C2158038,Package_TO_SOT_SMD:SOT-23-6,270,0,0
 C138714,Package_SON:USON-10_2.5x1.0mm_P0.5mm,270,0,0
 C160390,Connector_JST:JST_SH_BM04B-SRSS-TB_1x04-1MP_P1.00mm_Vertical,0,0,0.062
 C110293,Button_Switch_SMD:SW_Push_1P1T-MP_NO_Horizontal_Alps_SKRTLAE010,0,0,0.075
-C49424687,Connector_PinSocket_2.00mm:PinSocket_2x10_P2.00mm_Horizontal,270,-1,9
+C19268939,Connector_PinSocket_2.00mm:PinSocket_2x10_P2.00mm_Horizontal,270,-1,9
 C2906016,Connector_PinHeader_2.00mm:PinHeader_2x10_P2.00mm_Horizontal,90,1,9
 C46061833,Package_DFN_QFN:Texas_DSQ0010A_WSON-10-1EP_2x2mm_P0.4mm_EP0.9x1.5mm,270,0,0
