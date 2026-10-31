@@ -14,11 +14,11 @@ https://datasheet.lcsc.com/datasheet/pdf/eae0dbe4b558713dce5995c355b822c6.pdf
 
 This is not manufacturer-supplied CAD.
 
-**Kinghelm_KH-2FH90-2X10P-H6.35.step**
-Simplified body, contact openings and solder tails generated from Kinghelm drawing 2.0FH H6.35 2xNPin 90°, revision A, 2022-06-14:
-https://datasheet.lcsc.com/datasheet/pdf/93c2b2909b9753ec38e6ff3bb3d03fed.pdf
+**Xundatong_XDM200-2-10-W-6.35-G0.step**
+Simplified body, contact openings and solder tails generated from Shenzhen Xunda Technology's XDM200-2-N-W-6.35-G0 drawing, revision A:
+https://wmsc.lcsc.com/wmsc/upload/file/pdf/v2/lcsc/2311211629_chxunda-XDM200-2-10-W-6-35-G0_C19268939.pdf
 
-The model uses nominal dimensions and omits internal spring detail. It is project-generated geometry.
+The model uses nominal dimensions: a 20.5 × 6.35 × 4 mm housing, 2 mm contact pitch and 3.1 mm solder tails. Contact openings and internal contact geometry are simplified. It is project-generated geometry, not manufacturer-supplied CAD.
 
 ## EasyEDA / LCSC models
 
