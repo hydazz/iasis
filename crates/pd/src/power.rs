@@ -8,29 +8,54 @@ pub struct HostLimit {
     pub upper_ma: u16,
 }
 
+const PRESENCE_TIERS: [HostLimit; 4] = [
+    HostLimit {
+        bits: 3,
+        upper_ma: 1890,
+    },
+    HostLimit {
+        bits: 2,
+        upper_ma: 1450,
+    },
+    HostLimit {
+        bits: 1,
+        upper_ma: 550,
+    },
+    HostLimit {
+        bits: 0,
+        upper_ma: 170,
+    },
+];
+
 /// Reserve 3.5 W at 4.5 V, rounded up to 800 mA, before target presence.
 /// AP22653 upper bounds include 1% resistors and manufacturer limit curves.
 pub fn host_limit(allowance_ma: u16) -> Option<HostLimit> {
-    [
-        HostLimit {
-            bits: 3,
-            upper_ma: 1890,
-        },
-        HostLimit {
-            bits: 2,
-            upper_ma: 1450,
-        },
-        HostLimit {
-            bits: 1,
-            upper_ma: 550,
-        },
-        HostLimit {
-            bits: 0,
-            upper_ma: 170,
-        },
-    ]
-    .into_iter()
-    .find(|tier| u32::from(allowance_ma) >= 800 + u32::from(tier.upper_ma))
+    PRESENCE_TIERS
+        .into_iter()
+        .find(|tier| u32::from(allowance_ma) >= 800 + u32::from(tier.upper_ma))
+}
+
+/// The presence branch follows 5V_LOGIC's automatic brick/host priority mux.
+/// Keep the host ceiling for fallback, and also reserve from a present brick.
+pub fn presence_limit(
+    allowance_ma: u16,
+    bus_adc: Option<u16>,
+    pd_status: Option<u8>,
+    current_50ma: Option<u8>,
+    power_good: bool,
+    side_power: bool,
+) -> Option<HostLimit> {
+    let host = host_limit(allowance_ma)?;
+    let mv = bus_adc.and_then(millivolts)?;
+    // U1005's 47k/10k EN divider releases the primary above 6 V even at
+    // the minimum falling threshold. Below 5 V leaves ADC/divider margin.
+    if mv < 5000 {
+        return Some(host);
+    }
+    let budget_mw = brick_budget_mw(bus_adc, pd_status, current_50ma, power_good, side_power);
+    PRESENCE_TIERS.into_iter().find(|tier| {
+        tier.upper_ma <= host.upper_ma && u32::from(tier.upper_ma) * 5350 <= budget_mw * 1000
+    })
 }
 
 /// Default Rp carries no evidence of a Pi's shared allowance. The explicit
@@ -93,6 +118,16 @@ pub fn available_ports(
     power_good: bool,
     side_power: bool,
 ) -> u8 {
+    (brick_budget_mw(bus_adc, pd_status, current_50ma, power_good, side_power) / 6000).min(5) as u8
+}
+
+fn brick_budget_mw(
+    bus_adc: Option<u16>,
+    pd_status: Option<u8>,
+    current_50ma: Option<u8>,
+    power_good: bool,
+    side_power: bool,
+) -> u32 {
     let Some(mv) = bus_adc.and_then(millivolts) else {
         return 0;
     };
@@ -100,8 +135,9 @@ pub fn available_ports(
         return 0;
     }
     let input_mw = mv * u32::from(current_50ma.unwrap_or(0)) * 50 / 1000;
-    let reserve_mw = 3500 + if side_power { 32_000 } else { 0 };
-    ((input_mw * 80 / 100).saturating_sub(reserve_mw) / 6000).min(5) as u8
+    // CM5, 6 W SSD, 0.4 A fan, 1.5 A accessory and VCONN, including losses.
+    let reserve_mw = 3500 + if side_power { 35_000 } else { 0 };
+    (input_mw * 80 / 100).saturating_sub(reserve_mw)
 }
 
 #[cfg(test)]
@@ -165,6 +201,63 @@ mod tests {
     }
 
     #[test]
+    fn brick_takeover_charges_presence_against_the_actual_source() {
+        let limit = |current| {
+            presence_limit(3000, Some(adc(9000)), Some(8), Some(current), true, false)
+                .map(|tier| tier.upper_ma)
+        };
+        // No complete 6 W charging slot does not mean the brick is absent.
+        assert_eq!(
+            available_ports(Some(adc(9000)), Some(8), Some(20), true, false),
+            0
+        );
+        assert_eq!(limit(20), Some(550));
+        assert_eq!(limit(33), Some(1450));
+        assert_eq!(limit(60), Some(1890));
+        // Retaining the host ceiling also bounds automatic fallback.
+        assert_eq!(
+            presence_limit(1500, Some(adc(9000)), Some(8), Some(60), true, false)
+                .unwrap()
+                .upper_ma,
+            550
+        );
+        assert_eq!(
+            presence_limit(3000, Some(adc(20_000)), Some(8), Some(40), true, true),
+            None
+        );
+        assert_eq!(
+            presence_limit(3000, Some(adc(20_000)), Some(8), Some(60), true, true)
+                .unwrap()
+                .upper_ma,
+            1450
+        );
+    }
+
+    #[test]
+    fn unknown_brick_capacity_cannot_be_treated_as_host_only() {
+        for (voltage, pd, current, pg) in [
+            (None, Some(8), Some(60), true),
+            (Some(4096), Some(8), Some(60), true),
+            (Some(adc(5500)), Some(8), Some(60), true),
+            (Some(adc(28_000)), Some(8), Some(60), true),
+            (Some(adc(9000)), None, Some(60), true),
+            (Some(adc(9000)), Some(0), Some(60), true),
+            (Some(adc(9000)), Some(8), None, true),
+            (Some(adc(9000)), Some(8), Some(60), false),
+        ] {
+            assert_eq!(presence_limit(3000, voltage, pd, current, pg, false), None);
+        }
+        // Hub-only builds and completed brick removal need no CH224 response.
+        for voltage in [0, 4900] {
+            assert_eq!(
+                presence_limit(3000, Some(adc(voltage)), None, None, false, false),
+                host_limit(3000)
+            );
+        }
+        assert_eq!(presence_limit(0, Some(0), None, None, false, false), None);
+    }
+
+    #[test]
     fn invalid_or_unconfirmed_input_never_grants_power() {
         for (voltage, pd, current, pg) in [
             (None, Some(8), Some(60), true),
@@ -192,7 +285,7 @@ mod tests {
         );
         assert_eq!(
             available_ports(Some(adc(20_000)), Some(8), Some(60), true, true),
-            2
+            1
         );
     }
 

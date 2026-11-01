@@ -285,7 +285,15 @@ async fn main(_spawner: Spawner) {
                 configured.get() && !suspended.get(),
                 host_budget.get(),
             );
-            let host_tier = iasis_pd::power::host_limit(next.host_allowance_ma);
+            let host_tier = iasis_pd::power::presence_limit(
+                next.host_allowance_ma,
+                next.bus_voltage_adc,
+                next.ch224_status,
+                next.ch224_current_50ma,
+                next.expander_inputs
+                    .is_some_and(|inputs| inputs & 0x40 == 0),
+                controls.side_power_enabled(),
+            );
             let brick_ports = if next.i2c_root_fault || next.aggregate_power_fault {
                 0
             } else {

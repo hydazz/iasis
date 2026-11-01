@@ -1588,28 +1588,6 @@
 		)
 		(uuid "0bd9788f-5337-4883-92bc-9436756a77f3")
 	)
-	(text "VCORE = 1.131 V nominal. Shared USB7206 and RP2354 DVDD.\nR1060 10k / R1061 11.3k, both 0.1%; retain local bulk and decoupling."
-		(exclude_from_sim no)
-		(at 147.32 137.16 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left top)
-		)
-		(uuid "33ddf4a5-c523-42f1-9d42-44ac5be7a909")
-	)
-	(text "CT open: 20ms reset release delay. AON_RESET_N resets the MCU, ADC isolation switches and hub.\nVCORE is 1.122V nominal (static 1.102–1.142V). Verify sequencing and load transients on the prototype.\nThe MCU uses external VCORE; its internal regulator stays disabled. MCU reset disables the shift-register outputs."
-		(exclude_from_sim no)
-		(at 147.32 147.32 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left top)
-		)
-		(uuid "9adbe7e3-598b-4194-9b10-5e7589820379")
-	)
 	(junction
 		(at 137.16 119.38)
 		(diameter 0)
@@ -2438,6 +2416,16 @@
 			)
 		)
 	)
+  (text "VCORE = 1.133 V nominal. Shared USB7206 and RP2354 DVDD.\nR1060 4.53k / R1061 5.10k, both 0.1%; C1060 470p C0G.\nRetain local bulk and decoupling."
+    (at 147.32 137.16 0)
+    (effects (font (size 1.27 1.27)) (justify left top))
+    (uuid "f0b3a5e2-fc5e-4b2f-85bb-98bc622a8fb1")
+  )
+  (text "CT open: 20ms reset release delay. AON_RESET_N resets the MCU, ADC isolation switches and hub.\nVCORE is 1.133V nominal (static divider corner 1.114–1.152V at 25°C). Verify sequencing and load transients on the prototype.\nThe MCU uses external VCORE; its internal regulator stays disabled. MCU reset disables the shift-register outputs."
+    (at 147.32 147.32 0)
+    (effects (font (size 1.27 1.27)) (justify left top))
+    (uuid "cb0e84c8-07aa-4c2a-be6b-53c6d13ba387")
+  )
 	(symbol
 		(lib_id "power:GND")
 		(at 101.6 73.66 0)
@@ -3203,7 +3191,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "10k 0.1%"
+		(property "Value" "4.53k 0.1%"
 			(at 139.7 116.84 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3225,7 +3213,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://wmsc.lcsc.com/wmsc/upload/file/pdf/v2/lcsc/2205091745_FH--Guangdong-Fenghua-Advanced-Tech-THC02H1002BT_C2991528.pdf"
+		(property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2405061537_RESI-PTFR0402B4K53N9_C2692956.pdf"
 			(at 137.16 115.57 0)
 			(hide yes)
 			(show_name no)
@@ -3247,7 +3235,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C2991528"
+		(property "LCSC" "C2692956"
 			(at 137.16 115.57 0)
 			(hide yes)
 			(show_name no)
@@ -3258,7 +3246,7 @@
 				)
 			)
 		)
-		(property "MPN" "THC02H1002BT"
+		(property "MPN" "PTFR0402B4K53N9"
 			(at 137.16 115.57 0)
 			(hide yes)
 			(show_name no)
@@ -3269,7 +3257,7 @@
 				)
 			)
 		)
-		(property "Manufacturer" "FH (Guangdong Fenghua Advanced Tech)"
+		(property "Manufacturer" "RESI"
 			(at 137.16 115.57 0)
 			(hide yes)
 			(show_name no)
@@ -3317,7 +3305,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "220p C0G"
+		(property "Value" "470p C0G"
 			(at 156.21 118.11 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3339,7 +3327,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://wmsc.lcsc.com/wmsc/upload/file/pdf/v2/lcsc/2304140030_FH--Guangdong-Fenghua-Advanced-Tech-0402CG221J500NT_C39122.pdf"
+		(property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2304140030_YAGEO-CC0402JRNPO9BN471_C106259.pdf"
 			(at 152.4 115.57 0)
 			(hide yes)
 			(show_name no)
@@ -3361,7 +3349,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C39122"
+		(property "LCSC" "C106259"
 			(at 152.4 115.57 0)
 			(hide yes)
 			(show_name no)
@@ -3372,7 +3360,7 @@
 				)
 			)
 		)
-		(property "MPN" "0402CG221J500NT"
+		(property "MPN" "CC0402JRNPO9BN471"
 			(at 152.4 115.57 0)
 			(hide yes)
 			(show_name no)
@@ -3383,7 +3371,7 @@
 				)
 			)
 		)
-		(property "Manufacturer" "FH (Guangdong Fenghua Advanced Tech)"
+		(property "Manufacturer" "YAGEO"
 			(at 152.4 115.57 0)
 			(hide yes)
 			(show_name no)
@@ -3735,7 +3723,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "11.3k 0.1%"
+		(property "Value" "5.10k 0.1%"
 			(at 139.7 124.46 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3757,7 +3745,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.vishay.com/docs/28758/tnpw_e3.pdf"
+		(property "Datasheet" "https://wmsc.lcsc.com/wmsc/upload/file/pdf/v2/lcsc/2210190030_YAGEO-RT0603BRB075K1L_C860455.pdf"
 			(at 137.16 123.19 0)
 			(hide yes)
 			(show_name no)
@@ -3779,7 +3767,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C3980906"
+		(property "LCSC" "C860455"
 			(at 137.16 123.19 0)
 			(hide yes)
 			(show_name no)
@@ -3790,7 +3778,7 @@
 				)
 			)
 		)
-		(property "MPN" "TNPW060311K3BEEA"
+		(property "MPN" "RT0603BRB075K1L"
 			(at 137.16 123.19 0)
 			(hide yes)
 			(show_name no)
@@ -3801,7 +3789,7 @@
 				)
 			)
 		)
-		(property "Manufacturer" "Vishay"
+		(property "Manufacturer" "YAGEO"
 			(at 137.16 123.19 0)
 			(hide yes)
 			(show_name no)

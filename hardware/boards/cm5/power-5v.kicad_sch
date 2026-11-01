@@ -2985,7 +2985,7 @@
 			(do_not_autoplace no)
 			(effects (font (size 1.27 1.27)) (justify left))
 		)
-		(property "Value" "100k"
+		(property "Value" "100k 0.1%"
 			(at 218.44 68.58 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3002,7 +3002,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2206010100_UNI-ROYAL-Uniroyal-Elec-0402WGF1003TCE_C25741.pdf"
+		(property "Datasheet" "https://wmsc.lcsc.com/wmsc/upload/file/pdf/v2/lcsc/2203231830_Viking-Tech-ARG02BTC1003_C2984406.pdf"
 			(at 215.9 67.31 0)
 			(hide yes)
 			(show_name no)
@@ -3024,7 +3024,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C25741"
+		(property "LCSC" "C2984406"
 			(at 215.9 67.31 0)
 			(hide yes)
 			(show_name no)
@@ -3035,7 +3035,7 @@
 				)
 			)
 		)
-		(property "MPN" "0402WGF1003TCE"
+		(property "MPN" "ARG02BTC1003"
 			(at 215.9 67.31 0)
 			(hide yes)
 			(show_name no)
@@ -3046,7 +3046,7 @@
 				)
 			)
 		)
-		(property "Manufacturer" "UNI-ROYAL(Uniroyal Elec)"
+		(property "Manufacturer" "Viking Tech"
 			(at 215.9 67.31 0)
 			(hide yes)
 			(show_name no)
@@ -3089,7 +3089,7 @@
 			(do_not_autoplace no)
 			(effects (font (size 1.27 1.27)) (justify left))
 		)
-		(property "Value" "24.9k 1%"
+		(property "Value" "24.3k 0.1%"
 			(at 203.2 99.06 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3106,7 +3106,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.lcsc.com/datasheet/lcsc_datasheet_2206010045_UNI-ROYAL-Uniroyal-Elec-0402WGF2492TCE_C25874.pdf"
+		(property "Datasheet" "https://wmsc.lcsc.com/wmsc/upload/file/pdf/v2/lcsc/2304140030_Viking-Tech-ARG02BTC2432_C2681592.pdf"
 			(at 200.66 97.79 0)
 			(hide yes)
 			(show_name no)
@@ -3128,7 +3128,7 @@
 				)
 			)
 		)
-		(property "LCSC" "C25874"
+		(property "LCSC" "C2681592"
 			(at 200.66 97.79 0)
 			(hide yes)
 			(show_name no)
@@ -3139,7 +3139,7 @@
 				)
 			)
 		)
-		(property "MPN" "0402WGF2492TCE"
+		(property "MPN" "ARG02BTC2432"
 			(at 200.66 97.79 0)
 			(hide yes)
 			(show_name no)
@@ -3150,7 +3150,7 @@
 				)
 			)
 		)
-		(property "Manufacturer" "UNI-ROYAL(Uniroyal Elec)"
+		(property "Manufacturer" "Viking Tech"
 			(at 200.66 97.79 0)
 			(hide yes)
 			(show_name no)
@@ -3449,6 +3449,6 @@
 (label "BUCK_FB" (at 190.5 93.98 0) (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "aac0689c-b0f7-449b-b80c-43137ff9494c"))
 (no_connect (at 160.02 88.9) (uuid "9ff80cd9-0c2e-4eae-997c-3310079851b9"))
 (text "5 V supply — SIDE_BUS buck to 5 V" (exclude_from_sim no) (at 25.4 20.32 0) (effects (font (size 2.54 2.54) (bold yes)) (justify left top)) (uuid "baf1a3bf-30fd-4fe6-9e12-93065d4e37d1"))
-(text "5.02 V from VFB 1.0 V; RT on VCC sets 400 kHz" (exclude_from_sim no) (at 187.96 116.84 0) (effects (font (size 1.27 1.27)) (justify left top)) (uuid "76030417-f5cd-448c-88d5-7f4251cd92f5"))
+(text "5.115 V from VFB 1.0 V, 0.1% divider; RT on VCC sets 400 kHz" (exclude_from_sim no) (at 187.96 116.84 0) (effects (font (size 1.27 1.27)) (justify left top)) (uuid "76030417-f5cd-448c-88d5-7f4251cd92f5"))
 (embedded_fonts no)
 )
