@@ -44,6 +44,8 @@ from build123d import (
 )
 
 from .artwork import icon
+from .battery import Battery
+from .battery import seat as battery_seat
 from .board import Board, load
 from .retention import DisplayFrame, Joint
 from .side import Pair, pair
@@ -215,6 +217,7 @@ class Layout:
     parts_top: float  # tallest part beneath the roof; the RJ45 passes through it
     split: float
     ports: dict[str, tuple[str, str]] = field(default_factory=lambda: dict(PORTS))
+    battery: Battery | None = None
     _roofs: dict[Display | None, float] = field(default_factory=dict, init=False, repr=False)
 
     @property
@@ -445,6 +448,8 @@ def tray(lay: Layout) -> Part:
             for x, y in _foot_centres(lay)
         ]
     )
+    if lay.battery is not None:
+        body -= lay.battery.pocket + lay.battery.channel
     body.label = "tray"
     # build123d's boolean annotations lose the result's dimensional subtype.
     return cast(Part, body)
@@ -752,6 +757,7 @@ def assemble_cm5(
     main = load(STEP)
     both = pair(main, side_board(main))
     lay = layout(both, ports=PORTS | SIDE_PORTS)
+    lay.battery = battery_seat(both, lay.z_bottom + FLOOR)
     covers = {name: cover(lay, name, COVERS[name]) for name in cover_names}
     return lay, tray(lay), covers
 
