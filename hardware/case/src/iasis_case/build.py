@@ -26,6 +26,8 @@ def write(
             printing.export(f"{prefix}display-retainer", c.retainer.part, print_dir)
 
     extra: list[Shape] = [tray, *case.feet(lay)]
+    if lay.battery is not None:
+        extra += [lay.battery.pack, lay.battery.lead, lay.battery.plug]
     for c in covers.values():
         extra += [c.part, c.markings, c.button]
         if c.display is not None:
