@@ -59,11 +59,17 @@ To remove the frame, press its finger pad inward, lift the front and slide it ou
 | Model                               | Waveshare CM4-HEATSINK, SKU 19623 |
 | Body                                | 55 × 40 × 5 mm                    |
 | Mounting allowance above module PCB | 3 mm                              |
-| Clearance to inner roof             | 1.29 mm                           |
 
 Check the cooler's spacers and thermal-pad contact before assembly. Taller spacers need a taller lid.
 
-With power disconnected, fit the cooler screws from below. Align the boards' rear edges, keep them level and slide the carrier header into the main-board socket. Lower both onto the tray pegs. The connector is unshrouded, so check pin alignment before closing the lid.
+Disconnect power before assembly or removal.
+
+1. Fit the cooler screws from below.
+2. Stick the RTC battery into the tray recess. Route its cable along the channel and pass the plug between the boards before joining them.
+3. Align the boards' rear edges and connector pins, join the boards and lower them onto the pegs. Keep the wires side by side in the board gap.
+4. Connect the battery to J104, tuck the cable clear of the lid and [enable charging](../boards/cm5/README.md#rtc-battery).
+
+To remove the battery, unplug J104 and separate the boards before feeding the plug back through the gap.
 
 ## CAD tools
 
