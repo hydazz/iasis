@@ -101,7 +101,7 @@ jobs:
     timeout-minutes: 45
     container:
       # -full carries the stock 3D models the STEP exports and fit test need.
-      image: kicad/kicad:10.0.7-full@sha256:347d5b7d5d88207ba4217cdf594eeccd142279600d023e7a7e426f8599c77708
+      image: kicad/kicad:10.0.8-full@sha256:4ae56a2c3202334383ab70ad698c649d7a9e2b7ba207088b2a38eca40a2b4e84
       # The image's default user, kicad, can't write the runner's workspace.
       options: --user root
     permissions:
