@@ -29,6 +29,12 @@ def show(lay: Layout, tray: Shape, covers: dict[str, Cover]) -> None:
         "Body": _coloured(tray, "#d6d8dc"),
         "Feet": _coloured(Compound(feet(lay)), "#353b39"),
     }
+    if lay.battery is not None:
+        base |= {
+            "RTC battery envelope": _coloured(lay.battery.pack, "#427b8a"),
+            "RTC lead space": _coloured(lay.battery.lead, "#b04b45"),
+            "RTC plug space": _coloured(lay.battery.plug, "#353b39"),
+        }
     states = {
         **{f"/Group/Tray/{part}": [1, 1] for part in base},
         **{f"/Group/PCB/{part}": [1, 1] for part in pcb},

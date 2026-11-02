@@ -22,7 +22,7 @@ from build123d import (
 )
 from build123d.topology.shape_core import Shape
 
-from . import case, retention
+from . import battery, case, retention
 
 USB_C_METAL = (8.28, 2.43)  # USB Type-C R2.5 Fig 3-3, maximum metal plug envelope
 USB_C_OVERMOLD = (12.85, 7.0)  # maximum straight cable body, stays outside the wall
@@ -102,6 +102,8 @@ def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
         r.fail("PCB cannot lower vertically onto the tray pegs")
     else:
         r.ok("PCB lowers vertically onto the tray pegs")
+    if lay.battery is not None:
+        _battery(r, lay, tray, covers, parts)
 
     r.lines.append("openings")
     _webs(r, lay)
@@ -181,6 +183,49 @@ def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
         else:
             r.ok(f"{name} flush colour inlays fill their pockets")
     return r
+
+
+def _battery(
+    r: Report, lay: case.Layout, tray: Part, covers: dict[str, case.Cover], parts: Candidates
+) -> None:
+    b = lay.battery
+    assert b is not None
+    r.lines.append("RTC battery")
+    for name, shape in (("pack", b.pack), ("leads", b.lead), ("plug", b.plug)):
+        if _overlap(shape, tray) > 1e-3:
+            r.fail(f"RTC {name} intersects the tray")
+        else:
+            r.ok(f"RTC {name} fits its tray space")
+        _clear(r, f"RTC {name}", shape, [p for p in parts if p[0] != "S:J104"])
+        if _overlap(shape, lay.board.body) > 1e-3:
+            r.fail(f"RTC {name} intersects a PCB")
+        for cover in covers.values():
+            if _overlap(shape, cover.part) > 1e-3:
+                r.fail(f"RTC {name} intersects {cover.part.label}")
+    clearance = lay.board.body.distance_to(b.pack)
+    if clearance < case.MIN_GAP:
+        r.fail(f"RTC pack only {clearance:.2f} mm below PCB")
+    else:
+        r.ok(f"RTC pack/adhesive allowance {battery.PACK[2]:.1f} mm, {clearance:.2f} mm below PCB")
+    # A real floor slab catches intersections with underside feet as well as the pocket.
+    pocket_box = (b.pocket + b.channel).bounding_box()
+    web = Pos(pocket_box.center().X, pocket_box.center().Y, b.bottom - 0.999) * Box(
+        pocket_box.size.X, pocket_box.size.Y, 0.998, align=case.BASE
+    )
+    if (web - tray).volume > 1e-3:
+        r.fail("RTC recess leaves less than 1 mm of solid floor")
+    else:
+        r.ok("RTC recess retains 1 mm of solid floor")
+    if b.lead_length + 10 > battery.LEAD_MIN:
+        r.fail(f"RTC lead route {b.lead_length:.1f} mm leaves less than 10 mm slack")
+    else:
+        r.ok(
+            f"RTC lead route {b.lead_length:.1f} mm leaves {battery.LEAD_MIN - b.lead_length:.1f} mm at 90 mm lead length"
+        )
+    if any(_overlap(Pos(0, 0, dz) * lay.board.body, b.pack) > 1e-3 for dz in (0, 1, 3, 6)):
+        r.fail("boards cannot lift clear of the seated RTC battery")
+    else:
+        r.ok("boards lift clear of the seated RTC battery")
 
 
 def _case_retention(r: Report, c: case.Cover, tray: Part, parts: Candidates) -> None:
