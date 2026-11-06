@@ -1,6 +1,6 @@
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
-  extends: ["local>hydazz/renovate-config"],
+  extends: ["local>hydazz/.github:renovate-config"],
   packageRules: [
     {
       description: "Embassy crates share driver and time traits",
