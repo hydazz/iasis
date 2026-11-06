@@ -6,8 +6,6 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - "**.md"
   pull_request:
     branches:
       - main
@@ -29,28 +27,6 @@ env:
   MISE_TASK_RUN_AUTO_INSTALL: "false"
 
 jobs:
-  workflow-lint:
-    name: Workflow Lint
-    runs-on: ubuntu-26.04
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Setup Mise
-        uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
-        with:
-          install_args: --locked jactionlint
-
-      - name: Lint workflows
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: jactionlint --online --shellcheck= --format github
-
   software:
     name: Software (${{ matrix.os }})
     strategy:
@@ -78,20 +54,24 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Check Rust formatting
+        if: runner.os == 'Linux'
         run: mise run software:fmt-check
 
-      - name: Lint Rust
-        run: mise run software:lint
+      - name: Lint host software
+        run: mise run host:lint
 
-      - name: Run Rust tests
-        run: mise run software:test
+      - name: Test host software
+        run: mise run host:test
 
       - name: Build host
         run: mise run host:build
 
-      - name: Build firmware
-        if: ${{ runner.os == 'Linux' }}
-        run: mise run firmware:build
+      - name: Check firmware
+        if: runner.os == 'Linux'
+        run: |
+          mise run firmware:lint
+          mise run firmware:test
+          mise run firmware:build
 
   hardware:
     name: Hardware
@@ -118,7 +98,12 @@ jobs:
       - name: Setup Mise
         uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
-          install_args: --locked python uv ruff node npm:pyright
+          install_args: --locked jactionlint python uv ruff node npm:pyright
+
+      - name: Lint workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: jactionlint --online --shellcheck= --format github
 
       - name: Check Python formatting
         run: mise run python:fmt-check
@@ -157,15 +142,11 @@ jobs:
     needs:
       - hardware
       - software
-      - workflow-lint
     runs-on: ubuntu-26.04
-    timeout-minutes: 15
+    timeout-minutes: 5
     permissions: {}
     steps:
-      - name: Any jobs failed?
-        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
-        run: exit 1
-
-      - name: All jobs passed or skipped?
-        if: ${{ !(contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
-        run: echo "All jobs passed or skipped" && echo "${{ toJSON(needs.*.result) }}"
+      - name: Check results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: jq -e 'all(.[]; .result == "success")' <<<"$RESULTS"

@@ -89,14 +89,25 @@ run = "cargo fmt --all -- --check"
 
 [tasks."software:lint"]
 description = "Lint host and firmware sources"
-run = [
-  "cargo clippy --locked --all-targets -- -D warnings",
-  "cargo clippy --locked --release -p iasis-firmware --target thumbv8m.main-none-eabihf -- -D warnings",
-]
+depends = ["host:lint", "firmware:lint"]
+
+[tasks."host:lint"]
+run = "cargo clippy --locked --all-targets -- -D warnings"
+
+[tasks."firmware:lint"]
+run = "cargo clippy --locked --release -p iasis-firmware --target thumbv8m.main-none-eabihf -- -D warnings"
 
 [tasks."software:test"]
 description = "Test host, firmware logic and the wire protocol"
-run = ["cargo test --locked", "cargo test --locked -p iasis-firmware --lib"]
+depends = ["host:test", "firmware:test"]
+
+[tasks."host:test"]
+description = "Test host software and the wire protocol"
+run = "cargo test --locked"
+
+[tasks."firmware:test"]
+description = "Test the firmware logic"
+run = "cargo test --locked -p iasis-firmware --lib"
 
 [task_templates."pcb:step"]
 description = "Export the populated board STEP"
