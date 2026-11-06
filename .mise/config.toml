@@ -28,7 +28,6 @@ config_roots = ["hardware/case", "hardware/boards/*"]
 postinstall = "lefthook install"
 
 [tasks.deps]
-description = "Install workspace dependencies"
 run = ["uv sync --locked", "cargo fetch --locked"]
 
 [tasks.build]
@@ -54,7 +53,6 @@ description = "Test software, board tooling and enclosure fit"
 depends = ["software:test", "python:test", "//hardware/case:test"]
 
 [tasks."python:fmt-check"]
-description = "Check Python formatting"
 run = "ruff format --check hardware"
 
 [tasks."python:lint"]
@@ -66,12 +64,10 @@ description = "Test JLCPCB placement conversion"
 run = 'uv run --locked python -m unittest discover -s hardware/tools -p "test_*.py"'
 
 [tasks.format]
-description = "Format sources, Markdown and configuration"
 depends = ["//hardware/case:format", "//hardware/boards/...:format"]
 run = ["mise fmt", "ruff format hardware", "cargo fmt --all", "oxfmt"]
 
 [tasks.fmt-check]
-description = "Check repository formatting"
 depends = [
   "software:fmt-check",
   "python:fmt-check",
@@ -89,7 +85,6 @@ description = "Build the RP2354B firmware ELF"
 run = "cargo build --locked --release -p iasis-firmware --target thumbv8m.main-none-eabihf"
 
 [tasks."software:fmt-check"]
-description = "Check Rust formatting"
 run = "cargo fmt --all -- --check"
 
 [tasks."software:lint"]
