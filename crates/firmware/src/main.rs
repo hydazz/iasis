@@ -4,6 +4,7 @@
 mod board;
 mod bus;
 mod fusb;
+mod oled;
 mod outputs;
 mod ports;
 mod stage;
@@ -192,6 +193,7 @@ async fn main(_spawner: Spawner) {
         let mut upstream = upstream::Upstream::default();
         let mut button = iasis_firmware::button::Button::default();
         let mut panel_due = 0;
+        let mut oled = oled::Oled::new();
         let mut button_id = 0u32;
         loop {
             if update.get() {
@@ -372,6 +374,7 @@ async fn main(_spawner: Spawner) {
                 Timer::after_micros(400).await;
                 panel_due = Instant::now().as_millis() + 100;
             }
+            oled.tick(&mut bus, &next, Instant::now().as_millis()).await;
             watchdog.feed(Duration::from_secs(2));
             Timer::after_millis(2).await;
         }
