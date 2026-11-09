@@ -9,7 +9,7 @@ pub fn colors(status: &Status) -> [[u8; 3]; 6] {
         [0, 8, 12]
     };
     for (index, port) in status.ports.iter().enumerate() {
-        pixels[5 - index] = if port.error.is_some() {
+        pixels[5 - index] = if port.error.is_some() || port.state == PortState::Fault {
             [32, 0, 0]
         } else if let Some(job) = port.restore {
             match job.phase {

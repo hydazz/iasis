@@ -1,6 +1,6 @@
 # Firmware
 
-The RP2354 firmware controls Iasis port power, USB-C attachment, Apple DFU signalling, the button and LEDs. Restore data passes directly through the USB hub between the host and targets.
+The RP2354 firmware controls Iasis port power, USB-C attachment, Apple DFU signalling, the button, LEDs and optional OLED. Restore data passes directly through the USB hub between the host and targets.
 
 ## Build and flash
 
@@ -54,14 +54,22 @@ When a brick is inserted, attached ports keep their output path, while the share
 
 The [button gestures and CLI commands](../../README.md#use) operate on ready ports. DFU supports Apple Silicon and T2; the button selects Apple Silicon. Commands use the attachment generation to reject requests for a device that has since disconnected.
 
-| LED colour | Meaning                            |
-| ---------- | ---------------------------------- |
-| Green      | Ready or restore reported complete |
-| Blue       | Preparation or activity            |
-| Amber      | Waiting or unconfirmed result      |
-| Red        | Fault or failure                   |
+| LED colour | Meaning                                |
+| ---------- | -------------------------------------- |
+| Green      | Ready or restore complete              |
+| Blue       | Activity                               |
+| Amber      | Preparation, waiting or unknown result |
+| Red        | Fault or failure                       |
 
 Host restore feedback expires after five seconds without an update, changing the LED to unconfirmed without cycling power. Command results and feedback fields are defined in the [protocol](../protocol/README.md).
+
+## OLED
+
+Connect an [Adafruit 938](https://www.adafruit.com/product/938) to the display I²C connector. The 128×64 screen keeps all five physical ports visible in a fixed overview. A lightning bolt indicates brick power; the lower area shows actions, button feedback and board faults. The button retains its batch gestures.
+
+`RDY` means ready for signalling. Restore feedback comes from the host: `DONE` means complete, `UNKN` means the result is unknown. The face animates during activity and blinks at idle.
+
+The display is optional and works with an external restore host or the CM5. It uses mux channel 7 at `0x3d`, or `0x3c` with the address jumper changed. A bus timeout quarantines channel 7, which also carries the charging-input controller, until reboot.
 
 ## Board connections
 
