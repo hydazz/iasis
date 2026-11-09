@@ -377,6 +377,7 @@ impl Port {
                     fusb::attach(bus, orientation).await?;
                     self.status.orientation = Some(orientation);
                     self.status.generation = self.status.generation.wrapping_add(1);
+                    self.status.command_result = CommandResult::Idle;
                     self.status.state = PortState::Debouncing;
                     self.due = now() + 150;
                 }
