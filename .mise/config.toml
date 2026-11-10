@@ -31,7 +31,6 @@ postinstall = "lefthook install"
 run = ["uv sync --locked", "cargo fetch --locked"]
 
 [tasks.build]
-description = "Build software, the case and board fabrication files"
 depends = [
   "host:build",
   "firmware:build",
@@ -40,56 +39,44 @@ depends = [
 ]
 
 [tasks.preview]
-description = "Refresh the case and board previews"
 depends = ["//hardware/case:preview", "//hardware/boards/...:preview"]
 
 [tasks.lint]
-description = "Lint software, hardware and workflows"
-depends = ["software:lint", "python:lint", "//hardware/boards/...:lint"]
+depends = [
+  "host:lint",
+  "firmware:lint",
+  "python:lint",
+  "//hardware/boards/...:lint",
+]
 run = "jactionlint --shellcheck="
 
 [tasks.test]
-description = "Test software, board tooling and enclosure fit"
-depends = ["software:test", "python:test", "//hardware/case:test"]
+depends = ["host:test", "firmware:test", "python:test", "//hardware/case:test"]
 
 [tasks."python:fmt-check"]
 run = "ruff format --check hardware"
 
 [tasks."python:lint"]
-description = "Lint Python sources and check types"
 run = ["ruff check hardware", "uv run --locked pyright"]
 
 [tasks."python:test"]
-description = "Test JLCPCB placement conversion"
 run = 'uv run --locked python -m unittest discover -s hardware/tools -p "test_*.py"'
 
 [tasks.format]
-depends = ["//hardware/case:format", "//hardware/boards/...:format"]
 run = ["mise fmt", "ruff format hardware", "cargo fmt --all", "oxfmt"]
 
 [tasks.fmt-check]
-depends = [
-  "software:fmt-check",
-  "python:fmt-check",
-  "//hardware/case:fmt-check",
-  "//hardware/boards/...:fmt-check",
-]
+depends = ["rust:fmt-check", "python:fmt-check"]
 run = ["mise fmt --check", "oxfmt --check"]
 
 [tasks."host:build"]
-description = "Build the Iasis host library and CLI"
 run = "cargo build --locked --release -p iasis"
 
 [tasks."firmware:build"]
-description = "Build the RP2354B firmware ELF"
 run = "cargo build --locked --release -p iasis-firmware --target thumbv8m.main-none-eabihf"
 
-[tasks."software:fmt-check"]
+[tasks."rust:fmt-check"]
 run = "cargo fmt --all -- --check"
-
-[tasks."software:lint"]
-description = "Lint host and firmware sources"
-depends = ["host:lint", "firmware:lint"]
 
 [tasks."host:lint"]
 run = "cargo clippy --locked --all-targets -- -D warnings"
@@ -97,21 +84,13 @@ run = "cargo clippy --locked --all-targets -- -D warnings"
 [tasks."firmware:lint"]
 run = "cargo clippy --locked --release -p iasis-firmware --target thumbv8m.main-none-eabihf -- -D warnings"
 
-[tasks."software:test"]
-description = "Test host, firmware logic and the wire protocol"
-depends = ["host:test", "firmware:test"]
-
 [tasks."host:test"]
-description = "Test host software and the wire protocol"
 run = "cargo test --locked"
 
 [tasks."firmware:test"]
-description = "Test the firmware logic"
 run = "cargo test --locked -p iasis-firmware --lib"
 
 [task_templates."pcb:step"]
-description = "Export the populated board STEP"
-vars = { args = "" }
 sources = [
   "*.3dshapes/*",
   "*.kicad_pcb",
@@ -124,16 +103,13 @@ sources = [
   ".mise.toml",
 ]
 outputs = ["../../../build/boards/{{ config_root | basename }}/board.step"]
-run = 'uv run --locked python "{{ config_root }}/../../tools/board.py" {{ vars.args }}'
+run = 'uv run --locked python "{{ config_root }}/../../tools/board.py"'
 
 [task_templates."pcb:fab"]
-description = "Export JLCPCB fabrication and assembly files"
-vars = { args = "" }
-run = 'uv run --locked python "{{ config_root }}/../../tools/fab.py" {{ vars.args }}'
+description = "JLCPCB"
+run = 'uv run --locked python "{{ config_root }}/../../tools/fab.py"'
 
 [task_templates."pcb:preview"]
-description = "Render the board photo"
-vars = { args = "" }
 sources = [
   "*.3dshapes/*",
   "*.kicad_pcb",
@@ -147,16 +123,8 @@ sources = [
   ".mise.toml",
 ]
 outputs = ["board.png"]
-run = 'uv run --locked python "{{ config_root }}/../../tools/preview.py" {{ vars.args }}'
+run = 'uv run --locked python "{{ config_root }}/../../tools/preview.py"'
 
 [task_templates."pcb:lint"]
-description = "Run DRC, schematic parity and ERC"
+description = "DRC, ERC, schematic parity"
 run = 'uv run --locked python "{{ config_root }}/../../tools/board.py" --check'
-
-[task_templates."project:format"]
-description = "Format mise configuration"
-run = "mise fmt"
-
-[task_templates."project:fmt-check"]
-description = "Check mise formatting"
-run = "mise fmt --check"
