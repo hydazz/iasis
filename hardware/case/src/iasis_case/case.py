@@ -43,11 +43,12 @@ from build123d import (
     fillet,
 )
 
+from . import retention
 from .artwork import icon
 from .battery import Battery
 from .battery import seat as battery_seat
 from .board import Board, load
-from .retention import DisplayFrame, Joint
+from .retention import DisplayMount, Fastener
 from .side import Pair, pair
 from .side import assemble as side_board
 
@@ -67,8 +68,7 @@ STANDOFF = 3.0  # clear space under the board
 TOP_CHAMFER = 0.8  # 45 degrees, supported when the cover prints top down
 BASE_CHAMFER = 0.6
 PORT_EDGE_R = 0.5  # outer edge of each USB-C opening
-FOOT_D, FOOT_H, FOOT_RECESS, FOOT_CHAMFER = 12.0, 2.0, 0.8, 0.4
-FOOT_FIT = 0.2  # radial clearance for adhesive-mounted TPU feet
+FOOT_D, FOOT_H = 8.0, 3.0  # adhesive bumper envelope
 
 # Board support
 HOLE_D = 3.2  # the board's M3 drill, which identifies the case holes
@@ -144,9 +144,7 @@ DISPLAY_OVER = ("J501", "J601")  # centred between ports 2 and 3
 WINDOW_MARGIN = 0.5  # window beyond the active area, each side
 WINDOW_BEVEL = 1.4  # 45 degree chamfer round the window's outer edge
 GLASS_GAP = 0.4  # glass face to the inside of the top; clears the tape over the flex
-POST_D = 4.0  # leaves 0.4 mm to the glass beside the holes
-DISPLAY_HOLE_D, DISPLAY_PIN_D = 2.5, 2.1
-DISPLAY_PIN_OVER = 0.2
+DISPLAY_HOLE_D = 2.5
 
 
 COVERS = {"passive": None, "display": OLED}
@@ -246,6 +244,21 @@ class Layout:
     def display_x(self) -> float:
         return sum(self.board.box(ref).center().X for ref in DISPLAY_OVER) / len(DISPLAY_OVER)
 
+    @cached_property
+    def fasteners(self) -> tuple[Fastener, ...]:
+        left, right = min(h.X for h in self.holes), max(h.X for h in self.holes)
+        mounts = []
+        for edge, angle in ((left, 0), (right, 180)):
+            end = [h for h in self.holes if abs(h.X - edge) < 1]
+            for h in (min(end, key=lambda h: h.Y), max(end, key=lambda h: h.Y)):
+                mounts.append(Fastener(h.X, h.Y, self.z_bottom, 15, angle))
+        return tuple(mounts)
+
+    def fastener_at(self, hole: Vector) -> Fastener | None:
+        return next(
+            (f for f in self.fasteners if math.hypot(f.x - hole.X, f.y - hole.Y) < 0.01), None
+        )
+
     def top_inside(self, display: Display | None = None) -> float:
         if display in self._roofs:
             return self._roofs[display]
@@ -268,20 +281,6 @@ class Layout:
             top = max(
                 top, local_top + MIN_GAP + display.back + thickness + display.glass[4] + GLASS_GAP
             )
-            rear = -GLASS_GAP - display.glass[4] - thickness
-            frame = DisplayFrame(self.display_x, rear, 0, display.holes)
-            # Frame rails and keeper toes hang below the display's rear components.
-            for shape in (frame.part, *frame.keepers):
-                envelope = shape.bounding_box()
-                under = [
-                    b.max.Z
-                    for b in boxes
-                    if b.min.X < envelope.max.X + MIN_GAP
-                    and b.max.X > envelope.min.X - MIN_GAP
-                    and b.min.Y < envelope.max.Y + MIN_GAP
-                    and b.max.Y > envelope.min.Y - MIN_GAP
-                ]
-                top = max(top, max(under, default=self.seat) + MIN_GAP - envelope.min.Z)
         self._roofs[display] = math.ceil(top * 2) / 2
         return self._roofs[display]
 
@@ -293,8 +292,8 @@ class Cover:
     display: Part | None  # the module's envelope
     markings: Compound
     button: Part
-    joint: Joint
-    retainer: DisplayFrame | None
+    fasteners: tuple[Fastener, ...]
+    display_mount: DisplayMount | None
 
 
 def layout(
@@ -403,20 +402,19 @@ def _outline(lay: Layout) -> Sketch:
 
 
 def _foot_centres(lay: Layout) -> list[tuple[float, float]]:
-    return [(x, y) for x in (-lay.length / 2 + 15, lay.length / 2 - 15) for y in (-43, 43)]
+    return [(x, y) for x in (-lay.length / 2 + 17, lay.length / 2 - 17) for y in (-42, 42)]
 
 
 def foot() -> Part:
-    """Flat-bottomed TPU foot, standing on the print bed."""
+    """Purchased adhesive bumper envelope; not a printable part."""
     body = Cylinder(FOOT_D / 2, FOOT_H, align=BASE)
-    body = chamfer(body.edges().group_by(Axis.Z)[0], FOOT_CHAMFER)
-    body.label = "TPU foot"
+    body.label = "adhesive rubber bumper envelope"
     return cast(Part, body)
 
 
 def feet(lay: Layout) -> list[Part]:
     body = foot()
-    return [Pos(x, y, lay.z_bottom - FOOT_H + FOOT_RECESS) * body for x, y in _foot_centres(lay)]
+    return [Pos(x, y, lay.z_bottom - FOOT_H) * body for x, y in _foot_centres(lay)]
 
 
 def tray(lay: Layout) -> Part:
@@ -432,6 +430,8 @@ def tray(lay: Layout) -> Part:
         ]
     )
     for h in lay.holes:
+        if lay.fastener_at(h) is not None:
+            continue
         body += Pos(h.X, h.Y, -0.1) * Cylinder(
             LOCATOR_D / 2, lay.seat + LOCATOR_OVER - 0.3, align=BASE
         )
@@ -439,15 +439,9 @@ def tray(lay: Layout) -> Part:
             LOCATOR_D / 2, LOCATOR_D / 2 - 0.4, 0.4, align=BASE
         )
     body -= Compound([_wall_cut(o) for o in lay.openings])
-    joint = Joint(lay.length / 2, lay.split, lay.top_inside())
-    body += Compound(joint.tray_parts())
-    body -= Compound(joint.tray_cuts())
-    body -= Compound(
-        [
-            Pos(x, y, z0 - 0.1) * Cylinder(FOOT_D / 2 + FOOT_FIT, FOOT_RECESS + 0.1, align=BASE)
-            for x, y in _foot_centres(lay)
-        ]
-    )
+    body -= Compound(retention.guide_pockets(lay.length / 2, lay.split))
+    for f in lay.fasteners:
+        body -= f.bore
     if lay.battery is not None:
         body -= lay.battery.pocket + lay.battery.channel
     body.label = "tray"
@@ -467,21 +461,40 @@ def cover(lay: Layout, name: str, display: Display | None) -> Cover:
 
     # Pillars and display posts project from the roof into the cavity.
     intrusions: dict[str, Part] = {}
-    joint = Joint(lay.length / 2, lay.split, top_in)
-    shell -= Compound(joint.cover_cuts())
-    intrusions |= {f"latch {i + 1}": p for i, p in enumerate(joint.cover_parts())}
+    intrusions |= {
+        f"guide {i + 1}": p for i, p in enumerate(retention.guides(lay.length / 2, lay.split))
+    }
     cuts: list[Part] = []
     # A hole nearer the edge than the pillar's radius gets a pillar cut flush with the board edge,
     # clear of the tray wall that rises beyond it.
     board_edge = Face(lay.cavity.outer_wire().offset_2d(-CLEARANCE, kind=Kind.INTERSECTION))
     edge = extrude(Pos(0, 0, lay.seat) * board_edge, amount=top_in - lay.seat + 1, dir=Z_UP)
+    outside = extrude(Pos(0, 0, lay.seat) * _outline(lay), amount=top_in - lay.seat + 1)
     for i, h in enumerate(lay.holes):
         bottom = lay.seat + BOARD_HOLD_GAP
-        pillar = Pos(h.X, h.Y, bottom) * Cylinder(PILLAR_D / 2, top_in - bottom + 0.5, align=BASE)
-        pillar -= Pos(h.X, h.Y, bottom - 0.1) * Cylinder(
-            (LOCATOR_D + 2 * CLEARANCE) / 2, LOCATOR_OVER + CLEARANCE, align=BASE
-        )
-        intrusions[f"pillar {i + 1}"] = cast(Part, pillar & edge)
+        if (f := lay.fastener_at(h)) is not None:
+            stem_top = 4.2
+            shoulder = stem_top + (retention.BOSS_D - PILLAR_D) / 2
+            pillar = (
+                Pos(h.X, h.Y, bottom) * Cylinder(PILLAR_D / 2, stem_top - bottom, align=BASE)
+            ) & edge
+            pillar += Pos(h.X, h.Y, stem_top) * Cone(
+                PILLAR_D / 2, retention.BOSS_D / 2, shoulder - stem_top, align=BASE
+            )
+            pillar += Pos(h.X, h.Y, shoulder) * Cylinder(
+                retention.BOSS_D / 2, top_in + 0.5 - shoulder, align=BASE
+            )
+            pillar = cast(Part, pillar & outside) - f.receiver_cut
+            cuts.append(f.receiver_cut)
+        else:
+            pillar = Pos(h.X, h.Y, bottom) * Cylinder(
+                PILLAR_D / 2, top_in - bottom + 0.5, align=BASE
+            )
+            pillar -= Pos(h.X, h.Y, bottom - 0.1) * Cylinder(
+                (LOCATOR_D + 2 * CLEARANCE) / 2, LOCATOR_OVER + CLEARANCE, align=BASE
+            )
+            pillar &= edge
+        intrusions[f"pillar {i + 1}"] = cast(Part, pillar)
     shell += Compound(list(intrusions.values()))
 
     cuts += [_wall_cut(o) for o in lay.openings]
@@ -495,16 +508,14 @@ def cover(lay: Layout, name: str, display: Display | None) -> Cover:
     )
 
     display_part = None
-    retainer = None
+    display_mount = None
     if display:
-        window, posts, display_part = _display(lay, display, top_in, top_out)
-        cuts.append(window)
-        shell += Compound(posts)
-        intrusions |= {f"display post {i + 1}": p for i, p in enumerate(posts)}
-        rear = top_in - GLASS_GAP - display.glass[4] - display.pcb[2]
-        retainer = DisplayFrame(lay.display_x, rear, top_in, display.holes)
-        shell += Compound(retainer.keepers)
-        intrusions |= {f"display keeper {i + 1}": p for i, p in enumerate(retainer.keepers)}
+        face = top_in - GLASS_GAP - display.glass[4]
+        display_mount = DisplayMount(lay.display_x, face, top_in, display.pcb[2], display.holes)
+        window, display_part = _display(lay, display, top_in, top_out)
+        cuts += [window, *display_mount.pilots]
+        shell += Compound(display_mount.posts)
+        intrusions |= {f"display post {i + 1}": p for i, p in enumerate(display_mount.posts)}
 
     markings = _markings(lay, top_out)
     shell -= Compound(cuts)
@@ -516,15 +527,13 @@ def cover(lay: Layout, name: str, display: Display | None) -> Cover:
         display=display_part,
         markings=markings,
         button=_button(lay, name, top_in, top_out),
-        joint=joint,
-        retainer=retainer,
+        fasteners=lay.fasteners,
+        display_mount=display_mount,
     )
 
 
-def _display(
-    lay: Layout, d: Display, top_in: float, top_out: float
-) -> tuple[Part, list[Part], Part]:
-    """Window, locating posts and the module envelope, including clear mounting corners."""
+def _display(lay: Layout, d: Display, top_in: float, top_out: float) -> tuple[Part, Part]:
+    """Window and module envelope, including clear mounting corners."""
     pw, pd, pt = d.pcb
     x = lay.display_x
     y = 0.0  # board centre; clears the front mounting pillars
@@ -536,19 +545,6 @@ def _display(
 
     gx, gy, gw, gh, gt = d.glass
     face = top_in - GLASS_GAP - gt  # the module PCB's top face
-    posts = []
-    for hx, hy in d.holes:
-        at = Pos(x + hx, y + hy, face)
-        post = at * Cylinder(POST_D / 2, top_in - face + 0.5, align=BASE)
-        post += Pos(x + hx, y + hy, face - pt) * Cylinder(DISPLAY_PIN_D / 2, pt + 0.1, align=BASE)
-        post += Pos(x + hx, y + hy, face - pt - DISPLAY_PIN_OVER) * Cone(
-            DISPLAY_PIN_D / 2 - DISPLAY_PIN_OVER,
-            DISPLAY_PIN_D / 2,
-            DISPLAY_PIN_OVER,
-            align=BASE,
-        )
-        posts.append(cast(Part, post))
-
     module = Pos(x, y, face) * Box(pw, pd, pt, align=(Align.CENTER, Align.CENTER, Align.MAX))
     for hx, hy in d.holes:
         module -= Pos(x + hx, y + hy, face - pt - 0.1) * Cylinder(
@@ -563,7 +559,7 @@ def _display(
     module += back
     module += Pos(x + gx, y + gy, face) * Box(gw, gh, gt, align=BASE)
     module.label = f"{d.name} envelope"
-    return window, posts, cast(Part, module)
+    return window, cast(Part, module)
 
 
 def _wall_cut(o: Opening) -> Part:
@@ -670,7 +666,7 @@ def _roof_openings(lay: Layout) -> list[Sketch]:
 
 
 def _display_keepout(lay: Layout, display: Display) -> Sketch:
-    return Pos(lay.display_x, 0) * Rectangle(display.pcb[0] + 10, display.pcb[1] + 10)
+    return Pos(lay.display_x, 0) * Rectangle(display.pcb[0] + 4, display.pcb[1] + 4)
 
 
 def _control_grooves(lay: Layout, top: float, display: Display | None) -> list[Part]:
@@ -690,7 +686,7 @@ def _control_grooves(lay: Layout, top: float, display: Display | None) -> list[P
 def _side_intakes(lay: Layout) -> list[Part]:
     cuts = []
     for x in (-lay.length / 2, lay.length / 2):
-        for y in (-32, 20, 32):
+        for y in (-24, 0, 24):
             plane = Plane(origin=(x - 2, y, 6), x_dir=(0, 1, 0), z_dir=(1, 0, 0))
             cuts.append(extrude(plane * SlotOverall(10, 2.8), amount=4))
     return cuts
