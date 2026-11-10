@@ -255,7 +255,8 @@ async fn main(_spawner: Spawner) {
             }
             sequence = sequence.wrapping_add(1);
             next.sequence = sequence;
-            next.aggregate_power_fault = aggregate_fault.is_low();
+            let host_limiter_fault = aggregate_fault.is_low();
+            next.aggregate_power_fault = host_limiter_fault;
             for (index, port) in next.ports.iter_mut().enumerate() {
                 port.faults = Some(PortFaults {
                     power: power_faults[index].is_low(),
@@ -279,9 +280,16 @@ async fn main(_spawner: Spawner) {
                 bus.sample(&mut next).await;
                 metadata_due = Instant::now().as_millis() + 50;
             }
-            next.aggregate_power_fault |= next
+            let brick_power_good = next
                 .expander_inputs
-                .is_some_and(|inputs| inputs & 0x20 == 0);
+                .is_some_and(|inputs| inputs & 0x40 == 0);
+            next.aggregate_power_fault |= iasis_pd::power::brick_input_fault(
+                next.expander_inputs
+                    .is_some_and(|inputs| inputs & 0x20 == 0),
+                brick_power_good,
+                next.ch224_status,
+                next.bus_voltage_adc,
+            );
             next.host_allowance_ma = iasis_pd::power::host_allowance(
                 upstream.cc_level(),
                 configured.get() && !suspended.get(),
@@ -292,8 +300,7 @@ async fn main(_spawner: Spawner) {
                 next.bus_voltage_adc,
                 next.ch224_status,
                 next.ch224_current_50ma,
-                next.expander_inputs
-                    .is_some_and(|inputs| inputs & 0x40 == 0),
+                brick_power_good,
                 controls.side_power_enabled(),
             );
             let brick_ports = if next.i2c_root_fault || next.aggregate_power_fault {
@@ -303,11 +310,11 @@ async fn main(_spawner: Spawner) {
                     next.bus_voltage_adc,
                     next.ch224_status,
                     next.ch224_current_50ma,
-                    next.expander_inputs
-                        .is_some_and(|inputs| inputs & 0x40 == 0),
+                    brick_power_good,
                     controls.side_power_enabled(),
                 )
             };
+            let previous_supply = next.supply;
             next.supply = if host_tier.is_some() && ports.using_host() {
                 Supply::HostPresence
             } else if brick_ports > 0 {
@@ -342,21 +349,31 @@ async fn main(_spawner: Spawner) {
             match &mut outputs {
                 Ok(outputs) => {
                     // Switch off direct requests before withdrawing the aggregate rail.
-                    if next.supply == Supply::Off {
+                    if next.supply == Supply::Off || next.supply != previous_supply {
                         for index in 0..protocol::PORT_COUNT {
                             controls.charge(index, false);
                         }
                     }
-                    if let Err(error) = outputs
-                        .host_budget(&mut bus, &mut controls, host_tier)
+                    match outputs
+                        .power_policy(&mut bus, &mut controls, next.supply, host_tier)
                         .await
                     {
-                        ports.fail_all(&mut controls, &mut next, error);
-                        next.available_ports = 0;
+                        Ok(()) => {
+                            ports
+                                .tick(
+                                    &mut bus,
+                                    &mut controls,
+                                    outputs,
+                                    &mut next,
+                                    host_limiter_fault,
+                                )
+                                .await
+                        }
+                        Err(error) => {
+                            ports.fail_all(&mut controls, &mut next, error);
+                            next.available_ports = 0;
+                        }
                     }
-                    ports
-                        .tick(&mut bus, &mut controls, outputs, &mut next)
-                        .await
                 }
                 Err(error) => ports.fail_all(&mut controls, &mut next, *error),
             }

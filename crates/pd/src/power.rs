@@ -1,8 +1,17 @@
 //! Fixed-5 V charging and protected host-presence power budgets.
 
+/// Maximum nominal voltage on the Rev A charging input.
+pub const MAX_BRICK_MV: u32 = 20_000;
+
+/// Allow the fixed supply's 5% tolerance at the input ADC.
+pub fn brick_overvoltage(raw: Option<u16>) -> bool {
+    raw.and_then(millivolts)
+        .is_some_and(|mv| mv > MAX_BRICK_MV * 105 / 100)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HostLimit {
-    /// QD/QE, selecting the parallel 68k/22k ILIM resistors.
+    /// U1182 QB/QC, selecting the parallel 68k/22k ILIM resistors.
     pub bits: u8,
     /// Rounded-up threshold, not a promised target contract.
     pub upper_ma: u16,
@@ -35,6 +44,25 @@ pub fn host_limit(allowance_ma: u16) -> Option<HostLimit> {
         .find(|tier| u32::from(allowance_ma) >= 800 + u32::from(tier.upper_ma))
 }
 
+fn below_brick_handover(bus_adc: Option<u16>) -> bool {
+    // The priority mux releases the brick above 6 V on a falling bus.
+    // Below 5 V leaves margin for the ADC and divider.
+    bus_adc.and_then(millivolts).is_some_and(|mv| mv < 5000)
+}
+
+/// The unpowered brick protector can assert FLT on a host-powered board.
+pub fn brick_input_fault(
+    asserted: bool,
+    power_good: bool,
+    pd_status: Option<u8>,
+    bus_adc: Option<u16>,
+) -> bool {
+    asserted
+        && (power_good
+            || pd_status.is_some_and(|status| status & 8 != 0)
+            || !below_brick_handover(bus_adc))
+}
+
 /// The presence branch follows 5V_LOGIC's automatic brick/host priority mux.
 /// Keep the host ceiling for fallback, and also reserve from a present brick.
 pub fn presence_limit(
@@ -46,10 +74,7 @@ pub fn presence_limit(
     side_power: bool,
 ) -> Option<HostLimit> {
     let host = host_limit(allowance_ma)?;
-    let mv = bus_adc.and_then(millivolts)?;
-    // U1005's 47k/10k EN divider releases the primary above 6 V even at
-    // the minimum falling threshold. Below 5 V leaves ADC/divider margin.
-    if mv < 5000 {
+    if below_brick_handover(bus_adc) {
         return Some(host);
     }
     let budget_mw = brick_budget_mw(bus_adc, pd_status, current_50ma, power_good, side_power);
@@ -131,7 +156,11 @@ fn brick_budget_mw(
     let Some(mv) = bus_adc.and_then(millivolts) else {
         return 0;
     };
-    if !power_good || !pd_status.is_some_and(|s| s & 8 != 0) || !(7000..=21_000).contains(&mv) {
+    if !power_good
+        || !pd_status.is_some_and(|s| s & 8 != 0)
+        || mv < 7000
+        || brick_overvoltage(bus_adc)
+    {
         return 0;
     }
     let input_mw = mv * u32::from(current_50ma.unwrap_or(0)) * 50 / 1000;
@@ -146,6 +175,28 @@ mod tests {
 
     fn adc(mv: u32) -> u16 {
         (mv * 4095 / 39_679) as u16
+    }
+
+    #[test]
+    fn brick_ceiling_allows_spr_tolerance_but_excludes_epr() {
+        for mv in [9000, 15_000, 20_000, 21_000] {
+            assert!(!brick_overvoltage(Some(adc(mv))));
+        }
+        for mv in [21_100, 28_000, 29_400] {
+            assert!(brick_overvoltage(Some(adc(mv))));
+            assert_eq!(
+                available_ports(Some(adc(mv)), Some(8), Some(100), true, false),
+                0
+            );
+            assert_eq!(
+                presence_limit(3000, Some(adc(mv)), Some(8), Some(100), true, false),
+                None
+            );
+        }
+        for raw in [None, Some(4096)] {
+            assert!(!brick_overvoltage(raw));
+            assert_eq!(available_ports(raw, Some(8), Some(100), true, false), 0);
+        }
     }
 
     #[test]
@@ -231,6 +282,21 @@ mod tests {
                 .upper_ma,
             1450
         );
+    }
+
+    #[test]
+    fn unpowered_brick_fault_allows_an_independent_host_supply() {
+        assert!(!brick_input_fault(true, false, None, Some(78)));
+        for (pg, pd, bus) in [
+            (true, None, Some(78)),
+            (false, Some(8), Some(78)),
+            (false, None, Some(adc(5100))),
+            (false, None, None),
+            (false, None, Some(4096)),
+        ] {
+            assert!(brick_input_fault(true, pg, pd, bus));
+            assert!(!brick_input_fault(false, pg, pd, bus));
+        }
     }
 
     #[test]
