@@ -5,7 +5,7 @@ use embassy_rp::{
     pac,
     peripherals::{I2C0, PIN_1, PIN_24, PIN_25},
 };
-use embassy_time::{Duration, Timer, with_timeout};
+use embassy_time::{Duration, Instant, Timer, with_timeout};
 use iasis_protocol::{PortError, Status};
 
 pub struct Bus {
@@ -19,6 +19,7 @@ pub struct Bus {
     recoveries: u32,
     isolated: u8,
     exposed: u8,
+    brick_request_due: u64,
 }
 
 impl Bus {
@@ -39,6 +40,7 @@ impl Bus {
             recoveries: 0,
             isolated: 0,
             exposed: 0,
+            brick_request_due: 0,
         };
         Timer::after_micros(10).await;
         bus.restart();
@@ -205,7 +207,23 @@ impl Bus {
             if self.select(Some(7)).await.is_ok() {
                 status.ch224_status = self.register(0x22, 0x09).await.ok();
                 if status.ch224_status.is_some_and(|value| value & 8 != 0) {
-                    status.ch224_current_50ma = self.register(0x22, 0x50).await.ok();
+                    if iasis_pd::power::brick_overvoltage(status.bus_voltage_adc) {
+                        // CH224 §5.2.3: 0x0a is write-only; 4 requests fixed
+                        // 20 V. Never select 28 V, PPS or AVS on rev A.
+                        // Recover a contract left by previous firmware without
+                        // renegotiating a normal 9–20 V supply under load.
+                        let now = Instant::now().as_millis();
+                        if now >= self.brick_request_due {
+                            self.brick_request_due = now + 1000;
+                            if self.write(0x22, &[0x0a, 4]).await.is_err() {
+                                status.ch224_status = None;
+                            }
+                        }
+                        // A successful write isn't a confirmed contract. Leave
+                        // capacity unknown until fresh PG/status/ADC agree.
+                    } else {
+                        status.ch224_current_50ma = self.register(0x22, 0x50).await.ok();
+                    }
                 }
             }
             status.i2c_root_fault |= self.select(None).await.is_err();

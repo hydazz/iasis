@@ -3,6 +3,7 @@ use embassy_rp::{
     gpio::{AnyPin, Pin},
     pac,
 };
+use embassy_time::{Duration, Instant};
 
 const PASSWORD: u32 = 0x5afe_0000;
 const HANDOFF: u32 = 0x4941_5302;
@@ -63,10 +64,12 @@ impl Controls {
             w.0 |= PASSWORD;
             w.set_unlock(true);
         });
+        wait_for_vreg();
         pac::POWMAN.vreg().modify(|w| {
             w.0 |= PASSWORD;
             w.set_hiz(true);
         });
+        wait_for_vreg();
         assert!(pac::POWMAN.vreg().read().hiz(), "VREG HIZ write failed");
         for pin in &targets {
             output(pin.pin().into(), false);
@@ -154,6 +157,13 @@ impl Controls {
         loop {
             cortex_m::asm::wfi();
         }
+    }
+}
+
+fn wait_for_vreg() {
+    let deadline = Instant::now() + Duration::from_millis(10);
+    while pac::POWMAN.vreg().read().update_in_progress() {
+        assert!(Instant::now() < deadline, "VREG update timed out");
     }
 }
 
