@@ -44,11 +44,12 @@ def show(lay: Layout, tray: Shape, covers: dict[str, Cover]) -> None:
             "Body": _coloured(cover.part, "#d6d8dc"),
             "Markings": _coloured(cover.markings, "#23262a"),
             "Button": _coloured(cover.button, "#d6d8dc"),
+            "Fasteners": _coloured(Compound([f.hardware for f in cover.fasteners]), "#9a9a9a"),
         }
         if cover.display is not None:
             group["Display envelope"] = _coloured(cover.display, "#3d6fd1")
-        if cover.retainer is not None:
-            group["Retainer"] = _coloured(cover.retainer.part, "#d6d8dc")
+        if cover.display_mount is not None:
+            group["Display screws"] = _coloured(Compound(cover.display_mount.screws), "#9a9a9a")
         variant = "OLED" if name == "display" else "Passive"
         variants[variant] = group
         for part in group:

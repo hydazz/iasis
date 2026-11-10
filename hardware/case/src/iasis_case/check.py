@@ -6,7 +6,6 @@ reserve room for board movement and printing error.
 """
 
 from itertools import combinations
-from math import degrees
 
 from build123d import (
     BoundBox,
@@ -16,7 +15,6 @@ from build123d import (
     Part,
     Pos,
     Rectangle,
-    Rot,
     SlotOverall,
     extrude,
 )
@@ -57,9 +55,7 @@ def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
         tray,
         *(c.part for c in covers.values()),
         *(c.button for c in covers.values()),
-        *feet,
     ]
-    printed += [c.retainer.part for c in covers.values() if c.retainer is not None]
     for part in printed:
         if part.is_valid and len(part.solids()) == 1 and part.volume > 0:
             bb = part.bounding_box()
@@ -72,7 +68,12 @@ def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
 
     for foot in feet:
         if _overlap(foot, tray) > 1e-3:
-            r.fail("TPU foot overlaps its tray recess")
+            r.fail("adhesive foot overlaps the tray")
+        if any(_overlap(foot, f.driver) > 1e-3 for f in lay.fasteners):
+            r.fail("adhesive foot blocks a case screw")
+
+    if case.FOOT_H - retention.HEAD_H < 0.3:
+        r.fail("feet leave less than 0.3 mm nominal clearance below the screw heads")
 
     r.lines.append("walls and floor")
     outline = board.body.bounding_box()
@@ -96,8 +97,6 @@ def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
         r.fail(f"board/cover movement {movement:.2f} mm exceeds USB seating allowance")
     else:
         r.ok(f"board/cover movement bounded to {movement:.2f} mm")
-    for i, feature in enumerate(next(iter(covers.values())).joint.tray_parts()):
-        _clear(r, f"tray catch/guide {i + 1}", feature, parts)
     if any(_overlap(Pos(0, 0, z / 2) * board.body, tray) > 1e-3 for z in range(1, 13)):
         r.fail("PCB cannot lower vertically onto the tray pegs")
     else:
@@ -170,7 +169,7 @@ def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
                 [("button", c.button, c.button.bounding_box())],
             )
             _display_retention(r, c, parts)
-        _case_retention(r, c, tray, parts)
+        _case_retention(r, lay, c, tray, parts)
         _paths(r, lay, c.part, tray)
         if (overlap := _overlap(c.part, tray)) > 1e-3:
             r.fail(f"{name} overlaps tray by {overlap:.2f} mm3")
@@ -228,84 +227,93 @@ def _battery(
         r.ok("boards lift clear of the seated RTC battery")
 
 
-def _case_retention(r: Report, c: case.Cover, tray: Part, parts: Candidates) -> None:
-    joint = c.joint
-    hook = joint.hook
-    root_cut = Pos(joint.inner + retention.BEAM_THICKNESS / 2, joint.y, joint.root - 0.02) * Box(
-        1.6, 8.8, 0.02, align=case.BASE
-    )
-    # Only the roof root should connect the spring to the fixed shell.
-    for cut, pad in zip(retention.paired(root_cut), retention.paired(joint.pad)):
-        detached = (c.part - cut).solids()
-        if not any(
-            solid.bounding_box().max.Z <= joint.root and _overlap(solid, pad) > 1e-3
-            for solid in detached
-        ):
-            r.fail("latch is joined to the fixed shell below its root")
-    if _overlap(Pos(0, 0, retention.LATCH_PLAY + 0.1) * hook, tray) < 1e-3:
-        r.fail("cover hook does not retain the cover")
+def _fastener(r: Report, label: str, f: retention.Fastener, receiver: Part, clamped: Part) -> None:
+    for name, hardware in (("screw", f.screw), ("nut", f.nut)):
+        if _overlap(hardware, receiver) > 1e-3 or _overlap(hardware, clamped) > 1e-3:
+            r.fail(f"{label}: {name} overlaps printed material")
+    if any(_overlap(f.nut_at(d / 2), receiver) > 1e-3 for d in range(17)):
+        r.fail(f"{label}: nut cannot slide into its pocket")
     else:
-        r.ok(f"cover retained with {retention.LATCH_PLAY:.2f} mm axial play")
-    released = Pos(-retention.RELEASE, 0, 0) * hook
-    for side in retention.paired(released):
-        _clear(r, "pressed latch", side, parts)
-        if any(_overlap(Pos(0, 0, dz / 4) * side, tray) > 1e-3 for dz in range(25)):
-            r.fail("pressed latch cannot lift clear of tray")
-            break
+        r.ok(f"{label}: nut loads through its side opening")
+    if _overlap(f.driver, receiver) > 1e-3 or _overlap(f.driver, clamped) > 1e-3:
+        r.fail(f"{label}: screwdriver access is blocked")
+    # Full-height sections below the nut and above the head carry axial load.
+    nut_land = _overlap(Pos(0, 0, -1.2) * f.nut, receiver) / 1.2
+    head_land = _overlap(Pos(0, 0, 1.2) * f.screw, clamped) / 1.2
+    if min(nut_land, head_land) < 12:
+        r.fail(
+            f"{label}: insufficient 1.2 mm-deep bearing land ({nut_land:.2f}/{head_land:.2f} mm2)"
+        )
     else:
-        r.ok(f"latches release at {retention.RELEASE:.2f} mm inward hook travel")
-    arm = joint.root - joint.pad_z
-    tip = joint.root - joint.shoulder
-    pad_travel = retention.RELEASE * 2 * arm / (3 * tip - arm)
-    if pad_travel >= retention.STOP:
-        r.fail("latch stop prevents release")
-    pivot = Pos(joint.inner + retention.BEAM_THICKNESS / 2, joint.y, joint.pad_z)
-    # Approximate pad rotation from the cantilever slope.
-    fixed = c.part
-    for side in retention.paired(hook):
-        fixed -= side
-    for fraction in (0.25, 0.5, 0.75, 1.0):
-        travel = retention.STOP * fraction
-        angle = degrees(3 * travel / (2 * arm))
-        moved_pad = Pos(-travel, 0, 0) * pivot * Rot(Y=angle) * pivot.inverse() * joint.pad
-        for side in retention.paired(moved_pad):
-            _clear(r, f"latch pad at {travel:.2f} mm", side, parts)
-            if _overlap(side, tray) > 1e-3 or _overlap(side, fixed) > 1e-3:
-                r.fail("pressed latch pad catches shell")
+        r.ok(f"{label}: nut/head bearing lands {nut_land:.1f}/{head_land:.1f} mm2 over 1.2 mm")
+    if f.tip - (f.nut_z + retention.NUT_H + retention.NUT_PLAY) < 0.5:
+        r.fail(f"{label}: screw does not pass fully through the nut at maximum axial play")
+    if receiver.bounding_box().max.Z - f.tip < 0.8:
+        r.fail(f"{label}: screw tip leaves less than 0.8 mm of roof")
+
+
+def _case_retention(
+    r: Report, lay: case.Layout, c: case.Cover, tray: Part, parts: Candidates
+) -> None:
+    if len(c.fasteners) != 4 or len({(f.x, f.y) for f in c.fasteners}) != 4:
+        r.fail("case needs four distinct screw joints")
+    for i, f in enumerate(c.fasteners):
+        _fastener(r, f"case screw {i + 1}", f, c.part, tray)
+        _clear(r, f"case hardware {i + 1}", f.hardware, parts)
+        if _overlap(f.hardware, lay.board.body) > 1e-3:
+            r.fail(f"case screw {i + 1} intersects PCB material")
+    # No PCB is part of this closing stop: the two printed shells meet directly.
+    if _overlap(Pos(0, 0, -0.1) * c.part, tray) < 10:
+        r.fail("empty case lacks a substantial plastic-to-plastic closing stop")
+    else:
+        r.ok("empty case closes against the perimeter seam independently of the PCB")
+    if any(_overlap(Pos(0, 0, dz / 4) * c.part, tray) > 1e-3 for dz in range(1, 17)):
+        r.fail("unscrewed cover cannot lift straight off the tray")
+    for h in lay.holes:
+        lower = Pos(h.X, h.Y, -0.1) * Cylinder(case.STANDOFF_D / 2, 0.1, align=case.BASE)
+        upper = Pos(h.X, h.Y, lay.seat + case.BOARD_HOLD_GAP) * Cylinder(
+            case.PILLAR_D / 2, 0.1, align=case.BASE
+        )
+        if _overlap(lower, tray) < 1 or _overlap(upper, c.part) < 1:
+            r.fail(f"PCB mounting hole at {h.X:.1f},{h.Y:.1f} lacks paired support faces")
+    r.ok(f"PCB capture allowance {case.BOARD_HOLD_GAP:.2f} mm above board thickness")
 
 
 def _display_retention(r: Report, c: case.Cover, parts: Candidates) -> None:
-    mount, module = c.retainer, c.display
+    mount, module = c.display_mount, c.display
     assert mount is not None and module is not None
-    frame = mount.part
-    _clear(r, "display retainer", frame, parts)
-    if _overlap(frame, c.part) > 1e-3 or _overlap(frame, module) > 1e-3:
-        r.fail("display retainer overlaps cover or module")
+    if len(mount.centres) != 4:
+        r.fail("display needs four corner mounts")
+    if _overlap(module, c.part) > 1e-3:
+        r.fail("OLED overlaps its cover")
+    engagement = mount.tip - mount.face
+    if engagement < 2:
+        r.fail("display screws have less than 2 mm engagement in the posts")
+    for i, ((x, y), screw, head) in enumerate(
+        zip(mount.centres, mount.screws, mount.heads, strict=True), 1
+    ):
+        _clear(r, f"display screw {i}", screw, parts)
+        if _overlap(screw, module) > 1e-3 or _overlap(head, c.part) > 1e-3:
+            r.fail(f"display screw {i} overlaps the OLED or cover outside its thread")
+        if _overlap(Pos(0, 0, 0.1) * head, module) < 0.8:
+            r.fail(f"display screw {i} head does not retain the PCB corner")
+        # Full material around the screw, including the part entering the roof.
+        wall = Pos(x, y, mount.face) * (
+            Cylinder(mount.post_d / 2, engagement, align=case.BASE)
+            - Cylinder(mount.screw_d / 2, engagement, align=case.BASE)
+        )
+        if (wall - c.part).volume > 1e-3:
+            r.fail(f"display post {i} lacks solid material around the thread")
+        cap = Pos(x, y, mount.tip + 0.2) * Cylinder(1.25, 0.8, align=case.BASE)
+        if (cap - c.part).volume > 1e-3:
+            r.fail(f"display screw {i} leaves less than 0.8 mm over its blind hole")
+        driver = Pos(x, y, mount.rear - mount.head_h - 20) * Cylinder(1.6, 20, align=case.BASE)
+        if _overlap(driver, c.part) > 1e-3 or _overlap(driver, module) > 1e-3:
+            r.fail(f"display screw {i} has obstructed driver access")
+    if any(_overlap(Pos(0, 0, -d / 4) * module, c.part) > 1e-3 for d in range(1, 17)):
+        r.fail("unscrewed OLED cannot lift straight off its supports")
     else:
-        r.ok("display retainer fits cover and module")
-    if _overlap(Pos(0, 0, -0.1) * frame, c.part) < 1e-3:
-        r.fail("display retainer can drop out")
-    else:
-        r.ok("three keepers retain the display frame")
-    if _overlap(Pos(0, mount.release, -0.1) * mount.tip, c.part) > 1e-3:
-        r.fail("display finger pad does not release")
-    else:
-        r.ok(f"display finger pad releases at {mount.release:.2f} mm")
-    # The front pad is held in while the frame swings out of the rear keepers.
-    rigid = frame - mount.tip
-    blocked = []
-    pivot = Pos(mount.x, 18.4, mount.base)
-    poses = [pivot * Rot(X=a) * pivot.inverse() for a in (0, 1, 2, 3, 4, 5, 6, 8)]
-    poses += [Pos(0, -y / 4, 0) * poses[-1] for y in range(1, 5)]
-    poses += [Pos(0, 0, -z) * poses[-1] for z in (1, 2, 4, 8)]
-    for i, pose in enumerate(poses):
-        moved = pose * rigid
-        if _overlap(moved, c.part) > 1e-3 or _overlap(moved, module) > 1e-3:
-            blocked.append(i)
-    if blocked:
-        r.fail(f"display frame removal blocked at steps {blocked}")
-    else:
-        r.ok("display frame tilts, slides forward and lifts out of its keepers")
+        r.ok(f"OLED screws engage {engagement:.2f} mm in supported corner posts; straight removal")
 
 
 def _overlap(a: Shape, b: Shape) -> float:
