@@ -9,9 +9,3 @@ extends = "pcb:preview"
 
 [tasks.lint]
 extends = "pcb:lint"
-
-[tasks.format]
-extends = "project:format"
-
-[tasks.fmt-check]
-extends = "project:fmt-check"

@@ -55,7 +55,7 @@ jobs:
 
       - name: Check Rust formatting
         if: runner.os == 'Linux'
-        run: mise run software:fmt-check
+        run: mise run rust:fmt-check
 
       - name: Lint host software
         run: mise run host:lint
