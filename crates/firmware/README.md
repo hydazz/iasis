@@ -37,18 +37,20 @@ Ports start enabled and reserve power only while attached. Disabling a port open
 
 The host path supports attachment and signalling with charged targets. Its current limit is shared across ports; the 0 mA PDO does not prevent pre-contract draw.
 
-| Upstream allowance | Aggregate target limit |
-| ------------------ | ---------------------- |
-| 900 mA             | Off                    |
-| 1200 mA            | 170 mA                 |
-| 1500 mA            | 550 mA                 |
-| 3000 mA            | 1890 mA                |
+| Upstream allowance | Aggregate target allowance |
+| ------------------ | -------------------------- |
+| 900 mA             | Off                        |
+| 1200 mA            | 170 mA                     |
+| 1500 mA            | 550 mA                     |
+| 3000 mA            | 1890 mA                    |
 
 Native USB-C Rp supplies the allowance. On legacy A-to-C connections, `host-budget <mA>` declares the remaining allowance including Iasis, up to 1600 mA. It clears on USB reset and never overrides native Rp.
 
 The charging path requires a confirmed CH224 contract, power-good and 7–21 V on the input bus. It configures each converter for 5.10 V with a 1 A limit, checks safe-zero before connecting and checks output voltage before starting PD.
 
-When a brick is inserted, attached ports keep their output path, while the shared `5V_LOGIC` rail changes source. The presence limit must fit both the host allowance and the brick's remaining budget. Lost or reduced supply capacity can interrupt a restore.
+The Rev A charging input supports fixed profiles up to 20 V. Firmware leaves normal 9–20 V input contracts unchanged. If the bus exceeds 21 V (20 V plus tolerance), it requests fixed 20 V and withholds target power until fresh contract, power-good and voltage readings allow it. The host USB port never requests a voltage above 5 V.
+
+When a brick is inserted, attached host-powered ports can keep their output path if the presence limit fits both supplies. Removing the brick from a brick-powered target drops its VBUS and can disconnect USB while the controller stays online. Leave the power source and any inline meter connected throughout a restore.
 
 ## Controls and status
 

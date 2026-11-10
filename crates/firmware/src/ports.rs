@@ -135,6 +135,7 @@ impl Ports {
         controls: &mut Controls,
         outputs: &mut Outputs,
         status: &mut Status,
+        host_limiter_fault: bool,
     ) {
         let grants = power::admit_ports(
             self.ports.each_ref().map(|port| {
@@ -149,6 +150,11 @@ impl Ports {
         );
         // Remove source requests before spending time on bus transactions.
         for (index, port) in self.ports.iter_mut().enumerate() {
+            // The shared EN is latched low before ticking on either fallback
+            // supply. The TPS55288 has reset and need not answer an I²C stop.
+            if status.supply != Supply::Brick {
+                port.stage_on = false;
+            }
             if !grants[index] || status.aggregate_power_fault || bus.faulted() {
                 controls.charge(index, false);
             }
@@ -156,15 +162,14 @@ impl Ports {
             port.status.vbus_adc = input.vbus_adc;
             port.status.faults = input.faults;
         }
+        // A brick input fault withdraws the shared supply. Only the host
+        // limiter attributes a shared overcurrent trip to powered targets.
         for (index, port) in self.ports.iter_mut().enumerate() {
             let result = if core::mem::take(&mut port.host_expired) {
                 Err(PortError::HostAllowanceExpired)
             } else if bus.faulted() {
                 Err(PortError::BusStopped)
-            } else if status.aggregate_power_fault
-                && port.powered
-                && port.status.state != PortState::Fault
-            {
+            } else if host_limiter_fault && port.powered && port.status.state != PortState::Fault {
                 Err(PortError::Protection)
             } else {
                 port.tick(
