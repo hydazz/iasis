@@ -22,18 +22,16 @@ def write(
     for name, c in covers.items():
         printing.export(f"{prefix}cover-{name}", c.part, print_dir, c.markings, rotation=Rot(X=180))
         printing.export(f"{prefix}button-{name}", c.button, print_dir, rotation=Rot(X=180))
-        if c.retainer is not None:
-            printing.export(f"{prefix}display-retainer", c.retainer.part, print_dir)
 
-    extra: list[Shape] = [tray, *case.feet(lay)]
+    extra: list[Shape] = [tray, *case.feet(lay), *(f.hardware for f in lay.fasteners)]
     if lay.battery is not None:
         extra += [lay.battery.pack, lay.battery.lead, lay.battery.plug]
     for c in covers.values():
         extra += [c.part, c.markings, c.button]
         if c.display is not None:
             extra.append(c.display)
-        if c.retainer is not None:
-            extra.append(c.retainer.part)
+        if c.display_mount is not None:
+            extra.extend(c.display_mount.screws)
     step = output / f"iasis-{prefix}case.step"
     kicad.export_assembly(lay.board, extra, step, getattr(lay.board, "attach", None))
     return step
@@ -45,7 +43,8 @@ def main() -> None:
     args = parser.parse_args()
     output = args.output.resolve() if args.output else BUILD
     output.mkdir(parents=True, exist_ok=True)
-    printing.export("tpu-foot", case.foot(), output / "print")
+    for obsolete in ("tpu-foot.stl", "display-retainer.stl", "cm5-display-retainer.stl"):
+        (output / "print" / obsolete).unlink(missing_ok=True)
     steps = [
         write("", *case.assemble(), output),
         write("cm5-", *case.assemble_cm5(), output),
