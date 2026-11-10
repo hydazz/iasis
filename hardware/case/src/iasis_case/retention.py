@@ -1,199 +1,199 @@
-"""Finger-release end catches and mating guides, in assembled coordinates."""
+"""Screw joints, seam guides and OLED mounting posts, in assembled coordinates."""
 
 from dataclasses import dataclass
 from functools import cached_property
+from math import cos, radians, sin
 from typing import cast
 
-from build123d import Align, Box, Cylinder, Part, Plane, Polygon, Pos, Rot, extrude
+from build123d import (
+    Align,
+    Box,
+    Compound,
+    Cylinder,
+    Part,
+    Plane,
+    Polygon,
+    Pos,
+    RegularPolygon,
+    Rot,
+    extrude,
+)
 
-FIT = 0.15
-BEAM_THICKNESS = 0.8
-RELEASE, STOP = 0.4, 0.35
-LATCH_PLAY = 0.2
+FIT = 0.10
+SCREW_D, SCREW_CLEAR = 3.0, 3.4
+HEAD_D, HEAD_H = 6.0, 2.6
+NUT_AF, NUT_H = 5.5, 2.4
+NUT_FIT, NUT_PLAY = 0.15, 0.3
+BOSS_D = 9.2
 BASE = (Align.CENTER, Align.CENTER, Align.MIN)
 
 
-def paired(part: Part) -> list[Part]:
-    return [part, part.mirror(Plane.YZ)]
-
-
 def section(points: list[tuple[float, float]], y: float, width: float) -> Part:
-    """Extrude an X/Z section towards decreasing Y."""
     return extrude(Pos(0, y + width / 2, 0) * (Plane.XZ * Polygon(*points, align=None)), width)
 
 
 @dataclass(frozen=True)
-class Joint:
-    edge: float
-    split: float
-    roof: float
-    y: float = -21.0
-    pad_z: float = 6.7
+class Fastener:
+    x: float
+    y: float
+    bearing: float  # under-head face; screw points toward +Z
+    length: float
+    angle: float  # nut-loading direction, measured from +X
 
     @property
-    def shoulder(self) -> float:
-        return self.split + 0.9
+    def tip(self) -> float:
+        return self.bearing + self.length
 
     @property
-    def root(self) -> float:
-        return self.roof + 0.8
+    def nut_z(self) -> float:
+        return self.tip - NUT_H - 1.0
 
     @property
-    def inner(self) -> float:
-        return self.edge - 2.4
+    def place(self):
+        return Pos(self.x, self.y, self.nut_z) * Rot(Z=self.angle)
 
     @cached_property
-    def pad(self) -> Part:
-        plane = Plane(
-            origin=(self.edge - 1.6, self.y, self.pad_z), x_dir=(0, 1, 0), z_dir=(1, 0, 0)
+    def pocket(self) -> Part:
+        af = NUT_AF + 2 * NUT_FIT
+        hexagon = extrude(RegularPolygon(af / 2, 6, major_radius=False), NUT_H + NUT_PLAY)
+        entry = Pos(4, 0, 0) * Box(8, af, NUT_H + NUT_PLAY, align=BASE)
+        return cast(Part, self.place * (hexagon + entry))
+
+    @cached_property
+    def bore(self) -> Part:
+        return Pos(self.x, self.y, self.bearing - 0.1) * Cylinder(
+            SCREW_CLEAR / 2, self.length + 0.4, align=BASE
         )
-        pad = plane * Cylinder(3, 1.6, align=BASE)
-        # A 45-degree crown grows the pad out from the beam when printed roof down.
-        ramp = section(
+
+    @cached_property
+    def receiver_cut(self) -> Part:
+        # Face-down printing bridges the nut slot before closing around the screw.
+        # The long opening anchors both ends of that first bridge; a round bore
+        # would start with a floating inner perimeter.
+        passage = Pos(self.x, self.y, self.bearing - 0.1) * Box(
+            SCREW_CLEAR, SCREW_CLEAR, self.nut_z - self.bearing + 0.2, align=BASE
+        )
+        bridge = self.place * (Pos(0, 0, -0.4) * Box(SCREW_CLEAR, NUT_AF + 1.1, 0.5, align=BASE))
+        return cast(Part, self.pocket + self.bore + passage + bridge)
+
+    @cached_property
+    def screw(self) -> Part:
+        head = Pos(self.x, self.y, self.bearing - HEAD_H) * Cylinder(HEAD_D / 2, HEAD_H, align=BASE)
+        shank = Pos(self.x, self.y, self.bearing) * Cylinder(SCREW_D / 2, self.length, align=BASE)
+        return cast(Part, head + shank)
+
+    @cached_property
+    def nut(self) -> Part:
+        body = extrude(RegularPolygon(NUT_AF / 2, 6, major_radius=False), NUT_H)
+        body -= Cylinder(SCREW_D / 2, NUT_H, align=BASE)
+        return cast(Part, self.place * body)
+
+    @property
+    def hardware(self) -> Compound:
+        return Compound([self.screw, self.nut], label="M3 screw and nut")
+
+    def nut_at(self, distance: float) -> Part:
+        a = radians(self.angle)
+        return Pos(distance * cos(a), distance * sin(a), 0) * self.nut
+
+    @property
+    def driver(self) -> Part:
+        return Pos(self.x, self.y, self.bearing - HEAD_H - 30) * Cylinder(3, 30, align=BASE)
+
+
+def guides(edge: float, split: float) -> list[Part]:
+    parts = []
+    for y in (-36, 36):
+        guide = section(
             [
-                (self.edge - 1.6, self.pad_z - 4),
-                (self.edge + 0.1, self.pad_z - 4),
-                (self.edge + 0.1, self.pad_z + 1.3),
-                (self.edge - 1.6, self.pad_z + 3),
+                (edge - 0.8, split + 1.6),
+                (edge - 1, split + 1.6),
+                (edge - 2.4, split + 0.2),
+                (edge - 2.4, split - 0.8),
+                (edge - 2, split - 1.2),
+                (edge - 1.2, split - 1.2),
+                (edge - 1.2, split + 0.2),
+                (edge - 0.8, split + 0.6),
             ],
-            self.y,
-            7,
+            y,
+            6,
         )
-        return cast(Part, pad & ramp)
+        parts += [guide, guide.mirror(Plane.YZ)]
+    return parts
 
-    @cached_property
-    def hook(self) -> Part:
-        x, z = self.edge, self.shoulder
-        beam = Pos(self.inner + BEAM_THICKNESS / 2, self.y, z - 0.45) * Box(
-            BEAM_THICKNESS, 8, self.root + 0.2 - z + 0.45, align=BASE
+
+def guide_pockets(edge: float, split: float) -> list[Part]:
+    parts = []
+    for y in (-36, 36):
+        cut = Pos(edge - 1.8, y, split - 1.2 - FIT) * Box(
+            1.2 + 2 * FIT, 6 + 2 * FIT, 1.2 + 2 * FIT, align=BASE
         )
-        toe = section(
-            [
-                (x - 1.6, z - 0.4),
-                (x - 1.35, z - 0.4),
-                (x - 0.95, z),
-                (x - 1.35, z),
-                (x - 1.35, z + 0.4),
-                (x - 1.6, z + 0.65),
-            ],
-            self.y,
-            8,
-        )
-        return cast(Part, beam + toe + self.pad)
-
-    @cached_property
-    def opening(self) -> Part:
-        plane = Plane(origin=(self.edge - 3, self.y, self.pad_z), x_dir=(0, 1, 0), z_dir=(1, 0, 0))
-        return plane * Cylinder(3.25, 4, align=BASE)
-
-    @cached_property
-    def catch(self) -> Part:
-        x, z = self.edge, self.shoulder
-        catch = Pos(x - 0.6, self.y, self.split - 0.2) * Box(1.2, 10, 2.3, align=BASE)
-        # The blind pocket leaves a continuous back wall beneath its small overhang.
-        catch -= Pos(x - 1.4, self.y, z - 0.8) * Box(1.2, 8 + 2 * FIT, 0.8 + LATCH_PLAY, align=BASE)
-        return cast(Part, catch - self.opening)
-
-    def tray_parts(self) -> list[Part]:
-        return paired(self.catch)
-
-    def guides(self) -> list[Part]:
-        parts = []
-        x, z = self.edge, self.split
-        for y in (-32, 32):
-            guide = section(
-                [
-                    (x - 1, z + 1),
-                    (x - 1.8, z + 1),
-                    (x - 1.8, z - 0.7),
-                    (x - 1.5, z - 1),
-                    (x - 1, z - 1),
-                ],
-                y,
-                4,
-            )
-            parts += paired(guide)
-        return parts
-
-    def tray_cuts(self) -> list[Part]:
-        cuts: list[Part] = [
-            Pos(self.edge - 1.5, y, self.split - 1 - FIT)
-            * Box(1 + 2 * FIT, 4 + 2 * FIT, 2, align=BASE)
-            for y in (-32, 32)
-        ]
-        cuts.append(self.opening)
-        return [half for cut in cuts for half in paired(cut)]
-
-    def cover_parts(self) -> list[Part]:
-        stop = Pos(self.inner - STOP - 1, self.y, self.pad_z) * Box(
-            2, 6, self.roof - self.pad_z + 0.5, align=BASE
-        )
-        return paired(self.hook) + paired(stop) + self.guides()
-
-    def cover_cuts(self) -> list[Part]:
-        x, z = self.edge, self.split
-        cuts = [
-            Pos(x - 0.6, self.y, z - 1) * Box(3, 10 + 2 * FIT, 3.1 + FIT, align=BASE),
-            self.opening,
-            Pos(x - 2, self.y, self.roof - 0.1) * Box(1.6, 8.8, 0.9, align=BASE),
-        ]
-        return [half for cut in cuts for half in paired(cut)]
+        parts += [cut, cut.mirror(Plane.YZ)]
+    return parts
 
 
 @dataclass(frozen=True)
-class DisplayFrame:
+class DisplayMount:
     x: float
-    rear: float
+    face: float
     roof: float
+    thickness: float
     holes: tuple[tuple[float, float], ...]
 
-    thickness: float = 1.2
-    play: float = 0.2
-    release: float = 0.6
+    screw_d: float = 2.5
+    screw_length: float = 4.0
+    head_d: float = 5.0
+    head_h: float = 2.2
+    post_d: float = 4.0
+    pilot_d: float = 2.2
 
     @property
-    def base(self) -> float:
-        return self.rear - 4.73
+    def rear(self) -> float:
+        return self.face - self.thickness
 
     @property
-    def contact(self) -> float:
-        return self.rear - self.play
+    def tip(self) -> float:
+        return self.rear + self.screw_length
 
     @cached_property
-    def tip(self) -> Part:
-        return Pos(self.x + 7, -16.65, self.base) * Box(6, 4.3, self.thickness, align=BASE)
+    def centres(self) -> tuple[tuple[float, float], ...]:
+        return tuple((self.x + x, y) for x, y in self.holes)
 
     @cached_property
-    def part(self) -> Part:
-        z = self.base
-        frame = Pos(self.x, 0, z) * Box(42, 37.6, self.thickness, align=BASE)
-        frame -= Pos(self.x, 0, z - 1) * Box(36, 33.6, self.thickness + 2, align=BASE)
-        # An 18 mm planar arm releases the front keeper; its pad stops after 0.8 mm.
-        frame -= Pos(self.x + 1.4, -17.2, z - 1) * Box(18.8, 0.8, 4, align=BASE)
-        frame -= Pos(self.x + 10.4, -18, z - 1) * Box(0.8, 3, 4, align=BASE)
-        frame += self.tip
-        frame += Pos(self.x + 13.25, -13.2, z) * Box(12.5, 1, self.thickness, align=BASE)
-        for x, y in self.holes:
-            side = 1 if x > 0 else -1
-            frame += Pos(self.x + (x + side * 19.5) / 2, y, z) * Box(
-                19.5 - abs(x), 4, self.thickness, align=BASE
-            )
-            frame += Pos(self.x + x, y, z) * Cylinder(2, self.contact - z, align=BASE)
-            frame -= Pos(self.x + x, y, z - 1) * Cylinder(1.4, self.contact - z + 2, align=BASE)
-        frame.label = "display retainer"
-        return cast(Part, frame)
-
-    @cached_property
-    def keepers(self) -> list[Part]:
-        # Horizontal bearing faces retain the frame without spring preload.
-        profile = [
-            (20, self.base - 0.6),
-            (20, self.roof + 0.5),
-            (19, self.roof + 0.5),
-            (19, self.base),
-            (18.4, self.base),
+    def pilots(self) -> list[Part]:
+        # Smooth bores: the screws form their threads in the printed posts.
+        return [
+            Pos(x, y, self.face - 0.1)
+            * Cylinder(self.pilot_d / 2, self.tip - self.face + 0.3, align=BASE)
+            for x, y in self.centres
         ]
-        rear = Rot(Z=90) * section(profile, 0, 6)
-        return [Pos(self.x + x, 0, 0) * rear for x in (-15.24, 15.24)] + [
-            Pos(self.x + 7, 0, 0) * rear.mirror(Plane.XZ)
+
+    @cached_property
+    def posts(self) -> list[Part]:
+        return [
+            cast(
+                Part,
+                Pos(x, y, self.face)
+                * Cylinder(self.post_d / 2, self.roof - self.face + 0.5, align=BASE)
+                - pilot,
+            )
+            for (x, y), pilot in zip(self.centres, self.pilots, strict=True)
+        ]
+
+    @cached_property
+    def heads(self) -> list[Part]:
+        return [
+            Pos(x, y, self.rear - self.head_h) * Cylinder(self.head_d / 2, self.head_h, align=BASE)
+            for x, y in self.centres
+        ]
+
+    @cached_property
+    def screws(self) -> list[Part]:
+        return [
+            cast(
+                Part,
+                head
+                + Pos(x, y, self.rear) * Cylinder(self.screw_d / 2, self.screw_length, align=BASE),
+            )
+            for (x, y), head in zip(self.centres, self.heads, strict=True)
         ]

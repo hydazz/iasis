@@ -1,16 +1,17 @@
 # Iasis case
 
-A snap-fit printed case with a removable lid and captive button. Choose a plain lid or one for an Adafruit 938 STEMMA QT OLED. The longer CM5 version holds the main board and carrier together.
+A printed case with a screw-fastened lid and captive button. Choose a plain lid or one for an Adafruit 938 STEMMA QT OLED. The longer CM5 version holds the main board and carrier together.
 
 <img src="preview/case.png" alt="Iasis enclosure" width="500">
 
 <img src="preview/case-cm5.png" alt="Iasis CM5 enclosure" width="500">
 
-| Case                  | External size, excluding feet |
-| --------------------- | ----------------------------- |
-| Main board, plain lid | 136 × 104.6 × 17.1 mm         |
-| Main board, OLED lid  | 136 × 104.6 × 19.6 mm         |
-| CM5, either lid       | 212.6 × 104.6 × 20.1 mm       |
+| Case                  | Printed body size       |
+| --------------------- | ----------------------- |
+| Main board, plain lid | 136 × 104.6 × 17.1 mm   |
+| Main board, OLED lid  | 136 × 104.6 × 19.6 mm   |
+| CM5, plain lid        | 212.6 × 104.6 × 20.1 mm |
+| CM5, OLED lid         | 212.6 × 104.6 × 20.1 mm |
 
 ## Generate the parts
 
@@ -27,30 +28,41 @@ The build exports both populated boards and writes the case parts to `build/case
 | `print/tray.stl`                                        | Tray, floor down                            |
 | `print/cover-passive.stl` / `print/cover-display.stl`   | Lid, top down                               |
 | `print/button-passive.stl` / `print/button-display.stl` | Matching button, face down                  |
-| `print/display-retainer.stl`                            | OLED frame, flat side down                  |
-| `print/tpu-foot.stl`                                    | Foot, flat side down; print four            |
 | `print/cover-*-lettering.stl`                           | Optional aligned lid inlays                 |
 | `print/cm5-*.stl`                                       | Corresponding CM5 parts; uses the same feet |
 | `iasis-case.step` / `iasis-cm5-case.step`               | Assemblies with both lid options            |
 
-The STLs are already oriented for printing.
+The STLs are already oriented for printing. The STEP assemblies include screw, nut and purchased-foot envelopes; these are not printed parts.
+
+## Hardware
+
+Both sizes use the same hardware.
+
+| Quantity     | Part                                       |
+| ------------ | ------------------------------------------ |
+| 4            | M3 × 15 mm pan-head screws and M3 hex nuts |
+| 4, OLED only | M2.5 × 4 mm pan-head screws                |
+| 4            | Small self-adhesive rubber feet            |
+
+Use the listed screw lengths to avoid reaching the lid's outer face.
 
 ## Print and assemble
 
-Use PLA, a 0.4 mm nozzle, 0.20 mm layers and no supports. Print the feet in TPU. For multicolour markings, import the lid and matching lettering STL as parts of one object, retain their positions and assign filaments. Omit the lettering STL for recessed text.
+Use PLA, a 0.4 mm nozzle, 0.20 mm layers and no supports. For multicolour markings, import the lid and matching lettering STL as parts of one object, retain their positions and assign filaments. Omit the lettering STL for recessed text.
 
-1. Glue the four feet into the tray recesses.
-2. Set the PCB on the locating pegs.
-3. Fit the button from inside the lid.
-4. Press the lid down until both catches engage.
+1. Slide four M3 nuts into the inward-facing slots in the lid's outer mounting posts.
+2. Set the PCB on the tray's locating pegs and fit the button from inside the lid.
+3. Lower the lid onto the tray, engaging the end guides. Keep the nuts seated while handling the lid.
+4. Fit the four 15 mm screws from underneath. Tighten by hand until the seam closes; the screws fasten the shell without clamping the PCB.
+5. Stick four rubber feet near the corners of the flat underside, leaving the screw heads accessible.
 
-To open, squeeze the round pads at either end and lift the lid straight up. BOOTSEL and RESET are under the lid. The dot marks port 1; [button gestures](../../README.md#use) are printed beside the button.
+To open, remove the four underside screws and lift the lid straight up. The feet provide clearance beneath the screw heads and can stay attached. The empty case also closes without the PCB. BOOTSEL and RESET are under the lid. The dot marks port 1; [button gestures](../../README.md#use) are printed beside the button.
 
 ### OLED assembly
 
-Place the display on the lid's locating pins. Slide the retaining frame under the two rear keepers, then snap its front edge into the catch. Connect the Qwiic cable before closing, clear of the button and catches.
+With the lid face down, place the OLED on its four mounting posts, with the flex edge toward the target ports. Fit four M2.5 × 4 mm screws through the PCB's corner holes into the printed posts. Tighten gently by hand until the PCB is held against the supports. Keep pressure off the glass.
 
-To remove the frame, press its finger pad inward, lift the front and slide it out.
+Connect the Qwiic cable before closing. The display can stay attached when opening the case.
 
 ### CM5 assembly
 
