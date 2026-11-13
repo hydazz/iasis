@@ -3,10 +3,10 @@ monorepo_root = true
 [tools]
 python = "3.14.10"
 rust = { version = "1.100.0", components = "rustfmt,clippy", targets = "thumbv8m.main-none-eabihf" }
-uv = "0.13.7"
-ruff = "0.17.4"
+uv = "0.13.8"
+ruff = "0.17.5"
 lefthook = "2.2.2"
-jactionlint = "v2.5.0"
+jactionlint = "v2.6.0"
 oxfmt = "0.75.0"
 node = "26.13.1"
 "npm:pyright" = "1.1.414"
