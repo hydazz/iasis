@@ -217,10 +217,10 @@ impl Ports {
         for index in 0..PORT_COUNT {
             controls.charge(index, false);
         }
-        for index in 0..PORT_COUNT {
+        for (index, port) in self.ports.iter().enumerate() {
             if bus.select(Some(index as u8)).await.is_ok() {
                 let _ = fusb::open(bus).await;
-                if self.ports[index].stage_on {
+                if port.stage_on {
                     let _ = stage::off(bus).await;
                 }
             }
