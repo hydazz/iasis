@@ -1,5 +1,8 @@
 use std::{
+    fs::File,
+    hash::{BuildHasher, RandomState},
     path::PathBuf,
+    sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
@@ -8,20 +11,25 @@ use anyhow::{Context, Result, bail, ensure};
 use clap::{Args, ValueEnum};
 use iasis::{
     Board,
-    identity::{AppleMode, Observation, SelectionError, TargetTracker},
+    dfu::{self, Attempt, Outcome, Signal},
+    identity::{AppleMode, Observation, TargetTracker},
     restore::{PreparedIpsw, RestoreEngine, RestoreState},
     topology,
 };
-use iasis_protocol::{Gesture, Port, PortAction, PortState, RestorePhase, RestoreStatus};
+use iasis_protocol::{
+    self as protocol, Gesture, Port, PortAction, PortState, RestoreArm, RestoreControl,
+    RestoreDecision, RestorePhase, RestoreStatus, Status,
+};
 
 #[derive(Args)]
 pub struct Options {
     /// Local IPSW; validated once before any target action
     pub ipsw: PathBuf,
     /// Physical ports to erase, comma-separated
-    #[arg(long, value_delimiter = ',', value_parser = super::parse_port, required_unless_present = "button", conflicts_with = "button")]
+    #[arg(long, value_delimiter = ',', value_parser = super::parse_port, required_unless_present = "button")]
     pub ports: Vec<Port>,
-    /// Wait for a new double-click-and-hold; restores the attached batch once
+    /// Prepare DFU targets and require a fresh three-second button hold to erase.
+    /// Omit --ports to select targets from the board's Restore menu.
     #[arg(long)]
     pub button: bool,
     /// Authorize erasing the selected targets
@@ -51,8 +59,13 @@ pub fn run(board: &Board, options: Options) -> Result<()> {
         "Prepared {} ({}) for {:?}",
         ipsw.product_version, ipsw.build_version, ipsw.product_types
     );
-    let selected = if options.button {
-        wait_button(board)?
+    let action = match options.device {
+        Device::AppleSilicon => PortAction::DfuAppleSilicon,
+        Device::T2 => PortAction::DfuT2,
+    };
+    let (_claims, mut targets, mut failed) = if options.button {
+        let (claims, targets) = prepare_button(board, &options.ports, action)?;
+        (claims, targets, false)
     } else {
         let deadline = Instant::now() + Duration::from_secs(3);
         let status = loop {
@@ -68,25 +81,11 @@ pub fn run(board: &Board, options: Options) -> Result<()> {
             }
             thread::sleep(Duration::from_millis(50));
         };
-        let mut selected = Vec::new();
-        for port in options.ports {
-            ensure!(
-                !selected.iter().any(|(existing, _)| existing == &port),
-                "duplicate port {}",
-                port.number()
-            );
-            selected.push((port, status.ports[port.index()].generation));
-        }
-        selected
+        let selected = select_ports(&options.ports, &status)?;
+        let claims = claim_ports(&std::env::temp_dir(), board.info().serial, &selected)?;
+        let (targets, failed) = enter_dfu(board, &selected, action, None)?;
+        (claims, targets, failed)
     };
-    ensure!(!selected.is_empty(), "no ready ports were selected");
-    // Per connector, not a host-wide restore lock: disjoint batches can run.
-    let _claims = claim_ports(&std::env::temp_dir(), board.info().serial, &selected)?;
-    let action = match options.device {
-        Device::AppleSilicon => PortAction::DfuAppleSilicon,
-        Device::T2 => PortAction::DfuT2,
-    };
-    let (mut targets, mut failed) = enter_dfu(board, &selected, action)?;
     // Waiting for another port may outlive the earlier selection. Revalidate
     // every physical slot immediately before launching destructive workers.
     let status = board.status()?;
@@ -97,10 +96,8 @@ pub fn run(board: &Board, options: Options) -> Result<()> {
                 status.ports[target.port.index()].state,
                 PortState::Ready | PortState::Contract
             )
-            && target.observe(board.info().serial, &snapshot)
-                == (Observation::Present {
-                    mode: AppleMode::Dfu,
-                });
+            && (!options.button || status.ready_mask() & (1 << target.port.index()) != 0)
+            && ordinary_dfu(board, target, &snapshot);
         if !valid {
             eprintln!(
                 "port {}: target changed before restore launch",
@@ -110,6 +107,10 @@ pub fn run(board: &Board, options: Options) -> Result<()> {
         }
         valid
     });
+    ensure!(
+        !options.button || !failed,
+        "confirmed targets changed before launch; no restore started"
+    );
     ensure!(
         !targets.is_empty(),
         "no selected target reached verified DFU; no restore started"
@@ -201,36 +202,175 @@ pub fn run(board: &Board, options: Options) -> Result<()> {
     Ok(())
 }
 
-fn wait_button(board: &Board) -> Result<Vec<(Port, u32)>> {
-    let initial = board.status()?;
-    let mut last = initial.button.map_or(0, |event| event.id);
-    let mut uptime = initial.uptime_ms;
-    println!(
-        "Ready for a new Restore gesture: click twice, then hold. Existing events are ignored."
-    );
-    loop {
-        let status = board.status()?;
+type VerifiedTargets = Vec<(TargetTracker, u32)>;
+
+fn select_ports(ports: &[Port], status: &Status) -> Result<Vec<(Port, u32)>> {
+    let mut selected = Vec::new();
+    for &port in ports {
         ensure!(
-            status.uptime_ms >= uptime,
-            "controller restarted while waiting; start a new batch"
+            !selected.iter().any(|(other, _)| *other == port),
+            "duplicate port {}",
+            port.number()
         );
-        uptime = status.uptime_ms;
-        if let Some(event) = status.button
-            && event.id != last
-        {
-            let consecutive = event.id == last.wrapping_add(1).max(1);
-            last = event.id;
-            if !consecutive {
-                eprintln!("Button events were missed; waiting for a fresh gesture.");
-            } else if event.gesture == Gesture::Restore {
-                return Ok(Port::ALL
-                    .into_iter()
-                    .filter(|port| event.ports & (1 << port.index()) != 0)
-                    .map(|port| (port, event.generations[port.index()]))
-                    .collect());
+        selected.push((port, status.ports[port.index()].generation));
+    }
+    ensure!(!selected.is_empty(), "no ports selected");
+    Ok(selected)
+}
+
+fn prepare_button(
+    board: &Board,
+    ports: &[Port],
+    action: PortAction,
+) -> Result<(Vec<File>, VerifiedTargets)> {
+    ensure!(
+        board.info().capabilities & protocol::CAP_RESTORE_ARM != 0,
+        "board does not support prepared erase confirmation"
+    );
+    let session = (RandomState::new().hash_one(board.info().serial) as u32).max(1);
+    let initial = board.status()?;
+    board.restore_control(RestoreControl::Begin(session))?;
+    let result = thread::scope(|scope| {
+        // DFU entry can take longer than the lease, even when USB is healthy.
+        let (stop, stopped) = mpsc::channel::<()>();
+        let heartbeat = scope.spawn(move || -> Result<()> {
+            while let Err(mpsc::RecvTimeoutError::Timeout) =
+                stopped.recv_timeout(Duration::from_millis(500))
+            {
+                board
+                    .restore_control(RestoreControl::KeepAlive(session))
+                    .context("restore session lost")?;
             }
+            Ok(())
+        });
+        let result = prepare_in_session(board, ports, action, session, &initial, || {
+            !heartbeat.is_finished()
+        });
+        drop(stop);
+        heartbeat.join().expect("restore heartbeat panicked")?;
+        result
+    });
+    // End also verifies that USB still owns the session which produced the decision.
+    let ended = board.restore_control(RestoreControl::End(session));
+    let prepared = result?;
+    ended.context("restore session ended before confirmation was collected")?;
+    Ok(prepared)
+}
+
+fn prepare_in_session(
+    board: &Board,
+    ports: &[Port],
+    action: PortAction,
+    session: u32,
+    initial: &Status,
+    alive: impl Fn() -> bool,
+) -> Result<(Vec<File>, VerifiedTargets)> {
+    let selected = if ports.is_empty() {
+        println!(
+            "On Iasis, select the targets, open the actions menu and choose Restore to prepare them for erase."
+        );
+        let mut last = initial.button.map_or(0, |e| e.id);
+        loop {
+            ensure!(
+                alive(),
+                "restore session lost while waiting for target selection"
+            );
+            let status = board.status()?;
+            if let Some(event) = status.button
+                && event.id != last
+            {
+                last = event.id;
+                if event.session == Some(session) && event.gesture == Gesture::Restore {
+                    break Port::ALL
+                        .into_iter()
+                        .filter(|p| event.ports & (1 << p.index()) != 0)
+                        .map(|p| (p, event.generations[p.index()]))
+                        .collect::<Vec<_>>();
+                }
+            }
+            thread::sleep(Duration::from_millis(100));
         }
-        thread::sleep(Duration::from_millis(100));
+    } else {
+        select_ports(ports, initial)?
+    };
+    let status = board.status()?;
+    let mut arm = RestoreArm {
+        session,
+        id: 1,
+        ports: 0,
+        generations: [0; protocol::PORT_COUNT],
+        expires: 0,
+    };
+    for &(port, generation) in &selected {
+        arm.ports |= 1 << port.index();
+        arm.generations[port.index()] = generation;
+    }
+    ensure!(
+        arm.matches_targets(&status),
+        "selected targets changed, are busy or are unavailable"
+    );
+    let claims = claim_ports(&std::env::temp_dir(), board.info().serial, &selected)?;
+    let (targets, failed) = enter_dfu(board, &selected, action, Some(session))?;
+    ensure!(
+        !failed && targets.len() == selected.len(),
+        "not all selected targets reached verified DFU; no erase armed"
+    );
+    let status = board.status()?;
+    ensure!(
+        arm.matches_targets(&status),
+        "prepared targets changed; no erase armed"
+    );
+    let snapshot = topology::discover(board.topology())?;
+    ensure!(
+        targets
+            .iter()
+            .all(|(target, _)| ordinary_dfu(board, target, &snapshot)),
+        "a prepared DFU identity changed; no erase armed"
+    );
+    arm.expires = status.uptime_ms + protocol::RESTORE_ARM_MS;
+    board
+        .restore_control(RestoreControl::Arm(arm))
+        .context("board rejected the prepared erase arm")?;
+    for (target, _) in &targets {
+        println!(
+            "Prepared port {}, ECID {:016x}",
+            target.port.number(),
+            target.ecid
+        );
+    }
+    println!(
+        "Hold the Iasis button for 3 seconds to erase these targets. Tap to cancel. The arm expires in 20 seconds."
+    );
+    let deadline = Instant::now() + Duration::from_millis(protocol::RESTORE_ARM_MS);
+    loop {
+        ensure!(alive(), "restore session lost; erase cancelled");
+        ensure!(Instant::now() < deadline, "erase arm expired");
+        if confirmed(arm, &board.status()?)? {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    Ok((claims, targets))
+}
+
+fn ordinary_dfu(board: &Board, target: &TargetTracker, snapshot: &topology::Snapshot) -> bool {
+    dfu::direct_device(snapshot, target.port).is_some()
+        && target.observe(board.info().serial, snapshot)
+            == (Observation::Present {
+                mode: AppleMode::Dfu,
+            })
+}
+
+fn confirmed(arm: RestoreArm, status: &Status) -> Result<bool> {
+    ensure!(status.uptime_ms < arm.expires, "erase arm expired");
+    ensure!(
+        arm.matches_targets(status),
+        "prepared targets changed; erase cancelled"
+    );
+    match status.restore_decision {
+        Some(RestoreDecision::Confirmed(echo)) if echo == arm => Ok(true),
+        Some(RestoreDecision::Cancelled(echo)) if echo == arm => bail!("erase cancelled"),
+        _ => Ok(false),
     }
 }
 
@@ -238,58 +378,70 @@ fn enter_dfu(
     board: &Board,
     selected: &[(Port, u32)],
     action: PortAction,
-) -> Result<(Vec<(TargetTracker, u32)>, bool)> {
+    session: Option<u32>,
+) -> Result<(VerifiedTargets, bool)> {
     let mut pending = Vec::new();
     let mut targets = Vec::new();
     let mut failed = false;
-    let mut snapshot = topology::discover(board.topology())?;
-    snapshot.query_identities();
     for &(port, generation) in selected {
-        let current = board.status()?.ports[port.index()];
-        if current
-            .restore
-            .is_some_and(|job| matches!(job.phase, RestorePhase::Preparing | RestorePhase::Running))
-        {
-            eprintln!("port {}: a restore is already active", port.number());
-            failed = true;
-            continue;
+        let mut snapshot = topology::discover(board.topology())?;
+        if board.status()?.ready_mask() & (1 << port.index()) != 0 {
+            snapshot.query_port_identity(port);
         }
-        if current.generation != generation
-            || !matches!(current.state, PortState::Ready | PortState::Contract)
-        {
+        let status = board.status()?;
+        let assessment = dfu::assess(board.info().serial, port, &status, &snapshot, None);
+        if generation != assessment.generation || status.ready_mask() & (1 << port.index()) == 0 {
             eprintln!(
-                "port {}: attachment changed or power is not ready",
-                port.number()
+                "port {}: attachment changed or unavailable. {}",
+                port.number(),
+                assessment.describe()
             );
             failed = true;
             continue;
         }
-        let known = match TargetTracker::pin(board.info().serial, &snapshot, port) {
-            Ok(target) => Some(target),
-            Err(SelectionError::Ambiguous(_)) => {
-                eprintln!("port {}: ambiguous target identity", port.number());
-                failed = true;
+        match (assessment.signal, assessment.usb_mode) {
+            (Signal::AlreadyDfu, Some(AppleMode::Dfu)) => {
+                match TargetTracker::pin(board.info().serial, &snapshot, port) {
+                    Ok(target) => targets.push((target, generation)),
+                    Err(error) => {
+                        eprintln!("port {}: {error}", port.number());
+                        failed = true;
+                    }
+                }
                 continue;
             }
-            Err(SelectionError::PortDfu(_)) => {
+            (Signal::PortDfu, _) => {
                 pending.push((port, generation, None));
                 continue;
             }
-            Err(SelectionError::Missing(_) | SelectionError::IdentityMissing(_)) => None,
-        };
-        if let Some(target) = &known
-            && target.observe(board.info().serial, &snapshot)
-                == (Observation::Present {
-                    mode: AppleMode::Dfu,
-                })
-        {
-            targets.push((target.clone(), generation));
-            continue;
+            (Signal::Available, _) => {}
+            _ => {
+                eprintln!(
+                    "port {}: {} Restore requires an ordinary DFU identity.",
+                    port.number(),
+                    assessment.describe()
+                );
+                failed = true;
+                continue;
+            }
+        }
+        if let Some(id) = session {
+            board.restore_control(RestoreControl::KeepAlive(id))?;
         }
         match board.command_for_generation(port, generation, action) {
             Ok(result) => {
                 println!("port {} DFU signalling: {result:?}", port.number());
-                pending.push((port, generation, known));
+                pending.push((
+                    port,
+                    generation,
+                    Some(Attempt::new(
+                        board.info().serial,
+                        port,
+                        &assessment,
+                        &snapshot,
+                        result,
+                    )),
+                ));
             }
             Err(error) => {
                 eprintln!("port {}: {error}", port.number());
@@ -310,21 +462,42 @@ fn enter_dfu(
                 failed = true;
                 return false;
             }
-            let Ok(target) = TargetTracker::pin(board.info().serial, &snapshot, *port) else {
-                return true;
-            };
-            if previous
-                .as_ref()
-                .is_some_and(|known| known.ecid != target.ecid)
+            let assessment = dfu::assess(
+                board.info().serial,
+                *port,
+                &status,
+                &snapshot,
+                previous.as_ref(),
+            );
+            if matches!(
+                assessment.signal,
+                Signal::MultipleTransports
+                    | Signal::Ambiguous
+                    | Signal::DifferentDevice
+                    | Signal::Fault
+                    | Signal::Restoring
+            ) || matches!(assessment.usb_mode, Some(AppleMode::KisDfu))
+                || matches!(
+                    assessment.outcome,
+                    Some(
+                        Outcome::IdentityChanged
+                            | Outcome::AttachmentChanged
+                            | Outcome::BoardRestarted
+                            | Outcome::TargetUnclear
+                    )
+                )
             {
-                eprintln!("port {}: ECID changed during DFU entry", port.number());
+                eprintln!(
+                    "port {}: {} Restore requires an ordinary DFU identity.",
+                    port.number(),
+                    assessment.describe()
+                );
                 failed = true;
                 return false;
             }
-            if target.observe(board.info().serial, &snapshot)
-                == (Observation::Present {
-                    mode: AppleMode::Dfu,
-                })
+            if assessment.usb_mode == Some(AppleMode::Dfu)
+                && assessment.outcome != Some(Outcome::IdentityUnverified)
+                && let Ok(target) = TargetTracker::pin(board.info().serial, &snapshot, *port)
             {
                 targets.push((target, *generation));
                 return false;
@@ -381,6 +554,53 @@ fn claim_ports(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_exact_prepared_targets_can_confirm_erase() {
+        let arm = RestoreArm {
+            session: 7,
+            id: 1,
+            ports: 4,
+            generations: [0, 0, 12, 0, 0],
+            expires: 20_000,
+        };
+        let mut status = Status::default();
+        status.ports[2].generation = 12;
+        status.ports[2].state = PortState::Ready;
+        status.button = Some(protocol::ButtonEvent {
+            id: 1,
+            session: Some(7),
+            gesture: Gesture::Restore,
+            ports: 4,
+            generations: arm.generations,
+        });
+        assert!(!confirmed(arm, &status).unwrap());
+        for other in [
+            RestoreArm { session: 6, ..arm },
+            RestoreArm { id: 2, ..arm },
+            RestoreArm { ports: 5, ..arm },
+            RestoreArm {
+                generations: [0; 5],
+                ..arm
+            },
+            RestoreArm {
+                expires: 25_000,
+                ..arm
+            },
+        ] {
+            status.restore_decision = Some(RestoreDecision::Confirmed(other));
+            assert!(!confirmed(arm, &status).unwrap());
+        }
+        status.restore_decision = Some(RestoreDecision::Cancelled(arm));
+        assert!(confirmed(arm, &status).is_err());
+        status.restore_decision = Some(RestoreDecision::Confirmed(arm));
+        assert!(confirmed(arm, &status).unwrap());
+        status.uptime_ms = arm.expires;
+        assert!(confirmed(arm, &status).is_err());
+        status.uptime_ms = 10_000;
+        status.ports[2].generation += 1;
+        assert!(confirmed(arm, &status).is_err());
+    }
 
     #[test]
     fn concurrent_batches_claim_connectors_without_serializing_other_ports() {

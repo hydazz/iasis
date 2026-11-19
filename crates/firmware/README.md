@@ -55,22 +55,25 @@ When a brick is inserted, attached host-powered ports can keep their output path
 
 `iasis status --watch` shows the board temperature near the port 1 and 2 output switches (TH1191, sensor A) and the shared core regulator (TH1192, sensor B). On macOS it can run during a restore. Use the raw ADC counts in `status --json` for calibration.
 
-The [button gestures and CLI commands](../../README.md#use) operate on ready ports. DFU supports Apple Silicon and T2; the button selects Apple Silicon. Commands use the attachment generation to reject requests for a device that has since disconnected.
+The [button and CLI controls](../../README.md#use) operate on ready ports. DFU supports Apple Silicon and T2; the button selects Apple Silicon. Commands use the attachment generation to reject requests for a device that has since disconnected.
 
-| LED colour | Meaning                                |
-| ---------- | -------------------------------------- |
-| Green      | Ready or restore complete              |
-| Blue       | Activity                               |
-| Amber      | Preparation, waiting or unknown result |
-| Red        | Fault or failure                       |
+| LED colour | Meaning                                  |
+| ---------- | ---------------------------------------- |
+| Off        | Empty or disabled target port            |
+| Green      | Ready for signalling or restore complete |
+| Blue       | Activity                                 |
+| Amber      | Preparation, waiting or unknown result   |
+| Red        | Fault or failure                         |
+
+Some cables, including USB-C to Lightning, can keep the port green after the device is unplugged. Use `iasis ports` to list devices on the host.
 
 Host restore feedback expires after five seconds without an update, changing the LED to unconfirmed without cycling power. Command results and feedback fields are defined in the [protocol](../protocol/README.md).
 
 ## OLED
 
-Connect an [Adafruit 938](https://www.adafruit.com/product/938) to the display I²C connector. The 128×64 screen keeps all five physical ports visible in a fixed overview. A lightning bolt indicates brick power; the lower area shows actions, button feedback and board faults. The button retains its batch gestures.
+Connect an [Adafruit 938](https://www.adafruit.com/product/938) to the display I²C connector. The 128×64 screen shows all five physical ports. Tap to inspect All or a single port and hold to open its action menu. Details shows connector readings for the selected target. A lightning bolt indicates brick power. The lower area shows available actions, restore progress and faults.
 
-`RDY` means ready for signalling. Restore feedback comes from the host: `DONE` means complete, `UNKN` means the result is unknown. The face animates during activity and blinks at idle.
+`RDY` means ready for signalling. During a restore run by Iasis, a moving mark means the worker is preparing or has yet to report progress. The bar under each port fills with the current stage and can start over at the next stage. Select a port to read its stage percentage. `DONE` means the worker reported completion. `UNKN` means the outcome is unknown. Restores started separately in Finder or Apple Configurator show progress on the host.
 
 The display is optional and works with an external restore host or the CM5. It uses mux channel 7 at `0x3d`, or `0x3c` with the address jumper changed. A bus timeout quarantines channel 7, which also carries the charging-input controller, until reboot.
 

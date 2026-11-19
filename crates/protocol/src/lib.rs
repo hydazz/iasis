@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 3;
+pub const VERSION: u16 = 4;
 pub const MAX_PACKET: usize = 512;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
@@ -11,6 +11,9 @@ pub const GET_STATUS: u8 = 2;
 pub const ENTER_BOOTLOADER: u8 = 3;
 pub const PORT_COMMAND: u8 = 4;
 pub const RESTORE_FEEDBACK: u8 = 6;
+pub const RESTORE_CONTROL: u8 = 7;
+pub const RESTORE_ARM_MS: u64 = 20_000;
+pub const RESTORE_SESSION_MS: u64 = 3000;
 
 // pid.codes private experimentation IDs, replace for distributed firmware.
 pub const DEVELOPMENT_VID: u16 = 0x1209;
@@ -21,6 +24,7 @@ pub const CAP_ROM_UPDATE: u32 = 1 << 1;
 pub const CAP_PORT_CONTROL: u32 = 1 << 2;
 pub const CAP_HOST_POWER: u32 = 1 << 3;
 pub const CAP_BATCH_BUTTON: u32 = 1 << 4;
+pub const CAP_RESTORE_ARM: u32 = 1 << 5;
 
 const MAGIC: [u8; 4] = *b"IASI";
 const HEADER_SIZE: usize = 6;
@@ -98,9 +102,51 @@ pub enum Gesture {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ButtonEvent {
     pub id: u32,
+    pub session: Option<u32>,
     pub gesture: Gesture,
     pub ports: u8,
     pub generations: [u32; PORT_COUNT],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RestoreArm {
+    pub session: u32,
+    pub id: u32,
+    pub ports: u8,
+    pub generations: [u32; PORT_COUNT],
+    /// Deadline in board uptime milliseconds.
+    pub expires: u64,
+}
+
+impl RestoreArm {
+    pub fn matches_targets(&self, status: &Status) -> bool {
+        self.ports != 0
+            && self.ports & status.ready_mask() == self.ports
+            && Port::ALL.into_iter().all(|p| {
+                self.ports & (1 << p.index()) == 0
+                    || self.generations[p.index()] == status.ports[p.index()].generation
+            })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum RestoreDecision {
+    Confirmed(RestoreArm),
+    Cancelled(RestoreArm),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum RestoreControl {
+    Begin(u32),
+    KeepAlive(u32),
+    Arm(RestoreArm),
+    End(u32),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RestoreControlRequest {
+    pub serial: u64,
+    pub control: RestoreControl,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -241,6 +287,32 @@ pub struct Status {
     pub available_ports: u8,
     pub supply: Supply,
     pub button: Option<ButtonEvent>,
+    pub restore_decision: Option<RestoreDecision>,
+}
+
+impl Status {
+    /// Targets eligible for a local action or a prepared erase.
+    pub fn ready_mask(&self) -> u8 {
+        if self.i2c_root_fault || self.aggregate_power_fault {
+            return 0;
+        }
+        let mut mask = 0;
+        for (i, port) in self.ports.iter().enumerate() {
+            if matches!(port.state, PortState::Ready | PortState::Contract)
+                && port.error.is_none()
+                && port.command_result != CommandResult::Pending
+                && !port.restore.is_some_and(|job| {
+                    matches!(
+                        job.phase,
+                        RestorePhase::Preparing | RestorePhase::Running | RestorePhase::Unconfirmed
+                    )
+                })
+            {
+                mask |= 1 << i;
+            }
+        }
+        mask
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -348,10 +420,18 @@ mod tests {
             supply: Supply::Brick,
             button: Some(ButtonEvent {
                 id: u32::MAX,
+                session: Some(u32::MAX),
                 gesture: Gesture::Restore,
                 ports: 31,
                 generations: [u32::MAX; PORT_COUNT],
             }),
+            restore_decision: Some(RestoreDecision::Confirmed(RestoreArm {
+                session: u32::MAX,
+                id: u32::MAX,
+                ports: 31,
+                generations: [u32::MAX; PORT_COUNT],
+                expires: u64::MAX,
+            })),
         };
         let mut buffer = [0; MAX_PACKET];
         let packet = encode(&status, &mut buffer).unwrap();
@@ -374,7 +454,7 @@ mod tests {
         assert_eq!(
             packet,
             &[
-                b'I', b'A', b'S', b'I', 3, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
+                b'I', b'A', b'S', b'I', 4, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
             ]
         );
         let length = packet.len();

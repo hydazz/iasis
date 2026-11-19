@@ -14,8 +14,8 @@ use embedded_graphics::{
 };
 use heapless::String;
 use iasis_protocol::{
-    CommandError, CommandResult, Gesture, Orientation, Port, PortError, PortState, PortStatus,
-    RestorePhase, Status, Supply,
+    CommandError, CommandResult, Orientation, Port, PortError, PortState, PortStatus, RestorePhase,
+    Status, Supply,
 };
 
 pub const SIZE: Size = Size::new(128, 64);
@@ -55,45 +55,33 @@ pub struct View {
     pub lines: [String<32>; 2],
 }
 
-#[derive(Default)]
-pub struct Screen {
-    button_id: u32,
-    button_since: u64,
-}
+pub fn view(status: &Status, button: &crate::button::Button, now: u64) -> View {
+    use crate::button::Mode;
 
-impl Screen {
-    pub fn view(&mut self, status: &Status, now: u64, selected: Option<Port>) -> View {
-        if let Some(button) = status.button
-            && button.id != self.button_id
-        {
-            self.button_id = button.id;
-            self.button_since = now;
-        }
-        let mut view = overview(status, selected);
-        if status.i2c_root_fault
-            || status.aggregate_power_fault
-            || selected.is_some_and(|p| attention(&status.ports[p.index()]))
-        {
-            return view;
-        }
-        if let Some(button) = status.button
-            && now.saturating_sub(self.button_since) < 2500
-        {
-            view.lines = if button.ports == 0 {
-                pair("No ready targets", "")
-            } else {
-                pair(
-                    match button.gesture {
-                        Gesture::Dfu => "DFU requested",
-                        Gesture::Reboot => "Reboot requested",
-                        Gesture::Restore => "Waiting for host",
-                    },
-                    "",
-                )
-            };
-        }
-        view
+    let mut view = overview(status, button.selected);
+    view.ports = button.selected_mask();
+    view.connected = button.host_prepared();
+    view.actions = if view.connected {
+        &["DFU", "Reboot", "Restore", "Details"]
+    } else {
+        &["DFU", "Reboot", "Details"]
+    };
+    if let Mode::Details(page) = button.mode {
+        view.page = Some(page);
     }
+    if status.i2c_root_fault || status.aggregate_power_fault {
+        return view;
+    }
+    if button.armed().is_some() {
+        view.lines = pair("Erase", "Hold 3s");
+    } else if let Mode::Actions(action) = button.mode {
+        view.lines = pair(action.label(), "Hold");
+    } else if view.lines[0].is_empty()
+        && let Some(notice) = button.notice(now)
+    {
+        view.lines = pair(notice, "");
+    }
+    view
 }
 
 fn pair(first: &str, second: &str) -> [String<32>; 2] {
@@ -198,7 +186,9 @@ fn details(status: &Status, port: &PortStatus) -> [String<32>; 2] {
             RestorePhase::Preparing => pair("Preparing", ""),
             RestorePhase::Running => {
                 let mut lines = pair("Restoring", "");
-                write!(lines[1], "Stage {}%", job.progress.min(100)).unwrap();
+                if job.progress > 0 {
+                    write!(lines[1], "Stage {}%", job.progress.min(100)).unwrap();
+                }
                 lines
             }
             RestorePhase::Reported => pair("Done", ""),
@@ -220,7 +210,7 @@ fn details(status: &Status, port: &PortStatus) -> [String<32>; 2] {
     let message = if matches!(port.state, PortState::Ready | PortState::Contract) {
         match port.command_result {
             CommandResult::Pending => "Sending signal",
-            CommandResult::Unconfirmed => "No signal reply",
+            CommandResult::Unconfirmed => return pair("No PD reply", "Check target"),
             CommandResult::Failed(error) => match error {
                 CommandError::StaleAttachment => "Attachment changed",
                 CommandError::NotReady => "Target not ready",
@@ -311,12 +301,17 @@ pub fn draw<D: DrawTarget<Color = BinaryColor>>(
         )?;
         if attention(port) {
             line(target, (x, 36), (x + 22, 36), ON)?;
-        } else if port
+        } else if let Some(job) = port
             .restore
-            .is_some_and(|r| matches!(r.phase, RestorePhase::Preparing | RestorePhase::Running))
+            .filter(|r| matches!(r.phase, RestorePhase::Preparing | RestorePhase::Running))
         {
-            let offset = (now / FRAME_MS % 19) as i32;
-            line(target, (x + offset, 36), (x + offset + 4, 36), ON)?;
+            if job.phase == RestorePhase::Running && job.progress > 0 {
+                let width = (u32::from(job.progress.min(100)) * 23).div_ceil(100);
+                fill(target, x, 36, width, 2)?;
+            } else {
+                let offset = (now / FRAME_MS % 19) as i32;
+                line(target, (x + offset, 36), (x + offset + 4, 36), ON)?;
+            }
         }
     }
     line(target, (0, 39), (127, 39), ON)?;
@@ -481,23 +476,26 @@ fn face<D: DrawTarget<Color = BinaryColor>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iasis_protocol::{ButtonEvent, RestoreStatus};
+    use crate::button::Button;
+    use iasis_protocol::RestoreStatus;
 
     #[test]
     fn selection_stays_fixed_and_faults_do_not_steal_focus() {
         let mut status = Status::default();
         status.ports[1].error = Some(PortError::Voltage);
         status.ports[4].error = Some(PortError::I2c);
-        let mut screen = Screen::default();
+        let mut button = Button::default();
+        button.selected = Some(Port::ALL[0]);
         for now in [0, 3000, 15_000, 90_000] {
-            let view = screen.view(&status, now, Some(Port::ALL[0]));
+            let view = view(&status, &button, now);
             assert_eq!(view.ports, 1);
             assert_eq!(view.lines, pair("", ""));
         }
-        assert_eq!(screen.view(&status, 0, None).ports, 0x1f);
+        button.selected = None;
+        assert_eq!(view(&status, &button, 0).ports, 0x1f);
         status.i2c_root_fault = true;
         assert_eq!(
-            screen.view(&status, 0, None).lines,
+            view(&status, &button, 0).lines,
             pair("I2C fault", "Targets off")
         );
     }
@@ -536,6 +534,11 @@ mod tests {
             pair("Restoring", "Stage 100%")
         );
         assert_eq!(overview(&status, None).lines, pair("", ""));
+        status.ports[1].restore.as_mut().unwrap().progress = 0;
+        assert_eq!(
+            overview(&status, Some(Port::ALL[1])).lines,
+            pair("Restoring", "")
+        );
         status.ports[1].restore.as_mut().unwrap().phase = RestorePhase::Reported;
         assert_eq!(
             overview(&status, Some(Port::ALL[1])).lines,
@@ -550,24 +553,24 @@ mod tests {
 
     #[test]
     fn button_feedback_expires_and_cannot_hide_a_fault() {
-        let mut status = Status {
-            button: Some(ButtonEvent {
-                id: 1,
-                gesture: Gesture::Restore,
-                ports: 1,
-                generations: [0; 5],
-            }),
-            ..Status::default()
-        };
-        let mut screen = Screen::default();
-        assert_eq!(screen.view(&status, 100, None).lines[0], "Waiting for host");
+        let mut status = Status::default();
+        status.ports[0].state = PortState::Contract;
+        let mut button = Button::default();
+        for (down, now) in [
+            (false, 0),
+            (true, 50),
+            (true, 80),
+            (false, 110),
+            (false, 140),
+        ] {
+            button.sample(&status, Some(false), None, None, down, now);
+        }
+        assert_eq!(view(&status, &button, 150).lines[0], "DFU requested");
+        button.selected = Some(Port::ALL[0]);
         status.ports[0].error = Some(PortError::Protection);
-        assert_eq!(
-            screen.view(&status, 200, Some(Port::ALL[0])).lines[0],
-            "Protection tripped"
-        );
+        assert_eq!(view(&status, &button, 200).lines[0], "Protection tripped");
         status.ports[0].error = None;
-        assert_eq!(screen.view(&status, 2600, None).lines, pair("", ""));
+        assert_eq!(view(&status, &button, 2700).lines, pair("", ""));
     }
 
     #[test]
@@ -675,7 +678,8 @@ mod tests {
                 progress: 37,
             });
         }
-        let mut screen = Screen::default();
+        let mut button = Button::default();
+        button.selected = Some(Port::ALL[1]);
         let pages = RefCell::new(Capture::default());
         // Reuse the previous frame's RAM: every byte, including erased pixels,
         // must be replaced as activity and status content change.
@@ -683,7 +687,7 @@ mod tests {
             if now == 17_600 {
                 status = Status::default();
             }
-            let mut view = screen.view(&status, now, Some(Port::ALL[1]));
+            let mut view = view(&status, &button, now);
             view.connected = now >= 200;
             view.page = match now {
                 15_000 => Some(Page::Voltage),
@@ -703,6 +707,14 @@ mod tests {
             driver.set_addr_mode(AddrMode::Horizontal).unwrap();
             draw(&mut driver, &status, &view, now).unwrap();
             driver.flush().unwrap();
+            if now < 17_600 {
+                let frame = full.borrow();
+                // 37% of the first port's 23-pixel stage bar covers nine pixels.
+                let bar_row = &frame.pixels[4 * 128..4 * 128 + 23];
+                for (x, column) in bar_row.iter().enumerate() {
+                    assert_eq!(column & (1 << 5) != 0, x < 9);
+                }
+            }
             for page in 0..8 {
                 pages.borrow_mut().written = 0;
                 let mut driver = Ssd1306::new(

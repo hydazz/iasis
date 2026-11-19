@@ -69,7 +69,7 @@ impl Ports {
         }
     }
 
-    pub fn feedback(&mut self, request: RestoreFeedback) {
+    pub fn feedback(&mut self, request: RestoreFeedback) -> PortStatus {
         let port = &mut self.ports[request.port.index()];
         if request.generation == port.status.generation
             && port.status.orientation.is_some()
@@ -80,6 +80,7 @@ impl Ports {
             port.status.restore = Some(request.status);
             port.feedback_deadline = now() + 5000;
         }
+        port.status
     }
 
     pub fn command(&mut self, command: PortCommand) -> PortStatus {

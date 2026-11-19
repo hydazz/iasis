@@ -1,5 +1,8 @@
 use display_interface::{AsyncWriteOnlyDataCommand, DataFormat, DisplayError};
-use iasis_firmware::display::{self, Screen, View};
+use iasis_firmware::{
+    button::Button,
+    display::{self, View},
+};
 use iasis_protocol::Status;
 use ssd1306::{Ssd1306Async, command::AddrMode, prelude::*};
 
@@ -9,7 +12,7 @@ pub struct Oled {
     address: Option<u8>,
     page: u8,
     due: u64,
-    screen: Screen,
+    probed: bool,
     frame: Option<(Status, View, u64)>,
 }
 
@@ -19,15 +22,24 @@ impl Oled {
             address: None,
             page: 0,
             due: 100,
-            screen: Screen::default(),
+            probed: false,
             frame: None,
         }
     }
 
-    pub async fn tick(&mut self, bus: &mut Bus, status: &Status, now: u64) {
-        if now < self.due || bus.faulted() {
+    pub fn present(&self) -> Option<bool> {
+        self.probed.then_some(self.address.is_some())
+    }
+
+    pub async fn tick(&mut self, bus: &mut Bus, status: &Status, button: &Button, now: u64) {
+        if bus.faulted() {
+            self.offline(now);
             return;
         }
+        if now < self.due {
+            return;
+        }
+        self.probed = true;
         if bus.select(Some(7)).await.is_err() {
             self.offline(now);
             let _ = bus.select(None).await;
@@ -35,7 +47,7 @@ impl Oled {
         }
         let result = if let Some(address) = self.address {
             if self.page == 0 {
-                self.frame = Some((*status, self.screen.view(status, now, None), now));
+                self.frame = Some((*status, display::view(status, button, now), now));
             }
             let (status, view, at) = self.frame.as_ref().unwrap();
             page(bus, address, self.page, status, view, *at).await
