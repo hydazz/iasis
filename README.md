@@ -83,7 +83,7 @@ target/release/iasis --serial 0123456789abcdef restore /path/to/UniversalMac.ips
 
 **`--erase` erases the selected targets.** To confirm a prepared batch on the board, add `--button` to the port list. Use `--button` alone to choose targets on the board: tap to select them, then hold until the status light turns purple and release. Preparation can put targets into DFU. When the host has prepared the targets, hold the button for three seconds to confirm the erase, or tap to cancel.
 
-The CLI worker requires ordinary DFU (`05ac:1227`) with a unique ECID. Use Apple Configurator for a Mac identified in DFU over Apple Debug USB. Each CLI target gets its own idevicerestore process, selected by ECID. Logs and working files go under `restores/`, or the directory passed to `--logs`. Allow space for an extracted OS image per worker. Iasis checks the local archive; idevicerestore checks device compatibility and Apple signing.
+The CLI worker requires ordinary DFU (`05ac:1227`) with a unique ECID. Use Apple Configurator for a Mac identified in DFU over Apple Debug USB. Each CLI target gets its own idevicerestore process, selected by ECID. In a terminal, each port has a progress row. Percentages apply to the current restore stage. Redirecting output records each change on its own line. Logs and working files go under `restores/`, or the directory passed to `--logs`. Allow space for an extracted OS image per worker. Iasis checks the local archive; idevicerestore checks device compatibility and Apple signing.
 
 ## Firmware and protocol
 

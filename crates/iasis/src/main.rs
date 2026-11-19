@@ -5,6 +5,7 @@ use std::{
 };
 
 mod batch;
+mod progress;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -108,7 +109,7 @@ fn parse_id(value: &str) -> Result<u16, String> {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     if let Command::Ipsw { path } = &cli.command {
-        let prepared = iasis::restore::PreparedIpsw::open(path)?;
+        let prepared = progress::check_ipsw(path)?;
         println!("{}", serde_json::to_string_pretty(&prepared)?);
         return Ok(());
     }
@@ -349,6 +350,7 @@ fn request_dfu(board: &Board, port: Port, device: AppleDevice) -> Result<()> {
     );
     let attempt = Attempt::new(board.info().serial, port, &before, &snapshot, result);
     let deadline = Instant::now() + Duration::from_secs(10);
+    let waiting = progress::waiting(format!("Waiting for USB DFU on port {}", port.number()));
     loop {
         let final_read = Instant::now() >= deadline;
         let Some((_, report)) = inspect_dfu(board, port, action, Some(&attempt), final_read)?
@@ -364,6 +366,7 @@ fn request_dfu(board: &Board, port: Port, device: AppleDevice) -> Result<()> {
         };
         match report.outcome {
             Some(Outcome::Dfu | Outcome::DfuAfterReattach) => {
+                waiting.finish_and_clear();
                 println!("Port {}  {}", port.number(), report.describe());
                 return Ok(());
             }
