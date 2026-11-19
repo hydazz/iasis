@@ -267,7 +267,7 @@ fn prepare_in_session(
 ) -> Result<(Vec<File>, VerifiedTargets)> {
     let selected = if ports.is_empty() {
         println!(
-            "On Iasis, select the targets, open the actions menu and choose Restore to prepare them for erase."
+            "On Iasis, tap to select the targets, then hold the button until Restore and release to prepare them for erase."
         );
         let mut last = initial.button.map_or(0, |e| e.id);
         loop {

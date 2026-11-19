@@ -120,6 +120,16 @@ pub struct PortStatus {
 }
 
 impl PortStatus {
+    /// A target is on the connector, or left a fault that is still reported.
+    pub fn occupied(&self) -> bool {
+        self.error.is_some()
+            || match self.state {
+                PortState::Disabled | PortState::Unattached => false,
+                PortState::WaitingPower | PortState::Discharging => self.orientation.is_some(),
+                _ => true,
+            }
+    }
+
     pub fn latch_fault(&mut self, error: PortError, sample: FaultSample) {
         if self.fault_sample.is_none() {
             self.error = Some(error);
@@ -373,6 +383,15 @@ pub struct Status {
 }
 
 impl Status {
+    /// Ports the button can select and the panel lights.
+    pub fn occupied_mask(&self) -> u8 {
+        let mut mask = 0;
+        for (i, port) in self.ports.iter().enumerate() {
+            mask |= u8::from(port.occupied()) << i;
+        }
+        mask
+    }
+
     /// Targets eligible for a local action or a prepared erase.
     pub fn ready_mask(&self) -> u8 {
         if self.i2c_root_fault || self.aggregate_power_fault {
