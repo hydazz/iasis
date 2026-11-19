@@ -2,6 +2,7 @@
 
 pub mod button;
 pub mod display;
+pub mod hub;
 pub mod panel;
 pub mod restore_session;
 

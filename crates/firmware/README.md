@@ -89,12 +89,14 @@ Host restore feedback expires after five seconds without an update, changing the
 
 ## OLED
 
-Connect an [Adafruit 938](https://www.adafruit.com/product/938) to the display I²C connector. The 128×64 screen shows all five physical ports. A selected port that a hold would reach is filled; any other selected port is outlined. A lightning bolt indicates brick power and a USB symbol a waiting restore host.
+Connect an [Adafruit 938](https://www.adafruit.com/product/938) to the display I²C connector. The 128×64 screen shows all five physical ports. Bars beside a port number show its USB link: one for USB 2, two for USB 3. A selected port that a hold would reach is filled; any other selected port is outlined. A lightning bolt indicates brick power and a USB symbol a waiting restore host.
 
 | Selection | Lower area                                                                                               |
 | --------- | -------------------------------------------------------------------------------------------------------- |
 | All       | Voltage measured at each occupied connector, then the input voltage and contract watts out of the supply |
-| One port  | Voltage measured at its connector and the plug orientation, then its contract                            |
+| One port  | Voltage measured at its connector and its USB link, then its contract                                    |
+
+A target with a USB link shows `USB2` or `USB3` after its voltage, as the hub reports the port. A target in DFU holds USB 2 whatever its cable carries. Without a link nothing is shown, which a cable without data lines and a device that has not enumerated both look like.
 
 A contract is the most a target may draw, not what it draws: `9V 3A (27W)` reserves 27 W of the supply whether or not the target uses it, and `50/68W` totals those reservations against the watts available. Iasis measures voltage, not current. On host power the All view shows the host allowance and the shared target limit. Holding the button lists the actions the selected targets take and highlights the one a release will send. A fault, restore progress or button feedback replaces the readings.
 
@@ -104,24 +106,24 @@ The display is optional and works with an external restore host or the CM5. It u
 
 ## Board connections
 
-| Function                | Connection                                              |
-| ----------------------- | ------------------------------------------------------- |
-| Management USB          | USB7206C internal USB 2 port 6                          |
-| Root I²C                | GPIO24 SDA / GPIO25 SCL, 400 kHz                        |
-| TCA6408A                | Address `0x20`; GPIO32 reset                            |
-| TCA9548A                | Address `0x70`; GPIO1 mux reset, gated by board reset   |
-| Target FUSB302          | Mux channels 0–4, address `0x22`                        |
-| Host FUSB302            | Mux channel 5, address `0x22`                           |
-| Hub configuration       | Mux channel 6; leave deselected for default USB startup |
-| CH224                   | Mux channel 7, address `0x22`                           |
-| Port VBUS ADC           | GPIO40, 41, 42, 43, 45 for ports 1–5                    |
-| Input bus / thermistors | GPIO44 / GPIO47 and GPIO46                              |
-| Button / LEDs           | GPIO21 / GPIO20                                         |
-| Debug UART              | 3.3 V TX on GPIO0; header NC/GND/TX                     |
+| Function                | Connection                                            |
+| ----------------------- | ----------------------------------------------------- |
+| Management USB          | USB7206C internal USB 2 port 6                        |
+| Root I²C                | GPIO24 SDA / GPIO25 SCL, 400 kHz                      |
+| TCA6408A                | Address `0x20`; GPIO32 reset                          |
+| TCA9548A                | Address `0x70`; GPIO1 mux reset, gated by board reset |
+| Target FUSB302          | Mux channels 0–4, address `0x22`                      |
+| Host FUSB302            | Mux channel 5, address `0x22`                         |
+| Hub I²C                 | Mux channel 6, address `0x2d`                         |
+| CH224                   | Mux channel 7, address `0x22`                         |
+| Port VBUS ADC           | GPIO40, 41, 42, 43, 45 for ports 1–5                  |
+| Input bus / thermistors | GPIO44 / GPIO47 and GPIO46                            |
+| Button / LEDs           | GPIO21 / GPIO20                                       |
+| Debug UART              | 3.3 V TX on GPIO0; header NC/GND/TX                   |
 
 ### Reset and recovery
 
-A cooperative ROM update disables target power and retains the CM5 supply, host selection, hub-run state and host orientation. The application restores those outputs before releasing GPIO isolation. Physical RESET resets the hub and drops CM5 power. Power loss or a failed update on a CM5 host requires recovery through the external host port or SWD; the CM5 service port does not power the board.
+A cooperative ROM update disables target power and retains the CM5 supply, host selection, hub-run state and host orientation. The application restores those outputs before releasing GPIO isolation. Each time it starts, the application resets the hub to turn on its I²C interface, so the board enumerates again on the host. Without firmware the hub attaches on its own. Physical RESET resets the hub and drops CM5 power. Power loss or a failed update on a CM5 host requires recovery through the external host port or SWD; the CM5 service port does not power the board.
 
 I²C transactions time out after 20 ms. Recovery resets the mux and MCU I²C controller, quarantines the failed downstream branch until reboot and preserves the root expander outputs. An unrecoverable root fault disables all targets while leaving USB diagnostics available.
 
