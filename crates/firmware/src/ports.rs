@@ -242,6 +242,7 @@ impl Ports {
             sink: Cell::new(SinkDemand::default()),
             listening: Cell::new(Instant::MIN),
             silent: Cell::new(false),
+            rejected: Cell::new(0),
             fault: Cell::new(None),
             stage_on: Cell::new(false),
             powered: Cell::new(false),
@@ -333,6 +334,7 @@ struct Port<'a> {
     listening: Cell<Instant>,
     /// No request arrived within NO_RESPONSE.
     silent: Cell<bool>,
+    rejected: Cell<u16>,
     fault: Cell<Option<PortError>>,
     stage_on: Cell<bool>,
     powered: Cell<bool>,
@@ -669,6 +671,8 @@ impl Port<'_> {
             let expired = now_ms() >= self.shared.feedback_deadline.get();
             self.update(|status| {
                 status.pd_write_retries = self.phy.retries();
+                (status.hard_resets_sent, status.hard_resets_received) = self.phy.hard_resets();
+                status.requests_rejected = self.rejected.get();
                 if let Some(restore) = &mut status.restore
                     && matches!(
                         restore.phase,
@@ -1083,6 +1087,8 @@ impl DevicePolicyManager for Policy<'_, '_> {
         if self.accepted {
             CapabilityResponse::Accept
         } else {
+            let port = self.port;
+            port.rejected.set(port.rejected.get().saturating_add(1));
             CapabilityResponse::Reject
         }
     }
