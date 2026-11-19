@@ -1,11 +1,11 @@
 use std::{borrow::Cow, fmt::Write, path::Path, time::Duration};
 
-use anyhow::Result;
-use iasis::{
+use crate::{
     identity::Observation,
     restore::{PreparedIpsw, RestoreState, RestoreStatus},
     topology,
 };
+use anyhow::Result;
 use iasis_protocol::Port;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 

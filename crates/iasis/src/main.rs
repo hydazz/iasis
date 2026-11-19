@@ -4,8 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-mod batch;
-mod progress;
+use iasis::{batch, parse_port, parse_serial, progress};
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -89,17 +88,6 @@ enum Power {
 enum AppleDevice {
     AppleSilicon,
     T2,
-}
-
-fn parse_port(value: &str) -> Result<Port, String> {
-    Port::try_from(value.parse::<u8>().map_err(|error| error.to_string())?).map_err(str::to_owned)
-}
-
-fn parse_serial(value: &str) -> Result<u64, String> {
-    if value.len() != 16 {
-        return Err("serial must contain sixteen hexadecimal digits".into());
-    }
-    u64::from_str_radix(value, 16).map_err(|error| error.to_string())
 }
 
 fn parse_id(value: &str) -> Result<u16, String> {
