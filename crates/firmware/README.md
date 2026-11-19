@@ -17,7 +17,7 @@ Use Raspberry Pi's [picotool](https://github.com/raspberrypi/picotool) to flash 
 ```sh
 target/release/iasis --serial <board-serial> bootloader
 picotool info
-picotool load -v -x target/thumbv8m.main-none-eabihf/release/iasis-firmware
+picotool load -v -x target/thumbv8m.main-none-eabihf/release/iasis-firmware -t elf
 ```
 
 Check that `picotool info` finds the intended board before loading. With multiple ROM devices attached, select it using picotool's bus/address options.
@@ -53,6 +53,8 @@ The Rev A charging input supports fixed profiles up to 20 V. Firmware leaves nor
 When a brick is inserted, attached host-powered ports can keep their output path if the presence limit fits both supplies. Removing the brick from a brick-powered target drops its VBUS and can disconnect USB while the controller stays online. Leave the power source and any inline meter connected throughout a restore.
 
 ## Controls and status
+
+`iasis status --watch` shows the board temperature near the port 1 and 2 output switches (TH1191, sensor A) and the shared core regulator (TH1192, sensor B). On macOS it can run during a restore. Use the raw ADC counts in `status --json` for calibration.
 
 The [button gestures and CLI commands](../../README.md#use) operate on ready ports. DFU supports Apple Silicon and T2; the button selects Apple Silicon. Commands use the attachment generation to reject requests for a device that has since disconnected.
 
