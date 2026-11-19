@@ -1,7 +1,7 @@
 use embassy_time::{Instant, Timer};
 use iasis_protocol::{Orientation, PortError, Status};
 
-use crate::{bus::Bus, fusb, outputs::Outputs};
+use crate::{bus::Bus, outputs::Outputs, phy};
 
 #[derive(Default)]
 pub struct Upstream {
@@ -51,21 +51,21 @@ impl Upstream {
         if !self.initialized {
             // Keep both internal Rd terminations throughout measurement. There
             // are no external Rd resistors on the protected CC nets.
-            fusb::write(bus, 0x08, 0).await?;
-            fusb::write(bus, 0x0b, 0x0f).await?;
-            fusb::write(bus, 0x03, 0x20).await?; // Sink/UFP, no PD negotiation.
+            phy::write(bus, 0x08, 0).await?;
+            phy::write(bus, 0x0b, 0x0f).await?;
+            phy::write(bus, 0x03, 0x20).await?; // Sink/UFP, no PD negotiation.
             self.initialized = true;
         }
         let mut cc = [0; 2];
         let mut active = false;
         for (index, level) in cc.iter_mut().enumerate() {
-            fusb::write(bus, 0x02, 3 | (4 << index)).await?;
+            phy::write(bus, 0x02, 3 | (4 << index)).await?;
             Timer::after_micros(300).await;
             let sample = bus.register(0x22, 0x40).await?;
             active |= sample & 0x40 != 0;
             *level = sample & 3;
         }
-        fusb::write(bus, 0x02, 3).await?;
+        phy::write(bus, 0x02, 3).await?;
         // BC_LVL is not valid during BMC signalling (FUSB302B table 37).
         if active {
             // Keep the previous observation only until its existing deadline.

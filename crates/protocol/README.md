@@ -10,8 +10,8 @@ Messages use vendor control transfers on interface 0.
 | ------------------------ | --------------------------------------------------------- |
 | Request type / recipient | Vendor / interface                                        |
 | `wIndex`                 | `0`                                                       |
-| `wValue`                 | Protocol version, `5`                                     |
-| Maximum payload          | 704 bytes                                                 |
+| `wValue`                 | Protocol version, `7`                                     |
+| Maximum payload          | 896 bytes                                                 |
 | Payload header           | ASCII `IASI`, then a little-endian `u16` protocol version |
 | Payload body             | Postcard-encoded message                                  |
 
@@ -31,9 +31,15 @@ The decoder rejects unknown versions, invalid ports, incomplete messages and tra
 
 Ports are numbered 1–5 and appear in that order in status. ADC readings are raw counts; absent readings use `None`. Sequence zero means no sample has completed. Later samples increment a wrapping sequence number and record their completion time in `uptime_ms`.
 
-Status reports the brick’s source PDOs, requested voltage and qualified input current. The charging budget is in milliwatts. Each port reports its last acknowledged source PDOs, accepted request, contract voltage (mV) and agreed operating current (mA).
+Status reports the brick’s source PDOs, requested voltage and qualified input current. The charging budget is in milliwatts. Each port reports the source PDOs it offers, the accepted request, contract voltage (mV) and agreed operating current (mA).
 
-Send a `PortCommand` with a nonzero request ID and the port's latest attachment generation. USB acceptance queues the command; poll status for the matching ID and result. Stale generations are rejected. The USB command queue holds one request, and a port with an action pending rejects another.
+After a trip the port reports its `error` and `fault_sample` until an attachment next becomes ready, a held-off port sees its target unplugged, or the port is enabled again. The sample records the uptime of the trip, port state, connector ADC, local fault pins, and active and pending contracts. Each contract includes voltage, operating current and current limit. A missing contract is `None`.
+
+`recoveries` counts trips since boot. `pd_write_retries` counts PD frames the port controller refused on a busy line and firmware wrote again.
+
+`PortProtection` identifies the local CC or power inputs that triggered the trip. The local power input is shared by the port’s host eFuse and charging converter. If it trips with the converter on, `converter_status` records TPS55288 STATUS after the output switch opens and before converter shutdown, when readable. `HostLimiter` identifies the shared host limiter. TPS55288 errors report the observed STATUS (0x07), MODE (0x06), current-limit (0x02) or failed readback register value. I²C errors identify the operation, 7-bit address, register or mux selection, exposed mux channel mask and failure reason.
+
+Send a `PortCommand` with a nonzero request ID. USB acceptance queues the command; poll status for the matching ID and result. DFU and reboot act on one attachment and must carry the port's latest generation; a stale generation is rejected. Enable and disable apply to the port itself. The USB command queue holds one request, and a port with an action pending rejects another.
 
 | Result                    | Meaning                                                                                     |
 | ------------------------- | ------------------------------------------------------------------------------------------- |
