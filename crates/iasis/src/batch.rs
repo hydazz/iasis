@@ -395,7 +395,7 @@ fn enter_dfu(
             snapshot.query_port_identity(port);
         }
         let status = board.status()?;
-        let assessment = dfu::assess(board.info().serial, port, &status, &snapshot, None);
+        let assessment = dfu::assess(board.info().serial, port, &status, &snapshot, action, None);
         if generation != assessment.generation || status.ready_mask() & (1 << port.index()) == 0 {
             eprintln!(
                 "port {}: attachment changed or unavailable. {}",
@@ -473,6 +473,7 @@ fn enter_dfu(
                 *port,
                 &status,
                 &snapshot,
+                action,
                 previous.as_ref(),
             );
             if matches!(
