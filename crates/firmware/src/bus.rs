@@ -234,17 +234,30 @@ impl Bus {
         register: u8,
         bytes: &mut [u8],
     ) -> Result<(), PortError> {
+        self.read_at(address, &[register], bytes).await
+    }
+
+    /// Write a pointer of one or more bytes, then read from it.
+    pub async fn read_at(
+        &mut self,
+        address: u8,
+        pointer: &[u8],
+        bytes: &mut [u8],
+    ) -> Result<(), PortError> {
         if let Some(error) = self.stopped {
             return Err(error);
         }
-        let operation = I2cOperation::Read { register };
+        let operation = I2cOperation::Read {
+            register: pointer[0],
+        };
         for attempt in 0..2 {
             match with_timeout(
                 Duration::from_millis(20),
-                self.i2c
-                    .as_mut()
-                    .unwrap()
-                    .write_read_async(address, [register], bytes),
+                self.i2c.as_mut().unwrap().write_read_async(
+                    address,
+                    pointer.iter().copied(),
+                    bytes,
+                ),
             )
             .await
             {

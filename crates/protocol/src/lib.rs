@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 9;
+pub const VERSION: u16 = 10;
 pub const MAX_PACKET: usize = 1152;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
@@ -125,6 +125,19 @@ pub struct PortStatus {
     /// Requests answered with Reject since boot.
     pub requests_rejected: u16,
     pub debug_actions: DebugActions,
+    /// The USB link the hub holds with the target. `None` while the hub
+    /// cannot be read.
+    pub link: Option<Link>,
+}
+
+/// A target's USB link, as the hub reports its downstream port. `Down` is a
+/// target that only draws power: nothing has linked, which a cable without
+/// data lines and a device that has not enumerated both look like.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum Link {
+    Down,
+    Usb2,
+    Usb3,
 }
 
 /// The most action IDs one Get Action List reply carries.
@@ -632,6 +645,7 @@ mod tests {
                 hard_resets_received: u16::MAX,
                 requests_rejected: u16::MAX,
                 debug_actions: DebugActions::Listed([u16::MAX; MAX_ACTIONS]),
+                link: Some(Link::Usb3),
                 restore: Some(RestoreStatus {
                     ecid: u64::MAX,
                     phase: RestorePhase::Failed,
@@ -730,7 +744,7 @@ mod tests {
         assert_eq!(
             packet,
             &[
-                b'I', b'A', b'S', b'I', 9, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
+                b'I', b'A', b'S', b'I', 10, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
             ]
         );
         let length = packet.len();
