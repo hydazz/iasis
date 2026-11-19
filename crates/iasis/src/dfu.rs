@@ -1,7 +1,8 @@
 //! DFU observations for one physical connector and one attachment generation.
 
 use iasis_protocol::{
-    CommandResult, Port, PortError, PortState, PortStatus, RestorePhase, Status, Supply,
+    CommandResult, DebugActions, Port, PortAction, PortError, PortState, PortStatus, RestorePhase,
+    Status, Supply,
 };
 use serde::Serialize;
 
@@ -24,6 +25,9 @@ pub enum Signal {
     Fault,
     Busy,
     Settling,
+    Unidentified,
+    NoDebug,
+    NotOffered,
     MultipleTransports,
     Ambiguous,
     DifferentDevice,
@@ -45,6 +49,15 @@ impl Signal {
             Self::Fault => "Port or supply fault. Check the power, cable and controller status.",
             Self::Busy => "A port command is pending.",
             Self::Settling => "Waiting for a stable powered attachment.",
+            Self::Unidentified => {
+                "The device has not negotiated Power Delivery. Check the cable; an unsupported device stays this way."
+            }
+            Self::NoDebug => {
+                "The target does not answer Apple debug, so Iasis cannot signal it. Enter DFU on the device itself."
+            }
+            Self::NotOffered => {
+                "This port of the target does not offer DFU. Use the Mac's DFU port."
+            }
             Self::MultipleTransports => {
                 "Apple Debug USB is present alongside two Mac interfaces advertising the same USB serial. If a restore is in progress, leave the cable connected."
             }
@@ -299,6 +312,7 @@ pub fn assess(
     port: Port,
     status: &Status,
     snapshot: &Snapshot,
+    action: PortAction,
     attempt: Option<&Attempt>,
 ) -> Assessment {
     let p = &status.ports[port.index()];
@@ -365,6 +379,14 @@ pub fn assess(
         }
     {
         Signal::Settling
+    } else if !p.identified() {
+        Signal::Unidentified
+    } else if p.debug_actions == DebugActions::Pending {
+        Signal::Settling
+    } else if p.debug_actions == DebugActions::Silent {
+        Signal::NoDebug
+    } else if !p.offers(action) {
+        Signal::NotOffered
     } else if single.is_some() && apple.is_none() {
         Signal::DifferentDevice
     } else {
@@ -496,6 +518,9 @@ mod tests {
             enabled: true,
             generation: 2,
             state: PortState::Contract,
+            debug_actions: DebugActions::Listed([
+                0x0606, 0x0106, 0x0105, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            ]),
             supply: Supply::Brick,
             vbus_adc: Some(530),
             orientation: Some(Orientation::Cc1),
@@ -527,7 +552,7 @@ mod tests {
         }
     }
     fn report(st: &Status, s: &Snapshot, attempt: Option<&Attempt>) -> Assessment {
-        assess(8, P, st, s, attempt)
+        assess(8, P, st, s, PortAction::DfuAppleSilicon, attempt)
     }
     fn sent(st: &Status, s: &Snapshot, result: CommandResult) -> Attempt {
         Attempt::new(8, P, &report(st, s, None), s, result)
@@ -555,7 +580,8 @@ mod tests {
         let mut debug = apple(AppleMode::Kis, 0x1881, None);
         debug.topology = slot.usb2.clone();
         slot.devices = vec![child, debug, direct];
-        let report = |s: &Snapshot| assess(8, port, &status(), s, None);
+        let report =
+            |s: &Snapshot| assess(8, port, &status(), s, PortAction::DfuAppleSilicon, None);
         let seen = report(&s);
         assert_eq!(seen.signal, Signal::MultipleTransports);
         assert_eq!((seen.usb_mode, seen.ecid), (None, None));
@@ -718,5 +744,18 @@ mod tests {
         st.ports[0].error = Some(PortError::HostLimiter);
         assert_eq!(report(&st, &s, None).signal, Signal::Fault);
         assert!(report(&st, &s, None).transport_result.is_none());
+    }
+
+    #[test]
+    fn a_port_that_lists_reboot_alone_is_not_ready_for_dfu() {
+        // What an M1 MacBook Air lists on the port that is not its DFU port.
+        let mut st = status();
+        st.ports[0].debug_actions =
+            DebugActions::Listed([0x0105, 0x0303, 0x0803, 0x0809, 0x0103, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(report(&st, &snapshot(), None).signal, Signal::NotOffered);
+        // An M5 Mac lists DFU there too, without the DFU USB a restore needs.
+        st.ports[0].debug_actions =
+            DebugActions::Listed([0x4606, 0x0106, 0x0105, 0x0303, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(report(&st, &snapshot(), None).signal, Signal::NotOffered);
     }
 }
