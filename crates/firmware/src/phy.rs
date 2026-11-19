@@ -99,6 +99,10 @@ pub struct Phy<'a> {
     inbox: RefCell<Deque<Packet, 4>>,
     failure: Cell<Option<PortError>>,
     retries: Cell<u16>,
+    /// The next hard reset answers one the sink sent.
+    answering: Cell<bool>,
+    resets_sent: Cell<u16>,
+    resets_received: Cell<u16>,
     debug_id: Cell<u8>,
     /// Woken after every service pass; each has one waiter.
     line: Signal<NoopRawMutex, ()>,
@@ -120,6 +124,9 @@ impl<'a> Phy<'a> {
             inbox: RefCell::new(Deque::new()),
             failure: Cell::new(None),
             retries: Cell::new(0),
+            answering: Cell::new(false),
+            resets_sent: Cell::new(0),
+            resets_received: Cell::new(0),
             debug_id: Cell::new(0),
             line: Signal::new(),
             received: Signal::new(),
@@ -232,6 +239,11 @@ impl<'a> Phy<'a> {
         self.retries.get()
     }
 
+    /// Hard resets this port began and hard resets its sinks sent, since boot.
+    pub fn hard_resets(&self) -> (u16, u16) {
+        (self.resets_sent.get(), self.resets_received.get())
+    }
+
     pub fn failure(&self) -> Option<PortError> {
         self.failure.take()
     }
@@ -264,6 +276,8 @@ impl<'a> Phy<'a> {
         }
         if a & 0x01 != 0 {
             self.hard_reset.set(true);
+            self.resets_received
+                .set(self.resets_received.get().saturating_add(1));
         }
         if a & 0x08 != 0 {
             self.hard_sent.set(true);
@@ -419,6 +433,7 @@ impl Driver for PdPhy<'_, '_> {
 
     async fn transmit(&mut self, data: &[u8]) -> Result<(), DriverTxError> {
         if self.0.hard_reset.take() {
+            self.0.answering.set(true);
             return Err(DriverTxError::HardReset);
         }
         // The engine composes revision 3 messages. Present them as revision
@@ -433,7 +448,10 @@ impl Driver for PdPhy<'_, '_> {
         }
         match self.0.send(SOP, &message).await {
             Ok(Tx::Sent) => Ok(()),
-            Ok(_) if self.0.hard_reset.take() => Err(DriverTxError::HardReset),
+            Ok(_) if self.0.hard_reset.take() => {
+                self.0.answering.set(true);
+                Err(DriverTxError::HardReset)
+            }
             Ok(_) => Err(DriverTxError::Discarded),
             Err(error) => {
                 self.0.fail(error);
@@ -446,6 +464,12 @@ impl Driver for PdPhy<'_, '_> {
     async fn transmit_hard_reset(&mut self) -> Result<(), DriverTxError> {
         let _transmitter = self.0.transmitter.lock().await;
         self.0.hard_sent.set(false);
+        // The engine also answers a received hard reset with one of its own.
+        if !self.0.answering.take() {
+            self.0
+                .resets_sent
+                .set(self.0.resets_sent.get().saturating_add(1));
+        }
         let written = async {
             let mut io = self.0.io.lock().await;
             let bus = io.port(self.0.channel).await?;
