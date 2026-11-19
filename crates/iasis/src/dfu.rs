@@ -347,7 +347,17 @@ pub fn assess(
         || p.orientation.is_none()
         || !match p.supply {
             Supply::HostPresence => iasis_pd::power::safe_presence(p.vbus_adc),
-            Supply::Brick => iasis_pd::power::safe_five_volts(p.vbus_adc),
+            Supply::Brick => {
+                let rail = if p.contract_mv == 0 {
+                    5000
+                } else {
+                    p.contract_mv
+                };
+                let (low, high) = iasis_pd::voltage_window(rail);
+                p.vbus_adc
+                    .and_then(iasis_pd::power::millivolts)
+                    .is_some_and(|mv| (u32::from(low)..=u32::from(high)).contains(&mv))
+            }
             Supply::Off => false,
         }
     {
@@ -702,7 +712,7 @@ mod tests {
         assert_eq!(report(&st, &s, None).signal, Signal::NoAttachment);
         st.ports[0].state = PortState::WaitingPower;
         assert_eq!(report(&st, &s, None).signal, Signal::WaitingPower);
-        st.ports[0].error = Some(PortError::Protection);
+        st.ports[0].error = Some(PortError::HostLimiter);
         assert_eq!(report(&st, &s, None).signal, Signal::Fault);
         assert!(report(&st, &s, None).transport_result.is_none());
     }
