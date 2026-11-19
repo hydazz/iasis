@@ -5,12 +5,49 @@ use embassy_rp::{
     pac,
     peripherals::{I2C0, PIN_1, PIN_24, PIN_25},
 };
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use embassy_time::{Duration, Instant, Timer, with_timeout};
 use iasis_pd::{
     brick::{Action, Capabilities, Gear, Selection},
     power,
 };
 use iasis_protocol::{I2cFailure, I2cOperation, PortError, RestorePhase, Status, Supply};
+
+use crate::{board::Controls, outputs::Outputs};
+
+/// Everything reached through the management I²C bus. One lock orders the
+/// root expander, its shift registers and the muxed port branches.
+pub struct Io {
+    pub bus: Bus,
+    pub controls: Controls,
+    pub outputs: Result<Outputs, PortError>,
+}
+
+pub type SharedIo = Mutex<NoopRawMutex, Io>;
+
+impl Io {
+    /// Select a target port's branch: its FUSB302 and TPS55288.
+    pub async fn port(&mut self, index: usize) -> Result<&mut Bus, PortError> {
+        self.bus.select(Some(index as u8)).await?;
+        Ok(&mut self.bus)
+    }
+
+    pub async fn discharge(&mut self, index: usize, enabled: bool) -> Result<(), PortError> {
+        self.outputs
+            .as_mut()
+            .map_err(|error| *error)?
+            .discharge(&mut self.bus, &mut self.controls, index, enabled)
+            .await
+    }
+
+    pub async fn high_voltage(&mut self, index: usize, high: bool) -> Result<(), PortError> {
+        self.outputs
+            .as_mut()
+            .map_err(|error| *error)?
+            .high_voltage(&mut self.bus, &mut self.controls, index, high)
+            .await
+    }
+}
 
 pub struct Bus {
     i2c: Option<I2c<'static, I2C0, Async>>,
@@ -23,6 +60,8 @@ pub struct Bus {
     recoveries: u32,
     isolated: u8,
     exposed: u8,
+    /// Mux mask known to be in effect; unknown after a failed select or reset.
+    selected: Option<u8>,
     brick: Selection,
     gear: Option<Gear>,
     preferred_gear: Option<Gear>,
@@ -46,6 +85,7 @@ impl Bus {
             recoveries: 0,
             isolated: 0,
             exposed: 0,
+            selected: None,
             brick: Selection::default(),
             gear: None,
             preferred_gear: None,
@@ -80,10 +120,6 @@ impl Bus {
         self.stopped.is_some()
     }
 
-    pub fn stopped(&self) -> Option<PortError> {
-        self.stopped
-    }
-
     fn error(&self, address: u8, operation: I2cOperation, failure: I2cFailure) -> PortError {
         PortError::I2c {
             address,
@@ -95,6 +131,7 @@ impl Bus {
 
     async fn timeout(&mut self, error: PortError) {
         self.timeouts = self.timeouts.saturating_add(1);
+        self.selected = None;
         self.isolated |= self.exposed;
         self.stopped = Some(error);
         pac::I2C0
@@ -125,6 +162,10 @@ impl Bus {
         {
             return Err(PortError::Isolated { channel });
         }
+        if self.selected == Some(bits) && !self.faulted() {
+            return Ok(());
+        }
+        self.selected = None;
         self.exposed |= bits;
         let result = self.write(0x70, &[bits]).await;
         if matches!(
@@ -143,6 +184,7 @@ impl Bus {
             result?;
         }
         self.exposed = bits;
+        self.selected = Some(bits);
         Ok(())
     }
 

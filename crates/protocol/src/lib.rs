@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 6;
+pub const VERSION: u16 = 7;
 pub const MAX_PACKET: usize = 896;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
@@ -114,6 +114,10 @@ pub struct PortStatus {
     pub contract_ma: u16,
     pub pd_transition: bool,
     pub fault_sample: Option<FaultSample>,
+    /// Attachments ended by a fault since boot, recovered or latched.
+    pub recoveries: u16,
+    /// PD frames rewritten after the port controller refused the first write.
+    pub pd_write_retries: u16,
 }
 
 impl PortStatus {
@@ -277,7 +281,6 @@ pub enum PortError {
         raw: u16,
         expected: u16,
     },
-    UnexpectedVbus,
     Voltage,
     DischargeTimeout,
     Protocol,
@@ -529,6 +532,8 @@ mod tests {
                     contract,
                     target: contract,
                 }),
+                recoveries: u16::MAX,
+                pd_write_retries: u16::MAX,
                 restore: Some(RestoreStatus {
                     ecid: u64::MAX,
                     phase: RestorePhase::Failed,
@@ -591,7 +596,7 @@ mod tests {
         assert_eq!(
             packet,
             &[
-                b'I', b'A', b'S', b'I', 6, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
+                b'I', b'A', b'S', b'I', 7, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
             ]
         );
         let length = packet.len();

@@ -1,6 +1,11 @@
 //! CH224Q fixed-voltage selection for the Rev A brick input.
 
-use crate::{Header, MAX_OBJECTS, PowerRole};
+use usbpd::{
+    PowerRole,
+    protocol_layer::message::header::{DataMessageType, Header, MessageType},
+};
+
+const MAX_OBJECTS: usize = 7;
 
 // CH224Q §5.2.3 register 0x0a. The bus switch cannot run the board from 5 V.
 const FIXED_MV: [u16; 5] = [5000, 9000, 12_000, 15_000, 20_000];
@@ -64,16 +69,16 @@ pub struct Capabilities {
 impl Capabilities {
     /// CH224Q register 0x60 begins with a little-endian Source_Capabilities header.
     pub fn decode(bytes: &[u8; 30]) -> Option<Self> {
-        let header = Header::parse(u16::from_le_bytes([bytes[0], bytes[1]])).ok()?;
-        if header.message_type() != 1
-            || header.power_role() != PowerRole::Source
-            || header.object_count() == 0
+        let header = Header::from_bytes(&bytes[..2]).ok()?;
+        if header.message_type() != MessageType::Data(DataMessageType::SourceCapabilities)
+            || !matches!(header.port_power_role(), PowerRole::Source)
+            || header.num_objects() == 0
         {
             return None;
         }
         let mut pdos = [0; MAX_OBJECTS];
         let mut gears = [None; FIXED_MV.len()];
-        for (dest, bytes) in pdos[..usize::from(header.object_count())]
+        for (dest, bytes) in pdos[..header.num_objects()]
             .iter_mut()
             .zip(bytes[2..].as_chunks::<4>().0)
         {
@@ -181,8 +186,11 @@ mod tests {
 
     fn registers(objects: &[u32]) -> [u8; 30] {
         let mut bytes = [0; 30];
-        let header = Header::source(1, 0, objects.len() as u8).unwrap();
-        bytes[..2].copy_from_slice(&header.bits().to_le_bytes());
+        let header = Header(0)
+            .with_message_type_raw(1)
+            .with_port_power_role(PowerRole::Source)
+            .with_num_objects(objects.len() as u8);
+        bytes[..2].copy_from_slice(&header.0.to_le_bytes());
         for (dest, pdo) in bytes[2..].as_chunks_mut::<4>().0.iter_mut().zip(objects) {
             *dest = pdo.to_le_bytes();
         }

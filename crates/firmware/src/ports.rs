@@ -1,731 +1,1036 @@
-use embassy_time::Instant;
-use iasis_pd::{Contract, Link, RailChange, ReceivedPacket, power};
+//! The five target ports as USB Type-C sources.
+//!
+//! Each port runs one task: wait for a sink, debounce it, apply VBUS, then run
+//! [`usbpd`]'s source policy engine until the sink leaves. A port that fails
+//! returns through vSafe0V and tries again; repeated failures and protection
+//! trips hold it off until the sink is unplugged or the port is enabled.
+
+use core::cell::Cell;
+
+use embassy_futures::select::{Either3, select, select3};
+use embassy_rp::gpio::Input;
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
+use embassy_time::{Duration, Instant, Timer};
+use iasis_pd::{
+    Contract, apple,
+    power::{self, PortDemand, SinkDemand},
+};
 use iasis_protocol::{
     CommandError, CommandResult, FaultContract, FaultSample, Orientation, PORT_COUNT, PortAction,
     PortCommand, PortError, PortFaults, PortState, PortStatus, RestoreFeedback, RestorePhase,
-    Status, Supply,
+    Supply,
+};
+use usbpd::{
+    protocol_layer::message::data::{
+        request::PowerSource, source_capabilities::SourceCapabilities,
+    },
+    source::{
+        device_policy_manager::{
+            CapabilityResponse, DevicePolicyManager, DrpDevicePolicyManager,
+            EprDevicePolicyManager, Event, SourceDpm,
+        },
+        policy_engine::Source,
+    },
 };
 
-use crate::{board::Controls, bus::Bus, fusb, outputs::Outputs, stage};
+use crate::{
+    bus::{Io, SharedIo},
+    phy::{self, PdPhy, Phy, Tx},
+    stage,
+};
 
-mod pd;
-use pd::{Transmission, TxKind};
+/// tCCDebounce.
+const CC_DEBOUNCE: Duration = Duration::from_millis(150);
+/// Longest the discharge load is applied to VBUS the port does not drive.
+const BLEED: Duration = Duration::from_millis(500);
+/// tSRCDisconnect.
+const DISCONNECT: Duration = Duration::from_millis(10);
+/// tVBUSON.
+const VBUS_ON: Duration = Duration::from_millis(275);
+/// tSrcTransition, from the sink's acknowledgement of Accept.
+const SOURCE_TRANSITION: Duration = Duration::from_millis(30);
+/// Inside tSrcSettle.
+const SETTLE: Duration = Duration::from_millis(250);
+const STABLE: Duration = Duration::from_millis(10);
+/// tSrcRecover.
+const RECOVER: Duration = Duration::from_millis(700);
+/// VBUS may leave its window this long before the port gives up.
+const UNDERVOLTAGE: Duration = Duration::from_millis(20);
+/// A sink lowers its draw after PS_RDY. Its old limit, and the budget behind
+/// it, stay in force for this long.
+const SINK_SETTLE: Duration = Duration::from_millis(500);
+/// The TPS55288 output discharges before it restarts.
+const STAGE_REST: Duration = Duration::from_millis(250);
+const OFFER_SPACING: Duration = Duration::from_millis(200);
+/// Failures inside this window count towards holding the port off.
+const STRIKE_WINDOW: Duration = Duration::from_secs(30);
+const STRIKES: u8 = 3;
+
+/// What the board gives one port: its supply, charging budget and the
+/// qualified brick voltage behind it.
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+pub struct Grant {
+    pub supply: Supply,
+    pub budget_mw: u32,
+    pub input_mv: u16,
+}
 
 #[derive(Default)]
-struct Port {
-    status: PortStatus,
-    initialized: bool,
-    due: u64,
-    stage_due: u64,
-    start_step: u8,
-    cc_lost: Option<u64>,
-    tx: Option<Transmission>,
-    link: Link,
-    caps_due: u64,
-    caps_sent: u8,
-    transition: Option<RailChange>,
-    contract: Option<Contract>,
-    budget_mw: u32,
-    input_mv: u16,
-    sink_demand: power::SinkDemand,
-    transition_busy: bool,
-    offers_busy: bool,
-    request_until: u64,
-    action: Option<PortAction>,
-    action_due: Option<u64>,
-    powered: bool,
-    stage_on: bool,
-    inbox: Option<ReceivedPacket>,
-    fault_discharge_until: Option<u64>,
-    fault_cc: Option<FaultCc>,
-    feedback_deadline: u64,
-    host_expired: bool,
+struct Shared {
+    status: Cell<PortStatus>,
+    vbus: Cell<Option<u16>>,
+    pins: Cell<Option<PortFaults>>,
+    grant: Cell<Grant>,
+    demand: Cell<PortDemand>,
+    action: Cell<Option<PortAction>>,
+    rearm: Cell<bool>,
+    supply_fault: Cell<Option<PortError>>,
+    feedback_deadline: Cell<u64>,
+    wake: Signal<NoopRawMutex, ()>,
 }
 
-#[derive(Clone, Copy)]
-enum FaultCc {
-    Isolated(Orientation),
-    Measuring(Orientation),
+impl Shared {
+    fn update(&self, change: impl FnOnce(&mut PortStatus)) {
+        let mut status = self.status.get();
+        change(&mut status);
+        self.status.set(status);
+    }
+
+    fn snapshot(&self) -> PortStatus {
+        PortStatus {
+            vbus_adc: self.vbus.get(),
+            faults: self.pins.get(),
+            ..self.status.get()
+        }
+    }
 }
 
+/// The board's side of the ports: measurements in, grants in, status out.
 pub struct Ports {
-    ports: [Port; PORT_COUNT],
+    ports: [Shared; PORT_COUNT],
 }
 
 impl Ports {
     pub fn new() -> Self {
-        Self {
-            ports: core::array::from_fn(|_| Port {
-                status: PortStatus {
-                    enabled: true,
-                    ..PortStatus::default()
-                },
-                ..Port::default()
-            }),
+        let ports: [Shared; PORT_COUNT] = Default::default();
+        for port in &ports {
+            port.update(|status| status.enabled = true);
         }
+        Self { ports }
     }
 
-    pub fn transitioning(&self) -> bool {
-        self.ports.iter().any(|p| p.transition.is_some())
+    pub fn sample(&self, index: usize, vbus: Option<u16>, pins: PortFaults) {
+        self.ports[index].vbus.set(vbus);
+        self.ports[index].pins.set(Some(pins));
+    }
+
+    pub fn statuses(&self) -> [PortStatus; PORT_COUNT] {
+        self.ports.each_ref().map(Shared::snapshot)
+    }
+
+    pub fn demands(&self) -> [PortDemand; PORT_COUNT] {
+        self.ports.each_ref().map(|port| port.demand.get())
+    }
+
+    pub fn grant(&self, supply: Supply, budgets: [u32; PORT_COUNT], input_mv: u16) {
+        for (port, budget_mw) in self.ports.iter().zip(budgets) {
+            let grant = Grant {
+                supply,
+                budget_mw,
+                input_mv,
+            };
+            if port.grant.replace(grant) != grant {
+                port.wake.signal(());
+            }
+        }
     }
 
     pub fn restoring_on_host(&self) -> bool {
-        self.ports
-            .iter()
-            .any(|p| p.status.supply == Supply::HostPresence && p.restore_active())
+        self.ports.iter().any(|port| {
+            let status = port.status.get();
+            status.supply == Supply::HostPresence && restoring(&status)
+        })
     }
 
-    pub fn host_allowance_expired(&mut self, status: &mut Status) {
-        crate::board::host_requests_off();
-        for (index, port) in self.ports.iter_mut().enumerate() {
-            if port.status.supply == Supply::HostPresence && port.status.state != PortState::Fault {
-                port.host_expired = true;
-                port.status.error = Some(PortError::HostAllowanceExpired);
-                status.ports[index] = port.status;
+    /// The host supply was withdrawn from the targets it powers.
+    pub fn host_fault(&self, error: PortError) {
+        for port in &self.ports {
+            if port.status.get().supply == Supply::HostPresence {
+                port.supply_fault.set(Some(error));
+                port.wake.signal(());
             }
         }
     }
 
-    pub fn feedback(&mut self, request: RestoreFeedback) -> PortStatus {
-        let port = &mut self.ports[request.port.index()];
-        if request.generation == port.status.generation
-            && port.status.orientation.is_some()
-            && port.status.state != PortState::Fault
+    pub fn feedback(&self, request: RestoreFeedback) -> PortStatus {
+        let port = &self.ports[request.port.index()];
+        let status = port.status.get();
+        if request.generation == status.generation
+            && status.orientation.is_some()
+            && status.state != PortState::Fault
             && request.status.ecid != 0
             && request.status.progress <= 100
         {
-            port.status.restore = Some(request.status);
-            port.feedback_deadline = now() + 5000;
+            port.update(|status| status.restore = Some(request.status));
+            port.feedback_deadline.set(now_ms() + 5000);
         }
-        port.status
+        port.snapshot()
     }
 
-    pub fn command(&mut self, command: PortCommand) -> PortStatus {
-        let port = &mut self.ports[command.port.index()];
-        port.status.command_id = command.id;
-        let error = if port.status.generation != command.generation {
-            Some(CommandError::StaleAttachment)
-        } else if port.action.is_some()
-            || (port.transition.is_some()
-                && !matches!(command.action, PortAction::Disable | PortAction::Enable))
-        {
-            Some(CommandError::Busy)
-        } else {
-            None
-        };
-        if let Some(error) = error {
-            port.status.command_result = CommandResult::Failed(error);
-            return port.status;
-        }
-        match command.action {
+    pub fn command(&self, command: PortCommand) -> PortStatus {
+        let port = &self.ports[command.port.index()];
+        let mut status = port.status.get();
+        status.command_id = command.id;
+        status.command_result = match command.action {
             PortAction::Enable => {
-                if port.status.state == PortState::Fault {
-                    // Explicit retry, with fresh controller initialization.
-                    port.initialized = false;
-                    port.status.state = PortState::Discharging;
-                    port.due = now() + 1000;
-                    port.status.error = None;
-                    port.status.fault_sample = None;
-                    port.fault_cc = None;
-                }
-                port.status.enabled = true;
-                port.status.command_result = CommandResult::Complete;
+                status.enabled = true;
+                port.rearm.set(status.state == PortState::Fault);
+                CommandResult::Complete
             }
             PortAction::Disable => {
-                port.status.enabled = false;
-                port.status.command_result = if port.status.state == PortState::Fault {
+                status.enabled = false;
+                if matches!(status.state, PortState::Disabled | PortState::Fault) {
                     CommandResult::Complete
                 } else {
                     CommandResult::Pending
-                };
+                }
+            }
+            _ if status.generation != command.generation => {
+                CommandResult::Failed(CommandError::StaleAttachment)
+            }
+            _ if port.action.get().is_some() || status.pd_transition => {
+                CommandResult::Failed(CommandError::Busy)
+            }
+            _ if !matches!(status.state, PortState::Ready | PortState::Contract) => {
+                CommandResult::Failed(CommandError::NotReady)
             }
             action => {
-                if !matches!(port.status.state, PortState::Ready | PortState::Contract) {
-                    port.status.command_result = CommandResult::Failed(CommandError::NotReady);
-                } else {
-                    port.status.command_result = CommandResult::Pending;
-                    port.action = Some(action);
-                    port.action_due = (action == PortAction::Reboot).then(now);
-                }
+                port.action.set(Some(action));
+                CommandResult::Pending
             }
-        }
-        port.status
-    }
-
-    pub async fn tick(
-        &mut self,
-        bus: &mut Bus,
-        controls: &mut Controls,
-        outputs: &mut Outputs,
-        status: &mut Status,
-        host_limiter_fault: bool,
-    ) {
-        let demands = self.ports.each_ref().map(|port| port.demand());
-        let grants = match status.supply {
-            Supply::Brick => power::allocate(status.charging_budget_mw, demands),
-            Supply::HostPresence => demands.map(|port| u32::from(port.attached)),
-            Supply::Off => [0; PORT_COUNT],
         };
-        let qualified_mv = bus.brick_voltage_mv(status).unwrap_or(0) as u16;
-        // Remove source requests before spending time on bus transactions.
-        for (index, port) in self.ports.iter_mut().enumerate() {
-            // The shared EN is latched low before ticking on either fallback
-            // supply. The TPS55288 has reset and need not answer an I²C stop.
-            if status.supply != Supply::Brick {
-                port.stage_on = false;
-            }
-            port.budget_mw = grants[index];
-            port.input_mv = qualified_mv;
-            if grants[index] == 0 || status.aggregate_power_fault || bus.faulted() {
-                controls.charge(index, false);
-            }
-            let input = status.ports[index];
-            port.status.vbus_adc = input.vbus_adc;
-            port.status.faults = input.faults;
-        }
-        // A brick input fault withdraws the shared supply. Only the host
-        // limiter attributes a shared overcurrent trip to powered targets.
-        let first = self
-            .ports
-            .iter()
-            .position(|port| port.transition.is_some())
-            .unwrap_or(0);
-        for offset in 0..PORT_COUNT {
-            let index = (first + offset) % PORT_COUNT;
-            let busy = self
-                .ports
-                .iter()
-                .enumerate()
-                .any(|(i, p)| i != index && p.transition.is_some());
-            let offers_busy = busy
-                || self
-                    .ports
-                    .iter()
-                    .enumerate()
-                    .any(|(i, p)| i != index && now() < p.request_until);
-            let port = &mut self.ports[index];
-            port.transition_busy = busy;
-            port.offers_busy = offers_busy;
-            let result = if core::mem::take(&mut port.host_expired) {
-                Err(PortError::HostAllowanceExpired)
-            } else if let Some(error) = bus.stopped() {
-                Err(error)
-            } else if host_limiter_fault && port.powered && port.status.state != PortState::Fault {
-                Err(PortError::HostLimiter)
-            } else {
-                port.tick(
-                    bus,
-                    controls,
-                    outputs,
-                    index,
-                    status.supply,
-                    (grants[index] > 0).then_some(status.supply),
-                )
-                .await
+        port.status.set(status);
+        port.wake.signal(());
+        port.snapshot()
+    }
+
+    /// Run one port. `int` is its FUSB302 INT_N line.
+    pub async fn run(&self, io: &SharedIo, index: usize, mut int: Input<'static>) -> ! {
+        let port = Port {
+            shared: &self.ports[index],
+            io,
+            index,
+            phy: Phy::new(io, index),
+            supply: Cell::new(Supply::Off),
+            contract: Cell::new(None),
+            enforced: Cell::new(Contract::USB_DEFAULT),
+            pending: Cell::new(None),
+            lowering: Cell::new(None),
+            offers: Cell::new([0; 4]),
+            sink: Cell::new(SinkDemand::default()),
+            fault: Cell::new(None),
+            stage_on: Cell::new(false),
+            powered: Cell::new(false),
+        };
+        let mut strikes = 0;
+        let mut struck = Instant::MIN;
+        loop {
+            port.idle().await;
+            let outcome = port.attachment(&mut int).await;
+            let Some((error, orientation)) = port.finish(outcome).await else {
+                continue;
             };
-            if let Err(mut error) = result {
-                controls.charge(index, false);
-                let at = now();
-                let channel = Some(index as u8);
-                let mut selected = !bus.faulted() && bus.select(channel).await.is_ok();
-                if selected
-                    && port.stage_on
-                    && port.status.supply == Supply::Brick
-                    && let PortError::PortProtection {
-                        pins,
-                        converter_status,
-                    } = &mut error
-                    && pins.power
-                {
-                    // The host eFuse and converter share this pin. STATUS is
-                    // read-to-clear, so capture it before shutting down the stage.
-                    match stage::status(bus).await {
-                        Ok(raw) => *converter_status = Some(raw),
-                        Err(_) => selected = !bus.faulted() && bus.select(channel).await.is_ok(),
-                    }
-                }
-                port.fail(error, at);
-                if selected {
-                    let _ = fusb::open(bus).await;
-                    if port.stage_on && stage::off(bus).await.is_ok() {
-                        port.stage_due = now() + 250;
-                        port.stage_on = false;
-                    }
-                }
-                // The discharge controls are on the root expander, so a
-                // quarantined target branch does not prevent safe discharge.
-                if !bus.faulted()
-                    && port.powered
-                    && outputs.discharge(bus, controls, index, true).await.is_ok()
-                {
-                    port.fault_discharge_until = Some(now() + 1000);
-                }
+            if struck.elapsed() > STRIKE_WINDOW {
+                strikes = 0;
             }
-            port.status.pd_transition = port.transition.is_some();
-            status.ports[index] = port.status;
-        }
-        if let Some(error) = bus.stopped() {
-            self.fail_all(controls, status, error);
-        }
-    }
-
-    pub fn fail_all(&mut self, controls: &mut Controls, status: &mut Status, error: PortError) {
-        for (index, port) in self.ports.iter_mut().enumerate() {
-            controls.charge(index, false);
-            port.status.vbus_adc = status.ports[index].vbus_adc;
-            port.status.faults = status.ports[index].faults;
-            port.fail(error, now());
-            status.ports[index] = port.status;
-        }
-    }
-
-    pub async fn shutdown(&mut self, bus: &mut Bus, controls: &mut Controls) {
-        for index in 0..PORT_COUNT {
-            controls.charge(index, false);
-        }
-        for (index, port) in self.ports.iter().enumerate() {
-            if bus.select(Some(index as u8)).await.is_ok() {
-                let _ = fusb::open(bus).await;
-                if port.stage_on {
-                    let _ = stage::off(bus).await;
-                }
+            strikes += 1;
+            struck = Instant::now();
+            if strikes >= STRIKES || holds_off(error) {
+                port.hold_off(orientation, &mut int).await;
+                strikes = 0;
             }
         }
     }
 }
 
-impl Port {
-    fn voltage_ready(&self) -> bool {
-        match self.status.supply {
-            Supply::HostPresence => power::safe_presence(self.status.vbus_adc),
-            Supply::Brick => power::safe_five_volts(self.status.vbus_adc),
+/// Stop every port before the ROM bootloader takes the processor.
+pub async fn shutdown(io: &mut Io, brick: bool) {
+    for index in 0..PORT_COUNT {
+        io.controls.charge(index, false);
+    }
+    for index in 0..PORT_COUNT {
+        if let Ok(bus) = io.port(index).await {
+            let _ = phy::release(bus).await;
+            if brick {
+                let _ = stage::off(bus).await;
+            }
+        }
+    }
+}
+
+fn restoring(status: &PortStatus) -> bool {
+    status.restore.is_some_and(|job| {
+        matches!(
+            job.phase,
+            RestorePhase::Preparing | RestorePhase::Running | RestorePhase::Unconfirmed
+        )
+    })
+}
+
+/// Protection trips and hardware disagreements wait for a person. Protocol
+/// and voltage failures recover through vSafe0V.
+fn holds_off(error: PortError) -> bool {
+    !matches!(
+        error,
+        PortError::Voltage | PortError::PdTimeout | PortError::Protocol | PortError::I2c { .. }
+    )
+}
+
+fn now_ms() -> u64 {
+    Instant::now().as_millis()
+}
+
+struct Clock;
+
+impl usbpd::timers::Timer for Clock {
+    fn after_millis(milliseconds: u64) -> impl Future<Output = ()> {
+        Timer::after_millis(milliseconds)
+    }
+}
+
+struct Port<'a> {
+    shared: &'a Shared,
+    io: &'a SharedIo,
+    index: usize,
+    phy: Phy<'a>,
+    /// Supply of the present attachment.
+    supply: Cell<Supply>,
+    contract: Cell<Option<Contract>>,
+    /// The contract whose current limit the converter enforces, and whose
+    /// cost the pool holds. It trails `contract` while a sink lowers its draw.
+    enforced: Cell<Contract>,
+    /// An accepted request and its RDO, reserved until PS_RDY.
+    pending: Cell<Option<(Contract, u32)>>,
+    lowering: Cell<Option<(Instant, Contract)>>,
+    /// The capabilities last given to the PD engine.
+    offers: Cell<[u32; 4]>,
+    sink: Cell<SinkDemand>,
+    fault: Cell<Option<PortError>>,
+    stage_on: Cell<bool>,
+    powered: Cell<bool>,
+}
+
+impl Port<'_> {
+    fn status(&self) -> PortStatus {
+        self.shared.status.get()
+    }
+
+    fn update(&self, change: impl FnOnce(&mut PortStatus)) {
+        self.shared.update(change);
+    }
+
+    fn fail(&self, error: PortError) {
+        if self.fault.get().is_none() {
+            self.fault.set(Some(error));
+        }
+    }
+
+    fn millivolts(&self) -> Option<u32> {
+        self.shared.vbus.get().and_then(power::millivolts)
+    }
+
+    fn operating_voltage(&self) -> u16 {
+        self.contract.get().map_or(5000, |c| c.millivolts)
+    }
+
+    fn voltage_valid(&self) -> bool {
+        match self.supply.get() {
+            Supply::HostPresence => power::safe_presence(self.shared.vbus.get()),
+            Supply::Brick => {
+                let (low, high) = iasis_pd::voltage_window(self.operating_voltage());
+                self.millivolts()
+                    .is_some_and(|mv| (u32::from(low)..=u32::from(high)).contains(&mv))
+            }
             Supply::Off => false,
         }
     }
 
-    fn demand(&self) -> power::PortDemand {
-        let on_brick = self.status.supply == Supply::Brick
-            && !matches!(self.status.state, PortState::Fault | PortState::Discharging);
-        power::PortDemand {
-            attached: self.status.enabled
-                && self.status.orientation.is_some()
-                && !matches!(self.status.state, PortState::Fault | PortState::Discharging),
-            active: on_brick.then_some(self.contract.unwrap_or(Contract::USB_DEFAULT)),
-            pending: self
-                .transition
-                .filter(|_| on_brick)
-                .map(|change| change.target),
-            wants_more: self.contract.is_none() || self.sink_demand.wants_more(),
-            restore_mv: self.restore_active().then(|| self.operating_voltage()),
+    /// The board no longer wants this attachment as it stands.
+    fn stopping(&self) -> bool {
+        let grant = self.shared.grant.get();
+        !self.status().enabled || grant.supply == Supply::Off || grant.supply != self.supply.get()
+    }
+
+    fn pins(&self) -> Result<(), PortError> {
+        if self.shared.vbus.get().is_none() {
+            return Err(PortError::Adc);
         }
-    }
-
-    fn restore_active(&self) -> bool {
-        self.status.restore.is_some_and(|job| {
-            matches!(
-                job.phase,
-                RestorePhase::Preparing | RestorePhase::Running | RestorePhase::Unconfirmed
-            )
-        })
-    }
-
-    fn operating_voltage(&self) -> u16 {
-        self.contract.map_or(5000, |contract| contract.millivolts)
-    }
-
-    fn detach(&mut self) {
-        if self.status.orientation.take().is_some() {
-            self.status.generation = self.status.generation.wrapping_add(1);
-        }
-        self.tx = None;
-        self.transition = None;
-        self.status.pd_transition = false;
-        self.sink_demand = power::SinkDemand::default();
-        self.request_until = 0;
-        self.contract = None;
-        self.status.contract_mv = 0;
-        self.status.contract_ma = 0;
-        self.status.pd_source_pdos = [0; 4];
-        self.status.pd_request = None;
-        self.link = Link::default();
-        self.cc_lost = None;
-        if self.action.take().is_some() {
-            self.status.command_result = CommandResult::Failed(CommandError::StaleAttachment);
-        }
-        self.action_due = None;
-        self.inbox = None;
-        self.status.restore = None;
-        self.feedback_deadline = 0;
-    }
-
-    fn fail(&mut self, error: PortError, at: u64) {
-        self.fault_cc = if matches!(
-            error,
-            PortError::Voltage | PortError::PdTimeout | PortError::Protocol
-        ) {
-            self.status.orientation.map(FaultCc::Isolated)
-        } else {
-            None
+        let Some(pins) = self.shared.pins.get() else {
+            return Ok(());
         };
+        let power = pins.power && (self.stage_on.get() || self.powered.get());
+        if pins.cc || power {
+            return Err(PortError::PortProtection {
+                pins: PortFaults { cc: pins.cc, power },
+                converter_status: None,
+            });
+        }
+        Ok(())
+    }
+
+    fn current_offers(&self) -> [u32; 4] {
+        let grant = self.shared.grant.get();
+        match self.supply.get() {
+            Supply::Brick => iasis_pd::fixed_offers(grant.budget_mw, grant.input_mv),
+            Supply::HostPresence => iasis_pd::host_offers(),
+            Supply::Off => [0; 4],
+        }
+    }
+
+    /// Tell the allocator what this port holds and wants.
+    fn publish(&self) {
+        let status = self.status();
+        let attached = status.enabled
+            && status.orientation.is_some()
+            && !matches!(status.state, PortState::Fault | PortState::Discharging);
+        let on_brick = attached && status.supply == Supply::Brick;
+        self.shared.demand.set(PortDemand {
+            attached,
+            active: on_brick.then(|| self.enforced.get()),
+            pending: self.pending.get().filter(|_| on_brick).map(|(c, _)| c),
+            wants_more: self.contract.get().is_none() || self.sink.get().wants_more(),
+            restore_mv: restoring(&status).then(|| self.operating_voltage()),
+        });
+    }
+
+    async fn vbus_within(&self, limit: Duration, reached: impl Fn(Option<u16>) -> bool) -> bool {
+        let deadline = Instant::now() + limit;
+        loop {
+            if reached(self.shared.vbus.get()) {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            Timer::after_millis(1).await;
+        }
+    }
+
+    /// Disabled or waiting for a supply.
+    async fn idle(&self) {
+        loop {
+            let enabled = self.status().enabled;
+            self.update(|status| {
+                status.state = if enabled {
+                    PortState::WaitingPower
+                } else {
+                    PortState::Disabled
+                };
+                if !enabled && status.command_result == CommandResult::Pending {
+                    status.command_result = CommandResult::Complete;
+                }
+            });
+            if enabled && self.shared.grant.get().supply != Supply::Off {
+                return;
+            }
+            select(self.shared.wake.wait(), Timer::after_millis(50)).await;
+        }
+    }
+
+    /// One attachment, from looking for a sink until it leaves or fails.
+    async fn attachment(&self, int: &mut Input<'static>) -> Result<(), PortError> {
+        let supply = self.shared.grant.get().supply;
+        self.supply.set(supply);
+        let id = self.phy.init().await?;
+        self.update(|status| {
+            status.fusb_device_id = Some(id);
+            status.state = PortState::Unattached;
+        });
+        self.phy.toggle().await?;
+        let orientation = loop {
+            if self.stopping() {
+                return Ok(());
+            }
+            self.phy.wait(int, 20).await?;
+            if let Some(orientation) = self.phy.toggled() {
+                break orientation;
+            }
+        };
+
+        // AttachWait.SRC: Rd must hold for tCCDebounce with VBUS at vSafe0V.
+        self.phy.attach(orientation).await?;
+        self.update(|status| {
+            status.orientation = Some(orientation);
+            status.generation = status.generation.wrapping_add(1);
+            status.command_result = CommandResult::Idle;
+            status.state = PortState::Debouncing;
+        });
+        self.publish();
+        let debounced = Instant::now() + CC_DEBOUNCE;
+        let bleed_until = Instant::now() + BLEED;
+        let mut stage_step = 0;
+        let mut stage_due = Instant::now();
+        loop {
+            self.phy.wait(int, 5).await?;
+            if self.stopping() || self.phy.cc_open() {
+                return Ok(());
+            }
+            self.pins()?;
+            // A sink unplugged a moment ago can return some charge to VBUS.
+            // Bleed it briefly; a source holding VBUS up is left to itself.
+            let quiet = power::safe_zero(self.shared.vbus.get());
+            let mut io = self.io.lock().await;
+            io.discharge(self.index, !quiet && Instant::now() < bleed_until)
+                .await?;
+            if self.shared.grant.get().budget_mw == 0 {
+                continue;
+            }
+            self.update(|status| status.supply = supply);
+            if supply == Supply::Brick && Instant::now() >= stage_due {
+                let bus = io.port(self.index).await?;
+                match stage_step {
+                    0 => {
+                        stage::off(bus).await?;
+                        stage_due = Instant::now() + STAGE_REST;
+                    }
+                    1 => {
+                        stage::five_volts(bus).await?;
+                        self.stage_on.set(true);
+                        stage_due = Instant::now() + Duration::from_millis(20);
+                    }
+                    2 => stage::check_status(bus).await?,
+                    _ => {}
+                }
+                stage_step = (stage_step + 1).min(3);
+            }
+            let stage_ready = supply != Supply::Brick || stage_step == 3;
+            if quiet && stage_ready && Instant::now() >= debounced {
+                break;
+            }
+        }
+        if !self.phy.is_rd().await? {
+            return Ok(());
+        }
+
+        // Attached.SRC.
+        self.enforced.set(Contract::USB_DEFAULT);
+        {
+            let mut io = self.io.lock().await;
+            io.discharge(self.index, false).await?;
+            io.controls
+                .orientation(self.index, orientation == Orientation::Cc1);
+            io.controls.target(self.index, supply);
+        }
+        self.powered.set(true);
+        self.update(|status| status.state = PortState::Starting);
+        let deadline = Instant::now() + VBUS_ON;
+        while !self.voltage_valid() {
+            self.phy.wait(int, 2).await?;
+            if self.stopping() || self.phy.cc_open() {
+                return Ok(());
+            }
+            self.pins()?;
+            if Instant::now() >= deadline {
+                return Err(PortError::Voltage);
+            }
+        }
+        let offers = self.current_offers();
+        self.offers.set(offers);
+        self.update(|status| {
+            status.state = PortState::Ready;
+            status.pd_source_pdos = offers;
+            status.error = None;
+            status.fault_sample = None;
+        });
+
+        let policy = Policy {
+            port: self,
+            accepted: false,
+            offered: Instant::now(),
+        };
+        let mut source = Source::<_, Clock, _>::new(PdPhy(&self.phy), policy, false);
+        match select3(source.run(), self.supervise(), self.phy.run(int)).await {
+            // The engine ends when the sink stops answering or the supply
+            // could not follow a request.
+            Either3::First(_) => Err(self.fault.take().unwrap_or(PortError::PdTimeout)),
+            Either3::Second(result) => result,
+            Either3::Third(error) => Err(error),
+        }
+    }
+
+    /// Watch an attached sink beside the PD engine.
+    async fn supervise(&self) -> Result<(), PortError> {
+        let mut open_since = None;
+        let mut invalid_since = None;
+        loop {
+            select(self.phy.changed(), Timer::after_millis(2)).await;
+            let failure = self.phy.failure().or(self.fault.take());
+            if let Some(error) = failure.or(self.shared.supply_fault.take()) {
+                return Err(error);
+            }
+            self.pins()?;
+            if self.stopping() || self.shared.grant.get().budget_mw == 0 {
+                return Ok(());
+            }
+            let now = Instant::now();
+            let transition = self.status().pd_transition;
+            if !self.phy.cc_open() {
+                open_since = None;
+            } else if transition || now - *open_since.get_or_insert(now) >= DISCONNECT {
+                return Ok(());
+            }
+            if transition || self.voltage_valid() {
+                invalid_since = None;
+            } else if now - *invalid_since.get_or_insert(now) >= UNDERVOLTAGE {
+                return Err(PortError::Voltage);
+            }
+            if !transition {
+                if let Some((due, target)) = self.lowering.get()
+                    && now >= due
+                {
+                    let mut io = self.io.lock().await;
+                    stage::set_limit(io.port(self.index).await?, target.limit_ma).await?;
+                    self.enforced.set(target);
+                    self.lowering.set(None);
+                }
+                if let Some(action) = self.shared.action.take() {
+                    self.signal(action).await?;
+                }
+            }
+            let expired = now_ms() >= self.shared.feedback_deadline.get();
+            self.update(|status| {
+                status.pd_write_retries = self.phy.retries();
+                if let Some(restore) = &mut status.restore
+                    && matches!(
+                        restore.phase,
+                        RestorePhase::Preparing | RestorePhase::Running
+                    )
+                    && expired
+                {
+                    restore.phase = RestorePhase::Unconfirmed;
+                }
+            });
+            self.publish();
+        }
+    }
+
+    /// Send an Apple debug action. Targets answer an empty vendor header
+    /// before they accept DFU.
+    async fn signal(&self, action: PortAction) -> Result<(), PortError> {
+        let words = match action {
+            PortAction::DfuAppleSilicon => apple::SILICON_DFU,
+            PortAction::DfuT2 => apple::T2_DFU,
+            _ => apple::REBOOT,
+        };
+        if action != PortAction::Reboot {
+            self.phy.send_debug(&apple::PROBE).await?;
+            Timer::after_millis(20).await;
+        }
+        let result = match self.phy.send_debug(&words).await? {
+            Tx::Sent => CommandResult::Acknowledged,
+            Tx::Unanswered => CommandResult::Unconfirmed,
+            Tx::Collision => CommandResult::Failed(CommandError::Transmission),
+        };
+        self.update(|status| status.command_result = result);
+        Ok(())
+    }
+
+    /// Reserve a request the present offers and budget allow.
+    fn accept(&self, rdo: u32) -> bool {
+        let grant = self.shared.grant.get();
+        let Ok(target) = iasis_pd::fixed_contract(&self.offers.get(), rdo) else {
+            return false;
+        };
+        let funded = self.supply.get() == Supply::HostPresence
+            || target.permitted(grant.budget_mw, grant.input_mv);
+        // An active restore keeps its voltage.
+        let steady = !restoring(&self.status()) || target.millivolts == self.operating_voltage();
+        if funded && steady {
+            self.pending.set(Some((target, rdo)));
+            self.publish();
+        }
+        funded && steady
+    }
+
+    /// Move the supply to the accepted request. PS_RDY follows.
+    async fn transition(&self) -> Result<(), PortError> {
+        let (target, rdo) = self.pending.get().ok_or(PortError::Protocol)?;
+        self.update(|status| status.pd_transition = true);
+        let result = self.change_rail(target).await;
+        self.pending.set(None);
+        if result.is_ok() {
+            let offer = self.offers.get()[((rdo >> 28) & 7) as usize - 1];
+            let mut sink = self.sink.get();
+            sink.accept(offer, rdo);
+            self.sink.set(sink);
+            self.contract.set(Some(target));
+        }
+        self.update(|status| {
+            status.pd_transition = false;
+            if result.is_ok() {
+                status.pd_request = Some(rdo);
+                status.contract_mv = target.millivolts;
+                status.contract_ma = target.operating_ma;
+                status.state = PortState::Contract;
+            }
+        });
+        self.publish();
+        result
+    }
+
+    async fn change_rail(&self, target: Contract) -> Result<(), PortError> {
+        Timer::after(SOURCE_TRANSITION).await;
+        if self.supply.get() == Supply::HostPresence {
+            return if self.voltage_valid() {
+                Ok(())
+            } else {
+                Err(PortError::Voltage)
+            };
+        }
+        let from_mv = self.operating_voltage();
+        if target.millivolts == from_mv {
+            let old = iasis_pd::nominal_limit_ma(self.enforced.get().limit_ma);
+            let new = iasis_pd::nominal_limit_ma(target.limit_ma);
+            if new < old {
+                self.lowering
+                    .set(Some((Instant::now() + SINK_SETTLE, target)));
+            } else {
+                self.lowering.set(None);
+                if new > old {
+                    let mut io = self.io.lock().await;
+                    stage::set_limit(io.port(self.index).await?, target.limit_ma).await?;
+                }
+                self.enforced.set(target);
+            }
+            return Ok(());
+        }
+
+        // The sink is in standby until PS_RDY, so the new limit applies at once.
+        {
+            let mut io = self.io.lock().await;
+            if target.millivolts > 5000 {
+                // Raise the output switch's overvoltage threshold first.
+                io.high_voltage(self.index, true).await?;
+            }
+            let bus = io.port(self.index).await?;
+            stage::set_contract(bus, target.millivolts, target.limit_ma).await?;
+        }
+        let window = |mv: u16| {
+            let (low, high) = iasis_pd::voltage_window(mv);
+            u32::from(low)..=u32::from(high)
+        };
+        let (from, to) = (window(from_mv), window(target.millivolts));
+        let slew = *from.start().min(to.start())..=*from.end().max(to.end());
+        let deadline = Instant::now() + SETTLE;
+        let mut stable_since = None;
+        loop {
+            Timer::after_millis(1).await;
+            let now = Instant::now();
+            let mv = self.millivolts().ok_or(PortError::Adc)?;
+            if !slew.contains(&mv) {
+                return Err(PortError::Voltage);
+            }
+            if !to.contains(&mv) {
+                stable_since = None;
+            } else if now - *stable_since.get_or_insert(now) >= STABLE {
+                break;
+            }
+            if now >= deadline {
+                return Err(PortError::PdTimeout);
+            }
+        }
+        let mut io = self.io.lock().await;
+        stage::settled(io.port(self.index).await?, target.limit_ma).await?;
+        if target.millivolts == 5000 {
+            io.high_voltage(self.index, false).await?;
+        }
+        self.lowering.set(None);
+        self.enforced.set(target);
+        Ok(())
+    }
+
+    /// Hard reset: VBUS to vSafe0V, tSrcRecover, then vSafe5V.
+    async fn power_cycle(&self) -> Result<(), PortError> {
+        self.contract.set(None);
+        self.pending.set(None);
+        self.lowering.set(None);
+        self.sink.set(SinkDemand::default());
+        self.update(|status| {
+            status.pd_transition = true;
+            status.state = PortState::Ready;
+            status.pd_request = None;
+            status.contract_mv = 0;
+            status.contract_ma = 0;
+        });
+        let result = self.cycle().await;
+        self.update(|status| status.pd_transition = false);
+        self.publish();
+        result
+    }
+
+    async fn cycle(&self) -> Result<(), PortError> {
+        let supply = self.supply.get();
+        {
+            let mut io = self.io.lock().await;
+            io.controls.target(self.index, Supply::Off);
+            if self.stage_on.replace(false) {
+                stage::off(io.port(self.index).await?).await?;
+            }
+            io.discharge(self.index, true).await?;
+        }
+        if !self
+            .vbus_within(Duration::from_millis(650), power::safe_zero)
+            .await
+        {
+            return Err(PortError::DischargeTimeout);
+        }
+        Timer::after(RECOVER).await;
+        {
+            let mut io = self.io.lock().await;
+            io.high_voltage(self.index, false).await?;
+            io.discharge(self.index, false).await?;
+            if supply == Supply::Brick {
+                stage::five_volts(io.port(self.index).await?).await?;
+                self.stage_on.set(true);
+            }
+        }
+        self.enforced.set(Contract::USB_DEFAULT);
+        self.phy.pd_reset().await?;
+        if supply == Supply::Brick {
+            Timer::after_millis(20).await;
+            let mut io = self.io.lock().await;
+            stage::check_status(io.port(self.index).await?).await?;
+        }
+        self.io.lock().await.controls.target(self.index, supply);
+        if !self.vbus_within(VBUS_ON, |_| self.voltage_valid()).await {
+            return Err(PortError::Voltage);
+        }
+        Ok(())
+    }
+
+    /// Return the port to vSafe0V with Rp removed. Reports a failure the
+    /// board did not ask for, with the CC line the sink was on.
+    async fn finish(
+        &self,
+        outcome: Result<(), PortError>,
+    ) -> Option<(PortError, Option<Orientation>)> {
+        let wanted = self.stopping();
+        let before = self.shared.snapshot();
         let snapshot = |contract: Contract| FaultContract {
             millivolts: contract.millivolts,
             operating_ma: contract.operating_ma,
             limit_ma: contract.limit_ma,
         };
-        self.status.latch_fault(
-            error,
-            FaultSample {
-                uptime_ms: at,
-                state: self.status.state,
-                vbus_adc: self.status.vbus_adc,
-                faults: self.status.faults,
-                contract: self.contract.map(snapshot),
-                target: self.transition.map(|change| snapshot(change.target)),
-            },
-        );
-        let restore = self.status.restore;
-        self.detach();
-        self.status.restore = restore.map(|mut restore| {
-            restore.phase = RestorePhase::Failed;
-            restore
-        });
-        self.status.state = PortState::Fault;
-        self.status.supply = Supply::Off;
-        if self.status.command_result == CommandResult::Pending {
-            self.status.command_result = CommandResult::Failed(CommandError::Hardware);
-        }
-    }
-
-    async fn stop(
-        &mut self,
-        bus: &mut Bus,
-        controls: &mut Controls,
-        outputs: &mut Outputs,
-        index: usize,
-    ) -> Result<(), PortError> {
-        controls.charge(index, false);
-        fusb::open(bus).await?;
-        if self.stage_on {
-            stage::off(bus).await?;
-            self.stage_on = false;
-        }
-        self.stage_due = now() + 250;
-        if self.powered {
-            outputs.discharge(bus, controls, index, true).await?;
-        }
-        self.detach();
-        self.status.state = PortState::Discharging;
-        self.due = now() + 1000;
-        Ok(())
-    }
-
-    async fn poll_fault(
-        &mut self,
-        bus: &mut Bus,
-        controls: &mut Controls,
-        outputs: &mut Outputs,
-        index: usize,
-        supply: Supply,
-    ) -> Result<(), PortError> {
-        let isolated =
-            !self.stage_on && now() >= self.stage_due && power::safe_zero(self.status.vbus_adc);
-        if isolated {
-            outputs.high_voltage(bus, controls, index, false).await?;
-        }
-        if self.fault_discharge_until.is_some_and(|due| now() >= due) {
-            outputs.discharge(bus, controls, index, false).await?;
-            self.fault_discharge_until = None;
-        }
-        let Some(watch) = self.fault_cc else {
-            return Ok(());
+        let sample = FaultSample {
+            uptime_ms: now_ms(),
+            state: before.state,
+            vbus_adc: before.vbus_adc,
+            faults: before.faults,
+            contract: self.contract.get().map(snapshot),
+            target: self.pending.get().map(|(target, _)| snapshot(target)),
         };
-        let may_sense = isolated
-            && self.fault_discharge_until.is_none()
-            && self.status.enabled
-            && supply != Supply::Off
-            && self
-                .status
-                .faults
-                .is_some_and(|faults| !faults.cc && !faults.power);
-        match (watch, may_sense) {
-            (FaultCc::Isolated(cc), true) => {
-                bus.select(Some(index as u8)).await?;
-                fusb::open(bus).await?;
-                fusb::sense_cc(bus, cc).await?;
-                self.fault_cc = Some(FaultCc::Measuring(cc));
+        let brick = self.shared.grant.get().supply == Supply::Brick;
+        let mut error = outcome.err();
+        if let Some(PortError::PortProtection {
+            pins,
+            converter_status,
+        }) = &mut error
+            && pins.power
+            && brick
+            && self.stage_on.get()
+        {
+            // FB/INT is shared with the host eFuse and STATUS clears on read.
+            let mut io = self.io.lock().await;
+            if let Ok(bus) = io.port(self.index).await {
+                *converter_status = stage::status(bus).await.ok();
             }
-            (FaultCc::Measuring(cc), false) => {
-                bus.select(Some(index as u8)).await?;
-                fusb::open(bus).await?;
-                self.fault_cc = Some(FaultCc::Isolated(cc));
-                self.cc_lost = None;
-            }
-            (FaultCc::Measuring(_), true) => {
-                bus.select(Some(index as u8)).await?;
-                if power::cc_detached(&mut self.cc_lost, fusb::cc_open(bus).await?, now(), 150) {
-                    fusb::open(bus).await?;
-                    self.fault_cc = None;
-                    self.cc_lost = None;
-                    self.powered = false;
-                    self.status.error = None;
-                    self.status.fault_sample = None;
-                    self.status.restore = None;
-                    self.status.state = PortState::WaitingPower;
-                }
-            }
-            (FaultCc::Isolated(_), false) => {}
         }
-        Ok(())
+
+        self.contract.set(None);
+        self.pending.set(None);
+        self.lowering.set(None);
+        self.sink.set(SinkDemand::default());
+        self.fault.set(None);
+        self.phy.failure();
+        let action = self.shared.action.take();
+        self.update(|status| {
+            if status.orientation.take().is_some() {
+                status.generation = status.generation.wrapping_add(1);
+            }
+            status.state = PortState::Discharging;
+            status.pd_transition = false;
+            status.pd_source_pdos = [0; 4];
+            status.pd_request = None;
+            status.contract_mv = 0;
+            status.contract_ma = 0;
+            if action.is_some() || status.command_result == CommandResult::Pending {
+                status.command_result = if status.enabled {
+                    CommandResult::Failed(CommandError::StaleAttachment)
+                } else {
+                    CommandResult::Pending
+                };
+            }
+        });
+        self.publish();
+        let released = self.release(brick).await;
+        let error = error.or(released.err()).filter(|_| !wanted);
+        self.update(|status| {
+            status.supply = Supply::Off;
+            status.restore = status.restore.filter(|_| error.is_some()).map(|mut job| {
+                job.phase = RestorePhase::Failed;
+                job
+            });
+            if let Some(error) = error {
+                status.error = Some(error);
+                status.fault_sample = Some(sample);
+                status.recoveries = status.recoveries.saturating_add(1);
+            }
+        });
+        error.map(|error| (error, before.orientation))
     }
 
-    async fn tick(
-        &mut self,
-        bus: &mut Bus,
-        controls: &mut Controls,
-        outputs: &mut Outputs,
-        index: usize,
-        supply: Supply,
-        granted: Option<Supply>,
-    ) -> Result<(), PortError> {
-        if let Some(restore) = &mut self.status.restore
-            && matches!(
-                restore.phase,
-                RestorePhase::Preparing | RestorePhase::Running
-            )
-            && now() >= self.feedback_deadline
-        {
-            restore.phase = RestorePhase::Unconfirmed;
-        }
-        if self.status.state == PortState::Fault {
-            return self.poll_fault(bus, controls, outputs, index, supply).await;
-        }
-        bus.select(Some(index as u8)).await?;
-        if !self.initialized {
-            self.status.fusb_device_id = Some(fusb::init(bus).await?);
-            self.initialized = true;
-            if self.status.state == PortState::Discharging && self.stage_on {
-                stage::off(bus).await?;
-                self.stage_on = false;
-                self.stage_due = now() + 250;
-            }
-        }
-        if let Some(faults) = self.status.faults {
-            let power = faults.power
-                && (self.stage_on || self.powered)
-                && self.status.state != PortState::Discharging;
-            if faults.cc || power {
-                return Err(PortError::PortProtection {
-                    pins: PortFaults {
-                        cc: faults.cc,
-                        power,
-                    },
-                    converter_status: None,
-                });
-            }
-        }
-        if self.status.enabled && self.status.vbus_adc.is_none() {
-            return Err(PortError::Adc);
-        }
-        if (!self.status.enabled
-            || supply == Supply::Off
-            || (self.status.supply != Supply::Off && granted != Some(self.status.supply)))
-            && !matches!(
-                self.status.state,
-                PortState::Disabled | PortState::WaitingPower | PortState::Discharging
-            )
-        {
-            self.stop(bus, controls, outputs, index).await?;
-        }
-        match self.status.state {
-            PortState::Disabled | PortState::WaitingPower => {
-                if !self.status.enabled {
-                    self.status.state = PortState::Disabled;
-                    if self.status.command_result == CommandResult::Pending {
-                        self.status.command_result = CommandResult::Complete;
-                    }
-                } else if supply != Supply::Off {
-                    if !power::safe_zero(self.status.vbus_adc) {
-                        return Err(PortError::UnexpectedVbus);
-                    }
-                    outputs.discharge(bus, controls, index, false).await?;
-                    fusb::toggle(bus).await?;
-                    self.status.state = PortState::Unattached;
+    async fn release(&self, brick: bool) -> Result<(), PortError> {
+        let powered = self.powered.replace(false);
+        // The shared enable holds every converter in reset off brick power.
+        let stage_on = self.stage_on.replace(false) && brick;
+        let mut io = self.io.lock().await;
+        io.controls.charge(self.index, false);
+        let mut result = match io.port(self.index).await {
+            Ok(bus) => {
+                let released = phy::release(bus).await;
+                if stage_on {
+                    released.and(stage::off(bus).await)
                 } else {
-                    self.status.state = PortState::WaitingPower;
+                    released
                 }
             }
-            PortState::Unattached => {
-                if !power::safe_zero(self.status.vbus_adc) {
-                    return Err(PortError::UnexpectedVbus);
-                }
-                let events = fusb::events(bus).await?;
-                let orientation = match events.toggle {
-                    1 => Some(Orientation::Cc1),
-                    2 => Some(Orientation::Cc2),
-                    _ => None,
-                };
-                if let Some(orientation) = orientation {
-                    fusb::attach(bus, orientation).await?;
-                    self.status.orientation = Some(orientation);
-                    self.status.generation = self.status.generation.wrapping_add(1);
-                    self.status.command_result = CommandResult::Idle;
-                    self.status.state = PortState::Debouncing;
-                    self.due = now() + 150;
-                }
+            Err(error) => Err(error),
+        };
+        if powered {
+            result = result.and(io.discharge(self.index, true).await);
+            drop(io);
+            let quiet = self
+                .vbus_within(Duration::from_secs(1), power::safe_zero)
+                .await;
+            let mut io = self.io.lock().await;
+            result = result
+                .and(io.high_voltage(self.index, false).await)
+                .and(io.discharge(self.index, false).await);
+            if !quiet {
+                result = result.and(Err(PortError::DischargeTimeout));
             }
-            PortState::Debouncing => {
-                if fusb::events(bus).await?.cc_open {
-                    self.stop(bus, controls, outputs, index).await?;
-                    return Ok(());
-                }
-                if !power::safe_zero(self.status.vbus_adc) {
-                    return Err(PortError::UnexpectedVbus);
-                }
-                let Some(supply) = granted else {
-                    return Ok(());
-                };
-                // Only an observed attachment reserves a stage. Its discharge
-                // and settling overlap CC debounce; idle connectors cost no slots.
-                if self.status.supply == Supply::Off {
-                    self.status.supply = supply;
-                    if supply == Supply::Brick {
-                        stage::off(bus).await?;
-                        self.start_step = 0;
-                        self.stage_due = now() + 250;
-                    }
-                }
-                if supply == Supply::Brick {
-                    if self.transition_busy {
-                        return Ok(());
-                    }
-                    if now() >= self.stage_due && self.start_step == 0 {
-                        stage::five_volts(bus).await?;
-                        self.stage_on = true;
-                        self.start_step = 1;
-                        self.stage_due = now() + 20;
-                    } else if now() >= self.stage_due && self.start_step == 1 {
-                        stage::faults(bus).await?;
-                        self.start_step = 2;
-                    }
-                    if self.start_step != 2 {
-                        return Ok(());
-                    }
-                }
-                if now() >= self.due {
-                    if !fusb::is_rd(bus).await? {
-                        return Err(PortError::Protocol);
-                    }
-                    if !power::safe_zero(self.status.vbus_adc) {
-                        return Err(PortError::UnexpectedVbus);
-                    }
-                    controls.orientation(index, self.status.orientation == Some(Orientation::Cc1));
-                    controls.target(index, self.status.supply);
-                    self.powered = true;
-                    self.status.state = PortState::Starting;
-                    self.due = now() + 100;
-                }
-            }
-            PortState::Starting => {
-                if fusb::events(bus).await?.cc_open {
-                    self.stop(bus, controls, outputs, index).await?;
-                } else if self.voltage_ready() {
-                    self.status.state = PortState::Ready;
-                    self.caps_due = now();
-                    self.caps_sent = 0;
-                } else if now() >= self.due {
-                    return Err(PortError::Voltage);
-                }
-            }
-            PortState::Ready | PortState::Contract => {
-                let events = fusb::events(bus).await?;
-                if events.hard_reset {
-                    self.stop(bus, controls, outputs, index).await?;
-                    return Ok(());
-                }
-                let detached = power::cc_detached(&mut self.cc_lost, events.cc_open, now(), 15);
-                if events.cc_open {
-                    if detached || self.transition.is_some() {
-                        self.stop(bus, controls, outputs, index).await?;
-                    }
-                    return Ok(());
-                }
-                self.finish_tx(events.tx_ack, events.tx_failed, events.collision)?;
-                if self.tx.is_none()
-                    && let Some(packet) = self.inbox.take()
-                    && self.received(bus, controls, outputs, index, packet).await?
-                {
-                    self.stop(bus, controls, outputs, index).await?;
-                    return Ok(());
-                }
-                if !events.rx_empty && self.inbox.is_none() {
-                    let packet = fusb::receive(bus).await?;
-                    if self.received(bus, controls, outputs, index, packet).await? {
-                        self.stop(bus, controls, outputs, index).await?;
-                        return Ok(());
-                    }
-                }
-                if self.transition.is_some() {
-                    self.advance_change(bus, controls, outputs, index).await?;
-                } else {
-                    let valid = if self.status.supply == Supply::HostPresence {
-                        power::safe_presence(self.status.vbus_adc)
-                    } else {
-                        let (low, high) = iasis_pd::voltage_window(self.operating_voltage());
-                        self.status
-                            .vbus_adc
-                            .and_then(power::millivolts)
-                            .is_some_and(|mv| (u32::from(low)..=u32::from(high)).contains(&mv))
-                    };
-                    if !valid {
-                        return Err(PortError::Voltage);
-                    }
-                }
-                if self.tx.is_none() && self.transition.is_none() {
-                    if let Some(action) = self.action {
-                        match self.action_due {
-                            None => {
-                                self.transmit(bus, TxKind::Probe, true, 15, &[0]).await?;
-                            }
-                            Some(due) if now() >= due => {
-                                let words = match action {
-                                    PortAction::DfuAppleSilicon => iasis_pd::APPLE_SILICON_DFU,
-                                    PortAction::DfuT2 => iasis_pd::APPLE_T2_DFU,
-                                    _ => iasis_pd::APPLE_REBOOT,
-                                };
-                                self.transmit(bus, TxKind::Action, true, 15, &words).await?;
-                            }
-                            _ => {}
-                        }
-                    } else if self.caps_due_now() {
-                        self.capabilities(bus).await?;
-                    }
-                }
-            }
-            PortState::Discharging => {
-                if now() >= self.stage_due && power::safe_zero(self.status.vbus_adc) {
-                    outputs.high_voltage(bus, controls, index, false).await?;
-                    outputs.discharge(bus, controls, index, false).await?;
-                    self.powered = false;
-                    self.status.supply = Supply::Off;
-                    self.fault_discharge_until = None;
-                    self.status.state = if self.status.enabled {
-                        PortState::WaitingPower
-                    } else {
-                        PortState::Disabled
-                    };
-                    if self.status.command_result == CommandResult::Pending {
-                        self.status.command_result = CommandResult::Complete;
-                    }
-                } else if now() >= self.due {
-                    return Err(PortError::DischargeTimeout);
-                }
-            }
-            PortState::Fault => {}
+        } else {
+            drop(io);
         }
-        Ok(())
+        // tErrorRecovery with Rp removed.
+        Timer::after_millis(30).await;
+        result
+    }
+
+    /// Stay off until the port is enabled again or the sink is unplugged.
+    async fn hold_off(&self, orientation: Option<Orientation>, int: &mut Input<'static>) {
+        self.update(|status| status.state = PortState::Fault);
+        self.publish();
+        self.shared.rearm.set(false);
+        // Rp on the sink's CC line shows the unplug without powering VBUS.
+        let mut watching = match orientation {
+            Some(orientation) => {
+                self.phy.init().await.is_ok() && self.phy.attach(orientation).await.is_ok()
+            }
+            None => false,
+        };
+        let mut open_since = None;
+        while !self.shared.rearm.take() {
+            if !watching {
+                select(self.shared.wake.wait(), Timer::after_millis(50)).await;
+                continue;
+            }
+            watching = self.phy.wait(int, 20).await.is_ok();
+            let pins = self.shared.pins.get();
+            let clear = pins.is_some_and(|pins| !pins.cc && !pins.power)
+                && power::safe_zero(self.shared.vbus.get());
+            if power::cc_detached(
+                &mut open_since,
+                watching && clear && self.phy.cc_open(),
+                now_ms(),
+                CC_DEBOUNCE.as_millis(),
+            ) {
+                break;
+            }
+        }
+        if let Ok(bus) = self.io.lock().await.port(self.index).await {
+            let _ = phy::release(bus).await;
+        }
+        self.update(|status| {
+            status.error = None;
+            status.fault_sample = None;
+            status.restore = None;
+        });
     }
 }
 
-fn now() -> u64 {
-    Instant::now().as_millis()
+/// The port's answers to the PD source policy engine.
+struct Policy<'a, 'p> {
+    port: &'a Port<'p>,
+    /// A sink's request was accepted and awaits its supply transition.
+    accepted: bool,
+    offered: Instant,
 }
+
+impl DevicePolicyManager for Policy<'_, '_> {
+    fn source_capabilities(&mut self) -> SourceCapabilities {
+        iasis_pd::capabilities(&self.port.offers.get())
+    }
+
+    async fn evaluate_request(&mut self, request: &PowerSource) -> CapabilityResponse {
+        let PowerSource::FixedVariableSupply(request) = request else {
+            return CapabilityResponse::Reject;
+        };
+        self.accepted = self.port.accept(request.0);
+        if self.accepted {
+            CapabilityResponse::Accept
+        } else {
+            CapabilityResponse::Reject
+        }
+    }
+
+    async fn transition_power(&mut self, _request: &PowerSource) -> Result<(), ()> {
+        // Without an accepted request the engine is settling a sink that
+        // never negotiated, already at vSafe5V.
+        if !core::mem::take(&mut self.accepted) {
+            return Ok(());
+        }
+        self.port
+            .transition()
+            .await
+            .map_err(|error| self.port.fail(error))
+    }
+
+    async fn hard_reset(&mut self) -> Result<(), ()> {
+        self.port
+            .power_cycle()
+            .await
+            .map_err(|error| self.port.fail(error))
+    }
+
+    /// Advertise again when the pool changes what this port may offer.
+    async fn get_event(&mut self) -> Event {
+        loop {
+            let offers = self.port.current_offers();
+            if offers != self.port.offers.get()
+                && offers[0] != 0
+                && self.offered.elapsed() >= OFFER_SPACING
+            {
+                self.port.offers.set(offers);
+                self.port.update(|status| status.pd_source_pdos = offers);
+                self.offered = Instant::now();
+                return Event::UpdatedSourceCapabilities;
+            }
+            Timer::after_millis(10).await;
+        }
+    }
+}
+
+impl EprDevicePolicyManager for Policy<'_, '_> {}
+impl DrpDevicePolicyManager for Policy<'_, '_> {}
+impl SourceDpm for Policy<'_, '_> {}

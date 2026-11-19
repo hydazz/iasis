@@ -157,7 +157,6 @@ fn error_text(error: PortError) -> &'static str {
         PortError::ConverterStatus { .. } => "Converter fault",
         PortError::ConverterMode { .. } => "Converter mode",
         PortError::ConverterCurrentLimitDisabled { .. } => "Current limit off",
-        PortError::UnexpectedVbus => "Unexpected VBUS",
         PortError::StageReadback { .. } => "Converter readback",
         PortError::Voltage => "VBUS out of range",
         PortError::DischargeTimeout => "Discharge timeout",

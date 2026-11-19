@@ -28,7 +28,9 @@ Development USB IDs are `1209:0001`. Set `IASIS_USB_VID` and `IASIS_USB_PID` as 
 
 ## Port power
 
-Ports start enabled and reserve power only while attached. Disabling a port opens CC and discharges VBUS. A fault switches the affected output off. After a voltage or PD negotiation fault, the port can accept a new attachment once the cable is unplugged, VBUS has discharged and the protection signals are clear. Re-enable the port to retry a hardware fault.
+Ports start enabled and reserve power only while attached. Disabling a port removes Rp and discharges VBUS. Targets negotiate fixed supplies over USB PD revision 2.0.
+
+A port whose voltage or negotiation fails switches its output off, discharges VBUS and attaches again. Three failures within 30 seconds, or a protection trip, hold the port off until the target is unplugged or the port is enabled again.
 
 | Supply path     | Target offer                                | Budget                                                                                      |
 | --------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------- |

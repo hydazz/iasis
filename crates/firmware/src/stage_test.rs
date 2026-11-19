@@ -58,7 +58,7 @@ fn downshift_increases_the_output_limit_only_after_voltage_confirmation() {
     run(async {
         stage::off(&mut bus).await.unwrap();
         stage::five_volts(&mut bus).await.unwrap();
-        stage::faults(&mut bus).await.unwrap();
+        stage::check_status(&mut bus).await.unwrap();
         stage::set_contract(&mut bus, 20_000, 1500).await.unwrap();
         stage::settled(&mut bus, 1500).await.unwrap();
         assert_eq!(bus.registers[2], 0x80 | 35); // 1.75 A threshold at 20 V.
@@ -116,11 +116,13 @@ fn converter_faults_report_the_register_values_that_tripped_the_guard() {
         );
         assert_eq!(bus.registers[7], 0x02);
 
+        // Current limiting alone is reported, not treated as a fault.
         bus.registers[7] = 0x42;
-        let at_cutoff = stage::status(&mut bus).await.unwrap();
+        stage::set_limit(&mut bus, 2000).await.unwrap();
+        assert_eq!(bus.registers[2], 0x80 | 45);
+        assert_eq!(stage::status(&mut bus).await.unwrap(), 0x42);
+        stage::check_status(&mut bus).await.unwrap();
         stage::off(&mut bus).await.unwrap();
-        assert_eq!(at_cutoff, 0x42);
-        assert_eq!(bus.registers[7], 0x02);
 
         bus.ignore_write = Some(0);
         bus.registers[0..2].copy_from_slice(&960u16.to_le_bytes());

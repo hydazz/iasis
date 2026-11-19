@@ -8,7 +8,9 @@ const MODE: u8 = 6;
 const OFF: u8 = 0x3d; // Hiccup protection and discharge while OE is clear.
 const ON: u8 = OFF | 0x80;
 const FPWM: u8 = 1 << 1;
-const FAULT_BITS: u8 = 0xe0;
+// Short circuit and overvoltage stop the port. Output current limiting
+// (STATUS bit 6) is the converter regulating and is left to the VBUS window.
+const FAULT_BITS: u8 = 0xa0;
 
 async fn write_checked(bus: &mut Bus, register: u8, value: u8) -> Result<(), PortError> {
     bus.write(ADDRESS, &[register, value]).await?;
@@ -61,8 +63,8 @@ pub async fn five_volts(bus: &mut Bus) -> Result<(), PortError> {
             mask: u8::MAX,
         });
     }
-    // Mask OCP while enabling the limiter and OE (TI §7.6.5).
-    write_checked(bus, 5, 0xa0).await?;
+    // FB/INT reports short circuit and overvoltage only.
+    write_checked(bus, 5, FAULT_BITS).await?;
     write_checked(
         bus,
         2,
@@ -75,16 +77,12 @@ pub async fn five_volts(bus: &mut Bus) -> Result<(), PortError> {
     write_checked(bus, MODE, ON).await
 }
 
-pub async fn faults(bus: &mut Bus) -> Result<(), PortError> {
-    write_checked(bus, 5, FAULT_BITS).await?;
-    check_status(bus).await
-}
-
 pub async fn status(bus: &mut Bus) -> Result<u8, PortError> {
     bus.register(ADDRESS, 7).await
 }
 
-async fn check_status(bus: &mut Bus) -> Result<(), PortError> {
+/// Fails on a latched short-circuit or overvoltage event.
+pub async fn check_status(bus: &mut Bus) -> Result<(), PortError> {
     let raw = status(bus).await?;
     if raw & FAULT_BITS != 0 {
         return Err(PortError::ConverterStatus { raw });
@@ -139,6 +137,11 @@ pub async fn set_contract(bus: &mut Bus, millivolts: u16, milliamps: u16) -> Res
         set_reference(bus, code).await?;
     }
     Ok(())
+}
+
+/// Change the output current limit of the present rail.
+pub async fn set_limit(bus: &mut Bus, milliamps: u16) -> Result<(), PortError> {
+    write_checked(bus, 2, current_limit(milliamps)?).await
 }
 
 // Called after the connector ADC confirms the requested rail, before PS_RDY.

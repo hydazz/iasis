@@ -126,13 +126,9 @@ pub fn cc_detached(
     }
 }
 
+/// vSafe0V at the connector.
 pub fn safe_zero(raw: Option<u16>) -> bool {
-    raw.and_then(millivolts).is_some_and(|mv| mv < 750)
-}
-
-pub fn safe_five_volts(raw: Option<u16>) -> bool {
-    raw.and_then(millivolts)
-        .is_some_and(|mv| (4850..=5350).contains(&mv))
+    raw.and_then(millivolts).is_some_and(|mv| mv < 800)
 }
 
 fn brick_budget_mw(
@@ -166,7 +162,7 @@ pub fn charging_budget_mw(input_mv: u16, current_50ma: u8, side_power: bool) -> 
 
 /// Compare requests with spare headroom. A request limited by our offer
 /// cannot establish how little the sink needs.
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 pub struct SinkDemand {
     wants_more: bool,
     last_unconstrained_mw: Option<u32>,
@@ -674,12 +670,8 @@ mod tests {
 
     #[test]
     fn voltage_checks_fail_closed() {
-        assert!(safe_zero(Some(adc(700))));
-        assert!(!safe_zero(Some(adc(800))));
-        assert!(safe_five_volts(Some(adc(5100))));
-        for raw in [None, Some(4096), Some(adc(4600)), Some(adc(5600))] {
-            assert!(!safe_five_volts(raw));
-        }
+        assert!(safe_zero(Some(adc(750))));
+        assert!(!safe_zero(Some(adc(850))));
         assert!(!safe_zero(None));
     }
 }
