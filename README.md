@@ -52,17 +52,19 @@ Use the serial from `list`. Add `--device t2` for a T2 Mac. Use `ports --watch` 
 
 The button selects targets with a tap and acts on them with a hold, with or without an OLED.
 
-| Button              | Status light | Result                                                |
-| ------------------- | ------------ | ----------------------------------------------------- |
-| Tap                 |              | Select All, then each attached port in turn           |
-| Hold 0.5 s, release | Blue         | DFU                                                   |
-| Hold 2 s, release   | Amber        | Reboot                                                |
-| Hold 3.5 s, release | Purple       | Ask the waiting host to prepare a [restore](#restore) |
-| Keep holding        | Normal       | Nothing is sent                                       |
+| Button           | Status light | Result                                                |
+| ---------------- | ------------ | ----------------------------------------------------- |
+| Tap              |              | Select All, then each attached port in turn           |
+| Hold and release | Blue         | DFU                                                   |
+|                  | Amber        | Reboot                                                |
+|                  | Purple       | Ask the waiting host to prepare a [restore](#restore) |
+| Keep holding     | Normal       | Nothing is sent                                       |
+
+A hold steps through the actions the selected targets take, in this order: the first after half a second, each next one 1.5 seconds later. DFU and Reboot are offered only where a target lists them, and DFU only on a port that carries the target's DFU USB. On a Mac that is its DFU port; its other ports take Reboot.
 
 Port lights outside the selection dim. While the button is held, only the ports the action will reach stay bright. An emptied port stays selected for 30 seconds so a replacement target takes its place.
 
-DFU and Reboot apply to the selected ready targets. A white port light marks a device Iasis cannot identify; a hold passes it by. DFU leaves their data intact and works with Apple Configurator. `power <port> off` disables a port. `power <port> on` enables it and retries a fault.
+A white port light marks a device Iasis cannot identify; a hold passes it by. DFU leaves their data intact and works with Apple Configurator. `power <port> off` disables a port. `power <port> on` enables it and retries a fault.
 
 Native USB-C uses the host's advertised current. With a legacy A-to-C connection, set the remaining shared USB allowance, including Iasis and after subtracting other loads:
 
