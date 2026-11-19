@@ -84,12 +84,14 @@ pub fn indicators(status: &Status, control: &Button, now: u64) -> [[u8; 3]; 6] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iasis_protocol::{PortError, RestoreArm, RestoreStatus};
+    use iasis_protocol::{DebugActions, PortError, RestoreArm, RestoreStatus};
 
     fn ready() -> Status {
         let mut status = Status::default();
         for port in &mut status.ports {
             port.state = PortState::Contract;
+            port.debug_actions =
+                DebugActions::Listed([0x0606, 0x0106, 0x0105, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         }
         status
     }

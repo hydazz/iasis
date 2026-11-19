@@ -14,7 +14,7 @@ use iasis::{
     identity::AppleMode,
     topology::{self, Snapshot},
 };
-use iasis_protocol::{CommandResult, Port, PortAction, Status};
+use iasis_protocol::{CommandResult, DebugActions, Port, PortAction, Status};
 
 #[derive(Parser)]
 #[command(version, about = "Manage Iasis ports and controller firmware")]
@@ -208,7 +208,14 @@ fn main() -> Result<()> {
             let current = board.status()?;
             let reports = Port::ALL.map(|port| {
                 let slot = &snapshot.ports[port.index()];
-                let mut report = dfu::assess(board.info().serial, port, &current, &snapshot, None);
+                let mut report = dfu::assess(
+                    board.info().serial,
+                    port,
+                    &current,
+                    &snapshot,
+                    PortAction::DfuAppleSilicon,
+                    None,
+                );
                 if status.ports[port.index()].generation != report.generation {
                     report.outcome = Some(Outcome::AttachmentChanged);
                     report.signal = Signal::Settling;
@@ -284,6 +291,7 @@ struct PortReport<'a> {
 fn inspect_dfu(
     board: &Board,
     port: Port,
+    action: PortAction,
     attempt: Option<&Attempt>,
     identify: bool,
 ) -> Result<Option<(Snapshot, dfu::Assessment)>> {
@@ -301,7 +309,14 @@ fn inspect_dfu(
         snapshot.query_port_identity(port);
     }
     let after = board.status()?;
-    let report = dfu::assess(board.info().serial, port, &after, &snapshot, attempt);
+    let report = dfu::assess(
+        board.info().serial,
+        port,
+        &after,
+        &snapshot,
+        action,
+        attempt,
+    );
     if after.uptime_ms < before.uptime_ms {
         bail!("Iasis restarted during USB enumeration.");
     }
@@ -312,7 +327,11 @@ fn inspect_dfu(
 }
 
 fn request_dfu(board: &Board, port: Port, device: AppleDevice) -> Result<()> {
-    let (snapshot, before) = inspect_dfu(board, port, None, true)?
+    let action = match device {
+        AppleDevice::AppleSilicon => PortAction::DfuAppleSilicon,
+        AppleDevice::T2 => PortAction::DfuT2,
+    };
+    let (snapshot, before) = inspect_dfu(board, port, action, None, true)?
         .context("The attachment changed before signalling. Inspect the current target.")?;
     match before.signal {
         Signal::Available => {}
@@ -322,10 +341,6 @@ fn request_dfu(board: &Board, port: Port, device: AppleDevice) -> Result<()> {
         }
         _ => bail!("Port {}  {}", port.number(), before.describe()),
     }
-    let action = match device {
-        AppleDevice::AppleSilicon => PortAction::DfuAppleSilicon,
-        AppleDevice::T2 => PortAction::DfuT2,
-    };
     let result = board.command_for_generation(port, before.generation, action)?;
     println!(
         "Port {} DFU signal {}.",
@@ -336,7 +351,8 @@ fn request_dfu(board: &Board, port: Port, device: AppleDevice) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let final_read = Instant::now() >= deadline;
-        let Some((_, report)) = inspect_dfu(board, port, Some(&attempt), final_read)? else {
+        let Some((_, report)) = inspect_dfu(board, port, action, Some(&attempt), final_read)?
+        else {
             if final_read {
                 bail!(
                     "Port {} is still reconnecting. Check its USB mode.",
@@ -419,6 +435,23 @@ fn print_status(status: &Status) {
             state.command_id,
             state.command_result
         );
+        match state.debug_actions {
+            DebugActions::Pending => {}
+            DebugActions::Silent => println!("  debug actions: no answer"),
+            DebugActions::Listed(list) => {
+                let ids: Vec<_> = list
+                    .iter()
+                    .take_while(|id| **id != 0)
+                    .map(|id| format!("{id:04x}"))
+                    .collect();
+                println!(
+                    "  debug actions: {}  DFU {}  reboot {}",
+                    ids.join(" "),
+                    state.offers(PortAction::DfuAppleSilicon),
+                    state.offers(PortAction::Reboot)
+                );
+            }
+        }
         if let Some(fault) = state.fault_sample {
             println!(
                 "  fault at {} ms in {:?}  VBUS ADC {:?}  pins {:?}  prior {:?}  target {:?}",
