@@ -16,8 +16,8 @@ use serde::Serialize;
 
 pub const MAX_RESTORES: usize = 5;
 
-/// CRC-checked local archive. Signing and target compatibility are checked by
-/// idevicerestore when it contacts the target and Apple's signing service.
+/// CRC-checked local archive. Apple authorizes the restore when
+/// idevicerestore requests a signing ticket for the connected target.
 #[derive(Clone, Debug, Serialize)]
 pub struct PreparedIpsw {
     path: PathBuf,
@@ -26,6 +26,8 @@ pub struct PreparedIpsw {
     pub product_version: String,
     pub build_version: String,
     pub product_types: Vec<String>,
+    #[serde(skip)]
+    erase_hardware: HashSet<(u32, u32)>,
 }
 
 impl PreparedIpsw {
@@ -87,16 +89,38 @@ impl PreparedIpsw {
             })
             .collect::<Result<Vec<_>>>()?;
         ensure!(!product_types.is_empty(), "IPSW supports no product types");
-        ensure!(
-            manifest
-                .get("BuildIdentities")
-                .and_then(plist::Value::as_array)
-                .is_some_and(|identities| !identities.is_empty()
-                    && identities
-                        .iter()
-                        .all(|identity| identity.as_dictionary().is_some())),
-            "BuildManifest has no valid BuildIdentities"
-        );
+        let identities = manifest
+            .get("BuildIdentities")
+            .and_then(plist::Value::as_array)
+            .filter(|identities| !identities.is_empty())
+            .context("BuildManifest has no BuildIdentities")?;
+        let mut erase_hardware = HashSet::new();
+        for identity in identities {
+            let identity = identity.as_dictionary().context("invalid BuildIdentity")?;
+            let Some(info) = identity.get("Info").and_then(plist::Value::as_dictionary) else {
+                continue;
+            };
+            let variant = info.get("Variant").and_then(plist::Value::as_string);
+            // idevicerestore --erase selects this variant for the target's
+            // device class and excludes the research variant.
+            if variant
+                .is_some_and(|s| s.contains("Erase Install (IPSW)") && !s.contains("Research"))
+            {
+                ensure!(
+                    info.get("DeviceClass")
+                        .and_then(plist::Value::as_string)
+                        .is_some_and(|s| !s.is_empty()),
+                    "erase BuildIdentity has no DeviceClass"
+                );
+                let id = |key| {
+                    identity
+                        .get(key)
+                        .and_then(manifest_id)
+                        .with_context(|| format!("erase BuildIdentity has invalid {key}"))
+                };
+                erase_hardware.insert((id("ApChipID")?, id("ApBoardID")?));
+            }
+        }
         let prepared = Self {
             path,
             bytes: metadata.len(),
@@ -104,6 +128,7 @@ impl PreparedIpsw {
             product_version: string("ProductVersion")?,
             build_version: string("ProductBuildVersion")?,
             product_types,
+            erase_hardware,
         };
         prepared.check_unchanged()?;
         Ok(prepared)
@@ -117,7 +142,7 @@ impl PreparedIpsw {
         self.bytes
     }
 
-    fn check_unchanged(&self) -> Result<()> {
+    pub fn check_unchanged(&self) -> Result<()> {
         let metadata = fs::metadata(&self.path).context("checking prepared IPSW")?;
         ensure!(
             metadata.is_file()
@@ -127,6 +152,70 @@ impl PreparedIpsw {
         );
         Ok(())
     }
+}
+
+fn hex_id(value: &str) -> Option<u32> {
+    let digits = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .unwrap_or(value);
+    if digits.len() > 8 || !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    u32::from_str_radix(digits, 16).ok()
+}
+
+fn manifest_id(value: &plist::Value) -> Option<u32> {
+    if let Some(integer) = value.as_unsigned_integer() {
+        return u32::try_from(integer).ok();
+    }
+    let s = value.as_string()?;
+    if s.starts_with("0x") || s.starts_with("0X") {
+        hex_id(s)
+    } else if s.bytes().all(|b| b.is_ascii_digit()) {
+        s.parse().ok()
+    } else {
+        None
+    }
+}
+
+/// Select the unique prepared archive containing an erase identity for the
+/// chip and board reported in an ordinary DFU USB serial descriptor.
+pub fn image_for_dfu<'a>(
+    images: &'a [PreparedIpsw],
+    serial_descriptor: &str,
+) -> Result<&'a PreparedIpsw> {
+    let id = |key| -> Result<u32> {
+        let mut fields = serial_descriptor
+            .split_ascii_whitespace()
+            .filter_map(|token| token.split_once(':'))
+            .filter(|(name, _)| *name == key);
+        let (_, value) = fields
+            .next()
+            .with_context(|| format!("DFU serial has no {key}"))?;
+        ensure!(
+            fields.next().is_none(),
+            "DFU serial has multiple {key} fields"
+        );
+        hex_id(value).with_context(|| format!("invalid hexadecimal {key} in DFU serial"))
+    };
+    let chip = id("CPID")?;
+    ensure!(chip != 0, "invalid zero CPID in DFU serial");
+    let board = id("BDID")?;
+    let mut matching = images
+        .iter()
+        .filter(|image| image.erase_hardware.contains(&(chip, board)));
+    let image = matching.next().with_context(|| {
+        format!("no supplied IPSW has an erase identity for CPID:{chip:04X} BDID:{board:02X}")
+    })?;
+    if let Some(other) = matching.next() {
+        anyhow::bail!(
+            "multiple IPSWs match CPID:{chip:04X} BDID:{board:02X}: {} and {}",
+            image.path.display(),
+            other.path.display()
+        );
+    }
+    Ok(image)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -217,17 +306,26 @@ impl RestoreEngine {
     /// No device discovery, DFU signalling or consent prompt occurs here.
     /// Dropping the batch handle does not interrupt an active restore.
     pub fn start_erase(&self, ipsw: &PreparedIpsw, ecids: &[u64]) -> Result<RestoreBatch> {
+        let targets: Vec<_> = ecids.iter().map(|&ecid| (ipsw, ecid)).collect();
+        self.start_selected(&targets)
+    }
+
+    /// Check all selected archives and reserve every ECID before starting any
+    /// worker. The caller supplies the prepared image for each verified target.
+    pub fn start_selected(&self, targets: &[(&PreparedIpsw, u64)]) -> Result<RestoreBatch> {
         ensure!(
-            !ecids.is_empty() && ecids.len() <= MAX_RESTORES,
+            !targets.is_empty() && targets.len() <= MAX_RESTORES,
             "select between one and five restore targets"
         );
-        let selected: HashSet<_> = ecids.iter().copied().collect();
+        let selected: HashSet<_> = targets.iter().map(|&(_, ecid)| ecid).collect();
         ensure!(
             !selected.contains(&0),
             "ECID zero means automatic selection and is not allowed"
         );
-        ensure!(selected.len() == ecids.len(), "duplicate restore ECID");
-        ipsw.check_unchanged()?;
+        ensure!(selected.len() == targets.len(), "duplicate restore ECID");
+        for &(ipsw, _) in targets {
+            ipsw.check_unchanged()?;
+        }
         // Resolve a caller-supplied relative executable before changing the
         // worker's working directory. A bare name is resolved through PATH.
         let program = if self.program.components().count() > 1 {
@@ -241,7 +339,7 @@ impl RestoreEngine {
         let logs_root = self.logs_root.canonicalize()?;
         let mut active = self.active.lock().unwrap();
         ensure!(
-            active.len() + ecids.len() <= MAX_RESTORES,
+            active.len() + targets.len() <= MAX_RESTORES,
             "five restores are already reserved"
         );
         ensure!(
@@ -250,15 +348,20 @@ impl RestoreEngine {
         );
         // Allocate every log and cache before launching the first target.
         let mut workers = Vec::new();
-        for &ecid in ecids {
+        for &(ipsw, ecid) in targets {
             let directory = tempfile::Builder::new()
                 .prefix(&format!("{ecid:016x}-"))
                 .tempdir_in(&logs_root)
-                .context("creating restore worker directory")?
-                .keep();
-            fs::create_dir(directory.join("cache"))?;
-            let stdout = File::create(directory.join("stdout.log"))?;
-            let stderr = File::create(directory.join("stderr.log"))?;
+                .context("creating restore worker directory")?;
+            fs::create_dir(directory.path().join("cache"))?;
+            let stdout = File::create(directory.path().join("stdout.log"))?;
+            let stderr = File::create(directory.path().join("stderr.log"))?;
+            workers.push((ipsw, ecid, directory, stdout, stderr));
+        }
+        active.extend(selected);
+        drop(active);
+        let mut statuses = Vec::new();
+        for (ipsw, ecid, directory, stdout, stderr) in workers {
             let status = Arc::new(Mutex::new(RestoreStatus {
                 ecid,
                 state: RestoreState::Starting,
@@ -266,19 +369,12 @@ impl RestoreEngine {
                 progress: None,
                 message: String::new(),
                 exit_code: None,
-                directory,
+                directory: directory.keep(),
             }));
-            workers.push((status, stdout, stderr));
-        }
-        active.extend(selected);
-        drop(active);
-        let mut statuses = Vec::new();
-        for (status, stdout, stderr) in workers {
             let worker_status = Arc::clone(&status);
             let active = Arc::clone(&self.active);
             let program = program.clone();
             let ipsw = ipsw.clone();
-            let ecid = status.lock().unwrap().ecid;
             let spawn = thread::Builder::new()
                 .name(format!("restore-{ecid:x}"))
                 .spawn(move || {
@@ -459,8 +555,15 @@ mod tests {
     const MANIFEST: &str = r#"<?xml version="1.0"?><plist version="1.0"><dict>
         <key>ProductVersion</key><string>26.0</string>
         <key>ProductBuildVersion</key><string>25A354</string>
-        <key>SupportedProductTypes</key><array><string>Mac14,2</string></array>
-        <key>BuildIdentities</key><array><dict/></array>
+        <key>SupportedProductTypes</key><array><string>Macmini9,1</string></array>
+        <key>BuildIdentities</key><array><dict>
+            <key>ApChipID</key><string>0x8103</string>
+            <key>ApBoardID</key><integer>34</integer>
+            <key>Info</key><dict>
+                <key>DeviceClass</key><string>j274ap</string>
+                <key>Variant</key><string>Customer Erase Install (IPSW)</string>
+            </dict>
+        </dict></array>
         </dict></plist>"#;
 
     fn archive(path: &Path, manifest: Option<&str>) {
@@ -482,7 +585,7 @@ mod tests {
         let path = temp.path().join("local.ipsw");
         archive(&path, Some(MANIFEST));
         let ready = PreparedIpsw::open(&path).unwrap();
-        assert_eq!(ready.product_types, ["Mac14,2"]);
+        assert_eq!(ready.product_types, ["Macmini9,1"]);
         assert_eq!(ready.build_version, "25A354");
         assert!(ready.path().is_absolute());
         let mut bytes = fs::read(&path).unwrap();
@@ -503,6 +606,65 @@ mod tests {
         );
         archive(&path, Some("<plist><dict/></plist>"));
         assert!(PreparedIpsw::open(&path).is_err());
+    }
+
+    #[test]
+    fn ordinary_dfu_matches_one_archive_by_chip_and_board_in_the_same_erase_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let prepare = |name: &str, manifest: &str| {
+            let path = temp.path().join(name);
+            archive(&path, Some(manifest));
+            PreparedIpsw::open(path).unwrap()
+        };
+        let update = prepare(
+            "update.ipsw",
+            &MANIFEST.replace("Erase Install", "Upgrade Install"),
+        );
+        let research = prepare("research.ipsw", &MANIFEST.replace("Customer", "Research"));
+        let other_chip = prepare("other-chip.ipsw", &MANIFEST.replace("0x8103", "0x8027"));
+        let other_board = prepare(
+            "other-board.ipsw",
+            &MANIFEST.replace("<integer>34", "<integer>0"),
+        );
+        let images = [
+            update,
+            research,
+            other_chip,
+            other_board,
+            prepare("matching.ipsw", MANIFEST),
+        ];
+        let serial = "CPID:8103 CPRV:11 BDID:22 ECID:001234567890ABCD";
+        assert_eq!(
+            image_for_dfu(&images, serial).unwrap().path(),
+            images[4].path()
+        );
+        assert!(image_for_dfu(&images[..4], serial).is_err());
+        assert_eq!(
+            image_for_dfu(&images, "BDID:00 CPID:0X8103")
+                .unwrap()
+                .path(),
+            images[3].path()
+        );
+        assert!(
+            image_for_dfu(
+                &[images[4].clone(), prepare("other-build.ipsw", MANIFEST)],
+                serial
+            )
+            .is_err()
+        );
+        for invalid in [
+            "",
+            "XCPID:8103 BDID:22",
+            "CPID:8103 XBDID:22",
+            "CPID:8103 CPID:8103 BDID:22",
+            "CPID:8103 BDID:22 BDID:22",
+            "CPID:+8103 BDID:22",
+            "CPID:0 BDID:22",
+            "CPID:8103 BDID:22x",
+            "CPID:8103 BDID:100000022",
+        ] {
+            assert!(image_for_dfu(&images, invalid).is_err(), "{invalid}");
+        }
     }
 
     #[test]
@@ -571,6 +733,39 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         batch.snapshots()
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn mixed_batch_checks_all_images_before_start_and_passes_each_worker_its_image() {
+        let temp = tempfile::tempdir().unwrap();
+        let prepare = |name| {
+            let path = temp.path().join(name);
+            archive(&path, Some(MANIFEST));
+            PreparedIpsw::open(path).unwrap()
+        };
+        let first = prepare("one.ipsw");
+        let changed = prepare("two.ipsw");
+        let program = executable(temp.path(), r#"printf '%s\n' "$2" "$9" > selection"#);
+        let logs = temp.path().join("logs");
+        let engine = RestoreEngine::new(program, &logs);
+        fs::remove_file(changed.path()).unwrap();
+        assert!(
+            engine
+                .start_selected(&[(&first, 1), (&changed, 2)])
+                .is_err()
+        );
+        assert!(!logs.exists());
+        let second = prepare("two.ipsw");
+        let targets = [(&first, 1), (&second, 2)];
+        let statuses = finish(&engine.start_selected(&targets).unwrap());
+        for ((ipsw, ecid), status) in targets.iter().zip(statuses) {
+            assert_eq!(status.exit_code, Some(0), "{}", status.message);
+            assert_eq!(
+                fs::read_to_string(status.directory.join("selection")).unwrap(),
+                format!("0x{ecid:x}\n{}\n", ipsw.path().display())
+            );
+        }
     }
 
     #[test]

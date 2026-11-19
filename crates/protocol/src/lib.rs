@@ -29,7 +29,7 @@ pub const CAP_RESTORE_ARM: u32 = 1 << 5;
 const MAGIC: [u8; 4] = *b"IASI";
 const HEADER_SIZE: usize = 6;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "u8", into = "u8")]
 pub struct Port(u8);
 

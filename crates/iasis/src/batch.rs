@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs::File,
     hash::{BuildHasher, RandomState},
     path::PathBuf,
@@ -7,15 +8,15 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{Context, Result, bail, ensure};
-use clap::{Args, ValueEnum};
-use iasis::{
+use crate::{
     Board,
     dfu::{self, Attempt, Outcome, Signal},
     identity::{AppleMode, Observation, TargetTracker},
-    restore::{RestoreEngine, RestoreState},
+    restore::{PreparedIpsw, RestoreBatch, RestoreEngine, RestoreState, image_for_dfu},
     topology,
 };
+use anyhow::{Context, Result, bail, ensure};
+use clap::{Args, ValueEnum};
 use iasis_protocol::{
     self as protocol, Gesture, Port, PortAction, PortState, RestoreArm, RestoreControl,
     RestoreDecision, RestorePhase, RestoreStatus, Status,
@@ -52,22 +53,38 @@ pub enum Device {
     T2,
 }
 
+impl Device {
+    fn dfu_action(self) -> PortAction {
+        match self {
+            Self::AppleSilicon => PortAction::DfuAppleSilicon,
+            Self::T2 => PortAction::DfuT2,
+        }
+    }
+}
+
 pub fn run(board: &Board, options: Options) -> Result<()> {
     ensure!(options.erase, "restore requires --erase");
     let engine = RestoreEngine::new(&options.program, &options.logs);
     engine.check_program()?;
-    iasis::identity::check_usbmuxd().context("system usbmuxd is unavailable")?;
+    crate::identity::check_usbmuxd().context("system usbmuxd is unavailable")?;
     let ipsw = progress::check_ipsw(&options.ipsw)?;
     println!(
         "Prepared {} ({}) for {:?}",
         ipsw.product_version, ipsw.build_version, ipsw.product_types
     );
-    let action = match options.device {
-        Device::AppleSilicon => PortAction::DfuAppleSilicon,
-        Device::T2 => PortAction::DfuT2,
-    };
-    let (_claims, mut targets, mut failed) = if options.button {
-        let (claims, targets) = prepare_button(board, &options.ports, action)?;
+    let action = options.device.dfu_action();
+    let (claims, targets, failed) = if options.button {
+        let (claims, targets) = with_session(board, |session, initial, alive| {
+            let selected = selection(board, &options.ports, session, initial, alive)?;
+            prepare_selected(
+                board,
+                &selected,
+                action,
+                session,
+                alive,
+                std::slice::from_ref(&ipsw),
+            )
+        })?;
         (claims, targets, false)
     } else {
         let deadline = Instant::now() + Duration::from_secs(3);
@@ -89,6 +106,69 @@ pub fn run(board: &Board, options: Options) -> Result<()> {
         let (targets, failed) = enter_dfu(board, &selected, action, None)?;
         (claims, targets, failed)
     };
+    let running = start(
+        board,
+        &engine,
+        std::slice::from_ref(&ipsw),
+        claims,
+        targets,
+        failed,
+        options.button,
+    )?;
+    monitor(board, running)
+}
+
+/// Handle one board-initiated transaction while other workers keep reporting.
+pub fn listen(
+    board: &Board,
+    device: &nusb::DeviceInfo,
+    engine: &RestoreEngine,
+    images: &[PreparedIpsw],
+    family: Device,
+) -> Result<()> {
+    let action = family.dfu_action();
+    let request = with_session(board, |session, initial, alive| {
+        let selected = selection(board, &[], session, initial, alive)?;
+        // A declined or unavailable batch finishes this request. The listener
+        // can immediately accept the next gesture on a fresh lease.
+        Ok((|| -> Result<_> {
+            let control = Board::open(device).context("opening board for restore preparation")?;
+            ensure!(
+                control.info().serial == board.info().serial,
+                "board serial changed"
+            );
+            let (claims, targets) =
+                prepare_selected(&control, &selected, action, session, alive, images)?;
+            Ok((control, claims, targets))
+        })())
+    })?;
+    let running = match request.and_then(|(control, claims, targets)| {
+        start(&control, engine, images, claims, targets, false, true)
+    }) {
+        Ok(running) => running,
+        Err(error) => {
+            eprintln!("Restore request: {error:#}");
+            return Ok(());
+        }
+    };
+    let reporter = board.clone();
+    thread::spawn(move || {
+        if let Err(error) = monitor(&reporter, running) {
+            eprintln!("Restore: {error:#}");
+        }
+    });
+    Ok(())
+}
+
+fn start(
+    board: &Board,
+    engine: &RestoreEngine,
+    images: &[PreparedIpsw],
+    mut claims: PortClaims,
+    mut targets: VerifiedTargets,
+    mut failed: bool,
+    require_all: bool,
+) -> Result<Running> {
     // Waiting for another port may outlive the earlier selection. Revalidate
     // every physical slot immediately before launching destructive workers.
     let status = board.status()?;
@@ -99,7 +179,7 @@ pub fn run(board: &Board, options: Options) -> Result<()> {
                 status.ports[target.port.index()].state,
                 PortState::Ready | PortState::Contract
             )
-            && (!options.button || status.ready_mask() & (1 << target.port.index()) != 0)
+            && (!require_all || status.ready_mask() & (1 << target.port.index()) != 0)
             && ordinary_dfu(board, target, &snapshot);
         if !valid {
             eprintln!(
@@ -111,18 +191,63 @@ pub fn run(board: &Board, options: Options) -> Result<()> {
         valid
     });
     ensure!(
-        !options.button || !failed,
+        !require_all || !failed,
         "confirmed targets changed before launch; no restore started"
     );
     ensure!(
         !targets.is_empty(),
         "no selected target reached verified DFU; no restore started"
     );
-    let ecids = targets
+    let inputs = images_for_targets(board, &snapshot, &targets, images)?;
+    let workers = engine.start_selected(&inputs)?;
+    claims.retain(|port, _| targets.iter().any(|(target, _)| target.port == *port));
+    Ok(Running {
+        claims,
+        targets,
+        workers,
+        failed,
+    })
+}
+
+fn images_for_targets<'a>(
+    board: &Board,
+    snapshot: &topology::Snapshot,
+    targets: &VerifiedTargets,
+    images: &'a [PreparedIpsw],
+) -> Result<Vec<(&'a PreparedIpsw, u64)>> {
+    targets
         .iter()
-        .map(|(target, _)| target.ecid)
-        .collect::<Vec<_>>();
-    let batch = engine.start_erase(&ipsw, &ecids)?;
+        .map(|(target, _)| {
+            ensure!(
+                ordinary_dfu(board, target, snapshot),
+                "port {} lost its DFU identity",
+                target.port.number()
+            );
+            let serial = dfu::direct_device(snapshot, target.port)
+                .and_then(|device| device.serial_number.as_deref())
+                .context("DFU descriptor has no serial")?;
+            let image = image_for_dfu(images, serial)
+                .with_context(|| format!("port {}", target.port.number()))?;
+            image.check_unchanged()?;
+            Ok((image, target.ecid))
+        })
+        .collect()
+}
+
+struct Running {
+    claims: PortClaims,
+    targets: VerifiedTargets,
+    workers: RestoreBatch,
+    failed: bool,
+}
+
+fn monitor(board: &Board, running: Running) -> Result<()> {
+    let Running {
+        mut claims,
+        targets,
+        workers: batch,
+        mut failed,
+    } = running;
     let display = MultiProgress::with_draw_target(ProgressDrawTarget::stdout());
     let rows = targets
         .iter()
@@ -135,6 +260,9 @@ pub fn run(board: &Board, options: Options) -> Result<()> {
         // Do not open a competing restored service while idevicerestore owns it.
         for (index, job) in jobs.iter().enumerate() {
             let (target, generation) = &targets[index];
+            if !claims.contains_key(&target.port) {
+                continue;
+            }
             let identity = snapshot
                 .as_ref()
                 .map(|snapshot| target.observe(board.info().serial, snapshot));
@@ -175,11 +303,12 @@ pub fn run(board: &Board, options: Options) -> Result<()> {
                     }
                 }
             }
+            if job.state.is_terminal() {
+                failed |= job.state != RestoreState::RestoreReported;
+                claims.remove(&target.port);
+            }
         }
-        if jobs.iter().all(|job| job.state.is_terminal()) {
-            failed |= jobs
-                .iter()
-                .any(|job| job.state != RestoreState::RestoreReported);
+        if claims.is_empty() {
             break;
         }
         thread::sleep(Duration::from_secs(1));
@@ -200,6 +329,7 @@ pub fn run(board: &Board, options: Options) -> Result<()> {
 }
 
 type VerifiedTargets = Vec<(TargetTracker, u32)>;
+type PortClaims = HashMap<Port, File>;
 
 fn select_ports(ports: &[Port], status: &Status) -> Result<Vec<(Port, u32)>> {
     let mut selected = Vec::new();
@@ -215,11 +345,10 @@ fn select_ports(ports: &[Port], status: &Status) -> Result<Vec<(Port, u32)>> {
     Ok(selected)
 }
 
-fn prepare_button(
+fn with_session<T>(
     board: &Board,
-    ports: &[Port],
-    action: PortAction,
-) -> Result<(Vec<File>, VerifiedTargets)> {
+    work: impl FnOnce(u32, &Status, &dyn Fn() -> bool) -> Result<T>,
+) -> Result<T> {
     ensure!(
         board.info().capabilities & protocol::CAP_RESTORE_ARM != 0,
         "board does not support prepared erase confirmation"
@@ -240,9 +369,7 @@ fn prepare_button(
             }
             Ok(())
         });
-        let result = prepare_in_session(board, ports, action, session, &initial, || {
-            !heartbeat.is_finished()
-        });
+        let result = work(session, &initial, &|| !heartbeat.is_finished());
         drop(stop);
         heartbeat.join().expect("restore heartbeat panicked")?;
         result
@@ -254,14 +381,13 @@ fn prepare_button(
     Ok(prepared)
 }
 
-fn prepare_in_session(
+fn selection(
     board: &Board,
     ports: &[Port],
-    action: PortAction,
     session: u32,
     initial: &Status,
-    alive: impl Fn() -> bool,
-) -> Result<(Vec<File>, VerifiedTargets)> {
+    alive: &dyn Fn() -> bool,
+) -> Result<Vec<(Port, u32)>> {
     let selected = if ports.is_empty() {
         println!(
             "On Iasis, tap to select the targets, then hold the button until Restore and release to prepare them for erase."
@@ -290,6 +416,17 @@ fn prepare_in_session(
     } else {
         select_ports(ports, initial)?
     };
+    Ok(selected)
+}
+
+fn prepare_selected(
+    board: &Board,
+    selected: &[(Port, u32)],
+    action: PortAction,
+    session: u32,
+    alive: &dyn Fn() -> bool,
+    images: &[PreparedIpsw],
+) -> Result<(PortClaims, VerifiedTargets)> {
     let status = board.status()?;
     let mut arm = RestoreArm {
         session,
@@ -298,7 +435,7 @@ fn prepare_in_session(
         generations: [0; protocol::PORT_COUNT],
         expires: 0,
     };
-    for &(port, generation) in &selected {
+    for &(port, generation) in selected {
         arm.ports |= 1 << port.index();
         arm.generations[port.index()] = generation;
     }
@@ -306,8 +443,8 @@ fn prepare_in_session(
         arm.matches_targets(&status),
         "selected targets changed, are busy or are unavailable"
     );
-    let claims = claim_ports(&std::env::temp_dir(), board.info().serial, &selected)?;
-    let (targets, failed) = enter_dfu(board, &selected, action, Some(session))?;
+    let claims = claim_ports(&std::env::temp_dir(), board.info().serial, selected)?;
+    let (targets, failed) = enter_dfu(board, selected, action, Some(session))?;
     ensure!(
         !failed && targets.len() == selected.len(),
         "not all selected targets reached verified DFU; no erase armed"
@@ -318,23 +455,19 @@ fn prepare_in_session(
         "prepared targets changed; no erase armed"
     );
     let snapshot = topology::discover(board.topology())?;
-    ensure!(
-        targets
-            .iter()
-            .all(|(target, _)| ordinary_dfu(board, target, &snapshot)),
-        "a prepared DFU identity changed; no erase armed"
-    );
+    let matched = images_for_targets(board, &snapshot, &targets, images)?;
+    for ((target, _), (image, ecid)) in targets.iter().zip(matched) {
+        println!(
+            "Prepared port {}, ECID {ecid:016x} for {} ({})",
+            target.port.number(),
+            image.product_version,
+            image.build_version
+        );
+    }
     arm.expires = status.uptime_ms + protocol::RESTORE_ARM_MS;
     board
         .restore_control(RestoreControl::Arm(arm))
         .context("board rejected the prepared erase arm")?;
-    for (target, _) in &targets {
-        println!(
-            "Prepared port {}, ECID {:016x}",
-            target.port.number(),
-            target.ecid
-        );
-    }
     println!(
         "Hold the Iasis button for 3 seconds to erase these targets. Tap to cancel. The arm expires in 20 seconds."
     );
@@ -527,7 +660,7 @@ fn claim_ports(
     directory: &std::path::Path,
     serial: u64,
     ports: &[(Port, u32)],
-) -> Result<Vec<std::fs::File>> {
+) -> Result<PortClaims> {
     ports
         .iter()
         .map(|(port, _)| {
@@ -544,7 +677,7 @@ fn claim_ports(
                     port.number()
                 )
             })?;
-            Ok(file)
+            Ok((*port, file))
         })
         .collect()
 }
@@ -603,11 +736,13 @@ mod tests {
     #[test]
     fn concurrent_batches_claim_connectors_without_serializing_other_ports() {
         let directory = tempfile::tempdir().unwrap();
-        let first = claim_ports(directory.path(), 1, &[(Port::ALL[0], 7)]).unwrap();
+        let mut first =
+            claim_ports(directory.path(), 1, &[(Port::ALL[4], 3), (Port::ALL[0], 7)]).unwrap();
         assert!(claim_ports(directory.path(), 1, &[(Port::ALL[0], 8)]).is_err());
         assert!(claim_ports(directory.path(), 1, &[(Port::ALL[1], 7)]).is_ok());
         assert!(claim_ports(directory.path(), 2, &[(Port::ALL[0], 7)]).is_ok());
-        drop(first);
+        first.remove(&Port::ALL[0]);
         assert!(claim_ports(directory.path(), 1, &[(Port::ALL[0], 8)]).is_ok());
+        assert!(claim_ports(directory.path(), 1, &[(Port::ALL[4], 3)]).is_err());
     }
 }
