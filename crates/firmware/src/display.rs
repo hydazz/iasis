@@ -15,8 +15,8 @@ use embedded_graphics::{
 use heapless::{String, Vec};
 use iasis_pd::power::millivolts;
 use iasis_protocol::{
-    CommandError, CommandResult, Gesture, Orientation, Port, PortAction, PortError, PortState,
-    PortStatus, RestorePhase, Status, Supply,
+    CommandError, CommandResult, Gesture, Link, Port, PortAction, PortError, PortState, PortStatus,
+    RestorePhase, Status, Supply,
 };
 
 use crate::button::Button;
@@ -66,6 +66,8 @@ pub struct View {
     pub connected: bool,
     brick: bool,
     face: Face,
+    /// Bars beside each port number: one for a USB 2 link, two for USB 3.
+    bars: [u8; 5],
     columns: [(&'static str, Indicator); 5],
     /// The actions a hold steps through and the one a release would send.
     pub held: Option<(Vec<Gesture, 3>, Gesture)>,
@@ -83,7 +85,7 @@ impl View {
         if (self.brick, self.connected, self.face) != (old.brick, old.connected, old.face) {
             pages |= 0b0000_0011;
         }
-        if (self.ports, self.targets) != (old.ports, old.targets) {
+        if (self.ports, self.targets, self.bars) != (old.ports, old.targets, old.bars) {
             pages |= 0b0000_0110;
         }
         if self.columns != old.columns {
@@ -144,6 +146,11 @@ pub fn view(status: &Status, button: &Button, now: u64) -> View {
         connected: button.host_prepared(),
         brick: status.supply == Supply::Brick,
         face,
+        bars: status.ports.each_ref().map(|port| match port.link {
+            Some(Link::Usb2) => 1,
+            Some(Link::Usb3) => 2,
+            _ => 0,
+        }),
         columns,
         held: None,
         cells: Default::default(),
@@ -386,16 +393,16 @@ fn readings(port: &PortStatus) -> [String<32>; 2] {
     if let Some(mv) = port.vbus_adc.and_then(millivolts) {
         write!(lines[0], "VBUS {}.{:02}V", mv / 1000, mv % 1000 / 10).unwrap();
     }
-    if let Some(orientation) = port.orientation {
+    let link = match port.link {
+        Some(Link::Usb2) => Some("USB2"),
+        Some(Link::Usb3) => Some("USB3"),
+        Some(Link::Down) | None => None,
+    };
+    if let Some(link) = link {
         if !lines[0].is_empty() {
             lines[0].push(' ').unwrap();
         }
-        lines[0]
-            .push_str(match orientation {
-                Orientation::Cc1 => "CC1",
-                Orientation::Cc2 => "CC2",
-            })
-            .unwrap();
+        lines[0].push_str(link).unwrap();
     }
     if port.contract_ma > 0 {
         write!(lines[1], "{}V ", port.contract_mv / 1000).unwrap();
@@ -475,14 +482,20 @@ pub fn draw<D: DrawTarget<Color = BinaryColor>>(
         } else if marked {
             outline(target, x, 14, 23, 10)?;
         }
+        let ink = if target_port { OFF } else { ON };
         text(
             target,
             ["1", "2", "3", "4", "5"][physical.index()],
             x + 9,
             15,
             true,
-            if target_port { OFF } else { ON },
+            ink,
         )?;
+        for bar in 0..i32::from(view.bars[physical.index()]) {
+            let (left, top) = (x + 16 + bar * 3, 19 - bar * 3);
+            line(target, (left, top), (left, 21), ink)?;
+            line(target, (left + 1, top), (left + 1, 21), ink)?;
+        }
         text(
             target,
             value,
@@ -660,7 +673,7 @@ fn face<D: DrawTarget<Color = BinaryColor>>(target: &mut D, face: Face) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iasis_protocol::{DebugActions, RestoreStatus};
+    use iasis_protocol::{DebugActions, Orientation, RestoreStatus};
 
     /// A target on its DFU port, which lists DFU and reboot.
     fn contract(mv: u16, ma: u16) -> PortStatus {
@@ -696,7 +709,7 @@ mod tests {
         for now in [0, 3000, 15_000, 90_000] {
             let view = view(&status, &one, now);
             assert_eq!(view.ports, 1);
-            assert_eq!(view.lines, pair("CC2", "5V 0.9A (4.5W)"));
+            assert_eq!(view.lines, pair("", "5V 0.9A (4.5W)"));
         }
         let empty = selecting(2);
         let vacant = view(&status, &empty, 0);
@@ -715,21 +728,18 @@ mod tests {
         let button = selecting(0);
         for raw in [None, Some(4096), Some(u16::MAX)] {
             status.ports[0].vbus_adc = raw;
-            assert_eq!(
-                view(&status, &button, 0).lines,
-                pair("CC2", "20V 2.25A (45W)")
-            );
+            assert_eq!(view(&status, &button, 0).lines, pair("", "20V 2.25A (45W)"));
         }
         status.ports[0].vbus_adc = Some(520);
         assert_eq!(
             view(&status, &button, 0).lines,
-            pair("VBUS 5.03V CC2", "20V 2.25A (45W)")
+            pair("VBUS 5.03V", "20V 2.25A (45W)")
         );
         status.ports[0] = PortStatus {
             supply: Supply::HostPresence,
             ..contract(5000, 0)
         };
-        assert_eq!(view(&status, &button, 0).lines, pair("CC2", "Host power"));
+        assert_eq!(view(&status, &button, 0).lines, pair("", "Host power"));
         status.ports[0] = PortStatus {
             state: PortState::Ready,
             ..contract(0, 0)
@@ -789,6 +799,37 @@ mod tests {
             assert!(!lit(port, 2, 18));
         }
         assert!(!lit(4, 0, 18));
+    }
+
+    #[test]
+    fn a_selected_port_names_its_link() {
+        let mut status = Status::default();
+        status.ports[0] = contract(9000, 3000);
+        status.ports[0].vbus_adc = Some(932);
+        let button = selecting(0);
+        let line = |status: &Status| view(status, &button, 0).lines[0].clone();
+        // Unread or without a link, the hub adds nothing.
+        assert_eq!(line(&status), "VBUS 9.03V");
+        for (link, text) in [
+            (Link::Down, "VBUS 9.03V"),
+            (Link::Usb2, "VBUS 9.03V USB2"),
+            (Link::Usb3, "VBUS 9.03V USB3"),
+        ] {
+            status.ports[0].link = Some(link);
+            assert_eq!(line(&status), text);
+        }
+        // The bars follow the link now, one page of the screen.
+        status.ports[0].link = Some(Link::Down);
+        let before = view(&status, &button, 0);
+        assert_eq!(before.bars, [0; 5]);
+        status.ports[0].link = Some(Link::Usb3);
+        status.ports[1].link = Some(Link::Usb2);
+        let after = view(&status, &button, 0);
+        assert_eq!(after.bars, [2, 1, 0, 0, 0]);
+        assert_eq!(
+            after.changed_pages(Some(&before)) & 0b0000_0110,
+            0b0000_0110
+        );
     }
 
     #[test]
