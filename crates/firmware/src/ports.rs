@@ -16,9 +16,9 @@ use iasis_pd::{
     power::{self, PortDemand, SinkDemand},
 };
 use iasis_protocol::{
-    CommandError, CommandResult, DebugActions, FaultContract, FaultSample, Orientation, PORT_COUNT,
-    PortAction, PortCommand, PortError, PortFaults, PortState, PortStatus, RestoreFeedback,
-    RestorePhase, Supply,
+    CommandError, CommandResult, DebugActions, FaultContract, FaultSample, Link, Orientation,
+    PORT_COUNT, PortAction, PortCommand, PortError, PortFaults, PortState, PortStatus,
+    RestoreFeedback, RestorePhase, Supply,
 };
 use usbpd::{
     protocol_layer::message::data::{
@@ -89,6 +89,7 @@ struct Shared {
     status: Cell<PortStatus>,
     vbus: Cell<Option<u16>>,
     pins: Cell<Option<PortFaults>>,
+    link: Cell<Option<Link>>,
     grant: Cell<Grant>,
     demand: Cell<PortDemand>,
     action: Cell<Option<PortAction>>,
@@ -109,6 +110,7 @@ impl Shared {
         PortStatus {
             vbus_adc: self.vbus.get(),
             faults: self.pins.get(),
+            link: self.link.get(),
             ..self.status.get()
         }
     }
@@ -131,6 +133,13 @@ impl Ports {
     pub fn sample(&self, index: usize, vbus: Option<u16>, pins: PortFaults) {
         self.ports[index].vbus.set(vbus);
         self.ports[index].pins.set(Some(pins));
+    }
+
+    /// The hub's reading of each port's link, or `None` when it gave none.
+    pub fn links(&self, links: Option<[Link; PORT_COUNT]>) {
+        for (index, port) in self.ports.iter().enumerate() {
+            port.link.set(links.map(|links| links[index]));
+        }
     }
 
     pub fn statuses(&self) -> [PortStatus; PORT_COUNT] {
