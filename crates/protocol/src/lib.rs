@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 8;
-pub const MAX_PACKET: usize = 1024;
+pub const VERSION: u16 = 9;
+pub const MAX_PACKET: usize = 1152;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
 pub const GET_STATUS: u8 = 2;
@@ -123,6 +123,24 @@ pub struct PortStatus {
     pub hard_resets_received: u16,
     /// Requests answered with Reject since boot.
     pub requests_rejected: u16,
+    pub debug_actions: DebugActions,
+}
+
+/// The most action IDs one Get Action List reply carries.
+pub const MAX_ACTIONS: usize = 12;
+
+/// A target's answer to the Apple debug Get Action List query, asked once a
+/// contract has settled. Each port of a target answers for itself: on a Mac
+/// only the DFU port lists DFU and reboot.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum DebugActions {
+    /// Not asked yet.
+    #[default]
+    Pending,
+    /// No answer: the device, its port or its cable does not speak Apple debug.
+    Silent,
+    /// The action IDs the port lists, zero padded.
+    Listed([u16; MAX_ACTIONS]),
 }
 
 impl PortStatus {
@@ -140,6 +158,18 @@ impl PortStatus {
     /// negotiates one; a device that stays silent cannot take an action.
     pub fn identified(&self) -> bool {
         self.state == PortState::Contract
+    }
+
+    /// The target's port lists the Apple debug action this command performs.
+    /// DFU also needs DFU USB on the port: told to enter DFU from a port
+    /// without it, a Mac restarts into DFU where no host can reach it.
+    pub fn offers(&self, action: PortAction) -> bool {
+        match (self.debug_actions, action.debug_action()) {
+            (DebugActions::Listed(list), Some(id)) => {
+                list.contains(&id) && (action == PortAction::Reboot || list.contains(&DFU_USB))
+            }
+            _ => false,
+        }
     }
 
     pub fn latch_fault(&mut self, error: PortError, sample: FaultSample) {
@@ -327,6 +357,21 @@ pub enum PortAction {
     Reboot,
 }
 
+/// Apple debug action that puts the target's DFU USB on this port. A Mac
+/// lists it on its DFU port alone.
+pub const DFU_USB: u16 = 0x0606;
+
+impl PortAction {
+    /// The Apple debug action ID a target must list to take this command.
+    pub fn debug_action(self) -> Option<u16> {
+        match self {
+            Self::Enable | Self::Disable => None,
+            Self::DfuAppleSilicon => Some(0x0106),
+            Self::DfuT2 | Self::Reboot => Some(0x0105),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum CommandError {
     StaleAttachment,
@@ -334,6 +379,8 @@ pub enum CommandError {
     Busy,
     Hardware,
     Transmission,
+    /// The target does not list the action.
+    Unsupported,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -402,6 +449,22 @@ impl Status {
             mask |= u8::from(port.occupied()) << i;
         }
         mask
+    }
+
+    /// Ready targets a button gesture reaches. DFU and reboot go only where
+    /// the target lists them; a restore request reaches every ready target,
+    /// since the host may find one already in DFU.
+    pub fn gesture_mask(&self, gesture: Gesture) -> u8 {
+        let action = match gesture {
+            Gesture::Dfu => PortAction::DfuAppleSilicon,
+            Gesture::Reboot => PortAction::Reboot,
+            Gesture::Restore => return self.ready_mask(),
+        };
+        let mut mask = 0;
+        for (i, port) in self.ports.iter().enumerate() {
+            mask |= u8::from(port.offers(action)) << i;
+        }
+        mask & self.ready_mask()
     }
 
     /// Identified targets eligible for a local action or a prepared erase.
@@ -559,6 +622,7 @@ mod tests {
                 hard_resets_sent: u16::MAX,
                 hard_resets_received: u16::MAX,
                 requests_rejected: u16::MAX,
+                debug_actions: DebugActions::Listed([u16::MAX; MAX_ACTIONS]),
                 restore: Some(RestoreStatus {
                     ecid: u64::MAX,
                     phase: RestorePhase::Failed,
@@ -609,6 +673,42 @@ mod tests {
     }
 
     #[test]
+    fn gestures_reach_only_targets_that_list_their_action() {
+        let listed = |ids: &[u16]| {
+            let mut list = [0; MAX_ACTIONS];
+            list[..ids.len()].copy_from_slice(ids);
+            PortStatus {
+                state: PortState::Contract,
+                debug_actions: DebugActions::Listed(list),
+                ..PortStatus::default()
+            }
+        };
+        let mut status = Status::default();
+        status.ports[0] = listed(&[0x4606, 0x0606, 0x0106, 0x0105]);
+        status.ports[1] = listed(&[0x0302, 0x0501]);
+        // A port that lists DFU without DFU USB takes reboot alone.
+        status.ports[2] = listed(&[0x4606, 0x0106, 0x0105]);
+        status.ports[3] = PortStatus {
+            debug_actions: DebugActions::Silent,
+            ..listed(&[])
+        };
+        // A list means nothing without a contract.
+        status.ports[4] = PortStatus {
+            state: PortState::Ready,
+            ..listed(&[0x0106, 0x0105])
+        };
+        assert_eq!(status.ready_mask(), 0b01111);
+        assert_eq!(status.gesture_mask(Gesture::Dfu), 0b00001);
+        assert_eq!(status.gesture_mask(Gesture::Reboot), 0b00101);
+        assert_eq!(status.gesture_mask(Gesture::Restore), 0b01111);
+        assert!(status.ports[0].offers(PortAction::DfuT2));
+        assert!(!status.ports[2].offers(PortAction::DfuT2));
+        assert!(!status.ports[0].offers(PortAction::Enable));
+        status.ports[0].pd_transition = true;
+        assert_eq!(status.gesture_mask(Gesture::Dfu), 0);
+    }
+
+    #[test]
     fn identity_frame_and_version_are_explicit() {
         let info = Info {
             serial: 1,
@@ -621,7 +721,7 @@ mod tests {
         assert_eq!(
             packet,
             &[
-                b'I', b'A', b'S', b'I', 8, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
+                b'I', b'A', b'S', b'I', 9, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
             ]
         );
         let length = packet.len();
