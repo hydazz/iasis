@@ -94,10 +94,11 @@ fn parse_port_name(name: &str) -> Option<Topology> {
             .collect();
         (bus, chain?)
     };
-    bus.parse::<u8>().ok().filter(|bus| *bus != 0)?;
+    let bus = bus.parse::<u8>().ok().filter(|bus| *bus != 0)?;
     port_chain.push(port);
     Some(Topology {
-        bus: bus.to_owned(),
+        // nusb uses the three-digit bus ID found under /dev/bus/usb.
+        bus: format!("{bus:03}"),
         port_chain,
     })
 }
@@ -109,9 +110,9 @@ mod tests {
     #[test]
     fn parses_kernel_port_names() {
         for (name, bus, chain) in [
-            ("usb1-port3", "1", vec![3]),
-            ("1-3-port5", "1", vec![3, 5]),
-            ("2-7.4-port2", "2", vec![7, 4, 2]),
+            ("usb1-port3", "001", vec![3]),
+            ("1-3-port5", "001", vec![3, 5]),
+            ("2-7.4-port2", "002", vec![7, 4, 2]),
         ] {
             assert_eq!(
                 parse_port_name(name),
@@ -150,7 +151,7 @@ mod tests {
         assert_eq!(
             super::super::companion(
                 &Topology {
-                    bus: "1".into(),
+                    bus: "001".into(),
                     port_chain: vec![3, 2]
                 },
                 &ports,
@@ -158,7 +159,7 @@ mod tests {
             ),
             super::super::Companion::Mapped {
                 topology: Topology {
-                    bus: "2".into(),
+                    bus: "002".into(),
                     port_chain: vec![7, 2]
                 }
             }
