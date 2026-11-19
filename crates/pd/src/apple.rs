@@ -20,6 +20,35 @@ pub const T2_DFU: [u32; 3] = [0x05ac_8012, 0x0105, 0x8002_0000];
 pub const REBOOT: [u32; 3] = [0x05ac_8012, 0x0105, 0x8000_0000];
 /// An empty vendor header. Targets answer it before accepting an action.
 pub const PROBE: [u32; 1] = [0];
+/// Get Action List. Each port of a target answers with what it offers; on a
+/// Mac only the DFU port lists DFU and reboot.
+pub const ACTION_LIST: [u32; 1] = [0x05ac_8010];
+const ACTION_LIST_REPLY: u32 = 0x05ac_8050;
+/// The most action IDs one reply carries: six objects after its header.
+pub const MAX_ACTIONS: usize = 12;
+
+/// The action ID a Set Action message performs.
+pub fn action(words: &[u32; 3]) -> u16 {
+    words[1] as u16
+}
+
+/// Action IDs from a Get Action List reply: 16-bit units packed high to low
+/// in each object, zero terminated and zero padded here.
+pub fn actions(reply: &[u32]) -> Option<[u16; MAX_ACTIONS]> {
+    let (&header, objects) = reply.split_first()?;
+    if header != ACTION_LIST_REPLY {
+        return None;
+    }
+    let mut list = [0; MAX_ACTIONS];
+    let ids = objects
+        .iter()
+        .flat_map(|object| [(object >> 16) as u16, *object as u16])
+        .take_while(|id| *id != 0);
+    for (slot, id) in list.iter_mut().zip(ids) {
+        *slot = id;
+    }
+    Some(list)
+}
 
 /// Header and data objects of one debug message, without SOP or CRC.
 pub fn message(id: u8, objects: &[u32]) -> Vec<u8, 14> {
@@ -50,5 +79,35 @@ mod tests {
             ]
         );
         assert_eq!(message(8, &PROBE).as_slice(), &[0x6f, 0x11, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn an_action_list_reply_unpacks_to_its_ids() {
+        // M1 Mac mini DFU port, from the Asahi Linux notes.
+        let reply = [
+            0x05ac_8050,
+            0x4606_0606,
+            0x0206_0301,
+            0x0306_0106,
+            0x0105_0303,
+            0x0803_0809,
+            0x0103_0000,
+        ];
+        let list = actions(&reply).unwrap();
+        assert_eq!(
+            list,
+            [
+                0x4606, 0x0606, 0x0206, 0x0301, 0x0306, 0x0106, 0x0105, 0x0303, 0x0803, 0x0809,
+                0x0103, 0
+            ]
+        );
+        assert!(list.contains(&action(&SILICON_DFU)) && list.contains(&action(&REBOOT)));
+        assert_eq!(action(&T2_DFU), action(&REBOOT));
+        // A port without the debug actions, and a reply that ends early.
+        let plain = actions(&[0x05ac_8050, 0x0302_0501, 0x0301_0000, 0x0106_0000]).unwrap();
+        assert_eq!(plain[..4], [0x0302, 0x0501, 0x0301, 0]);
+        assert_eq!(actions(&[0x05ac_8050]), Some([0; MAX_ACTIONS]));
+        assert_eq!(actions(&[0x05ac_8052, 0x0106_0000]), None);
+        assert_eq!(actions(&[]), None);
     }
 }
