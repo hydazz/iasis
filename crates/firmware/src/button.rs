@@ -1,45 +1,18 @@
-//! One-button port selection, local signalling and host restore confirmation.
+//! One-button target selection, local signalling and host restore confirmation.
+//!
+//! A tap moves the selection through All and each occupied port. Holding steps
+//! through the actions; releasing sends the one reached, and holding past the
+//! last sends nothing.
 
 use iasis_protocol::{
     ButtonEvent, Gesture, Port, RestoreArm, RestoreDecision, RestorePhase, Status,
 };
 
-use crate::display::Page;
-
 const DEBOUNCE_MS: u64 = 30;
-const HOLD_MS: u64 = 400;
+const HOLD_MS: u64 = 500;
+const STEP_MS: u64 = 1500;
 const CONFIRM_MS: u64 = 3000;
-const MENU_TIMEOUT_MS: u64 = 12_000;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Action {
-    Dfu,
-    Reboot,
-    Restore,
-    Details,
-    Back,
-}
-
-impl Action {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Dfu => "DFU",
-            Self::Reboot => "Reboot",
-            Self::Restore => "Restore",
-            Self::Details => "Details",
-            Self::Back => "Back",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Mode {
-    #[default]
-    Overview,
-    Selecting,
-    Actions(Action),
-    Details(Page),
-}
+const VACANT_MS: u64 = 30_000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Event {
@@ -49,28 +22,25 @@ pub enum Event {
 
 #[derive(Default)]
 pub struct Button {
+    /// One port, or all of them.
     pub selected: Option<Port>,
-    pub mode: Mode,
-    screen: Option<bool>,
+    vacant_since: Option<u64>,
     session: Option<u32>,
     armed: Option<RestoreArm>,
     generations: [u32; 5],
+    /// Selected ports that would accept an action.
+    targets: u8,
     raw: bool,
     raw_since: u64,
     pressed: bool,
     pressed_since: u64,
     consumed: bool,
-    touched: u64,
     next_id: u32,
     notice: Option<(&'static str, u64)>,
     completed: [Option<u64>; 5],
 }
 
 impl Button {
-    pub fn screen(&self) -> bool {
-        self.screen == Some(true)
-    }
-
     pub fn host_prepared(&self) -> bool {
         self.session.is_some()
     }
@@ -79,11 +49,33 @@ impl Button {
         self.armed
     }
 
-    pub fn selected_mask(&self) -> u8 {
-        self.armed.map_or_else(
-            || self.selected.map_or(0x1f, |port| 1 << port.index()),
-            |arm| arm.ports,
-        )
+    /// Actions a hold steps through, in order.
+    pub fn actions(&self) -> &'static [Gesture] {
+        if self.session.is_some() {
+            &[Gesture::Dfu, Gesture::Reboot, Gesture::Restore]
+        } else {
+            &[Gesture::Dfu, Gesture::Reboot]
+        }
+    }
+
+    /// The action a release would send now.
+    pub fn held(&self, now: u64) -> Option<Gesture> {
+        if !self.pressed || self.consumed || self.armed.is_some() || self.targets == 0 {
+            return None;
+        }
+        self.stop(now.saturating_sub(self.pressed_since))
+    }
+
+    /// Ports the screen highlights and the LEDs keep at full brightness: an
+    /// armed batch, the targets of a held action, or the occupied selection.
+    pub fn marked(&self, status: &Status, now: u64) -> u8 {
+        if let Some(arm) = self.armed {
+            arm.ports
+        } else if self.held(now).is_some() {
+            self.targets
+        } else {
+            self.selected_mask() & status.occupied_mask()
+        }
     }
 
     pub fn notice(&self, now: u64) -> Option<&'static str> {
@@ -96,15 +88,17 @@ impl Button {
         self.completed[port.index()].filter(|&start| now.saturating_sub(start) < 1800)
     }
 
-    fn tell(&mut self, text: &'static str, now: u64) {
-        self.notice = Some((text, now + 2500));
+    fn selected_mask(&self) -> u8 {
+        self.selected.map_or(0x1f, |port| 1 << port.index())
     }
 
-    fn home(&mut self) {
-        self.mode = Mode::Overview;
-        if !self.screen() {
-            self.selected = None;
-        }
+    fn stop(&self, held_ms: u64) -> Option<Gesture> {
+        let index = held_ms.checked_sub(HOLD_MS)? / STEP_MS;
+        self.actions().get(index as usize).copied()
+    }
+
+    fn tell(&mut self, text: &'static str, now: u64) {
+        self.notice = Some((text, now + 2500));
     }
 
     /// Called after sampling the GPIO so a press already underway cannot confirm.
@@ -117,7 +111,6 @@ impl Button {
         }
         self.armed = Some(arm);
         self.consumed |= self.raw || self.pressed;
-        self.mode = Mode::Overview;
         self.notice = None;
         true
     }
@@ -125,7 +118,6 @@ impl Button {
     pub fn sample(
         &mut self,
         status: &Status,
-        screen: Option<bool>,
         session: Option<u32>,
         pending_arm: Option<RestoreArm>,
         down: bool,
@@ -135,17 +127,10 @@ impl Button {
             self.raw = down;
             self.raw_since = now;
         }
-        if screen != self.screen {
-            self.consumed |= down || self.pressed;
-            self.screen = screen;
-            self.home();
-        }
+        let busy = down || self.pressed;
         if session != self.session {
-            self.consumed |= down || self.pressed;
+            self.consumed |= busy;
             self.session = session;
-            if self.mode == Mode::Actions(Action::Restore) {
-                self.home();
-            }
         }
         let mut decision = None;
         if let Some(arm) = self.armed {
@@ -160,18 +145,36 @@ impl Button {
             };
             if let Some(reason) = reason {
                 self.armed = None;
-                self.consumed |= down || self.pressed;
-                self.home();
+                self.consumed |= busy;
                 self.tell(reason, now);
                 decision = Some(Event::Decision(RestoreDecision::Cancelled(arm)));
             }
         }
+
+        // An emptied port keeps the selection for a replacement target, so an
+        // action never widens to every port while its target re-attaches.
+        match self.selected {
+            Some(port) if !status.ports[port.index()].occupied() => {
+                let since = *self.vacant_since.get_or_insert(now);
+                if !busy && now.saturating_sub(since) >= VACANT_MS {
+                    self.selected = None;
+                    self.vacant_since = None;
+                }
+            }
+            _ => self.vacant_since = None,
+        }
         let generations = status.ports.map(|port| port.generation);
-        let selected_changed = (0..5)
-            .any(|i| self.selected_mask() & (1 << i) != 0 && generations[i] != self.generations[i]);
-        if selected_changed && (down || self.pressed || matches!(self.mode, Mode::Actions(_))) {
-            self.consumed |= down || self.pressed;
-            self.home();
+        let targets = self.selected_mask() & status.ready_mask();
+        let moved = targets != self.targets
+            || (0..5).any(|i| targets & (1 << i) != 0 && generations[i] != self.generations[i]);
+        // Once an action is on offer its targets must hold until release.
+        if moved
+            && self.pressed
+            && !self.consumed
+            && self.armed.is_none()
+            && now.saturating_sub(self.pressed_since) >= HOLD_MS
+        {
+            self.consumed = true;
             self.tell("Target changed", now);
         }
         for (i, port) in status.ports.iter().enumerate() {
@@ -188,41 +191,34 @@ impl Button {
             }
         }
         self.generations = generations;
-        if !down
-            && !self.pressed
-            && matches!(self.mode, Mode::Selecting | Mode::Actions(_))
-            && now.saturating_sub(self.touched) >= MENU_TIMEOUT_MS
-        {
-            self.home();
-        }
+        self.targets = targets;
+
         if let Some(arm) = pending_arm
             && !self.arm(arm, status, now)
         {
-            self.consumed |= down || self.pressed;
+            self.consumed |= busy;
             decision = Some(Event::Decision(RestoreDecision::Cancelled(arm)));
-        }
-        if self.screen.is_none() {
-            self.consumed |= down;
         }
 
         if down != self.pressed && now.saturating_sub(self.raw_since) >= DEBOUNCE_MS {
             self.pressed = down;
-            self.touched = now;
             if down {
                 self.pressed_since = self.raw_since;
                 self.notice = None;
             } else if !self.consumed {
-                return self.gesture(
-                    status,
-                    self.raw_since - self.pressed_since >= self.threshold(),
-                    now,
-                );
+                return self.release(status, self.raw_since - self.pressed_since, now);
             }
         }
-        if self.pressed && down && !self.consumed && now - self.pressed_since >= self.threshold() {
+        if let Some(arm) = self.armed
+            && self.pressed
+            && down
+            && !self.consumed
+            && now - self.pressed_since >= CONFIRM_MS
+        {
+            self.armed = None;
             self.consumed = true;
-            self.touched = now;
-            return self.gesture(status, true, now);
+            self.tell("Restore confirmed", now);
+            return Some(Event::Decision(RestoreDecision::Confirmed(arm)));
         }
         if !down && !self.pressed {
             self.consumed = false;
@@ -230,72 +226,25 @@ impl Button {
         decision
     }
 
-    fn threshold(&self) -> u64 {
-        if self.armed.is_some() {
-            CONFIRM_MS
-        } else {
-            HOLD_MS
-        }
-    }
-
-    fn gesture(&mut self, status: &Status, hold: bool, now: u64) -> Option<Event> {
+    fn release(&mut self, status: &Status, held_ms: u64, now: u64) -> Option<Event> {
         if let Some(arm) = self.armed.take() {
-            self.home();
-            let result = if hold {
-                self.tell("Restore confirmed", now);
-                RestoreDecision::Confirmed(arm)
-            } else {
-                self.tell("Restore cancelled", now);
-                RestoreDecision::Cancelled(arm)
-            };
-            return Some(Event::Decision(result));
+            self.tell("Restore cancelled", now);
+            return Some(Event::Decision(RestoreDecision::Cancelled(arm)));
         }
-        let screen = self.screen();
-        match (self.mode, hold) {
-            (Mode::Overview, false) if !screen => return self.action(Gesture::Dfu, status, now),
-            (Mode::Overview | Mode::Selecting, false) => {
-                self.selected = match self.selected {
-                    None => Some(Port::ALL[0]),
-                    Some(port) => Port::ALL.get(port.index() + 1).copied(),
-                };
-            }
-            (Mode::Overview, true) if !screen => self.mode = Mode::Selecting,
-            (Mode::Overview | Mode::Selecting, true) => self.mode = Mode::Actions(Action::Dfu),
-            (Mode::Actions(action), false) => {
-                self.mode = Mode::Actions(match action {
-                    Action::Dfu => Action::Reboot,
-                    Action::Reboot if screen && self.host_prepared() => Action::Restore,
-                    Action::Reboot | Action::Restore if screen => Action::Details,
-                    Action::Reboot | Action::Restore | Action::Details => Action::Back,
-                    Action::Back => Action::Dfu,
-                });
-            }
-            (Mode::Actions(Action::Dfu), true) => return self.action(Gesture::Dfu, status, now),
-            (Mode::Actions(Action::Reboot), true) => {
-                return self.action(Gesture::Reboot, status, now);
-            }
-            (Mode::Actions(Action::Restore), true) => {
-                return self.action(Gesture::Restore, status, now);
-            }
-            (Mode::Actions(Action::Details), true) => self.mode = Mode::Details(Page::Voltage),
-            (Mode::Details(page), false) => {
-                self.mode = Mode::Details(match page {
-                    Page::Voltage => Page::Cc,
-                    Page::Cc => Page::Voltage,
-                });
-            }
-            (Mode::Details(_) | Mode::Actions(Action::Back), true) => self.home(),
+        if held_ms < HOLD_MS {
+            let occupied = status.occupied_mask();
+            let after = self.selected.map_or(0, |port| port.index() + 1);
+            self.selected = Port::ALL[after..]
+                .iter()
+                .copied()
+                .find(|port| occupied & (1 << port.index()) != 0);
+            return None;
         }
-        None
-    }
-
-    fn action(&mut self, gesture: Gesture, status: &Status, now: u64) -> Option<Event> {
-        let ports = self.selected_mask() & status.ready_mask();
-        self.home();
-        if ports == 0 {
+        if self.targets == 0 {
             self.tell("No ready targets", now);
             return None;
         }
+        let gesture = self.stop(held_ms)?;
         self.tell(
             match gesture {
                 Gesture::Dfu => "DFU requested",
@@ -308,7 +257,7 @@ impl Button {
         Some(Event::Action(ButtonEvent {
             id: self.next_id,
             gesture,
-            ports,
+            ports: self.targets,
             generations: self.generations,
             session: if gesture == Gesture::Restore {
                 self.session
@@ -327,25 +276,27 @@ mod tests {
     struct Rig {
         button: Button,
         status: Status,
-        screen: Option<bool>,
         session: Option<u32>,
         pending: Option<RestoreArm>,
         now: u64,
     }
 
     impl Rig {
-        fn new(screen: Option<bool>) -> Self {
+        fn new(occupied: u8) -> Self {
             let mut rig = Self {
                 button: Button::default(),
                 status: Status::default(),
-                screen,
                 session: None,
                 pending: None,
                 now: 0,
             };
-            for port in &mut rig.status.ports {
-                port.state = PortState::Contract;
+            for (i, port) in rig.status.ports.iter_mut().enumerate() {
                 port.generation = 1;
+                port.state = if occupied & (1 << i) != 0 {
+                    PortState::Contract
+                } else {
+                    PortState::Unattached
+                };
             }
             rig.sample(false, 1);
             rig
@@ -355,7 +306,6 @@ mod tests {
             self.now += elapsed;
             self.button.sample(
                 &self.status,
-                self.screen,
                 self.session,
                 self.pending.take(),
                 down,
@@ -378,12 +328,15 @@ mod tests {
             self.release()
         }
 
-        fn hold(&mut self) -> Option<Event> {
+        /// Hold into the numbered stop, then release.
+        fn hold(&mut self, stop: u64) -> Option<Event> {
             self.press();
-            let result = self.sample(true, HOLD_MS);
-            assert_eq!(self.sample(true, 800), None);
-            assert_eq!(self.release(), None);
-            result
+            assert_eq!(self.sample(true, HOLD_MS + stop * STEP_MS), None);
+            self.release()
+        }
+
+        fn selected(&self) -> Option<u8> {
+            self.button.selected.map(Port::number)
         }
 
         fn prepare(&mut self) -> RestoreArm {
@@ -399,52 +352,36 @@ mod tests {
         }
     }
 
-    #[test]
-    fn oled_taps_inspect_all_ports_and_only_a_menu_hold_signals() {
-        let mut r = Rig::new(Some(true));
-        for port in Port::ALL.into_iter().map(Some).chain([None]) {
-            assert_eq!(r.tap(), None);
-            assert_eq!(r.button.selected, port);
+    fn action(gesture: Gesture, ports: u8, session: Option<u32>) -> impl Fn(Option<Event>) -> bool {
+        move |event| {
+            matches!(
+                event,
+                Some(Event::Action(e)) if e.gesture == gesture && e.ports == ports && e.session == session
+            )
         }
-        assert_eq!(r.tap(), None);
-        assert_eq!(r.hold(), None);
-        assert_eq!(r.button.mode, Mode::Actions(Action::Dfu));
-        assert!(matches!(
-            r.hold(),
-            Some(Event::Action(ButtonEvent {
-                gesture: Gesture::Dfu,
-                ports: 1,
-                session: None,
-                ..
-            }))
-        ));
-        assert_eq!(r.button.selected, Some(Port::ALL[0]));
-        r.hold();
-        r.tap();
-        assert!(matches!(
-            r.hold(),
-            Some(Event::Action(ButtonEvent {
-                gesture: Gesture::Reboot,
-                ports: 1,
-                ..
-            }))
-        ));
-        r.hold();
-        r.tap();
-        r.tap();
-        assert_eq!(r.button.mode, Mode::Actions(Action::Details));
-        r.hold();
-        assert_eq!(r.button.mode, Mode::Details(Page::Voltage));
-        r.sample(false, 60_000);
-        r.tap();
-        assert_eq!(r.button.mode, Mode::Details(Page::Cc));
-        r.hold();
-        assert_eq!(r.button.selected, Some(Port::ALL[0]));
     }
 
     #[test]
-    fn screenless_tap_excludes_jobs_and_hold_selects_one_port() {
-        let mut r = Rig::new(Some(false));
+    fn taps_visit_all_and_each_occupied_port_without_signalling() {
+        let mut r = Rig::new(0b01010);
+        for expected in [Some(2), Some(4), None, Some(2)] {
+            assert_eq!(r.tap(), None);
+            assert_eq!(r.selected(), expected);
+        }
+        assert_eq!(r.button.marked(&r.status, r.now), 0b00010);
+        r.button.selected = None;
+        assert_eq!(r.button.marked(&r.status, r.now), 0b01010);
+
+        let mut empty = Rig::new(0);
+        assert_eq!(empty.tap(), None);
+        assert_eq!(empty.selected(), None);
+        assert_eq!(empty.hold(0), None);
+        assert_eq!(empty.button.notice(empty.now), Some("No ready targets"));
+    }
+
+    #[test]
+    fn a_hold_steps_through_the_actions_and_release_sends_the_one_reached() {
+        let mut r = Rig::new(0b11111);
         for (i, phase) in [
             RestorePhase::Preparing,
             RestorePhase::Running,
@@ -459,86 +396,105 @@ mod tests {
                 progress: 1,
             });
         }
-        assert!(matches!(
-            r.tap(),
-            Some(Event::Action(ButtonEvent {
-                gesture: Gesture::Dfu,
-                ports: 0b11000,
-                ..
-            }))
-        ));
-        assert_eq!(r.hold(), None);
-        assert_eq!(r.button.mode, Mode::Selecting);
-        for _ in 0..4 {
-            assert_eq!(r.tap(), None);
-        }
-        assert_eq!(r.hold(), None);
+        r.press();
+        assert_eq!(r.button.held(r.now), None);
+        r.sample(true, HOLD_MS);
+        assert_eq!(r.button.held(r.now), Some(Gesture::Dfu));
+        // Only the targets of the offered action stay marked.
+        assert_eq!(r.button.marked(&r.status, r.now), 0b11000);
+        r.sample(true, STEP_MS);
+        assert_eq!(r.button.held(r.now), Some(Gesture::Reboot));
+        r.sample(true, STEP_MS);
+        assert_eq!(r.button.held(r.now), None);
+        assert_eq!(r.release(), None);
+
+        assert!(action(Gesture::Dfu, 0b11000, None)(r.hold(0)));
+        assert!(action(Gesture::Reboot, 0b11000, None)(r.hold(1)));
+        assert_eq!(r.hold(2), None);
         r.tap();
-        assert!(matches!(
-            r.hold(),
-            Some(Event::Action(ButtonEvent {
-                gesture: Gesture::Reboot,
-                ports: 0b01000,
-                ..
-            }))
-        ));
-        assert_eq!(r.button.selected, None);
-        r.hold();
         r.tap();
-        assert_eq!(r.sample(false, MENU_TIMEOUT_MS), None);
-        assert_eq!((r.button.mode, r.button.selected), (Mode::Overview, None));
+        r.tap();
+        r.tap();
+        assert_eq!(r.selected(), Some(4));
+        assert!(action(Gesture::Dfu, 0b01000, None)(r.hold(0)));
+        assert_eq!(r.selected(), Some(4));
+
+        r.session = Some(7);
+        r.sample(false, 10);
+        assert!(action(Gesture::Restore, 0b01000, Some(7))(r.hold(2)));
+        assert_eq!(r.hold(3), None);
     }
 
     #[test]
-    fn bounce_display_detection_and_attachment_change_do_not_signal() {
-        let mut r = Rig::new(None);
+    fn an_emptied_selection_waits_for_a_replacement_before_returning_to_all() {
+        let mut r = Rig::new(0b00110);
+        r.tap();
+        assert_eq!(r.selected(), Some(2));
+        r.status.ports[1].state = PortState::Unattached;
+        r.sample(false, 10);
+        assert_eq!(r.button.marked(&r.status, r.now), 0);
+        assert_eq!(r.hold(0), None);
+        assert_eq!(r.selected(), Some(2));
+        r.status.ports[1].state = PortState::Contract;
+        r.status.ports[1].generation = 2;
+        r.sample(false, VACANT_MS);
+        assert!(action(Gesture::Dfu, 0b00010, None)(r.hold(0)));
+
+        r.status.ports[1].state = PortState::Unattached;
+        r.sample(false, 10);
+        r.sample(false, VACANT_MS - 1);
+        assert_eq!(r.selected(), Some(2));
+        r.sample(false, 1);
+        assert_eq!(r.selected(), None);
+    }
+
+    #[test]
+    fn bounce_and_a_target_change_under_an_offered_action_do_not_signal() {
+        let mut r = Rig::new(0b11111);
         assert_eq!(r.sample(true, 2), None);
         assert_eq!(r.sample(false, 9), None);
+        assert_eq!(r.sample(false, DEBOUNCE_MS), None);
+        assert_eq!(r.selected(), None);
+
         r.press();
-        r.screen = Some(false);
-        assert_eq!(r.sample(true, HOLD_MS), None);
-        assert_eq!(r.release(), None);
-        assert_eq!(r.tap().map(|_| ()), Some(()));
-        r.screen = Some(true);
-        r.sample(false, 1);
-        r.tap();
-        r.hold();
-        r.press();
+        r.sample(true, HOLD_MS);
         r.status.ports[0].generation = 2;
-        assert_eq!(r.sample(true, HOLD_MS), None);
+        assert_eq!(r.sample(true, 10), None);
+        assert_eq!(r.button.held(r.now), None);
+        assert_eq!(r.button.notice(r.now), Some("Target changed"));
         assert_eq!(r.release(), None);
-        assert_eq!(r.button.mode, Mode::Overview);
+
+        // A target arriving before any action is on offer joins the batch.
+        r.status.ports[4].state = PortState::Unattached;
+        r.sample(false, 10);
         r.press();
-        r.screen = Some(false);
-        assert_eq!(r.sample(true, 500), None);
+        r.status.ports[4].state = PortState::Contract;
+        r.sample(true, 100);
+        r.sample(true, HOLD_MS);
+        assert!(action(Gesture::Dfu, 0b11111, None)(r.release()));
+
+        r.press();
+        r.sample(true, HOLD_MS);
+        r.session = Some(3);
+        assert_eq!(r.sample(true, 10), None);
         assert_eq!(r.release(), None);
     }
 
     #[test]
-    fn oled_restore_requests_preparation_and_erase_requires_a_new_three_second_hold() {
-        let mut r = Rig::new(Some(true));
+    fn a_restore_request_is_prepared_and_erase_requires_a_new_three_second_hold() {
+        let mut r = Rig::new(0b11111);
         let arm = r.prepare();
         r.tap();
-        r.hold();
-        r.tap();
-        r.tap();
-        assert_eq!(r.button.mode, Mode::Actions(Action::Restore));
-        assert!(matches!(
-            r.hold(),
-            Some(Event::Action(ButtonEvent {
-                gesture: Gesture::Restore,
-                ports: 1,
-                session: Some(7),
-                ..
-            }))
-        ));
+        assert!(action(Gesture::Restore, 0b00001, Some(7))(r.hold(2)));
         // The press is already electrically down, even before debounce qualifies it.
         r.sample(true, 2);
         r.pending = Some(arm);
         assert_eq!(r.sample(true, 2), None);
+        assert_eq!(r.button.marked(&r.status, r.now), arm.ports);
         assert_eq!(r.sample(true, CONFIRM_MS + 100), None);
         assert_eq!(r.release(), None);
         r.press();
+        assert_eq!(r.button.held(r.now + HOLD_MS), None);
         assert_eq!(r.sample(true, CONFIRM_MS - DEBOUNCE_MS - 1), None);
         assert_eq!(
             r.sample(true, 1),
@@ -552,7 +508,7 @@ mod tests {
     #[test]
     fn a_tap_expiry_replacement_or_session_loss_cancels_the_exact_arm() {
         for cause in 0..4 {
-            let mut r = Rig::new(Some(false));
+            let mut r = Rig::new(0b11111);
             let arm = r.prepare();
             r.pending = Some(arm);
             r.sample(false, 1);
@@ -577,6 +533,7 @@ mod tests {
                 assert_eq!(r.release(), None);
             }
             assert_eq!(r.button.armed(), None);
+            assert_eq!(r.selected(), None);
         }
     }
 }
