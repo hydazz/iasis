@@ -361,11 +361,8 @@ async fn main(_spawner: Spawner) {
                 ports.host_fault(protocol::PortError::HostLimiter);
             }
             next.uptime_ms = Instant::now().as_millis();
-            {
-                let mut io = io.lock().await;
-                oled.tick(&mut io.bus, &next, &button, next.uptime_ms).await;
-                next.i2c_root_fault |= io.bus.faulted();
-            }
+            oled.tick(&io, &next, &button, next.uptime_ms).await;
+            next.i2c_root_fault |= io.lock().await.bus.faulted();
             // USB feedback can arrive during the I²C work above. Apply it
             // before selecting targets for a button action in this pass.
             for update in feedback
