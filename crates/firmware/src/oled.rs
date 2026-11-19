@@ -6,7 +6,14 @@ use iasis_firmware::{
 use iasis_protocol::Status;
 use ssd1306::{Ssd1306Async, command::AddrMode, prelude::*};
 
-use crate::bus::Bus;
+use embassy_futures::yield_now;
+
+use crate::bus::SharedIo;
+
+/// Display bytes per I²C transaction. The port controllers share this bus and
+/// a target waits about 25 ms for the answer to a PD request, so the display
+/// never holds the bus for long: 33 bytes take under a millisecond.
+const CHUNK: usize = 32;
 
 pub struct Oled {
     address: Option<u8>,
@@ -25,34 +32,39 @@ impl Oled {
         }
     }
 
-    pub async fn tick(&mut self, bus: &mut Bus, status: &Status, button: &Button, now: u64) {
-        if bus.faulted() {
+    /// Draw and send one page. The bus is taken for one short transfer at a
+    /// time, never across drawing.
+    pub async fn tick(&mut self, io: &SharedIo, status: &Status, button: &Button, now: u64) {
+        if io.lock().await.bus.faulted() {
             self.offline(now);
             return;
         }
         if now < self.due {
             return;
         }
-        if bus.select(Some(7)).await.is_err() {
-            self.offline(now);
-            let _ = bus.select(None).await;
-            return;
+        {
+            let mut io = io.lock().await;
+            if io.bus.select(Some(7)).await.is_err() {
+                self.offline(now);
+                let _ = io.bus.select(None).await;
+                return;
+            }
         }
         let result = if let Some(address) = self.address {
             if self.page == 0 {
                 self.frame = Some((*status, display::view(status, button, now), now));
             }
             let (status, view, at) = self.frame.as_ref().unwrap();
-            page(bus, address, self.page, status, view, *at).await
+            page(io, address, self.page, status, view, *at).await
         } else {
             // The Adafruit 938 defaults to 0x3d; its address jumper selects 0x3c.
             for address in [0x3d, 0x3c] {
-                if init(bus, address).await.is_ok() {
+                if init(io, address).await.is_ok() {
                     self.address = Some(address);
                     break;
                 }
                 // A timeout resets/deselects the mux and quarantines this branch.
-                if bus.select(Some(7)).await.is_err() {
+                if io.lock().await.bus.select(Some(7)).await.is_err() {
                     break;
                 }
             }
@@ -62,7 +74,7 @@ impl Oled {
                 Err(DisplayError::BusWriteError)
             }
         };
-        let deselected = bus.select(None).await.is_ok();
+        let deselected = io.lock().await.bus.select(None).await.is_ok();
         if result.is_err() || !deselected {
             self.offline(now);
         } else if self.frame.is_some() {
@@ -81,9 +93,9 @@ impl Oled {
     }
 }
 
-async fn init(bus: &mut Bus, address: u8) -> Result<(), DisplayError> {
+async fn init(io: &SharedIo, address: u8) -> Result<(), DisplayError> {
     let mut driver = Ssd1306Async::new(
-        Transport { bus, address },
+        Transport { io, address },
         DisplaySize128x64,
         DisplayRotation::Rotate0,
     );
@@ -93,17 +105,17 @@ async fn init(bus: &mut Bus, address: u8) -> Result<(), DisplayError> {
 }
 
 async fn page(
-    bus: &mut Bus,
+    io: &SharedIo,
     address: u8,
     page: u8,
     status: &Status,
     view: &View,
     now: u64,
 ) -> Result<(), DisplayError> {
-    // Borrow the shared bus for one page only. The driver supplies SSD1306
-    // packing and commands; clipping limits flush to 128 data bytes.
+    // The driver supplies SSD1306 packing and commands; clipping limits flush
+    // to 128 data bytes.
     let mut driver = Ssd1306Async::new(
-        Transport { bus, address },
+        Transport { io, address },
         DisplaySize128x64,
         DisplayRotation::Rotate0,
     )
@@ -118,7 +130,7 @@ async fn page(
 }
 
 struct Transport<'a> {
-    bus: &'a mut Bus,
+    io: &'a SharedIo,
     address: u8,
 }
 
@@ -127,14 +139,22 @@ impl Transport<'_> {
         let DataFormat::U8(data) = data else {
             return Err(DisplayError::DataFormatNotImplemented);
         };
-        let mut packet = [0; 129];
+        let mut packet = [0; CHUNK + 1];
         packet[0] = control;
-        for chunk in data.chunks(128) {
+        for chunk in data.chunks(CHUNK) {
             packet[1..=chunk.len()].copy_from_slice(chunk);
-            self.bus
-                .write(self.address, &packet[..=chunk.len()])
-                .await
-                .map_err(|_| DisplayError::BusWriteError)?;
+            {
+                let mut io = self.io.lock().await;
+                let bus = &mut io.bus;
+                bus.select(Some(7))
+                    .await
+                    .map_err(|_| DisplayError::BusWriteError)?;
+                bus.write(self.address, &packet[..=chunk.len()])
+                    .await
+                    .map_err(|_| DisplayError::BusWriteError)?;
+            }
+            // A port task waiting for the bus takes it before the next chunk.
+            yield_now().await;
         }
         Ok(())
     }
