@@ -13,6 +13,7 @@ const DISCHARGE: [u16; 5] = [1 << 8, 1 << 12, 1 << 13, 1 << 14, 1 << 15];
 
 pub struct Outputs {
     expander: u8,
+    shift_known: bool,
 }
 
 impl Outputs {
@@ -34,12 +35,11 @@ impl Outputs {
         };
         let value =
             (controls.shift & !(HOST_LIMIT_MASK | PORT_STAGES_OFF)) | bits | HOST_TARGET_EN | inhibit;
-        if value != controls.shift {
-            let releasing_stages = controls.shift & PORT_STAGES_OFF != 0 && inhibit == 0;
-            self.latch(bus, controls, value).await?;
-            if releasing_stages {
-                Timer::after_millis(10).await;
-            }
+        let releasing_stages =
+            (!self.shift_known || controls.shift & PORT_STAGES_OFF != 0) && inhibit == 0;
+        self.latch(bus, controls, value).await?;
+        if releasing_stages {
+            Timer::after_millis(10).await;
         }
         Ok(())
     }
@@ -66,7 +66,10 @@ impl Outputs {
         value &= !0x0b;
         bus.write(0x20, &[1, value]).await?;
         bus.write(0x20, &[3, direction & !0x0b]).await?;
-        let mut outputs = Self { expander: value };
+        let mut outputs = Self {
+            expander: value,
+            shift_known: false,
+        };
         let initial = (controls.shift & HOST_EXT) | HOST_TARGET_EN | PORT_STAGES_OFF;
         outputs.latch(bus, controls, initial).await?;
         controls.enable_shift();
@@ -86,6 +89,12 @@ impl Outputs {
         controls: &mut Controls,
         value: u16,
     ) -> Result<(), PortError> {
+        if self.shift_known && value == controls.shift {
+            return Ok(());
+        }
+        // A failed latch-edge write can have reached the expander. Re-send
+        // the full word on recovery even if the desired value is unchanged.
+        self.shift_known = false;
         // U1181 QA is bit 0; its QH' feeds U1182. Send bit 15 first.
         for bit in (0..16).rev() {
             let data = ((value >> bit) & 1) as u8;
@@ -96,7 +105,22 @@ impl Outputs {
         self.expander(bus, 8).await?;
         self.expander(bus, 0).await?;
         controls.shift = value;
+        self.shift_known = true;
         Ok(())
+    }
+
+    pub async fn high_voltage(
+        &mut self,
+        bus: &mut Bus,
+        controls: &mut Controls,
+        index: usize,
+        high: bool,
+    ) -> Result<(), PortError> {
+        if index >= DISCHARGE.len() {
+            return Err(PortError::Protocol);
+        }
+        // U1181 QA..QE switch the corresponding LM74502 OV divider.
+        self.set_bit(bus, controls, 1 << index, high).await
     }
 
     pub async fn discharge(
@@ -106,15 +130,21 @@ impl Outputs {
         port: usize,
         enabled: bool,
     ) -> Result<(), PortError> {
-        let bit = DISCHARGE[port];
+        self.set_bit(bus, controls, DISCHARGE[port], enabled).await
+    }
+
+    async fn set_bit(
+        &mut self,
+        bus: &mut Bus,
+        controls: &mut Controls,
+        bit: u16,
+        enabled: bool,
+    ) -> Result<(), PortError> {
         let value = if enabled {
             controls.shift | bit
         } else {
             controls.shift & !bit
         };
-        if value != controls.shift {
-            self.latch(bus, controls, value).await?;
-        }
-        Ok(())
+        self.latch(bus, controls, value).await
     }
 }
