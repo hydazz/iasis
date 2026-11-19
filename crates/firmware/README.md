@@ -60,12 +60,13 @@ Leave the power supply connected throughout a restore. Changing the input can in
 
 `iasis status --watch` shows the board temperature near the port 1 and 2 output switches (TH1191, sensor A) and the shared core regulator (TH1192, sensor B). On macOS it can run during a restore. Use the raw ADC counts in `status --json` for calibration.
 
-The [button and CLI controls](../../README.md#use) operate on ready ports. DFU supports Apple Silicon and T2; the button selects Apple Silicon. Commands use the attachment generation to reject requests for a device that has since disconnected.
+The [button and CLI controls](../../README.md#use) operate on ready ports. A target is identified by its Power Delivery contract, and the button acts only on identified targets. A device that stays silent can be selected to read its voltage; a hold passes it by, and the CLI can still signal its port. DFU supports Apple Silicon and T2; the button selects Apple Silicon. Commands use the attachment generation to reject requests for a device that has since disconnected.
 
 | Port light | Meaning                                  |
 | ---------- | ---------------------------------------- |
 | Off        | Empty or disabled target port            |
 | Green      | Ready for signalling or restore complete |
+| White      | Powered device without a PD contract     |
 | Blue       | Activity                                 |
 | Amber      | Preparation, waiting or unknown result   |
 | Red        | Fault or failure                         |
@@ -88,16 +89,16 @@ Host restore feedback expires after five seconds without an update, changing the
 
 ## OLED
 
-Connect an [Adafruit 938](https://www.adafruit.com/product/938) to the display I²C connector. The 128×64 screen shows all five physical ports and highlights the selected ones. A lightning bolt indicates brick power and a USB symbol a waiting restore host.
+Connect an [Adafruit 938](https://www.adafruit.com/product/938) to the display I²C connector. The 128×64 screen shows all five physical ports. Selected targets are filled; any other selected port is outlined. A lightning bolt indicates brick power and a USB symbol a waiting restore host.
 
-| Selection | Lower area                                                                                          |
-| --------- | --------------------------------------------------------------------------------------------------- |
-| All       | Voltage measured at each occupied connector, then the input voltage and the watts contracts reserve |
-| One port  | Voltage measured at its connector and the plug orientation, then its contract                       |
+| Selection | Lower area                                                                                               |
+| --------- | -------------------------------------------------------------------------------------------------------- |
+| All       | Voltage measured at each occupied connector, then the input voltage and contract watts out of the supply |
+| One port  | Voltage measured at its connector and the plug orientation, then its contract                            |
 
-A contract is the most a target may draw, not what it draws: `Contract 9V 3A (27W)` reserves 27 W of the supply whether or not the target uses it, and `50/68W reserved` totals those reservations against the watts available. Iasis measures voltage, not current. On host power the All view shows the host allowance and the shared target limit. Holding the button lists the actions and highlights the one a release will send. A fault, restore progress or button feedback replaces the readings.
+A contract is the most a target may draw, not what it draws: `9V 3A (27W)` reserves 27 W of the supply whether or not the target uses it, and `50/68W` totals those reservations against the watts available. Iasis measures voltage, not current. On host power the All view shows the host allowance and the shared target limit. Holding the button lists the actions and highlights the one a release will send. A fault, restore progress or button feedback replaces the readings.
 
-`RDY` means ready for signalling. During a restore run by Iasis, a moving mark means the worker is preparing or has yet to report progress. The bar under each port fills with the current stage and can start over at the next stage. Select a port to read its stage percentage. `DONE` means the worker reported completion. `UNKN` means the outcome is unknown. Restores started separately in Finder or Apple Configurator show progress on the host.
+`RDY` means ready for signalling. `?` marks a powered device without a PD contract, which usually means a charge-only cable or an unsupported device. During a restore run by Iasis, a moving mark means the worker is preparing or has yet to report progress. The bar under each port fills with the current stage and can start over at the next stage. Select a port to read its stage percentage. `DONE` means the worker reported completion. `UNKN` means the outcome is unknown. Restores started separately in Finder or Apple Configurator show progress on the host.
 
 The display is optional and works with an external restore host or the CM5. It uses mux channel 7 at `0x3d`, or `0x3c` with the address jumper changed. A bus timeout quarantines channel 7, which also carries the charging-input controller, until reboot.
 
