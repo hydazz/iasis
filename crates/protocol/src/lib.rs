@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 4;
-pub const MAX_PACKET: usize = 512;
+pub const VERSION: u16 = 5;
+pub const MAX_PACKET: usize = 704;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
 pub const GET_STATUS: u8 = 2;
@@ -78,6 +78,15 @@ pub struct PortFaults {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FaultSample {
+    pub state: PortState,
+    pub vbus_adc: Option<u16>,
+    pub contract_mv: u16,
+    pub target_mv: u16,
+    pub target_ma: u16,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PortStatus {
     pub vbus_adc: Option<u16>,
     pub faults: Option<PortFaults>,
@@ -91,6 +100,12 @@ pub struct PortStatus {
     pub command_result: CommandResult,
     pub supply: Supply,
     pub restore: Option<RestoreStatus>,
+    pub pd_source_pdos: [u32; 4],
+    pub pd_request: Option<u32>,
+    pub contract_mv: u16,
+    pub contract_ma: u16,
+    pub pd_transition: bool,
+    pub fault_sample: Option<FaultSample>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -220,6 +235,7 @@ pub enum PortError {
     Adc,
     Protection,
     UnexpectedVbus,
+    StageReadback,
     Voltage,
     DischargeTimeout,
     Protocol,
@@ -288,6 +304,9 @@ pub struct Status {
     pub host_limit_ma: u16,
     pub ch224_status: Option<u8>,
     pub ch224_current_50ma: Option<u8>,
+    pub brick_source_pdos: [u32; 7],
+    pub brick_requested_mv: u16,
+    pub charging_budget_mw: u32,
     pub i2c_timeouts: u32,
     pub i2c_recoveries: u32,
     pub i2c_isolated: u8,
@@ -308,6 +327,7 @@ impl Status {
         let mut mask = 0;
         for (i, port) in self.ports.iter().enumerate() {
             if matches!(port.state, PortState::Ready | PortState::Contract)
+                && !port.pd_transition
                 && port.error.is_none()
                 && port.command_result != CommandResult::Pending
                 && !port.restore.is_some_and(|job| {
@@ -404,6 +424,18 @@ mod tests {
                 command_id: u32::MAX,
                 command_result: CommandResult::Failed(CommandError::Transmission),
                 supply: Supply::Brick,
+                pd_source_pdos: [u32::MAX; 4],
+                pd_request: Some(u32::MAX),
+                contract_mv: u16::MAX,
+                contract_ma: u16::MAX,
+                pd_transition: true,
+                fault_sample: Some(FaultSample {
+                    state: PortState::Contract,
+                    vbus_adc: Some(u16::MAX),
+                    contract_mv: u16::MAX,
+                    target_mv: u16::MAX,
+                    target_ma: u16::MAX,
+                }),
                 restore: Some(RestoreStatus {
                     ecid: u64::MAX,
                     phase: RestorePhase::Failed,
@@ -421,6 +453,9 @@ mod tests {
             host_limit_ma: u16::MAX,
             ch224_status: Some(u8::MAX),
             ch224_current_50ma: Some(u8::MAX),
+            brick_source_pdos: [u32::MAX; 7],
+            brick_requested_mv: u16::MAX,
+            charging_budget_mw: u32::MAX,
             i2c_timeouts: u32::MAX,
             i2c_recoveries: u32::MAX,
             i2c_isolated: u8::MAX,
@@ -463,7 +498,7 @@ mod tests {
         assert_eq!(
             packet,
             &[
-                b'I', b'A', b'S', b'I', 4, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
+                b'I', b'A', b'S', b'I', 5, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
             ]
         );
         let length = packet.len();
