@@ -1,5 +1,7 @@
 //! Apple identity and physical-slot selection across USB re-enumeration.
 
+#[cfg(target_os = "macos")]
+mod configurator;
 mod mux;
 
 /// Check the existing local daemon; no device connection or pairing is made.
@@ -21,6 +23,7 @@ pub enum AppleMode {
     Recovery,
     Wtf,
     Kis,
+    KisDfu,
     /// A usbmux-capable descriptor; QueryType has not identified the service.
     Mux,
     Restored,
@@ -33,6 +36,7 @@ pub enum IdentitySource {
     UsbSerial,
     Restored,
     Lockdown,
+    Configurator,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -226,10 +230,13 @@ fn matching_ports(snapshot: &Snapshot, ecid: u64) -> Vec<Port> {
         .collect()
 }
 
-pub(crate) fn query_mux_identities(snapshot: &mut Snapshot) {
+pub(crate) fn query(snapshot: &mut Snapshot, mask: u8) {
+    #[cfg(target_os = "macos")]
+    configurator::query(snapshot, mask);
     let candidates: Vec<_> = snapshot
         .ports
         .iter_mut()
+        .filter(|entry| mask & (1 << entry.port.index()) != 0)
         .flat_map(|port| &mut port.devices)
         .filter(|device| {
             device.apple.as_ref().is_some_and(|apple| {
@@ -266,7 +273,7 @@ mod tests {
         topology::{Companion, PortDevices, Speed},
     };
 
-    fn snapshot() -> Snapshot {
+    pub(super) fn snapshot() -> Snapshot {
         Snapshot {
             hub: Topology {
                 bus: "1".into(),
@@ -284,7 +291,7 @@ mod tests {
         }
     }
 
-    fn device(pid: u16, ecid: Option<u64>) -> UsbDevice {
+    pub(super) fn device(pid: u16, ecid: Option<u64>) -> UsbDevice {
         let serial = ecid.map(|ecid| {
             format!("CPID:8103 CPRV:11 CPFM:03 SCEP:01 BDID:22 ECID:{ecid:016X} IBFL:3C")
         });
@@ -299,6 +306,8 @@ mod tests {
             product: None,
             speed: Speed::High,
             apple: AppleDevice::from_usb(0x05ac, pid, serial.as_deref()),
+            #[cfg(target_os = "macos")]
+            macos_attachment: None,
         }
     }
 

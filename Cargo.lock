@@ -991,6 +991,7 @@ dependencies = [
  "anyhow",
  "clap",
  "core-foundation",
+ "iasis-pd",
  "iasis-protocol",
  "io-kit-sys",
  "nusb",
