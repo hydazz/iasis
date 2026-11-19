@@ -164,6 +164,38 @@ pub fn charging_budget_mw(input_mv: u16, current_50ma: u8, side_power: bool) -> 
     (input_mw * 80 / 100).saturating_sub(reserve_mw)
 }
 
+/// Compare requests with spare headroom. A request limited by our offer
+/// cannot establish how little the sink needs.
+#[derive(Default)]
+pub struct SinkDemand {
+    wants_more: bool,
+    last_unconstrained_mw: Option<u32>,
+}
+
+impl SinkDemand {
+    pub fn accept(&mut self, pdo: u32, rdo: u32) {
+        let maximum_ma = (rdo & 0x3ff) * 10;
+        let offered_ma = (pdo & 0x3ff) * 10;
+        if rdo & (1 << 26) != 0 || maximum_ma >= offered_ma {
+            self.wants_more = true;
+            return;
+        }
+        let millivolts = ((pdo >> 10) & 0x3ff) * 50;
+        let requested_mw = millivolts * maximum_ma / 1000;
+        if self
+            .last_unconstrained_mw
+            .is_none_or(|old| requested_mw < old)
+        {
+            self.wants_more = false;
+        }
+        self.last_unconstrained_mw = Some(requested_mw);
+    }
+
+    pub fn wants_more(&self) -> bool {
+        self.wants_more
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PortDemand {
     pub attached: bool,
@@ -364,6 +396,33 @@ mod tests {
         );
         ports[2].active = None;
         assert_eq!(allocate(pool, ports), [0, 0, 0, 0, pool]);
+    }
+
+    #[test]
+    fn a_reply_to_more_headroom_does_not_withdraw_it_again() {
+        let pool = charging_budget_mw(19_000, 94, false);
+        let mut ports = [PortDemand::default(); 5];
+        ports[1] = sink();
+        ports[4] = sink();
+        ports[4].active = Some(contract(5000, 3000));
+
+        let mut demand = SinkDemand::default();
+        for (rdo, expected_ma) in [
+            (0x2304_1104, 3000), // 2.6 A from a 3 A offer
+            (0x2704_112c, 2600), // wants 3 A back
+            (0x2704_b12c, 3000), // temporarily takes the full 3 A
+            (0x2304_1104, 3000),
+            (0x2304_1104, 3000),
+            (0x2303_20c8, 3000), // sink requests 2 A on the same profiles
+        ] {
+            let offers = crate::fixed_offers(allocate(pool, ports)[1], 19_000);
+            assert_eq!((offers[1] & 0x3ff) * 10, expected_ma);
+            demand.accept(offers[1], rdo);
+            ports[1].active = Some(crate::fixed_contract(&offers, rdo).unwrap());
+            ports[1].wants_more = demand.wants_more();
+        }
+        let offers = crate::fixed_offers(allocate(pool, ports)[1], 19_000);
+        assert_eq!((offers[1] & 0x3ff) * 10, 2000);
     }
 
     #[test]

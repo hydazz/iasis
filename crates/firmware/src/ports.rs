@@ -26,7 +26,7 @@ struct Port {
     contract: Option<Contract>,
     budget_mw: u32,
     input_mv: u16,
-    wants_more: bool,
+    sink_demand: power::SinkDemand,
     transition_busy: bool,
     offers_busy: bool,
     request_until: u64,
@@ -295,7 +295,7 @@ impl Port {
                 .transition
                 .filter(|_| on_brick)
                 .map(|change| change.target),
-            wants_more: self.contract.is_none() || self.wants_more,
+            wants_more: self.contract.is_none() || self.sink_demand.wants_more(),
             restore_mv: self.restore_active().then(|| self.operating_voltage()),
         }
     }
@@ -320,7 +320,7 @@ impl Port {
         self.tx = None;
         self.transition = None;
         self.status.pd_transition = false;
-        self.wants_more = false;
+        self.sink_demand = power::SinkDemand::default();
         self.request_until = 0;
         self.contract = None;
         self.status.contract_mv = 0;

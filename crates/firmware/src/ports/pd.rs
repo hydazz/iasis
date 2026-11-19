@@ -99,11 +99,8 @@ impl Port {
                     .as_mut()
                     .ok_or(PortError::Protocol)?
                     .acknowledge(tx.sent, now());
-                let pdo = self.status.pd_source_pdos[((rdo >> 28) - 1) as usize];
-                let at_ceiling = (rdo & 0x3ff) >= (pdo & 0x3ff);
-                let new_request = self.status.pd_request != Some(rdo);
-                self.wants_more =
-                    rdo & (1 << 26) != 0 || (at_ceiling && (new_request || self.wants_more));
+                let pdo = self.status.pd_source_pdos[(((rdo >> 28) & 7) - 1) as usize];
+                self.sink_demand.accept(pdo, rdo);
                 self.status.pd_request = Some(rdo);
             }
             TxKind::Ready if ack => {
