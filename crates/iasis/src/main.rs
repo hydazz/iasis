@@ -408,7 +408,7 @@ fn print_status(status: &Status) {
         status.retained_update
     );
     println!(
-        "CM5 power {}  I²C root fault {}  timeouts {}  expander {:?}  available 5 V ports {}",
+        "CM5 power {}  I²C root fault {}  timeouts {}  expander {:?}  port capacity {}",
         status.side_power_enabled,
         status.i2c_root_fault,
         status.i2c_timeouts,
@@ -418,21 +418,33 @@ fn print_status(status: &Status) {
     for port in Port::ALL {
         let state = &status.ports[port.index()];
         println!(
-            "port {}  {:?}  {:?}  generation {}  VBUS ADC {:?}  faults {:?}  error {:?}  command {} {:?}",
+            "port {}  {:?}  {:?}  generation {}  VBUS ADC {:?}  contract {} mV / {} mA  faults {:?}  error {:?}  command {} {:?}",
             port.number(),
             state.state,
             state.orientation,
             state.generation,
             state.vbus_adc,
+            state.contract_mv,
+            state.contract_ma,
             state.faults,
             state.error,
             state.command_id,
             state.command_result
         );
+        if let Some(fault) = state.fault_sample {
+            println!(
+                "  fault in {:?}  VBUS ADC {:?}  prior contract {} mV  target {} mV / {} mA",
+                fault.state, fault.vbus_adc, fault.contract_mv, fault.target_mv, fault.target_ma
+            );
+        }
     }
     println!(
-        "bus ADC {:?}  CH224 status {:?}",
-        status.bus_voltage_adc, status.ch224_status
+        "bus ADC {:?}  CH224 status {:?}  input request {} mV  qualified allowance {:?} mA  charging budget {} mW",
+        status.bus_voltage_adc,
+        status.ch224_status,
+        status.brick_requested_mv,
+        status.ch224_current_50ma.map(|units| u16::from(units) * 50),
+        status.charging_budget_mw
     );
     for (bank, adc) in ["A", "B"].into_iter().zip(status.thermistor_adc) {
         match adc.and_then(board_temperature) {
