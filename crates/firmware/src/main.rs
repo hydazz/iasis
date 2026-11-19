@@ -381,14 +381,7 @@ async fn main(_spawner: Spawner) {
             let now = Instant::now().as_millis();
             let session = restore_session.active(now);
             let pending = restore_session.take_arm(now);
-            if let Some(event) = button.sample(
-                &next,
-                oled.present(),
-                session,
-                pending,
-                confirm.is_low(),
-                now,
-            ) {
+            if let Some(event) = button.sample(&next, session, pending, confirm.is_low(), now) {
                 match event {
                     iasis_firmware::button::Event::Decision(decision) => {
                         next.restore_decision = Some(decision);
