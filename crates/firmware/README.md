@@ -28,12 +28,14 @@ Development USB IDs are `1209:0001`. Set `IASIS_USB_VID` and `IASIS_USB_PID` as 
 
 ## Port power
 
-Ports start enabled and reserve power only while attached. Disabling a port opens CC and discharges VBUS. Re-enabling it also retries a fault. ADC, protection, I²C or voltage faults turn off the affected source requests.
+Ports start enabled and reserve power only while attached. Disabling a port removes Rp and discharges VBUS. Targets negotiate fixed supplies over USB PD revision 2.0.
 
-| Supply path     | Target offer           | Budget                                                                                               |
-| --------------- | ---------------------- | ---------------------------------------------------------------------------------------------------- |
-| Host presence   | Fixed 5 V / 0 mA PDO   | 800 mA reserved for Iasis; remaining current selects the aggregate limit below                       |
-| Charging supply | Fixed 5 V / 500 mA PDO | 80% of input power, less 3.5 W for logic, 35 W for a powered CM5 carrier and 6 W per attached target |
+A port whose voltage or negotiation fails switches its output off, discharges VBUS and attaches again. Three failures within 30 seconds, or a protection trip, hold the port off until the target is unplugged or the port is enabled again.
+
+| Supply path     | Target offer                               | Budget                                                                                                                                                 |
+| --------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Host presence   | Fixed 5 V / 0 mA PDO                       | Iasis reserves 800 mA. The remaining current selects the shared limiter below.                                                                         |
+| Charging supply | Fixed 5, 9, 15 or 20 V, up to 3 A per port | The brick contract covers input cable and board losses, logic power and a 35 W reserve when the CM5 carrier is powered. The ports share the remainder. |
 
 The host path supports attachment and signalling with charged targets. Its current limit is shared across ports; the 0 mA PDO does not prevent pre-contract draw.
 
@@ -46,11 +48,13 @@ The host path supports attachment and signalling with charged targets. Its curre
 
 Native USB-C Rp supplies the allowance. On legacy A-to-C connections, `host-budget <mA>` declares the remaining allowance including Iasis, up to 1600 mA. It clears on USB reset and never overrides native Rp.
 
-The charging path requires a confirmed CH224 contract, power-good and 7–21 V on the input bus. It configures each converter for 5.10 V with a 1 A limit, checks safe-zero before connecting and checks output voltage before starting PD.
+On the charging input, Iasis requests the highest-power fixed profile it supports, up to 20 V. The host USB port stays at 5 V.
 
-The Rev A charging input supports fixed profiles up to 20 V. Firmware leaves normal 9–20 V input contracts unchanged. If the bus exceeds 21 V (20 V plus tolerance), it requests fixed 20 V and withholds target power until fresh contract, power-good and voltage readings allow it. The host USB port never requests a voltage above 5 V.
+Each port starts at 5 V. With a 20 V brick, one port can offer 5, 9, 15 and 20 V at different currents for the same share of power, up to 3 A. The target chooses its profile independently. With a 9 or 12 V input, the ports offer 5 and 9 V.
 
-When a brick is inserted, attached host-powered ports can keep their output path if the presence limit fits both supplies. Removing the brick from a brick-powered target drops its VBUS and can disconnect USB while the controller stays online. Leave the power source and any inline meter connected throughout a restore.
+A new device first receives spare capacity. If it reports that its best offer is insufficient, Iasis can renegotiate with other charging devices. Their existing contracts stay funded until they have stepped down. An active restore keeps its contract while the supply can cover it. A port waits if its starting allowance is unavailable.
+
+Leave the power supply connected throughout a restore. Changing the input can interrupt USB to the targets while the controller stays online.
 
 ## Controls and status
 

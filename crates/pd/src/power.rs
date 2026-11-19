@@ -1,12 +1,14 @@
-//! Fixed-5 V charging and protected host-presence power budgets.
+//! Shared brick power and protected host-presence budgets.
+
+use crate::source::Contract;
 
 /// Maximum nominal voltage on the Rev A charging input.
-pub const MAX_BRICK_MV: u32 = 20_000;
+pub const MAX_BRICK_MV: u16 = 20_000;
 
-/// Allow the fixed supply's 5% tolerance at the input ADC.
+/// Above anything the highest supported fixed supply presents at the input ADC.
 pub fn brick_overvoltage(raw: Option<u16>) -> bool {
-    raw.and_then(millivolts)
-        .is_some_and(|mv| mv > MAX_BRICK_MV * 105 / 100)
+    let ceiling = *crate::brick::supply_window(MAX_BRICK_MV).end();
+    raw.and_then(millivolts).is_some_and(|mv| mv > ceiling)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -68,18 +70,15 @@ pub fn brick_input_fault(
 pub fn presence_limit(
     allowance_ma: u16,
     bus_adc: Option<u16>,
-    pd_status: Option<u8>,
-    current_50ma: Option<u8>,
-    power_good: bool,
-    side_power: bool,
+    charging_budget_mw: u32,
 ) -> Option<HostLimit> {
     let host = host_limit(allowance_ma)?;
     if below_brick_handover(bus_adc) {
         return Some(host);
     }
-    let budget_mw = brick_budget_mw(bus_adc, pd_status, current_50ma, power_good, side_power);
     PRESENCE_TIERS.into_iter().find(|tier| {
-        tier.upper_ma <= host.upper_ma && u32::from(tier.upper_ma) * 5350 <= budget_mw * 1000
+        tier.upper_ma <= host.upper_ma
+            && (u32::from(tier.upper_ma) * 5350).div_ceil(1000) <= charging_budget_mw
     })
 }
 
@@ -103,70 +102,257 @@ pub fn safe_presence(raw: Option<u16>) -> bool {
         .is_some_and(|mv| (4400..=5350).contains(&mv))
 }
 
-/// Keep existing attached users, then admit waiting attachments in port order.
-/// Empty connectors never reserve a charging stage.
-pub fn admit_ports(eligible: [bool; 5], reserved: [bool; 5], capacity: u8) -> [bool; 5] {
-    let mut remaining = capacity;
-    let mut grants = [false; 5];
-    for active in [true, false] {
-        for index in 0..5 {
-            if remaining > 0 && eligible[index] && reserved[index] == active {
-                grants[index] = true;
-                remaining -= 1;
-            }
-        }
-    }
-    grants
-}
-
 /// Nominal ADC conversion including the 47k load on the 90.9k/10k divider.
 /// This is not a calibrated voltage measurement.
 pub fn millivolts(raw: u16) -> Option<u32> {
     (raw <= 4095).then(|| u32::from(raw) * 39_679 / 4095)
 }
 
-pub fn safe_zero(raw: Option<u16>) -> bool {
-    raw.and_then(millivolts).is_some_and(|mv| mv < 750)
-}
-
-pub fn safe_five_volts(raw: Option<u16>) -> bool {
-    raw.and_then(millivolts)
-        .is_some_and(|mv| (4850..=5350).contains(&mv))
-}
-
-/// Reserve for the 1 A stage limit, conversion losses, logic and powered CM5.
-/// No upstream-host power is allocated by this policy.
-pub fn available_ports(
-    bus_adc: Option<u16>,
-    pd_status: Option<u8>,
-    current_50ma: Option<u8>,
-    power_good: bool,
-    side_power: bool,
-) -> u8 {
-    (brick_budget_mw(bus_adc, pd_status, current_50ma, power_good, side_power) / 6000).min(5) as u8
-}
-
-fn brick_budget_mw(
-    bus_adc: Option<u16>,
-    pd_status: Option<u8>,
-    current_50ma: Option<u8>,
-    power_good: bool,
-    side_power: bool,
-) -> u32 {
-    let Some(mv) = bus_adc.and_then(millivolts) else {
-        return 0;
-    };
-    if !power_good
-        || !pd_status.is_some_and(|s| s & 8 != 0)
-        || mv < 7000
-        || brick_overvoltage(bus_adc)
-    {
-        return 0;
+/// Only a continuous open CC interval ends the attachment.
+pub fn cc_detached(
+    open_since: &mut Option<u64>,
+    open: bool,
+    now_ms: u64,
+    debounce_ms: u64,
+) -> bool {
+    if open {
+        now_ms - *open_since.get_or_insert(now_ms) >= debounce_ms
+    } else {
+        *open_since = None;
+        false
     }
-    let input_mw = mv * u32::from(current_50ma.unwrap_or(0)) * 50 / 1000;
-    // CM5, 6 W SSD, 0.4 A fan, 1.5 A accessory and VCONN, including losses.
-    let reserve_mw = 3500 + if side_power { 35_000 } else { 0 };
-    (input_mw * 80 / 100).saturating_sub(reserve_mw)
+}
+
+/// vSafe0V at the connector.
+pub fn safe_zero(raw: Option<u16>) -> bool {
+    raw.and_then(millivolts).is_some_and(|mv| mv < 800)
+}
+
+fn input_drop_mv(current_50ma: u8) -> u32 {
+    let ma = u32::from(current_50ma) * 50;
+    // Type-C §4.4.1 permits 750 mV round-trip drop at cable rated current.
+    // Only a contract above 3 A establishes that the cable is rated for 5 A.
+    let cable_mohm = if ma > 3000 { 150 } else { 250 };
+    (ma * (cable_mohm + 60)).div_ceil(1000)
+}
+
+/// Target connector power from a qualified fixed input. `input_mv` is the
+/// source's lower steady-state voltage, before cable and board drops.
+pub fn charging_budget_mw(input_mv: u16, current_50ma: u8, side_power: bool) -> u32 {
+    let ma = u32::from(current_50ma) * 50;
+    let bus_mv = u32::from(input_mv).saturating_sub(input_drop_mv(current_50ma));
+    let bus_mw = bus_mv * ma / 1000;
+    // 3.5 W board and UI at 5 V, 92.4% logic buck, 150 mW bus quiescent.
+    let logic_mw = (3500_u32 * 1000).div_ceil(924) + 150;
+    // Model stage input as 450 mW + output/0.93, including forced PWM at
+    // light load (TPS55288 typical curves, 400 kHz). All five may be on.
+    let stage_idle_mw = 5 * 450;
+    let reserve_mw = logic_mw + stage_idle_mw + if side_power { 35_000 } else { 0 };
+    // At 3 A a modeled 60 mΩ port path drops 180 mV, largest relative
+    // to the 5 V rail.
+    let stage_mw = bus_mw.saturating_sub(reserve_mw) * 93 / 100;
+    stage_mw * 5000 / 5180
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum DemandState {
+    #[default]
+    Unknown,
+    Satisfied,
+    AtLimit,
+    Shortfall,
+}
+
+impl DemandState {
+    fn at_limit(self) -> bool {
+        matches!(self, Self::AtLimit | Self::Shortfall)
+    }
+}
+
+/// A sink at its advertised limit has not shown how little would do.
+#[derive(Clone, Copy, Default)]
+pub struct SinkDemand {
+    state: DemandState,
+    last_unconstrained_mw: Option<u32>,
+}
+
+impl SinkDemand {
+    pub fn accept(&mut self, offers: &[u32; 4], rdo: u32) {
+        let position = ((rdo >> 28) & 7) as usize;
+        let Some(&pdo) = position.checked_sub(1).and_then(|i| offers.get(i)) else {
+            return;
+        };
+        if crate::wants_more(pdo, rdo) {
+            // Some sinks clear mismatch in their next request for the same
+            // full offer. Only actual headroom can resolve their shortfall.
+            let needs_more = self.state == DemandState::Shortfall || rdo & (1 << 26) != 0;
+            self.state = if needs_more
+                && (rdo & 0x3ff) >= (pdo & 0x3ff)
+                && crate::source::highest_offer(offers, rdo)
+                && offers.iter().any(|&p| p != 0 && p & 0x3ff < 300)
+            {
+                DemandState::Shortfall
+            } else {
+                DemandState::AtLimit
+            };
+            return;
+        }
+        let maximum_ma = (rdo & 0x3ff) * 10;
+        let millivolts = ((pdo >> 10) & 0x3ff) * 50;
+        let requested_mw = millivolts * maximum_ma / 1000;
+        if self
+            .last_unconstrained_mw
+            .is_none_or(|old| requested_mw < old)
+        {
+            self.state = DemandState::Satisfied;
+        } else if self.state == DemandState::Shortfall {
+            self.state = DemandState::AtLimit;
+        }
+        self.last_unconstrained_mw = Some(requested_mw);
+    }
+
+    pub fn state(&self) -> DemandState {
+        self.state
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PortDemand {
+    pub attached: bool,
+    /// Includes USB_DEFAULT while starting a stage or awaiting the first RDO.
+    pub active: Option<Contract>,
+    /// Reserved from Request acceptance until PS_RDY completes.
+    pub pending: Option<Contract>,
+    pub demand: DemandState,
+    /// Preserve the contract powering an active restore.
+    pub restoring: bool,
+}
+
+impl PortDemand {
+    fn held_mw(self) -> u32 {
+        self.active
+            .map_or(0, Contract::cost_mw)
+            .max(self.pending.map_or(0, Contract::cost_mw))
+    }
+}
+
+/// Find the highest equal share that fits after applying every floor and cap.
+fn fair_shares(budget: u32, floors: [u32; 5], caps: [u32; 5]) -> [u32; 5] {
+    let shares = |level: u32| core::array::from_fn(|i| level.clamp(floors[i], caps[i]));
+    let mut low = 0;
+    let mut high = caps.into_iter().max().unwrap_or(0).min(budget);
+    while low < high {
+        let mid = low + (high - low).div_ceil(2);
+        if shares(mid)
+            .iter()
+            .try_fold(budget, |remaining, &mw| remaining.checked_sub(mw))
+            .is_some()
+        {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    shares(low)
+}
+
+/// Per-port ceilings for new Requests. Zero withdraws the port's stage. A
+/// smaller nonzero ceiling keeps an old contract powered through renegotiation.
+/// Old advertisements must still be checked against the current ceiling.
+pub fn allocate(pool_mw: u32, ports: [PortDemand; 5]) -> [u32; 5] {
+    let held = ports.map(PortDemand::held_mw);
+    let mut priority = [0, 1, 2, 3, 4];
+    priority.sort_unstable_by_key(|&i| (!ports[i].restoring, held[i] == 0, held[i], i));
+
+    let mut floors = [0; 5];
+    let mut floor_room = pool_mw;
+    let mut contract_room = pool_mw;
+    for i in priority {
+        let mut floor = Contract::USB_DEFAULT.cost_mw();
+        if ports[i].restoring {
+            floor = floor.max(held[i]);
+        }
+        if ports[i].attached && floor <= floor_room && held[i] <= contract_room {
+            floors[i] = floor;
+            floor_room -= floor;
+            contract_room -= held[i];
+        }
+    }
+
+    // Leave contracts in place when the free capacity can start newcomers.
+    // Otherwise ask as few donors as possible to release just the shortfall.
+    let mut keep = core::array::from_fn(|i| {
+        if floors[i] == 0 {
+            0
+        } else {
+            held[i].max(floors[i])
+        }
+    });
+    let mut shortfall = keep.iter().sum::<u32>().saturating_sub(pool_mw);
+    if shortfall > 0 {
+        let mut donors = [0, 1, 2, 3, 4];
+        donors.sort_unstable_by_key(|&i| (core::cmp::Reverse(keep[i] - floors[i]), i));
+        for i in donors {
+            let release = shortfall.min(keep[i] - floors[i]);
+            keep[i] -= release;
+            shortfall -= release;
+        }
+    }
+
+    let short = |i: usize| {
+        floors[i] > 0 && !ports[i].restoring && ports[i].demand == DemandState::Shortfall
+    };
+    if (0..5).any(short) {
+        // A peer taking its full offer participates in the same fair split
+        // even if its RDO omits Capability Mismatch.
+        // Unknown newcomers and satisfied sinks cannot initiate redistribution.
+        let flexible =
+            |i: usize| floors[i] > 0 && !ports[i].restoring && ports[i].demand.at_limit();
+        let minimum = core::array::from_fn(|i| if flexible(i) { floors[i] } else { keep[i] });
+        let caps = core::array::from_fn(|i| if flexible(i) { pool_mw } else { keep[i] });
+        let fair = fair_shares(pool_mw, minimum, caps);
+        if (0..5).any(|i| short(i) && fair[i] > keep[i]) && (0..5).any(|i| fair[i] < keep[i]) {
+            keep = fair;
+        }
+    }
+
+    // If nobody asked for the spare power, leave it available to all sinks.
+    let outstanding_demand =
+        (0..5).any(|i| floors[i] != 0 && ports[i].demand != DemandState::Satisfied);
+    let caps = core::array::from_fn(|i| {
+        if floors[i] == 0 {
+            0
+        } else if !outstanding_demand || ports[i].demand != DemandState::Satisfied {
+            pool_mw
+        } else {
+            keep[i]
+        }
+    });
+    let mut targets = fair_shares(pool_mw, keep, caps);
+
+    if (0..5)
+        .try_fold(pool_mw, |mw, i| mw.checked_sub(held[i].max(targets[i])))
+        .is_some()
+    {
+        return targets;
+    }
+
+    // A new offer can spend only what remains after the larger of each old
+    // and pending contract. A reduction releases nothing until it completes.
+    let mut free = held
+        .iter()
+        .fold(pool_mw, |mw, &used| mw.saturating_sub(used));
+    let mut funded = [0; 5];
+    for i in priority {
+        let needed = floors[i].saturating_sub(held[i]);
+        if needed <= free {
+            free -= needed;
+            funded[i] = held[i].min(targets[i]).max(floors[i]);
+        } else {
+            targets[i] = 0;
+        }
+    }
+    fair_shares(funded.iter().sum::<u32>() + free, funded, targets)
 }
 
 #[cfg(test)]
@@ -178,55 +364,326 @@ mod tests {
     }
 
     #[test]
+    fn a_fault_requires_continuous_cc_disconnect_before_rearming() {
+        let mut since = None;
+        for (now, open, detached) in [
+            (0, false, false),
+            (1000, false, false),
+            (1010, true, false),
+            (1159, true, false),
+            (1160, false, false),
+            (1200, true, false),
+            (1349, true, false),
+            (1350, true, true),
+        ] {
+            assert_eq!(cc_detached(&mut since, open, now, 150), detached);
+        }
+    }
+
+    #[test]
     fn brick_ceiling_allows_spr_tolerance_but_excludes_epr() {
-        for mv in [9000, 15_000, 20_000, 21_000] {
+        for mv in [9000, 15_000, 20_000, 21_500] {
             assert!(!brick_overvoltage(Some(adc(mv))));
         }
-        for mv in [21_100, 28_000, 29_400] {
+        for mv in [21_600, 28_000, 29_400] {
             assert!(brick_overvoltage(Some(adc(mv))));
-            assert_eq!(
-                available_ports(Some(adc(mv)), Some(8), Some(100), true, false),
-                0
-            );
-            assert_eq!(
-                presence_limit(3000, Some(adc(mv)), Some(8), Some(100), true, false),
-                None
-            );
         }
         for raw in [None, Some(4096)] {
             assert!(!brick_overvoltage(raw));
-            assert_eq!(available_ports(raw, Some(8), Some(100), true, false), 0);
+        }
+    }
+
+    fn sink() -> PortDemand {
+        PortDemand {
+            attached: true,
+            demand: DemandState::Unknown,
+            ..Default::default()
+        }
+    }
+
+    fn contract(millivolts: u16, milliamps: u16) -> Contract {
+        Contract {
+            millivolts,
+            limit_ma: milliamps,
+            operating_ma: milliamps,
         }
     }
 
     #[test]
-    fn empty_connectors_cannot_starve_a_later_attachment() {
+    fn spare_power_follows_attachments_and_sink_demand() {
+        let pool = charging_budget_mw(19_000, 94, false);
+        let mut ports = [PortDemand::default(); 5];
+        ports[4] = sink();
+        assert_eq!(allocate(pool, ports), [0, 0, 0, 0, pool]);
+
+        ports[2] = sink();
+        assert_eq!(allocate(pool, ports), [0, 0, pool / 2, 0, pool / 2]);
+        let satisfied = contract(5000, 1000);
+        ports[2].active = Some(satisfied);
+        ports[2].demand = DemandState::Satisfied;
         assert_eq!(
-            admit_ports([false, false, false, false, true], [false; 5], 3),
-            [false, false, false, false, true]
+            allocate(pool, ports),
+            [0, 0, satisfied.cost_mw(), 0, pool - satisfied.cost_mw()]
         );
-        assert_eq!(admit_ports([false; 5], [true; 5], 3), [false; 5]);
-        assert_eq!(admit_ports([true; 5], [false; 5], 0), [false; 5]);
+
+        // A withdrawing connector continues costing power until it is isolated.
+        ports[2].attached = false;
+        assert_eq!(
+            allocate(pool, ports),
+            [0, 0, 0, 0, pool - satisfied.cost_mw()]
+        );
+        ports[2].active = None;
+        assert_eq!(allocate(pool, ports), [0, 0, 0, 0, pool]);
     }
 
     #[test]
-    fn existing_attachments_keep_grants_until_they_leave_or_capacity_falls() {
+    fn a_reply_to_more_headroom_does_not_withdraw_it_again() {
+        let pool = charging_budget_mw(19_000, 94, false);
+        let mut ports = [PortDemand::default(); 5];
+        ports[1] = sink();
+        ports[4] = sink();
+        ports[4].active = Some(contract(5000, 3000));
+
+        let mut demand = SinkDemand::default();
+        for (rdo, expected_ma) in [
+            (0x2304_1104, 3000), // 2.6 A from a 3 A offer
+            (0x2704_112c, 2600), // wants 3 A back
+            (0x2704_b12c, 3000), // temporarily takes the full 3 A
+            (0x2304_1104, 3000),
+            (0x2304_1104, 3000),
+            (0x2303_20c8, 3000), // sink requests 2 A on the same profiles
+        ] {
+            let offers = crate::fixed_offers(allocate(pool, ports)[1], 19_000, 0);
+            assert_eq!((offers[1] & 0x3ff) * 10, expected_ma);
+            demand.accept(&offers, rdo);
+            ports[1].active = Some(crate::fixed_contract(&offers, rdo).unwrap());
+            ports[1].demand = demand.state();
+        }
+        let offers = crate::fixed_offers(allocate(pool, ports)[1], 19_000, 0);
+        assert_eq!((offers[1] & 0x3ff) * 10, 2000);
+    }
+
+    #[test]
+    fn five_connected_macs_can_each_request_the_measured_two_amp_profile() {
+        let pool = charging_budget_mw(19_000, 94, false);
+        let shares = allocate(pool, [sink(); 5]);
+        assert_eq!(shares, [pool / 5; 5]);
+        for share in shares {
+            let objects = crate::source::fixed_offers(share, 19_000, 0);
+            let rdo = (1 << 28) | (200 << 10) | 200;
+            let accepted = crate::source::fixed_contract(&objects, rdo).unwrap();
+            assert_eq!(accepted, contract(5000, 2000));
+            assert!(accepted.permitted(share, 19_000));
+        }
+        assert!(contract(5000, 2000).cost_mw() * 5 <= pool);
+    }
+
+    #[test]
+    fn a_joining_sink_uses_spare_power_without_cutting_the_first_contract() {
+        let first = contract(20_000, 2400);
+        let pool = charging_budget_mw(19_000, 94, false);
+        let mut ports = [PortDemand::default(); 5];
+        ports[0] = sink();
+        ports[0].active = Some(first);
+        ports[1] = sink();
         assert_eq!(
-            admit_ports([true; 5], [false, false, true, false, true], 2),
-            [false, false, true, false, true]
+            allocate(pool, ports),
+            [first.cost_mw(), pool - first.cost_mw(), 0, 0, 0]
         );
+    }
+
+    #[test]
+    fn an_underpowered_sink_can_renegotiate_a_share_from_a_peer_at_its_limit() {
+        let pool = charging_budget_mw(19_000, 94, false);
+        let large = contract(20_000, 3000);
+        let mut ports = [PortDemand::default(); 5];
+        ports[0] = sink();
+        ports[0].active = Some(large);
+        ports[0].demand = DemandState::AtLimit;
+        ports[1] = sink();
+        let initial = allocate(pool, ports);
+        assert_eq!(initial, [large.cost_mw(), pool - large.cost_mw(), 0, 0, 0]);
+
+        // The M5 joining an M3 at 20 V / 3 A took 20 V / 340 mA with mismatch.
+        let offers = crate::fixed_offers(initial[1], 19_000, 0);
+        let rdo = 0x4700_8822;
+        let mut demand = SinkDemand::default();
+        // A mismatch with headroom still on the chosen rail is insufficient.
+        demand.accept(&offers, 0x4700_8421);
+        assert_ne!(demand.state(), DemandState::Shortfall);
+        demand.accept(&offers, rdo);
+        assert_eq!(demand.state(), DemandState::Shortfall);
+        let accepted = crate::fixed_contract(&offers, rdo).unwrap();
+        assert_eq!(accepted, contract(20_000, 340));
+        ports[1].active = Some(accepted);
+        ports[1].demand = demand.state();
+        let cut = allocate(pool, ports);
+        assert_eq!(cut, [pool / 2, initial[1], 0, 0, 0]);
+
+        ports[0].restoring = true;
+        assert_eq!(allocate(pool, ports), initial);
+        ports[0].restoring = false;
+        ports[0].demand = DemandState::Satisfied;
+        assert_eq!(allocate(pool, ports), initial);
+        ports[0].demand = DemandState::AtLimit;
+        let lower = contract(15_000, 2000);
+        ports[0].pending = Some(lower);
+        assert_eq!(allocate(pool, ports), cut);
+        ports[0].active = Some(lower);
+        ports[0].pending = None;
+        assert!(allocate(pool, ports)[1] >= pool / 2);
+    }
+
+    #[test]
+    fn three_macs_at_their_wire_limits_keep_stable_offers_on_a_9v_brick() {
+        let pool = charging_budget_mw(8550, 60, false);
+        let share = pool / 3;
+        let offers = crate::fixed_offers(share, 8550, 0);
+        assert_eq!(offers.map(|p| (p & 0x3ff) * 10), [930, 510, 0, 0]);
+        let mut ports = [PortDemand::default(); 5];
+        let mut demand = [SinkDemand::default(); 3];
+        ports[..3].fill(sink());
+        // The 3 Macs alternate rails and set or clear mismatch, while
+        // continuing to request the ceiling of the profile they select.
+        for (i, rdo) in [
+            (0, 0x2300_cc33),
+            (1, 0x2300_cc33),
+            (2, 0x2300_cc33),
+            (0, 0x1701_752c),
+            (1, 0x2700_cc33),
+            (2, 0x2700_cd2c),
+            (0, 0x2300_cc33),
+            (1, 0x1701_745d),
+            (2, 0x1701_752c),
+            (1, 0x2300_cc33),
+            (2, 0x2300_cc33),
+        ] {
+            demand[i].accept(&offers, rdo);
+            ports[i].active = Some(crate::fixed_contract(&offers, rdo).unwrap());
+            ports[i].demand = demand[i].state();
+            assert_eq!(allocate(pool, ports), [share, share, share, 0, 0]);
+        }
+        assert!(demand.iter().all(|d| d.state() == DemandState::Shortfall));
+    }
+
+    #[test]
+    fn a_joining_sink_waits_for_only_the_necessary_reduction() {
+        let old = contract(20_000, 2500);
+        let reduced = contract(20_000, 2400);
+        let peer = contract(9000, 2000);
+        let floor = Contract::USB_DEFAULT.cost_mw();
+        let pool = reduced.cost_mw() + peer.cost_mw() + floor;
+        let mut ports = [PortDemand::default(); 5];
+        ports[0] = sink();
+        ports[0].active = Some(old);
+        ports[1] = sink();
+        ports[1].active = Some(peer);
+        ports[2] = sink();
+
+        let cut = [reduced.cost_mw(), peer.cost_mw(), 0, 0, 0];
+        assert_eq!(allocate(pool, ports), cut);
+        ports[0].pending = Some(reduced);
+        assert_eq!(allocate(pool, ports), cut);
+        // An increasing transition reserves its larger contract too.
+        ports[0].active = Some(reduced);
+        ports[0].pending = Some(old);
+        assert_eq!(allocate(pool, ports), cut);
+        ports[0].pending = None;
+        assert_eq!(allocate(pool, ports), [cut[0], cut[1], floor, 0, 0]);
+    }
+
+    #[test]
+    fn weak_sources_admit_as_many_starting_floors_as_fit() {
+        let floor = Contract::USB_DEFAULT.cost_mw();
+        let mut ports = [sink(); 5];
+        ports[4].active = Some(Contract::USB_DEFAULT);
+        for count in 0..=5 {
+            let shares = allocate(count * floor, ports);
+            assert_eq!(
+                shares.iter().filter(|&&mw| mw >= floor).count(),
+                count as usize
+            );
+            assert_eq!(shares[4], if count == 0 { 0 } else { floor });
+            if count > 0 {
+                assert_eq!(
+                    allocate(count * floor - 1, ports)
+                        .into_iter()
+                        .filter(|&mw| mw > 0)
+                        .count(),
+                    count as usize - 1
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_new_sink_waits_instead_of_reducing_an_active_restore_contract() {
+        let mut ports = [sink(); 5];
+        let live = contract(20_000, 2000);
+        ports[4].active = Some(live);
+        ports[4].restoring = true;
+        let floor = Contract::USB_DEFAULT.cost_mw();
+        let pool = live.cost_mw() + 3 * floor;
         assert_eq!(
-            admit_ports(
-                [true, true, false, true, true],
-                [false, false, false, false, true],
-                2
-            ),
-            [true, false, false, false, true]
+            allocate(pool, ports),
+            [floor, floor, floor, 0, live.cost_mw()]
         );
+        ports[4].restoring = false;
         assert_eq!(
-            admit_ports([true; 5], [false, false, true, false, true], 1),
-            [false, false, true, false, false]
+            allocate(pool, ports),
+            [floor, floor, floor, 0, live.cost_mw() - floor]
         );
+
+        // When the actual supply shrinks, isolate non-restoring loads first.
+        ports[4].restoring = true;
+        ports[0].active = Some(live);
+        assert_eq!(
+            allocate(live.cost_mw(), ports),
+            [0, 0, 0, 0, live.cost_mw()]
+        );
+    }
+
+    #[test]
+    fn simultaneous_requests_cannot_exceed_room_left_by_other_committed_or_pending_ports() {
+        let contracts = [
+            None,
+            Some(Contract::USB_DEFAULT),
+            Some(contract(5000, 2000)),
+            Some(contract(15_000, 1800)),
+        ];
+        for mask in 0..32 {
+            for phase in 0..4 {
+                let ports = core::array::from_fn(|i| PortDemand {
+                    attached: mask & (1 << i) != 0,
+                    active: contracts[(phase + i) % 4],
+                    pending: if i == 2 { contracts[3 - phase] } else { None },
+                    demand: [
+                        DemandState::Unknown,
+                        DemandState::Shortfall,
+                        DemandState::Satisfied,
+                        DemandState::AtLimit,
+                    ][i % 4],
+                    restoring: i == 4,
+                });
+                let held = ports.map(PortDemand::held_mw);
+                for pool in (0..=80_000).step_by(1301) {
+                    let grants = allocate(pool, ports);
+                    let mut retained = 0;
+                    let mut before_isolation = 0;
+                    for i in 0..5 {
+                        let cost = grants[i].max(held[i]);
+                        before_isolation += cost;
+                        if grants[i] > 0 {
+                            assert!(ports[i].attached);
+                            assert!(Contract::USB_DEFAULT.permitted(grants[i], 19_000));
+                            retained += cost;
+                        }
+                    }
+                    assert!(retained <= pool);
+                    assert!(before_isolation <= pool.max(held.iter().sum()));
+                }
+            }
+        }
     }
 
     #[test]
@@ -252,36 +709,14 @@ mod tests {
     }
 
     #[test]
-    fn brick_takeover_charges_presence_against_the_actual_source() {
-        let limit = |current| {
-            presence_limit(3000, Some(adc(9000)), Some(8), Some(current), true, false)
-                .map(|tier| tier.upper_ma)
-        };
-        // No complete 6 W charging slot does not mean the brick is absent.
-        assert_eq!(
-            available_ports(Some(adc(9000)), Some(8), Some(20), true, false),
-            0
-        );
-        assert_eq!(limit(20), Some(550));
-        assert_eq!(limit(33), Some(1450));
-        assert_eq!(limit(60), Some(1890));
+    fn brick_takeover_charges_presence_against_the_qualified_budget() {
+        let bus = Some(adc(9000));
+        assert_eq!(presence_limit(3000, bus, 0), None);
+        assert_eq!(presence_limit(3000, bus, 3000).unwrap().upper_ma, 550);
+        assert_eq!(presence_limit(3000, bus, 8000).unwrap().upper_ma, 1450);
+        assert_eq!(presence_limit(3000, bus, 11_000).unwrap().upper_ma, 1890);
         // Retaining the host ceiling also bounds automatic fallback.
-        assert_eq!(
-            presence_limit(1500, Some(adc(9000)), Some(8), Some(60), true, false)
-                .unwrap()
-                .upper_ma,
-            550
-        );
-        assert_eq!(
-            presence_limit(3000, Some(adc(20_000)), Some(8), Some(40), true, true),
-            None
-        );
-        assert_eq!(
-            presence_limit(3000, Some(adc(20_000)), Some(8), Some(60), true, true)
-                .unwrap()
-                .upper_ma,
-            1450
-        );
+        assert_eq!(presence_limit(1500, bus, 11_000).unwrap().upper_ma, 550);
     }
 
     #[test]
@@ -301,68 +736,31 @@ mod tests {
 
     #[test]
     fn unknown_brick_capacity_cannot_be_treated_as_host_only() {
-        for (voltage, pd, current, pg) in [
-            (None, Some(8), Some(60), true),
-            (Some(4096), Some(8), Some(60), true),
-            (Some(adc(5500)), Some(8), Some(60), true),
-            (Some(adc(28_000)), Some(8), Some(60), true),
-            (Some(adc(9000)), None, Some(60), true),
-            (Some(adc(9000)), Some(0), Some(60), true),
-            (Some(adc(9000)), Some(8), None, true),
-            (Some(adc(9000)), Some(8), Some(60), false),
-        ] {
-            assert_eq!(presence_limit(3000, voltage, pd, current, pg, false), None);
+        for voltage in [None, Some(4096), Some(adc(5500)), Some(adc(28_000))] {
+            assert_eq!(presence_limit(3000, voltage, 0), None);
         }
         // Hub-only builds and completed brick removal need no CH224 response.
         for voltage in [0, 4900] {
             assert_eq!(
-                presence_limit(3000, Some(adc(voltage)), None, None, false, false),
+                presence_limit(3000, Some(adc(voltage)), 0),
                 host_limit(3000)
             );
         }
-        assert_eq!(presence_limit(0, Some(0), None, None, false, false), None);
-    }
-
-    #[test]
-    fn invalid_or_unconfirmed_input_never_grants_power() {
-        for (voltage, pd, current, pg) in [
-            (None, Some(8), Some(60), true),
-            (Some(4096), Some(8), Some(60), true),
-            (Some(adc(5000)), Some(8), Some(60), true),
-            (Some(adc(28_000)), Some(8), Some(60), true),
-            (Some(adc(20_000)), None, Some(60), true),
-            (Some(adc(20_000)), Some(0), Some(60), true),
-            (Some(adc(20_000)), Some(8), None, true),
-            (Some(adc(20_000)), Some(8), Some(60), false),
-        ] {
-            assert_eq!(available_ports(voltage, pd, current, pg, false), 0);
-        }
+        assert_eq!(presence_limit(0, Some(0), 0), None);
     }
 
     #[test]
     fn allocations_include_logic_and_side_power_reserves() {
-        assert_eq!(
-            available_ports(Some(adc(9000)), Some(8), Some(60), true, false),
-            3
-        );
-        assert_eq!(
-            available_ports(Some(adc(20_000)), Some(8), Some(60), true, false),
-            5
-        );
-        assert_eq!(
-            available_ports(Some(adc(20_000)), Some(8), Some(60), true, true),
-            1
-        );
+        assert_eq!(charging_budget_mw(8550, 60, false), 14_965);
+        assert_eq!(charging_budget_mw(19_000, 94, false), 70_443);
+        assert_eq!(charging_budget_mw(19_000, 94, true), 39_024);
+        assert_eq!(charging_budget_mw(8550, 60, true), 0);
     }
 
     #[test]
     fn voltage_checks_fail_closed() {
-        assert!(safe_zero(Some(adc(700))));
-        assert!(!safe_zero(Some(adc(800))));
-        assert!(safe_five_volts(Some(adc(5100))));
-        for raw in [None, Some(4096), Some(adc(4600)), Some(adc(5600))] {
-            assert!(!safe_five_volts(raw));
-        }
+        assert!(safe_zero(Some(adc(750))));
+        assert!(!safe_zero(Some(adc(850))));
         assert!(!safe_zero(None));
     }
 }
