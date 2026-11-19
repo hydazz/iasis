@@ -4,6 +4,7 @@ use embassy_usb::{
     Handler,
     control::{InResponse, OutResponse, Recipient, Request, RequestType},
 };
+pub use iasis_firmware::restore_session::RestoreSession;
 use iasis_protocol::{self as protocol, BootloaderRequest, Info, PortCommand, Status};
 
 pub struct Management<'a> {
@@ -14,6 +15,7 @@ pub struct Management<'a> {
     pub configured: &'a Cell<bool>,
     pub suspended: &'a Cell<bool>,
     pub feedback: &'a Cell<[Option<protocol::RestoreFeedback>; protocol::PORT_COUNT]>,
+    pub restore_session: &'a RestoreSession,
 }
 
 fn matches(request: &Request) -> bool {
@@ -23,17 +25,30 @@ fn matches(request: &Request) -> bool {
 }
 
 impl Handler for Management<'_> {
+    fn enabled(&mut self, enabled: bool) {
+        if !enabled {
+            self.restore_session.disconnect();
+        }
+    }
+
     fn reset(&mut self) {
+        self.restore_session.disconnect();
         self.configured.set(false);
         self.suspended.set(false);
     }
 
     fn configured(&mut self, configured: bool) {
         self.configured.set(configured);
+        if !configured {
+            self.restore_session.disconnect();
+        }
     }
 
     fn suspended(&mut self, suspended: bool) {
         self.suspended.set(suspended);
+        if suspended {
+            self.restore_session.disconnect();
+        }
     }
 
     fn control_in<'a>(
@@ -49,7 +64,17 @@ impl Handler for Management<'_> {
         }
         let result = match request.request {
             protocol::GET_INFO => protocol::encode(&self.info, buffer),
-            protocol::GET_STATUS => protocol::encode(&self.status.get(), buffer),
+            protocol::GET_STATUS => {
+                let mut status = self.status.get();
+                let now = embassy_time::Instant::now().as_millis();
+                let session = self.restore_session.active(now);
+                status.restore_decision = status.restore_decision.filter(|decision| {
+                    let (protocol::RestoreDecision::Confirmed(arm)
+                    | protocol::RestoreDecision::Cancelled(arm)) = decision;
+                    Some(arm.session) == session && now < arm.expires
+                });
+                protocol::encode(&status, buffer)
+            }
             _ => return Some(InResponse::Rejected),
         };
         Some(match result {
@@ -66,6 +91,22 @@ impl Handler for Management<'_> {
             return Some(OutResponse::Rejected);
         }
         match request.request {
+            protocol::RESTORE_CONTROL if self.configured.get() && !self.suspended.get() => {
+                let accepted =
+                    protocol::decode::<protocol::RestoreControlRequest>(data).is_ok_and(|req| {
+                        req.serial == self.info.serial
+                            && self.restore_session.apply(
+                                req.control,
+                                &self.status.get(),
+                                embassy_time::Instant::now().as_millis(),
+                            )
+                    });
+                Some(if accepted {
+                    OutResponse::Accepted
+                } else {
+                    OutResponse::Rejected
+                })
+            }
             protocol::RESTORE_FEEDBACK => {
                 match protocol::decode::<protocol::RestoreFeedback>(data) {
                     Ok(feedback)
@@ -86,6 +127,7 @@ impl Handler for Management<'_> {
             protocol::ENTER_BOOTLOADER if self.command.get().is_none() => {
                 match protocol::decode::<BootloaderRequest>(data) {
                     Ok(command) if command.serial == self.info.serial => {
+                        self.restore_session.disconnect();
                         self.update.set(true);
                         Some(OutResponse::Accepted)
                     }

@@ -118,7 +118,8 @@ async fn main(_spawner: Spawner) {
             | protocol::CAP_ROM_UPDATE
             | protocol::CAP_PORT_CONTROL
             | protocol::CAP_HOST_POWER
-            | protocol::CAP_BATCH_BUTTON,
+            | protocol::CAP_BATCH_BUTTON
+            | protocol::CAP_RESTORE_ARM,
     };
     let initial = Status {
         reset_reason: handoff.reset_reason,
@@ -134,8 +135,10 @@ async fn main(_spawner: Spawner) {
     let configured = Cell::new(false);
     let suspended = Cell::new(false);
     let feedback = Cell::new([None; protocol::PORT_COUNT]);
+    let restore_session = usb::RestoreSession::default();
     let mut management = usb::Management {
         info,
+        restore_session: &restore_session,
         status: &status,
         update: &update,
         command: &command,
@@ -193,8 +196,8 @@ async fn main(_spawner: Spawner) {
         let mut upstream = upstream::Upstream::default();
         let mut button = iasis_firmware::button::Button::default();
         let mut panel_due = 0;
+        let mut last_led_frame = None;
         let mut oled = oled::Oled::new();
-        let mut button_id = 0u32;
         loop {
             if update.get() {
                 // Give the control status stage time to complete before disconnecting.
@@ -207,50 +210,7 @@ async fn main(_spawner: Spawner) {
                 next.ports[request.port.index()] = ports.command(request);
                 status.set(next);
             }
-            for feedback in feedback
-                .replace([None; protocol::PORT_COUNT])
-                .into_iter()
-                .flatten()
-            {
-                ports.feedback(feedback);
-            }
             let mut next = status.get();
-            if let Some(gesture) = button.sample(confirm.is_low(), Instant::now().as_millis()) {
-                button_id = button_id.wrapping_add(1).max(1);
-                let mut event = protocol::ButtonEvent {
-                    id: button_id,
-                    gesture,
-                    ports: 0,
-                    generations: [0; protocol::PORT_COUNT],
-                };
-                for port in protocol::Port::ALL {
-                    let state = next.ports[port.index()];
-                    if matches!(
-                        state.state,
-                        protocol::PortState::Ready | protocol::PortState::Contract
-                    ) && state.command_result != protocol::CommandResult::Pending
-                    {
-                        event.ports |= 1 << port.index();
-                        event.generations[port.index()] = state.generation;
-                        let action = match gesture {
-                            protocol::Gesture::Dfu => Some(protocol::PortAction::DfuAppleSilicon),
-                            protocol::Gesture::Reboot => Some(protocol::PortAction::Reboot),
-                            protocol::Gesture::Restore => None,
-                        };
-                        if let Some(action) = action {
-                            next.ports[port.index()] = ports.command(protocol::PortCommand {
-                                serial,
-                                port,
-                                generation: state.generation,
-                                id: state.command_id.wrapping_add(1).max(1),
-                                action,
-                            });
-                        }
-                    }
-                }
-                next.button = Some(event);
-                status.set(next);
-            }
             sequence = sequence.wrapping_add(1);
             next.sequence = sequence;
             let host_limiter_fault = aggregate_fault.is_low();
@@ -382,16 +342,68 @@ async fn main(_spawner: Spawner) {
             next.side_power_enabled = controls.side_power_enabled();
             next.shift_outputs_enabled = controls.shift_outputs_enabled();
             next.uptime_ms = Instant::now().as_millis();
+            oled.tick(&mut bus, &next, &button, next.uptime_ms).await;
+            next.i2c_root_fault |= bus.faulted();
+            // USB feedback can arrive during the I²C work above. Apply it
+            // before selecting targets for a button action in this pass.
+            for update in feedback
+                .replace([None; protocol::PORT_COUNT])
+                .into_iter()
+                .flatten()
+            {
+                next.ports[update.port.index()] = ports.feedback(update);
+            }
+            let now = Instant::now().as_millis();
+            let session = restore_session.active(now);
+            let pending = restore_session.take_arm(now);
+            if let Some(event) = button.sample(
+                &next,
+                oled.present(),
+                session,
+                pending,
+                confirm.is_low(),
+                now,
+            ) {
+                match event {
+                    iasis_firmware::button::Event::Decision(decision) => {
+                        next.restore_decision = Some(decision);
+                    }
+                    iasis_firmware::button::Event::Action(event) => {
+                        let action = match event.gesture {
+                            protocol::Gesture::Dfu => Some(protocol::PortAction::DfuAppleSilicon),
+                            protocol::Gesture::Reboot => Some(protocol::PortAction::Reboot),
+                            protocol::Gesture::Restore => None,
+                        };
+                        if let Some(action) = action {
+                            for port in protocol::Port::ALL {
+                                let i = port.index();
+                                if event.ports & (1 << i) != 0 {
+                                    next.ports[i] = ports.command(protocol::PortCommand {
+                                        serial,
+                                        port,
+                                        generation: event.generations[i],
+                                        id: next.ports[i].command_id.wrapping_add(1).max(1),
+                                        action,
+                                    });
+                                }
+                            }
+                        }
+                        next.button = Some(event);
+                    }
+                }
+            }
             status.set(next);
             if Instant::now().as_millis() >= panel_due {
-                let colors = iasis_firmware::panel::colors(&next)
-                    .map(|[r, g, b]| smart_leds::RGB8 { r, g, b });
-                leds.write(&colors).await;
-                // SK6812SIDE-A needs >200 us reset, longer than WS2812B.
-                Timer::after_micros(400).await;
+                let frame = iasis_firmware::panel::indicators(&next, &button, now);
+                if last_led_frame != Some(frame) {
+                    let colors = frame.map(|[r, g, b]| smart_leds::RGB8 { r, g, b });
+                    leds.write(&colors).await;
+                    // SK6812SIDE-A needs >200 us reset, longer than WS2812B.
+                    Timer::after_micros(400).await;
+                    last_led_frame = Some(frame);
+                }
                 panel_due = Instant::now().as_millis() + 100;
             }
-            oled.tick(&mut bus, &next, Instant::now().as_millis()).await;
             watchdog.feed(Duration::from_secs(2));
             Timer::after_millis(2).await;
         }
