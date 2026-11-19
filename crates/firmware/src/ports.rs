@@ -61,7 +61,9 @@ const UNDERVOLTAGE: Duration = Duration::from_millis(20);
 const SINK_SETTLE: Duration = Duration::from_millis(500);
 /// The TPS55288 output discharges before it restarts.
 const STAGE_REST: Duration = Duration::from_millis(250);
-const OFFER_SPACING: Duration = Duration::from_millis(200);
+/// New offers are sent once they have held, and the sink has been silent,
+/// for this long.
+const OFFER_SETTLE: Duration = Duration::from_secs(1);
 /// Failures inside this window count towards holding the port off.
 const STRIKE_WINDOW: Duration = Duration::from_secs(30);
 const STRIKES: u8 = 3;
@@ -548,7 +550,8 @@ impl Port<'_> {
         let policy = Policy {
             port: self,
             accepted: false,
-            offered: Instant::now(),
+            quiet: Instant::now(),
+            candidate: None,
         };
         let mut source = Source::<_, Clock, _>::new(PdPhy(&self.phy), policy, false);
         match select3(source.run(), self.supervise(), self.phy.run(int)).await {
@@ -976,7 +979,10 @@ struct Policy<'a, 'p> {
     port: &'a Port<'p>,
     /// A sink's request was accepted and awaits its supply transition.
     accepted: bool,
-    offered: Instant,
+    /// The last exchange with the sink.
+    quiet: Instant,
+    /// Offers that differ from the advertised ones, and since when.
+    candidate: Option<([u32; 4], Instant)>,
 }
 
 impl DevicePolicyManager for Policy<'_, '_> {
@@ -988,6 +994,7 @@ impl DevicePolicyManager for Policy<'_, '_> {
         let PowerSource::FixedVariableSupply(request) = request else {
             return CapabilityResponse::Reject;
         };
+        self.quiet = Instant::now();
         self.accepted = self.port.accept(request.0);
         if self.accepted {
             CapabilityResponse::Accept
@@ -1002,30 +1009,38 @@ impl DevicePolicyManager for Policy<'_, '_> {
         if !core::mem::take(&mut self.accepted) {
             return Ok(());
         }
-        self.port
-            .transition()
-            .await
-            .map_err(|error| self.port.fail(error))
+        let moved = self.port.transition().await;
+        self.quiet = Instant::now();
+        moved.map_err(|error| self.port.fail(error))
     }
 
     async fn hard_reset(&mut self) -> Result<(), ()> {
-        self.port
-            .power_cycle()
-            .await
-            .map_err(|error| self.port.fail(error))
+        let cycled = self.port.power_cycle().await;
+        self.quiet = Instant::now();
+        cycled.map_err(|error| self.port.fail(error))
     }
 
     /// Advertise again when the pool changes what this port may offer.
+    ///
+    /// Apple sinks request again about 100 ms after PS_RDY. Revision 2.0 has
+    /// no collision avoidance, and an advertisement that crosses a request
+    /// ends in a hard reset. New offers therefore wait until they have held
+    /// and the sink has been silent for OFFER_SETTLE.
     async fn get_event(&mut self) -> Event {
         loop {
             let offers = self.port.current_offers();
-            if offers != self.port.offers.get()
-                && offers[0] != 0
-                && self.offered.elapsed() >= OFFER_SPACING
+            if offers == self.port.offers.get() || offers[0] == 0 {
+                self.candidate = None;
+            } else if self.candidate.is_none_or(|(held, _)| held != offers) {
+                self.candidate = Some((offers, Instant::now()));
+            } else if self
+                .candidate
+                .is_some_and(|(_, since)| since.elapsed() >= OFFER_SETTLE)
+                && self.quiet.elapsed() >= OFFER_SETTLE
             {
+                self.candidate = None;
                 self.port.offers.set(offers);
                 self.port.update(|status| status.pd_source_pdos = offers);
-                self.offered = Instant::now();
                 return Event::UpdatedSourceCapabilities;
             }
             Timer::after_millis(10).await;
