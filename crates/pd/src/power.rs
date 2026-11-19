@@ -3,12 +3,12 @@
 use crate::source::Contract;
 
 /// Maximum nominal voltage on the Rev A charging input.
-pub const MAX_BRICK_MV: u32 = 20_000;
+pub const MAX_BRICK_MV: u16 = 20_000;
 
-/// Allow the fixed supply's 5% tolerance at the input ADC.
+/// Above anything the highest supported fixed supply presents at the input ADC.
 pub fn brick_overvoltage(raw: Option<u16>) -> bool {
-    raw.and_then(millivolts)
-        .is_some_and(|mv| mv > MAX_BRICK_MV * 105 / 100)
+    let ceiling = *crate::brick::supply_window(MAX_BRICK_MV).end();
+    raw.and_then(millivolts).is_some_and(|mv| mv > ceiling)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -331,10 +331,10 @@ mod tests {
 
     #[test]
     fn brick_ceiling_allows_spr_tolerance_but_excludes_epr() {
-        for mv in [9000, 15_000, 20_000, 21_000] {
+        for mv in [9000, 15_000, 20_000, 21_500] {
             assert!(!brick_overvoltage(Some(adc(mv))));
         }
-        for mv in [21_100, 28_000, 29_400] {
+        for mv in [21_600, 28_000, 29_400] {
             assert!(brick_overvoltage(Some(adc(mv))));
             assert_eq!(
                 brick_budget_mw(Some(adc(mv)), Some(8), Some(100), true, false),

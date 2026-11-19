@@ -42,8 +42,9 @@ impl Gear {
 
     pub fn budget_mv(self, measured_mv: u32) -> Option<u32> {
         // Reserve against the lower edge of the fixed supply tolerance.
-        // ADC variation inside that window must not change the power offer.
-        in_range(self.nominal_mv(), measured_mv)
+        // Variation inside the window must not change the power offer.
+        supply_window(self.nominal_mv())
+            .contains(&measured_mv)
             .then(|| u32::from(self.nominal_mv().min(self.pdo_mv)) * 95 / 100)
     }
 
@@ -59,6 +60,15 @@ impl Gear {
 fn in_range(nominal: u16, measured: u32) -> bool {
     let nominal = u32::from(nominal);
     (nominal * 95 / 100..=nominal * 105 / 100).contains(&measured)
+}
+
+/// Input voltages of a fixed supply at `nominal_mv`: 5% regulation, and 0.5 V
+/// beyond it while the supply answers a load step (USB PD vSrcNew, vSrcValid).
+/// A port lowering its output returns charge to the input, which the supply
+/// cannot absorb.
+pub fn supply_window(nominal_mv: u16) -> core::ops::RangeInclusive<u32> {
+    let nominal = u32::from(nominal_mv);
+    nominal * 95 / 100 - 500..=nominal * 105 / 100 + 500
 }
 
 pub struct Capabilities {
@@ -212,7 +222,10 @@ mod tests {
         assert_eq!(gear.nominal_mv(), 20_000);
         assert_eq!(gear.budget_mv(20_280), Some(19_000));
         assert_eq!(gear.budget_mv(19_770), Some(19_000));
-        assert_eq!(gear.budget_mv(21_001), None);
+        assert_eq!(gear.budget_mv(21_500), Some(19_000));
+        assert_eq!(gear.budget_mv(21_501), None);
+        assert_eq!(gear.budget_mv(18_500), Some(19_000));
+        assert_eq!(gear.budget_mv(18_499), None);
         assert_eq!(gear.current_50ma(100), Some(94));
         assert_eq!(gear.current_50ma(60), Some(60));
         assert_eq!(gear.current_50ma(0), None);
