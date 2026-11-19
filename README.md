@@ -62,7 +62,7 @@ The button selects targets with a tap and acts on them with a hold, with or with
 
 Port lights outside the selection dim. While the button is held, only the ports the action will reach stay bright. An emptied port stays selected for 30 seconds so a replacement target takes its place.
 
-DFU and Reboot apply to the selected ready targets. DFU leaves their data intact and works with Apple Configurator. `power <port> off` disables a port. `power <port> on` enables it and retries a fault.
+DFU and Reboot apply to the selected ready targets. A white port light marks a device Iasis cannot identify; a hold passes it by. DFU leaves their data intact and works with Apple Configurator. `power <port> off` disables a port. `power <port> on` enables it and retries a fault.
 
 Native USB-C uses the host's advertised current. With a legacy A-to-C connection, set the remaining shared USB allowance, including Iasis and after subtracting other loads:
 
