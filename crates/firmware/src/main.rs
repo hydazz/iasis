@@ -3,6 +3,7 @@
 
 mod board;
 mod bus;
+mod hublink;
 mod oled;
 mod outputs;
 mod phy;
@@ -183,7 +184,13 @@ async fn main(_spawner: Spawner) {
     builder.handler(&mut management);
     let mut usb = builder.build();
 
-    let outputs = outputs::Outputs::new(&mut bus, &mut controls).await;
+    let mut outputs = outputs::Outputs::new(&mut bus, &mut controls).await;
+    // Every start switches the targets off, so the hub has no target link to
+    // lose by being reset here.
+    let hub_readable = match &mut outputs {
+        Ok(outputs) => hublink::start(&mut bus, outputs).await,
+        Err(_) => false,
+    };
     let io = Mutex::new(bus::Io {
         bus,
         controls,
@@ -217,6 +224,7 @@ async fn main(_spawner: Spawner) {
         let mut panel_due = 0;
         let mut last_led_frame = None;
         let mut oled = oled::Oled::new();
+        let mut links_due = 0;
         loop {
             if update.get() {
                 // Give the control status stage time to complete before disconnecting.
@@ -239,6 +247,10 @@ async fn main(_spawner: Spawner) {
                     cc: cc_faults[index].is_low(),
                 };
                 ports.sample(index, adc.read(&mut channels[index]).await.ok(), pins);
+            }
+            if hub_readable && Instant::now().as_millis() >= links_due {
+                ports.links(hublink::links(&io).await);
+                links_due = Instant::now().as_millis() + 500;
             }
             next.ports = ports.statuses();
             next.bus_voltage_adc = adc.read(&mut channels[5]).await.ok();
