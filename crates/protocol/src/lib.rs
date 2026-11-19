@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 5;
-pub const MAX_PACKET: usize = 704;
+pub const VERSION: u16 = 7;
+pub const MAX_PACKET: usize = 896;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
 pub const GET_STATUS: u8 = 2;
@@ -78,11 +78,19 @@ pub struct PortFaults {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct FaultSample {
+    pub uptime_ms: u64,
     pub state: PortState,
     pub vbus_adc: Option<u16>,
-    pub contract_mv: u16,
-    pub target_mv: u16,
-    pub target_ma: u16,
+    pub faults: Option<PortFaults>,
+    pub contract: Option<FaultContract>,
+    pub target: Option<FaultContract>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FaultContract {
+    pub millivolts: u16,
+    pub operating_ma: u16,
+    pub limit_ma: u16,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -105,6 +113,19 @@ pub struct PortStatus {
     pub contract_ma: u16,
     pub pd_transition: bool,
     pub fault_sample: Option<FaultSample>,
+    /// Attachments ended by a fault since boot, recovered or latched.
+    pub recoveries: u16,
+    /// PD frames rewritten after the port controller refused the first write.
+    pub pd_write_retries: u16,
+}
+
+impl PortStatus {
+    pub fn latch_fault(&mut self, error: PortError, sample: FaultSample) {
+        if self.fault_sample.is_none() {
+            self.error = Some(error);
+            self.fault_sample = Some(sample);
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -219,18 +240,60 @@ pub enum Orientation {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum PortError {
-    I2c,
-    BusStopped,
-    Isolated,
+    I2c {
+        address: u8,
+        operation: I2cOperation,
+        failure: I2cFailure,
+        exposed_channels: u8,
+    },
+    Isolated {
+        channel: u8,
+    },
     HostAllowanceExpired,
     Adc,
-    Protection,
-    UnexpectedVbus,
-    StageReadback,
+    HostLimiter,
+    PortProtection {
+        pins: PortFaults,
+        converter_status: Option<u8>,
+    },
+    ConverterStatus {
+        raw: u8,
+    },
+    ConverterMode {
+        raw: u8,
+        expected: u8,
+        mask: u8,
+    },
+    ConverterCurrentLimitDisabled {
+        raw: u8,
+    },
+    StageReadback {
+        register: u8,
+        raw: u16,
+        expected: u16,
+    },
     Voltage,
     DischargeTimeout,
     Protocol,
     PdTimeout,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum I2cOperation {
+    Read { register: u8 },
+    Write { register: Option<u8> },
+    Select { mask: u8 },
+    DisplayWrite { control: u8 },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum I2cFailure {
+    NoAcknowledge,
+    ArbitrationLoss,
+    TxNotEmpty(u16),
+    OtherAbort(u32),
+    InvalidTransfer,
+    Timeout,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -390,7 +453,36 @@ mod tests {
     }
 
     #[test]
+    fn cleanup_failure_preserves_the_first_trip_and_sample() {
+        let mut port = PortStatus::default();
+        let trip = PortError::ConverterStatus { raw: 0x91 };
+        let sample = FaultSample {
+            uptime_ms: 1058,
+            state: PortState::Contract,
+            vbus_adc: Some(454),
+            ..FaultSample::default()
+        };
+        port.latch_fault(trip, sample);
+        port.latch_fault(PortError::Isolated { channel: 2 }, FaultSample::default());
+        assert_eq!(port.error, Some(trip));
+        assert_eq!(port.fault_sample, Some(sample));
+    }
+
+    #[test]
     fn largest_status_fits_one_control_transfer() {
+        let error = PortError::I2c {
+            address: u8::MAX,
+            operation: I2cOperation::Write {
+                register: Some(u8::MAX),
+            },
+            failure: I2cFailure::OtherAbort(u32::MAX),
+            exposed_channels: u8::MAX,
+        };
+        let contract = Some(FaultContract {
+            millivolts: u16::MAX,
+            operating_ma: u16::MAX,
+            limit_ma: u16::MAX,
+        });
         let status = Status {
             uptime_ms: u64::MAX,
             sequence: u32::MAX,
@@ -411,7 +503,7 @@ mod tests {
                 generation: u32::MAX,
                 state: PortState::Contract,
                 orientation: Some(Orientation::Cc2),
-                error: Some(PortError::PdTimeout),
+                error: Some(error),
                 command_id: u32::MAX,
                 command_result: CommandResult::Failed(CommandError::Transmission),
                 supply: Supply::Brick,
@@ -423,10 +515,16 @@ mod tests {
                 fault_sample: Some(FaultSample {
                     state: PortState::Contract,
                     vbus_adc: Some(u16::MAX),
-                    contract_mv: u16::MAX,
-                    target_mv: u16::MAX,
-                    target_ma: u16::MAX,
+                    uptime_ms: u64::MAX,
+                    faults: Some(PortFaults {
+                        power: true,
+                        cc: true,
+                    }),
+                    contract,
+                    target: contract,
                 }),
+                recoveries: u16::MAX,
+                pd_write_retries: u16::MAX,
                 restore: Some(RestoreStatus {
                     ecid: u64::MAX,
                     phase: RestorePhase::Failed,
@@ -439,7 +537,7 @@ mod tests {
             upstream_fusb_device_id: Some(u8::MAX),
             upstream_cc: Some([u8::MAX; 2]),
             upstream_orientation: Some(Orientation::Cc2),
-            upstream_error: Some(PortError::I2c),
+            upstream_error: Some(error),
             host_allowance_ma: u16::MAX,
             host_limit_ma: u16::MAX,
             ch224_status: Some(u8::MAX),
@@ -489,7 +587,7 @@ mod tests {
         assert_eq!(
             packet,
             &[
-                b'I', b'A', b'S', b'I', 5, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
+                b'I', b'A', b'S', b'I', 7, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
             ]
         );
         let length = packet.len();

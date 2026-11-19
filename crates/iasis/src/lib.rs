@@ -176,8 +176,10 @@ impl Board {
         if self.info.capabilities & protocol::CAP_PORT_CONTROL == 0 {
             return Err(Error::PortControlUnsupported);
         }
+        // Enable and disable address the port; other actions one attachment.
+        let attachment = !matches!(action, PortAction::Enable | PortAction::Disable);
         let before = self.status()?.ports[port.index()];
-        if before.generation != generation {
+        if attachment && before.generation != generation {
             return Err(Error::Command(CommandError::StaleAttachment));
         }
         let command = PortCommand {
@@ -191,26 +193,6 @@ impl Board {
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
             let status = self.status()?.ports[port.index()];
-            if status.generation != generation {
-                let next_generation = status.generation == generation.wrapping_add(1)
-                    && status.command_id == command.id;
-                match action {
-                    // Opening CC advances the generation before discharge completes.
-                    PortAction::Disable if next_generation && !status.enabled => {}
-                    // An already-cabled target may attach before the first read.
-                    // Attachment resets the accepted enable's result to Idle.
-                    PortAction::Enable
-                        if next_generation
-                            && !before.enabled
-                            && status.enabled
-                            && status.orientation.is_some()
-                            && status.command_result == CommandResult::Idle =>
-                    {
-                        return Ok(CommandResult::Complete);
-                    }
-                    _ => return Err(Error::Command(CommandError::StaleAttachment)),
-                }
-            }
             if status.command_id == command.id {
                 match status.command_result {
                     CommandResult::Failed(error) => return Err(Error::Command(error)),
@@ -219,8 +201,15 @@ impl Board {
                     | CommandResult::Unconfirmed => {
                         return Ok(status.command_result);
                     }
+                    // A target attaching to the enabled port clears the result.
+                    CommandResult::Idle if action == PortAction::Enable && status.enabled => {
+                        return Ok(CommandResult::Complete);
+                    }
                     _ => {}
                 }
+            }
+            if attachment && status.generation != generation {
+                return Err(Error::Command(CommandError::StaleAttachment));
             }
             if Instant::now() >= deadline {
                 return Err(Error::CommandTimeout);

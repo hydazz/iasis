@@ -3,9 +3,9 @@
 
 mod board;
 mod bus;
-mod fusb;
 mod oled;
 mod outputs;
+mod phy;
 mod ports;
 mod stage;
 mod upstream;
@@ -14,7 +14,7 @@ mod usb;
 use core::{cell::Cell, fmt::Write};
 
 use embassy_executor::Spawner;
-use embassy_futures::join::join3;
+use embassy_futures::join::{join_array, join4};
 use embassy_rp::{
     adc::{self, Adc, Channel},
     bind_interrupts, dma,
@@ -24,6 +24,7 @@ use embassy_rp::{
     usb::Driver,
     watchdog::Watchdog,
 };
+use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Instant, Timer};
 use embassy_usb::{Builder, Config};
 use iasis_protocol::{self as protocol, Info, PortFaults, Status, Supply};
@@ -84,6 +85,13 @@ async fn main(_spawner: Spawner) {
         Input::new(p.PIN_11, Pull::None),
         Input::new(p.PIN_14, Pull::None),
         Input::new(p.PIN_17, Pull::None),
+    ];
+    let pd_interrupts = [
+        Input::new(p.PIN_8, Pull::None),
+        Input::new(p.PIN_10, Pull::None),
+        Input::new(p.PIN_13, Pull::None),
+        Input::new(p.PIN_16, Pull::None),
+        Input::new(p.PIN_19, Pull::None),
     ];
     let aggregate_fault = Input::new(p.PIN_4, Pull::None);
     let confirm = Input::new(p.PIN_21, Pull::None);
@@ -175,6 +183,19 @@ async fn main(_spawner: Spawner) {
     builder.handler(&mut management);
     let mut usb = builder.build();
 
+    let outputs = outputs::Outputs::new(&mut bus, &mut controls).await;
+    let io = Mutex::new(bus::Io {
+        bus,
+        controls,
+        outputs,
+    });
+    let ports = ports::Ports::new();
+    let mut index = 0;
+    let port_tasks = join_array(pd_interrupts.map(|int| {
+        index += 1;
+        ports.run(&io, index - 1, int)
+    }));
+
     let host_deadline = Cell::new(0u64);
     let host_tripped = Cell::new(false);
     let guard = async {
@@ -189,8 +210,6 @@ async fn main(_spawner: Spawner) {
     };
     let sample = async {
         let mut sequence = 0u32;
-        let mut ports = ports::Ports::new();
-        let mut outputs = outputs::Outputs::new(&mut bus, &mut controls).await;
         let mut metadata_due = 0;
         let mut upstream_due = 0;
         let mut upstream = upstream::Upstream::default();
@@ -202,32 +221,35 @@ async fn main(_spawner: Spawner) {
             if update.get() {
                 // Give the control status stage time to complete before disconnecting.
                 Timer::after_millis(100).await;
-                ports.shutdown(&mut bus, &mut controls).await;
-                controls.enter_bootloader();
+                let mut io = io.lock().await;
+                ports::shutdown(&mut io, status.get().supply == Supply::Brick).await;
+                io.controls.enter_bootloader();
             }
             if let Some(request) = command.take() {
-                let mut next = status.get();
-                next.ports[request.port.index()] = ports.command(request);
-                status.set(next);
+                ports.command(request);
             }
             let mut next = status.get();
             sequence = sequence.wrapping_add(1);
             next.sequence = sequence;
             let host_limiter_fault = aggregate_fault.is_low();
             next.aggregate_power_fault = host_limiter_fault;
-            for (index, port) in next.ports.iter_mut().enumerate() {
-                port.faults = Some(PortFaults {
+            for index in 0..protocol::PORT_COUNT {
+                let pins = PortFaults {
                     power: power_faults[index].is_low(),
                     cc: cc_faults[index].is_low(),
-                });
-                port.vbus_adc = adc.read(&mut channels[index]).await.ok();
+                };
+                ports.sample(index, adc.read(&mut channels[index]).await.ok(), pins);
             }
+            next.ports = ports.statuses();
             next.bus_voltage_adc = adc.read(&mut channels[5]).await.ok();
             next.thermistor_adc[0] = adc.read(&mut channels[6]).await.ok();
             next.thermistor_adc[1] = adc.read(&mut channels[7]).await.ok();
+
+            let mut guard = io.lock().await;
+            let board = &mut *guard;
             if Instant::now().as_millis() >= upstream_due {
-                if let Ok(outputs) = &mut outputs {
-                    upstream.sample(&mut bus, outputs, &mut next).await;
+                if let Ok(outputs) = &mut board.outputs {
+                    upstream.sample(&mut board.bus, outputs, &mut next).await;
                 }
                 upstream_due = Instant::now().as_millis() + 10;
                 if host_deadline.get() != 0 {
@@ -235,7 +257,7 @@ async fn main(_spawner: Spawner) {
                 }
             }
             if Instant::now().as_millis() >= metadata_due {
-                bus.sample(&mut next).await;
+                board.bus.sample(&mut next).await;
                 metadata_due = Instant::now().as_millis() + 50;
             }
             let brick_power_good = next
@@ -253,27 +275,34 @@ async fn main(_spawner: Spawner) {
                 configured.get() && !suspended.get(),
 
             );
+            let side_power = board.controls.side_power_enabled();
+            let qualified_mv = board.bus.brick_voltage_mv(&next);
+            next.charging_budget_mw = if next.i2c_root_fault || next.aggregate_power_fault {
+                0
+            } else {
+                qualified_mv.map_or(0, |mv| {
+                    iasis_pd::power::charging_budget_mw(
+                        mv as u16,
+                        next.ch224_current_50ma.unwrap_or(0),
+                        side_power,
+                    )
+                })
+            };
             let host_tier = iasis_pd::power::presence_limit(
                 next.host_allowance_ma,
                 next.bus_voltage_adc,
-                next.ch224_status,
-                next.ch224_current_50ma,
-                brick_power_good,
-                controls.side_power_enabled(),
+                next.charging_budget_mw,
             );
-            let brick_ports = if next.i2c_root_fault || next.aggregate_power_fault {
-                0
-            } else {
-                iasis_pd::power::available_ports(
-                    next.bus_voltage_adc,
-                    next.ch224_status,
-                    next.ch224_current_50ma,
-                    brick_power_good,
-                    controls.side_power_enabled(),
-                )
-            };
+            let brick_ports = (next.charging_budget_mw / iasis_pd::Contract::USB_DEFAULT.cost_mw())
+                .min(protocol::PORT_COUNT as u32) as u8;
             let previous_supply = next.supply;
-            next.supply = if host_tier.is_some() && ports.using_host() {
+            next.supply = if next.i2c_root_fault
+                || next.aggregate_power_fault
+                || board.outputs.is_err()
+                || board.bus.brick_upgrade_pending(&next)
+            {
+                Supply::Off
+            } else if host_tier.is_some() && ports.restoring_on_host() {
                 Supply::HostPresence
             } else if brick_ports > 0 {
                 Supply::Brick
@@ -282,18 +311,30 @@ async fn main(_spawner: Spawner) {
             } else {
                 Supply::Off
             };
-            if next.i2c_root_fault || next.aggregate_power_fault {
+            let host_tier = host_tier.filter(|_| next.supply == Supply::HostPresence);
+            // Switch off direct requests before withdrawing the aggregate rail.
+            if next.supply == Supply::Off || next.supply != previous_supply {
+                for index in 0..protocol::PORT_COUNT {
+                    board.controls.charge(index, false);
+                }
+            }
+            if let Ok(outputs) = &mut board.outputs
+                && outputs
+                    .power_policy(&mut board.bus, &mut board.controls, next.supply, host_tier)
+                    .await
+                    .is_err()
+            {
                 next.supply = Supply::Off;
             }
+            next.i2c_root_fault |= board.bus.faulted();
+            next.side_power_enabled = side_power;
+            next.shift_outputs_enabled = board.controls.shift_outputs_enabled();
+            drop(guard);
+
             next.available_ports = match next.supply {
                 Supply::Off => 0,
                 Supply::HostPresence => 5,
                 Supply::Brick => brick_ports,
-            };
-            let host_tier = if next.supply == Supply::HostPresence {
-                host_tier
-            } else {
-                None
             };
             next.host_limit_ma = host_tier.map_or(0, |tier| tier.upper_ma);
             host_deadline.set(if host_tier.is_some() {
@@ -301,49 +342,30 @@ async fn main(_spawner: Spawner) {
             } else {
                 0
             });
+            let demands = ports.demands();
+            let budgets = match next.supply {
+                Supply::Brick => iasis_pd::power::allocate(next.charging_budget_mw, demands),
+                Supply::HostPresence => demands.map(|port| u32::from(port.attached)),
+                Supply::Off => [0; protocol::PORT_COUNT],
+            };
+            ports.grant(
+                next.supply,
+                budgets,
+                qualified_mv.unwrap_or(0) as u16,
+                next.brick_source_pdos[0],
+            );
             if host_tripped.replace(false) {
-                ports.host_allowance_expired(&mut next);
+                ports.host_fault(protocol::PortError::HostAllowanceExpired);
             }
-            match &mut outputs {
-                Ok(outputs) => {
-                    // Switch off direct requests before withdrawing the aggregate rail.
-                    if next.supply == Supply::Off || next.supply != previous_supply {
-                        for index in 0..protocol::PORT_COUNT {
-                            controls.charge(index, false);
-                        }
-                    }
-                    match outputs
-                        .power_policy(&mut bus, &mut controls, next.supply, host_tier)
-                        .await
-                    {
-                        Ok(()) => {
-                            ports
-                                .tick(
-                                    &mut bus,
-                                    &mut controls,
-                                    outputs,
-                                    &mut next,
-                                    host_limiter_fault,
-                                )
-                                .await
-                        }
-                        Err(error) => {
-                            ports.fail_all(&mut controls, &mut next, error);
-                            next.available_ports = 0;
-                        }
-                    }
-                }
-                Err(error) => ports.fail_all(&mut controls, &mut next, *error),
+            if host_limiter_fault {
+                ports.host_fault(protocol::PortError::HostLimiter);
             }
-            if host_tripped.replace(false) {
-                ports.host_allowance_expired(&mut next);
-            }
-            next.i2c_root_fault |= bus.faulted();
-            next.side_power_enabled = controls.side_power_enabled();
-            next.shift_outputs_enabled = controls.shift_outputs_enabled();
             next.uptime_ms = Instant::now().as_millis();
-            oled.tick(&mut bus, &next, &button, next.uptime_ms).await;
-            next.i2c_root_fault |= bus.faulted();
+            {
+                let mut io = io.lock().await;
+                oled.tick(&mut io.bus, &next, &button, next.uptime_ms).await;
+                next.i2c_root_fault |= io.bus.faulted();
+            }
             // USB feedback can arrive during the I²C work above. Apply it
             // before selecting targets for a button action in this pass.
             for update in feedback
@@ -351,8 +373,9 @@ async fn main(_spawner: Spawner) {
                 .into_iter()
                 .flatten()
             {
-                next.ports[update.port.index()] = ports.feedback(update);
+                ports.feedback(update);
             }
+            next.ports = ports.statuses();
             let now = Instant::now().as_millis();
             let session = restore_session.active(now);
             let pending = restore_session.take_arm(now);
@@ -408,7 +431,7 @@ async fn main(_spawner: Spawner) {
             Timer::after_millis(2).await;
         }
     };
-    join3(usb.run(), sample, guard).await;
+    join4(usb.run(), sample, guard, port_tasks).await;
 }
 
 #[panic_handler]
