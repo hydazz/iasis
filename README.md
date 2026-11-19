@@ -48,7 +48,7 @@ target/release/iasis --serial 0123456789abcdef dfu 1
 target/release/iasis --serial 0123456789abcdef ports --watch
 ```
 
-Use the serial from `list`. Add `--device t2` for a T2 Mac. Use `ports --watch` to see the USB mode and identity on each port. If a Mac acknowledges the DFU request and then disappears from USB, check the data cable and the Mac’s [DFU socket](https://support.apple.com/en-us/120694).
+Use the serial from `list`. Add `--device t2` for a T2 Mac. Use `ports --watch` to see the USB mode, identity and link (none, USB 2 or USB 3) on each port. If a Mac acknowledges the DFU request and then disappears from USB, check the data cable and the Mac’s [DFU socket](https://support.apple.com/en-us/120694).
 
 The button selects targets with a tap and acts on them with a hold, with or without an OLED.
 
