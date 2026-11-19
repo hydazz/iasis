@@ -48,7 +48,7 @@ target/release/iasis --serial 0123456789abcdef dfu 1
 target/release/iasis --serial 0123456789abcdef ports --watch
 ```
 
-Use the serial reported by `list`. Wait for a port to reach `Ready` or `Contract` before sending DFU or reboot. `ports --watch` shows USB enumeration and device identity. Add `--device t2` to `dfu` for a T2 Mac.
+Use the serial from `list`. Add `--device t2` for a T2 Mac. Use `ports --watch` to see the USB mode and identity on each port. If a Mac acknowledges the DFU request and then disappears from USB, check the data cable and the Mac’s [DFU socket](https://support.apple.com/en-us/120694).
 
 | Button gesture        | Action on ready ports                   |
 | --------------------- | --------------------------------------- |
@@ -64,7 +64,7 @@ The [firmware power table](crates/firmware/README.md#port-power) lists the limit
 
 ### Restore
 
-Install [idevicerestore](https://github.com/libimobiledevice/idevicerestore) and its dependencies. Use the system `usbmuxd` service; macOS includes it, while Linux needs it installed and running.
+Install [idevicerestore](https://github.com/libimobiledevice/idevicerestore) and its dependencies. For source builds, configure with `--without-limera1n`. Use the system `usbmuxd` service. macOS includes it, and Linux needs it installed and running.
 
 With a local IPSW:
 

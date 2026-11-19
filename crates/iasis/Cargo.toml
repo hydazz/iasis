@@ -9,6 +9,7 @@ publish.workspace = true
 anyhow = "1.0"
 clap = { version = "4.6", features = ["derive"] }
 iasis-protocol.workspace = true
+iasis-pd.workspace = true
 nusb = "0.2.9"
 plist = "1.10.3"
 serde = { workspace = true, features = ["std"] }

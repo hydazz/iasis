@@ -48,6 +48,8 @@ pub async fn toggle(bus: &mut Bus) -> Result<(), PortError> {
 
 pub async fn attach(bus: &mut Bus, orientation: Orientation) -> Result<(), PortError> {
     write(bus, 0x08, 0).await?;
+    // The new attachment starts with fresh PD transmitter and receiver state.
+    write(bus, 0x0c, 0x02).await?;
     let cc = if orientation == Orientation::Cc1 {
         1
     } else {

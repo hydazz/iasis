@@ -153,7 +153,8 @@ mod tests {
                     bus: "1".into(),
                     port_chain: vec![3, 2]
                 },
-                &ports
+                &ports,
+                None
             ),
             super::super::Companion::Mapped {
                 topology: Topology {
