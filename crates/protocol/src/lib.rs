@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 7;
-pub const MAX_PACKET: usize = 896;
+pub const VERSION: u16 = 8;
+pub const MAX_PACKET: usize = 1024;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
 pub const GET_STATUS: u8 = 2;
@@ -117,6 +117,12 @@ pub struct PortStatus {
     pub recoveries: u16,
     /// PD frames rewritten after the port controller refused the first write.
     pub pd_write_retries: u16,
+    /// Hard resets this port began since boot.
+    pub hard_resets_sent: u16,
+    /// Hard resets its targets sent since boot.
+    pub hard_resets_received: u16,
+    /// Requests answered with Reject since boot.
+    pub requests_rejected: u16,
 }
 
 impl PortStatus {
@@ -550,6 +556,9 @@ mod tests {
                 }),
                 recoveries: u16::MAX,
                 pd_write_retries: u16::MAX,
+                hard_resets_sent: u16::MAX,
+                hard_resets_received: u16::MAX,
+                requests_rejected: u16::MAX,
                 restore: Some(RestoreStatus {
                     ecid: u64::MAX,
                     phase: RestorePhase::Failed,
@@ -612,7 +621,7 @@ mod tests {
         assert_eq!(
             packet,
             &[
-                b'I', b'A', b'S', b'I', 7, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
+                b'I', b'A', b'S', b'I', 8, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
             ]
         );
         let length = packet.len();
