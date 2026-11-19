@@ -10,7 +10,7 @@ Messages use vendor control transfers on interface 0.
 | ------------------------ | --------------------------------------------------------- |
 | Request type / recipient | Vendor / interface                                        |
 | `wIndex`                 | `0`                                                       |
-| `wValue`                 | Protocol version, `3`                                     |
+| `wValue`                 | Protocol version, `4`                                     |
 | Maximum payload          | 512 bytes                                                 |
 | Payload header           | ASCII `IASI`, then a little-endian `u16` protocol version |
 | Payload body             | Postcard-encoded message                                  |
@@ -23,6 +23,7 @@ Messages use vendor control transfers on interface 0.
 | `4`     | Host → device | `PortCommand`: serial, port, generation, request ID, action        |
 | `5`     | Host → device | `HostBudget`: serial, legacy host allowance in mA                  |
 | `6`     | Host → device | `RestoreFeedback`: serial, port, generation, ECID, phase, progress |
+| `7`     | Host → device | `RestoreControlRequest`: serial and begin, keep-alive, arm or end  |
 
 The decoder rejects unknown versions, invalid ports, incomplete messages and trailing bytes. Wire changes require a protocol version bump, independently of the Cargo package version.
 
@@ -44,7 +45,9 @@ Send a `PortCommand` with a nonzero request ID and the port's latest attachment 
 
 ## Button events and restore feedback
 
-A button event has a wrapping nonzero ID, gesture, port mask and attachment generations. A listener records a baseline and accepts only new events. Missed events or an MCU restart invalidate that sequence. Firmware handles DFU and reboot; a restore event needs a host with a prepared IPSW and erase authorization.
+Local DFU and reboot events carry the selected physical port mask and attachment generations. An OLED Restore selection sends a preparation request to the active host session. The host prepares the image and targets before issuing a restore arm.
+
+A restore arm identifies the session, operation, target mask, attachment generations and deadline in board uptime. The host refreshes its three-second session lease. The arm expires within 20 seconds. A fresh three-second hold confirms the arm once. A tap cancels. USB reset, host-session loss and attachment changes invalidate pending confirmation. The host checks the confirmed identifiers, target ECIDs and current attachments before launching workers.
 
 Feedback must match the board serial and attachment generation, carry a nonzero ECID and use progress from 0–100 within the current restore stage. Detach clears it; five seconds without an update changes active feedback to `Unconfirmed`.
 

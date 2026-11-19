@@ -167,6 +167,16 @@ impl Board {
         )
     }
 
+    pub fn restore_control(&self, control: protocol::RestoreControl) -> Result<(), Error> {
+        self.write(
+            protocol::RESTORE_CONTROL,
+            &protocol::RestoreControlRequest {
+                serial: self.info.serial,
+                control,
+            },
+        )
+    }
+
     /// Execute against the observed attachment generation. Enable permits
     /// attachment; Acknowledged means PD transport only, not DFU.
     pub fn command(&self, port: Port, action: PortAction) -> Result<CommandResult, Error> {
