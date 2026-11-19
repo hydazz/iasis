@@ -1,14 +1,19 @@
 use std::{
     io::{self, Write},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 mod batch;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
-use iasis::{Board, UsbIds};
+use iasis::{
+    Board, UsbIds,
+    dfu::{self, Attempt, Outcome, Signal},
+    identity::AppleMode,
+    topology::{self, Snapshot},
+};
 use iasis_protocol::{CommandResult, Port, PortAction, Status};
 
 #[derive(Parser)]
@@ -203,24 +208,40 @@ fn main() -> Result<()> {
             thread::sleep(Duration::from_secs(1));
         },
         Command::Ports { json, watch } => loop {
-            let mut snapshot = iasis::topology::discover(board.topology())?;
-            snapshot.query_identities();
+            let status = board.status()?;
+            let mut snapshot = topology::discover(board.topology())?;
+            let mut identity_ports = 0;
+            for port in Port::ALL {
+                if !dfu::job_in_progress(&status.ports[port.index()]) {
+                    identity_ports |= 1 << port.index();
+                }
+            }
+            snapshot.query_port_identities(identity_ports);
+            let current = board.status()?;
+            let reports = Port::ALL.map(|port| {
+                let slot = &snapshot.ports[port.index()];
+                let mut report = dfu::assess(board.info().serial, port, &current, &snapshot, None);
+                if status.ports[port.index()].generation != report.generation {
+                    report.outcome = Some(Outcome::AttachmentChanged);
+                    report.signal = Signal::Settling;
+                    report.usb_mode = None;
+                    report.ecid = None;
+                }
+                PortReport { slot, dfu: report }
+            });
             if json {
-                println!("{}", serde_json::to_string(&snapshot)?);
+                println!(
+                    "{}",
+                    serde_json::json!({"hub":snapshot.hub,"ports":reports})
+                );
             } else {
-                for port in snapshot.ports {
-                    println!(
-                        "port {} SuperSpeed companion {:?}",
-                        port.port.number(),
-                        port.superspeed
-                    );
-                    if port.devices.is_empty() {
-                        println!("port {}  no USB enumeration", port.port.number());
-                    }
-                    for device in port.devices {
+                for report in reports {
+                    let slot = report.slot;
+                    println!("port {}  {}", slot.port.number(), report.dfu.describe());
+                    println!("  SuperSpeed companion {:?}", slot.superspeed);
+                    for device in &slot.devices {
                         println!(
-                            "port {}  {:04x}:{:04x}  {:?}  {:?}  {:?}  {:?}",
-                            port.port.number(),
+                            "  {:04x}:{:04x}  {:?}  {:?}  {:?}  {:?}",
                             device.vendor_id,
                             device.product_id,
                             device.topology.port_chain,
@@ -251,18 +272,7 @@ fn main() -> Result<()> {
             );
         }
         Command::Dfu { port, device } => {
-            let result = board.command(
-                port,
-                match device {
-                    AppleDevice::AppleSilicon => PortAction::DfuAppleSilicon,
-                    AppleDevice::T2 => PortAction::DfuT2,
-                },
-            )?;
-            println!(
-                "Port {} DFU signalling: {}. Use ports --watch to observe USB2 re-enumeration.",
-                port.number(),
-                signal_result(result)
-            );
+            request_dfu(board, port, device)?;
         }
         Command::Reboot { port } => {
             let result = board.command(port, PortAction::Reboot)?;
@@ -274,6 +284,102 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[derive(serde::Serialize)]
+struct PortReport<'a> {
+    #[serde(flatten)]
+    slot: &'a topology::PortDevices,
+    dfu: dfu::Assessment,
+}
+
+fn inspect_dfu(
+    board: &Board,
+    port: Port,
+    attempt: Option<&Attempt>,
+    identify: bool,
+) -> Result<Option<(Snapshot, dfu::Assessment)>> {
+    let before = board.status()?;
+    let mut snapshot = topology::discover(board.topology())?;
+    let slot = &snapshot.ports[port.index()];
+    let busy = dfu::job_in_progress(&before.ports[port.index()]);
+    if !busy
+        && (identify
+            || slot
+                .devices
+                .iter()
+                .any(|d| d.apple.as_ref().is_some_and(|a| a.mode == AppleMode::Kis)))
+    {
+        snapshot.query_port_identity(port);
+    }
+    let after = board.status()?;
+    let report = dfu::assess(board.info().serial, port, &after, &snapshot, attempt);
+    if after.uptime_ms < before.uptime_ms {
+        bail!("Iasis restarted during USB enumeration.");
+    }
+    if before.ports[port.index()].generation != report.generation {
+        return Ok(None);
+    }
+    Ok(Some((snapshot, report)))
+}
+
+fn request_dfu(board: &Board, port: Port, device: AppleDevice) -> Result<()> {
+    let (snapshot, before) = inspect_dfu(board, port, None, true)?
+        .context("The attachment changed before signalling. Inspect the current target.")?;
+    match before.signal {
+        Signal::Available => {}
+        Signal::AlreadyDfu => {
+            println!("Port {}  {}", port.number(), before.describe());
+            return Ok(());
+        }
+        _ => bail!("Port {}  {}", port.number(), before.describe()),
+    }
+    let action = match device {
+        AppleDevice::AppleSilicon => PortAction::DfuAppleSilicon,
+        AppleDevice::T2 => PortAction::DfuT2,
+    };
+    let result = board.command_for_generation(port, before.generation, action)?;
+    println!(
+        "Port {} DFU signal {}.",
+        port.number(),
+        signal_result(result)
+    );
+    let attempt = Attempt::new(board.info().serial, port, &before, &snapshot, result);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let final_read = Instant::now() >= deadline;
+        let Some((_, report)) = inspect_dfu(board, port, Some(&attempt), final_read)? else {
+            if final_read {
+                bail!(
+                    "Port {} is still reconnecting. Check its USB mode.",
+                    port.number()
+                );
+            }
+            thread::sleep(Duration::from_millis(250));
+            continue;
+        };
+        match report.outcome {
+            Some(Outcome::Dfu | Outcome::DfuAfterReattach) => {
+                println!("Port {}  {}", port.number(), report.describe());
+                return Ok(());
+            }
+            Some(Outcome::IdentityChanged | Outcome::TargetUnclear | Outcome::BoardRestarted) => {
+                bail!("Port {}  {}", port.number(), report.describe())
+            }
+            _ if final_read
+                || matches!(
+                    report.signal,
+                    Signal::Fault
+                        | Signal::Disabled
+                        | Signal::Restoring
+                        | Signal::MultipleTransports
+                ) =>
+            {
+                bail!("Port {}  {}", port.number(), report.describe())
+            }
+            _ => thread::sleep(Duration::from_millis(250)),
+        }
+    }
 }
 
 fn signal_result(result: CommandResult) -> &'static str {
