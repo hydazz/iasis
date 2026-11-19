@@ -10,8 +10,8 @@ Messages use vendor control transfers on interface 0.
 | ------------------------ | --------------------------------------------------------- |
 | Request type / recipient | Vendor / interface                                        |
 | `wIndex`                 | `0`                                                       |
-| `wValue`                 | Protocol version, `4`                                     |
-| Maximum payload          | 512 bytes                                                 |
+| `wValue`                 | Protocol version, `5`                                     |
+| Maximum payload          | 704 bytes                                                 |
 | Payload header           | ASCII `IASI`, then a little-endian `u16` protocol version |
 | Payload body             | Postcard-encoded message                                  |
 
@@ -30,6 +30,8 @@ The decoder rejects unknown versions, invalid ports, incomplete messages and tra
 ## Commands and status
 
 Ports are numbered 1–5 and appear in that order in status. ADC readings are raw counts; absent readings use `None`. Sequence zero means no sample has completed. Later samples increment a wrapping sequence number and record their completion time in `uptime_ms`.
+
+Status reports the brick’s source PDOs, requested voltage and qualified input current. The charging budget is in milliwatts. Each port reports its last acknowledged source PDOs, accepted request, contract voltage (mV) and agreed operating current (mA).
 
 Send a `PortCommand` with a nonzero request ID and the port's latest attachment generation. USB acceptance queues the command; poll status for the matching ID and result. Stale generations are rejected. The USB command queue holds one request, and a port with an action pending rejects another.
 
