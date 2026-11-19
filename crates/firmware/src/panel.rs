@@ -24,7 +24,9 @@ pub fn colors(status: &Status) -> [[u8; 3]; 6] {
             }
         } else {
             match port.state {
-                PortState::Ready | PortState::Contract => [0, 12, 0],
+                PortState::Contract => [0, 12, 0],
+                // Powered, and silent on Power Delivery.
+                PortState::Ready if !port.pd_transition => [8, 8, 8],
                 PortState::WaitingPower => [12, 5, 0],
                 _ => [0, 0, 6],
             }
@@ -185,6 +187,25 @@ mod tests {
         assert_eq!(indicators(&status, &button, 8400)[0], [6, 0, 6]);
         status.aggregate_power_fault = true;
         assert_eq!(indicators(&status, &button, 8000)[0], [32, 0, 0]);
+    }
+
+    #[test]
+    fn a_powered_device_without_a_contract_is_white_and_never_a_target() {
+        let mut status = ready();
+        status.ports[2].state = PortState::Ready;
+        let mut button = Button::default();
+        assert_eq!(indicators(&status, &button, 0)[3], [8, 8, 8]);
+        // A hard reset is a target between contracts, not an unknown device.
+        status.ports[2].pd_transition = true;
+        assert_eq!(colors(&status)[3], [0, 0, 6]);
+        status.ports[2].pd_transition = false;
+        for (down, now) in [(false, 1), (true, 10), (true, 40), (true, 600)] {
+            button.sample(&status, None, None, down, now);
+        }
+        let held = indicators(&status, &button, 600);
+        assert_eq!(held[0], [0, 8, 24]);
+        assert_eq!(held[3], [2, 2, 2]);
+        assert_eq!(held[4], [0, 12, 0]);
     }
 
     #[test]
