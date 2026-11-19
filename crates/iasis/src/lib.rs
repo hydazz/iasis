@@ -32,6 +32,8 @@ pub enum Error {
     Protocol(protocol::DecodeError),
     #[error("could not encode Iasis request")]
     Encode,
+    #[error("this board connection is read-only")]
+    ReadOnly,
     #[error("board does not support ROM updates")]
     UpdateUnsupported,
     #[error("board does not support port control")]
@@ -77,9 +79,17 @@ pub fn discover(ids: UsbIds) -> Result<Vec<DeviceInfo>, Error> {
 }
 
 pub struct Board {
-    interface: Interface,
+    connection: Connection,
     info: Info,
     topology: Topology,
+}
+
+enum Connection {
+    Control(Interface),
+    #[cfg(target_os = "macos")]
+    Observer(nusb::Device),
+    #[cfg(not(target_os = "macos"))]
+    Observer(Interface),
 }
 
 impl Board {
@@ -89,9 +99,21 @@ impl Board {
             .wait()?
             .claim_interface(protocol::INTERFACE)
             .wait()?;
-        let info = read(&interface, protocol::GET_INFO)?;
+        Self::from_connection(device, Connection::Control(interface))
+    }
+
+    /// macOS permits status reads on endpoint zero while a restore owns the interface.
+    pub fn observe(device: &DeviceInfo) -> Result<Self, Error> {
+        let handle = device.open().wait()?;
+        #[cfg(not(target_os = "macos"))]
+        let handle = handle.claim_interface(protocol::INTERFACE).wait()?;
+        Self::from_connection(device, Connection::Observer(handle))
+    }
+
+    fn from_connection(device: &DeviceInfo, connection: Connection) -> Result<Self, Error> {
+        let info = read(&connection, protocol::GET_INFO)?;
         Ok(Self {
-            interface,
+            connection,
             info,
             topology: Topology {
                 bus: device.bus_id().to_owned(),
@@ -109,7 +131,7 @@ impl Board {
     }
 
     pub fn status(&self) -> Result<Status, Error> {
-        read(&self.interface, protocol::GET_STATUS)
+        read(&self.connection, protocol::GET_STATUS)
     }
 
     /// Declare the remaining legacy host budget, including Iasis itself.
@@ -213,7 +235,11 @@ impl Board {
     fn write(&self, request: u8, value: &impl Serialize) -> Result<(), Error> {
         let mut buffer = [0; protocol::MAX_PACKET];
         let data = protocol::encode(value, &mut buffer).map_err(|_| Error::Encode)?;
-        self.interface
+        let interface = match &self.connection {
+            Connection::Control(interface) => interface,
+            Connection::Observer(_) => return Err(Error::ReadOnly),
+        };
+        interface
             .control_out(
                 ControlOut {
                     control_type: ControlType::Vendor,
@@ -230,19 +256,18 @@ impl Board {
     }
 }
 
-fn read<T: DeserializeOwned>(interface: &Interface, request: u8) -> Result<T, Error> {
-    let data = interface
-        .control_in(
-            ControlIn {
-                control_type: ControlType::Vendor,
-                recipient: Recipient::Interface,
-                request,
-                value: protocol::VERSION,
-                index: protocol::INTERFACE.into(),
-                length: protocol::MAX_PACKET as u16,
-            },
-            TIMEOUT,
-        )
-        .wait()?;
+fn read<T: DeserializeOwned>(connection: &Connection, request: u8) -> Result<T, Error> {
+    let request = ControlIn {
+        control_type: ControlType::Vendor,
+        recipient: Recipient::Interface,
+        request,
+        value: protocol::VERSION,
+        index: protocol::INTERFACE.into(),
+        length: protocol::MAX_PACKET as u16,
+    };
+    let data = match connection {
+        Connection::Control(interface) => interface.control_in(request, TIMEOUT).wait()?,
+        Connection::Observer(device) => device.control_in(request, TIMEOUT).wait()?,
+    };
     protocol::decode(&data).map_err(Error::Protocol)
 }
