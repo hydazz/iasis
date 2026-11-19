@@ -1,5 +1,6 @@
 [package]
 name = "iasis"
+default-run = "iasis"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

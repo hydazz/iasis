@@ -25,15 +25,15 @@ mise run deps
 mise run host:build
 ```
 
-The CLI is `target/release/iasis` and runs on macOS and Linux. Linux needs read/write access to the management USB device.
+The macOS and Linux build produces `target/release/iasis` for direct board control and `target/release/iasisd` for [button restores](#button-restores). Linux needs read/write access to the management USB device.
 
-| Task               | Output                                                      |
-| ------------------ | ----------------------------------------------------------- |
-| `mise run build`   | CLI, firmware, case STLs, board STEPs and fabrication files |
-| `mise run lint`    | Rust, Python, workflow and KiCad checks                     |
-| `mise run test`    | Software, placement-conversion and case-fit tests           |
-| `mise run preview` | Board and case images                                       |
-| `mise run format`  | Formatted sources and configuration                         |
+| Task               | Output                                                             |
+| ------------------ | ------------------------------------------------------------------ |
+| `mise run build`   | Host tools, firmware, case STLs, board STEPs and fabrication files |
+| `mise run lint`    | Rust, Python, workflow and KiCad checks                            |
+| `mise run test`    | Software, placement-conversion and case-fit tests                  |
+| `mise run preview` | Board and case images                                              |
+| `mise run format`  | Formatted sources and configuration                                |
 
 Builds, checks and previews are separate tasks. Python tools share the root `.venv`; `mise install` also installs the Lefthook hooks.
 
@@ -85,9 +85,23 @@ target/release/iasis ipsw /path/to/UniversalMac.ipsw
 target/release/iasis --serial 0123456789abcdef restore /path/to/UniversalMac.ipsw --ports 1,2,3,4,5 --erase
 ```
 
-**`--erase` erases the selected targets.** To confirm a prepared batch on the board, add `--button` to the port list. Use `--button` alone to choose targets on the board: tap to select them, then hold until the status light turns purple and release. Preparation can put targets into DFU. When the host has prepared the targets, hold the button for three seconds to confirm the erase, or tap to cancel. Use `--host-ma 1200` to set a legacy host allowance for the batch.
+**`--erase` erases the selected targets.** Add `--button` to confirm the erase on the board. Omit `--ports` with `--button` to choose targets there too. Use `--host-ma 1200` to set a legacy host allowance for the batch.
 
-The CLI worker requires ordinary DFU (`05ac:1227`) with a unique ECID. Use Apple Configurator for a Mac identified in DFU over Apple Debug USB. Each CLI target gets its own idevicerestore process, selected by ECID. In a terminal, each port has a progress row. Percentages apply to the current restore stage. Redirecting output records each change on its own line. Logs and working files go under `restores/`, or the directory passed to `--logs`. Allow space for an extracted OS image per worker. Iasis checks the local archive; idevicerestore checks device compatibility and Apple signing.
+Each target needs ordinary DFU (`05ac:1227`) with a unique ECID. Use Apple Configurator for a Mac identified in DFU over Apple Debug USB. Each target gets its own idevicerestore process, selected by ECID. In a terminal, each port has a progress row. Percentages apply to the current restore stage. Redirecting output records each change on its own line. Logs and working files go under `restores/`, or the directory passed to `--logs`. Allow space for an extracted OS image per worker. Iasis checks the local archive and matches it to the target's chip and board IDs. idevicerestore checks Apple signing.
+
+#### Button restores
+
+To leave the board ready for repeated restores, run the optional listener in a terminal. Download the IPSWs beforehand and pass each file with `--ipsw`. A mixed batch can use several images. Each selected target must match exactly one.
+
+```sh
+"$PWD/target/release/iasisd" --serial 0123456789abcdef \
+  --ipsw /path/to/UniversalMac.ipsw --ipsw /path/to/iPad.ipsw \
+  --program "$(command -v idevicerestore)" --logs "$HOME/restores"
+```
+
+The OLED USB symbol means `iasisd` or a foreground `iasis restore --button` is listening. Tap to select targets, then hold until the status light turns purple and release. Preparation can put the targets into DFU. Once the erase is ready, hold for three seconds to confirm or tap to cancel. The daemon keeps listening after cancellation and while workers run. You can still use `iasis` to talk directly to the board.
+
+To run the command above in the background for your login session, prefix it with `systemd-run --user --unit=iasisd --` on Linux or `launchctl submit -l local.iasisd --` on macOS. For automatic startup at login, use absolute paths in a systemd user service's `ExecStart` or a user LaunchAgent's `ProgramArguments` in `~/Library/LaunchAgents/` with `RunAtLoad` enabled.
 
 ## Firmware and protocol
 
