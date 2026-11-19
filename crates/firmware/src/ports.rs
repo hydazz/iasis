@@ -1,8 +1,9 @@
 use embassy_time::Instant;
 use iasis_pd::{Contract, Link, RailChange, ReceivedPacket, power};
 use iasis_protocol::{
-    CommandError, CommandResult, Orientation, PORT_COUNT, PortAction, PortCommand, PortError,
-    PortState, PortStatus, RestoreFeedback, RestorePhase, Status, Supply,
+    CommandError, CommandResult, FaultContract, FaultSample, Orientation, PORT_COUNT, PortAction,
+    PortCommand, PortError, PortFaults, PortState, PortStatus, RestoreFeedback, RestorePhase,
+    Status, Supply,
 };
 
 use crate::{board::Controls, bus::Bus, fusb, outputs::Outputs, stage};
@@ -207,10 +208,10 @@ impl Ports {
             port.offers_busy = offers_busy;
             let result = if core::mem::take(&mut port.host_expired) {
                 Err(PortError::HostAllowanceExpired)
-            } else if bus.faulted() {
-                Err(PortError::BusStopped)
+            } else if let Some(error) = bus.stopped() {
+                Err(error)
             } else if host_limiter_fault && port.powered && port.status.state != PortState::Fault {
-                Err(PortError::Protection)
+                Err(PortError::HostLimiter)
             } else {
                 port.tick(
                     bus,
@@ -222,10 +223,29 @@ impl Ports {
                 )
                 .await
             };
-            if let Err(error) = result {
+            if let Err(mut error) = result {
                 controls.charge(index, false);
-                port.fail(error);
-                if !bus.faulted() && bus.select(Some(index as u8)).await.is_ok() {
+                let at = now();
+                let channel = Some(index as u8);
+                let mut selected = !bus.faulted() && bus.select(channel).await.is_ok();
+                if selected
+                    && port.stage_on
+                    && port.status.supply == Supply::Brick
+                    && let PortError::PortProtection {
+                        pins,
+                        converter_status,
+                    } = &mut error
+                    && pins.power
+                {
+                    // The host eFuse and converter share this pin. STATUS is
+                    // read-to-clear, so capture it before shutting down the stage.
+                    match stage::status(bus).await {
+                        Ok(raw) => *converter_status = Some(raw),
+                        Err(_) => selected = !bus.faulted() && bus.select(channel).await.is_ok(),
+                    }
+                }
+                port.fail(error, at);
+                if selected {
                     let _ = fusb::open(bus).await;
                     if port.stage_on && stage::off(bus).await.is_ok() {
                         port.stage_due = now() + 250;
@@ -244,8 +264,8 @@ impl Ports {
             port.status.pd_transition = port.transition.is_some();
             status.ports[index] = port.status;
         }
-        if bus.faulted() {
-            self.fail_all(controls, status, PortError::BusStopped);
+        if let Some(error) = bus.stopped() {
+            self.fail_all(controls, status, error);
         }
     }
 
@@ -254,7 +274,7 @@ impl Ports {
             controls.charge(index, false);
             port.status.vbus_adc = status.ports[index].vbus_adc;
             port.status.faults = status.ports[index].faults;
-            port.fail(error);
+            port.fail(error, now());
             status.ports[index] = port.status;
         }
     }
@@ -338,7 +358,7 @@ impl Port {
         self.feedback_deadline = 0;
     }
 
-    fn fail(&mut self, error: PortError) {
+    fn fail(&mut self, error: PortError, at: u64) {
         self.fault_cc = if matches!(
             error,
             PortError::Voltage | PortError::PdTimeout | PortError::Protocol
@@ -347,16 +367,22 @@ impl Port {
         } else {
             None
         };
-        if self.status.fault_sample.is_none() {
-            let target = self.transition.map(|change| change.target);
-            self.status.fault_sample = Some(iasis_protocol::FaultSample {
+        let snapshot = |contract: Contract| FaultContract {
+            millivolts: contract.millivolts,
+            operating_ma: contract.operating_ma,
+            limit_ma: contract.limit_ma,
+        };
+        self.status.latch_fault(
+            error,
+            FaultSample {
+                uptime_ms: at,
                 state: self.status.state,
                 vbus_adc: self.status.vbus_adc,
-                contract_mv: self.contract.map_or(0, |c| c.millivolts),
-                target_mv: target.map_or(0, |contract| contract.millivolts),
-                target_ma: target.map_or(0, |contract| contract.operating_ma),
-            });
-        }
+                faults: self.status.faults,
+                contract: self.contract.map(snapshot),
+                target: self.transition.map(|change| snapshot(change.target)),
+            },
+        );
         let restore = self.status.restore;
         self.detach();
         self.status.restore = restore.map(|mut restore| {
@@ -365,7 +391,6 @@ impl Port {
         });
         self.status.state = PortState::Fault;
         self.status.supply = Supply::Off;
-        self.status.error = Some(error);
         if self.status.command_result == CommandResult::Pending {
             self.status.command_result = CommandResult::Failed(CommandError::Hardware);
         }
@@ -379,7 +404,6 @@ impl Port {
         index: usize,
     ) -> Result<(), PortError> {
         controls.charge(index, false);
-        self.detach();
         fusb::open(bus).await?;
         if self.stage_on {
             stage::off(bus).await?;
@@ -389,6 +413,7 @@ impl Port {
         if self.powered {
             outputs.discharge(bus, controls, index, true).await?;
         }
+        self.detach();
         self.status.state = PortState::Discharging;
         self.due = now() + 1000;
         Ok(())
@@ -484,13 +509,19 @@ impl Port {
                 self.stage_due = now() + 250;
             }
         }
-        if self.status.faults.is_some_and(|fault| {
-            fault.cc
-                || (fault.power
-                    && (self.stage_on || self.powered)
-                    && self.status.state != PortState::Discharging)
-        }) {
-            return Err(PortError::Protection);
+        if let Some(faults) = self.status.faults {
+            let power = faults.power
+                && (self.stage_on || self.powered)
+                && self.status.state != PortState::Discharging;
+            if faults.cc || power {
+                return Err(PortError::PortProtection {
+                    pins: PortFaults {
+                        cc: faults.cc,
+                        power,
+                    },
+                    converter_status: None,
+                });
+            }
         }
         if self.status.enabled && self.status.vbus_adc.is_none() {
             return Err(PortError::Adc);

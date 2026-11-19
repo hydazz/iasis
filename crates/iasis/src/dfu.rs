@@ -705,7 +705,7 @@ mod tests {
         assert_eq!(report(&st, &s, None).signal, Signal::NoAttachment);
         st.ports[0].state = PortState::WaitingPower;
         assert_eq!(report(&st, &s, None).signal, Signal::WaitingPower);
-        st.ports[0].error = Some(PortError::Protection);
+        st.ports[0].error = Some(PortError::HostLimiter);
         assert_eq!(report(&st, &s, None).signal, Signal::Fault);
         assert!(report(&st, &s, None).transport_result.is_none());
     }

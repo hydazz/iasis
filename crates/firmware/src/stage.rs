@@ -12,8 +12,13 @@ const FAULT_BITS: u8 = 0xe0;
 
 async fn write_checked(bus: &mut Bus, register: u8, value: u8) -> Result<(), PortError> {
     bus.write(ADDRESS, &[register, value]).await?;
-    if bus.register(ADDRESS, register).await? != value {
-        return Err(PortError::StageReadback);
+    let raw = bus.register(ADDRESS, register).await?;
+    if raw != value {
+        return Err(PortError::StageReadback {
+            register,
+            raw: u16::from(raw),
+            expected: u16::from(value),
+        });
     }
     Ok(())
 }
@@ -29,8 +34,13 @@ async fn set_reference(bus: &mut Bus, code: u16) -> Result<(), PortError> {
     // loads the DAC, including on transitions where that byte is unchanged.
     let [low, high] = code.to_le_bytes();
     bus.write(ADDRESS, &[0, low, high]).await?;
-    if reference(bus).await? != code {
-        return Err(PortError::StageReadback);
+    let raw = reference(bus).await?;
+    if raw != code {
+        return Err(PortError::StageReadback {
+            register: 0,
+            raw,
+            expected: code,
+        });
     }
     Ok(())
 }
@@ -38,13 +48,18 @@ async fn set_reference(bus: &mut Bus, code: u16) -> Result<(), PortError> {
 pub async fn off(bus: &mut Bus) -> Result<(), PortError> {
     write_checked(bus, MODE, OFF).await?;
     // Reading STATUS releases latched faults before the next start.
-    bus.register(ADDRESS, 7).await?;
+    status(bus).await?;
     Ok(())
 }
 
 pub async fn five_volts(bus: &mut Bus) -> Result<(), PortError> {
-    if bus.register(ADDRESS, MODE).await? != OFF {
-        return Err(PortError::Protection);
+    let mode = bus.register(ADDRESS, MODE).await?;
+    if mode != OFF {
+        return Err(PortError::ConverterMode {
+            raw: mode,
+            expected: OFF,
+            mask: u8::MAX,
+        });
     }
     // Mask OCP while enabling the limiter and OE (TI §7.6.5).
     write_checked(bus, 5, 0xa0).await?;
@@ -65,9 +80,14 @@ pub async fn faults(bus: &mut Bus) -> Result<(), PortError> {
     check_status(bus).await
 }
 
+pub async fn status(bus: &mut Bus) -> Result<u8, PortError> {
+    bus.register(ADDRESS, 7).await
+}
+
 async fn check_status(bus: &mut Bus) -> Result<(), PortError> {
-    if bus.register(ADDRESS, 7).await? & FAULT_BITS != 0 {
-        return Err(PortError::Protection);
+    let raw = status(bus).await?;
+    if raw & FAULT_BITS != 0 {
+        return Err(PortError::ConverterStatus { raw });
     }
     Ok(())
 }
@@ -92,13 +112,17 @@ pub async fn set_contract(bus: &mut Bus, millivolts: u16, milliamps: u16) -> Res
     // never turn a reset converter back on behind a closed output switch.
     let mode = bus.register(ADDRESS, MODE).await?;
     if mode & !FPWM != ON {
-        return Err(PortError::Protection);
+        return Err(PortError::ConverterMode {
+            raw: mode,
+            expected: ON,
+            mask: !FPWM,
+        });
     }
     check_status(bus).await?;
     let previous = reference(bus).await?;
     let old_limit = bus.register(ADDRESS, 2).await?;
     if old_limit & 0x80 == 0 {
-        return Err(PortError::Protection);
+        return Err(PortError::ConverterCurrentLimitDisabled { raw: old_limit });
     }
     let slew_limit = if code < previous {
         // The higher current available at a lower voltage may exceed the
@@ -127,7 +151,11 @@ pub async fn settled(bus: &mut Bus, milliamps: u16) -> Result<(), PortError> {
         // The next detach restores the light-load mode with OE off.
         write_checked(bus, 2, limit).await?;
     } else if mode != ON {
-        return Err(PortError::Protection);
+        return Err(PortError::ConverterMode {
+            raw: mode,
+            expected: ON,
+            mask: !FPWM,
+        });
     }
     check_status(bus).await
 }

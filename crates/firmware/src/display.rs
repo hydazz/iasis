@@ -148,14 +148,17 @@ pub fn label(port: &PortStatus) -> &'static str {
 
 fn error_text(error: PortError) -> &'static str {
     match error {
-        PortError::I2c => "I2C error",
-        PortError::BusStopped => "I2C stopped",
-        PortError::Isolated => "I2C isolated",
+        PortError::I2c { .. } => "I2C error",
+        PortError::Isolated { .. } => "I2C isolated",
         PortError::HostAllowanceExpired => "Host budget expired",
         PortError::Adc => "ADC unavailable",
-        PortError::Protection => "Protection tripped",
+        PortError::HostLimiter => "Host limiter tripped",
+        PortError::PortProtection { .. } => "Protection tripped",
+        PortError::ConverterStatus { .. } => "Converter fault",
+        PortError::ConverterMode { .. } => "Converter mode",
+        PortError::ConverterCurrentLimitDisabled { .. } => "Current limit off",
         PortError::UnexpectedVbus => "Unexpected VBUS",
-        PortError::StageReadback => "Converter readback",
+        PortError::StageReadback { .. } => "Converter readback",
         PortError::Voltage => "VBUS out of range",
         PortError::DischargeTimeout => "Discharge timeout",
         PortError::Protocol => "PD protocol error",
@@ -165,19 +168,49 @@ fn error_text(error: PortError) -> &'static str {
 
 fn details(status: &Status, port: &PortStatus) -> [String<32>; 2] {
     if let Some(error) = port.error {
-        return pair(
-            error_text(error),
-            if error == PortError::Protection {
-                match port.faults {
-                    Some(f) if f.cc && f.power => "CC and power",
-                    Some(f) if f.cc => "CC",
-                    Some(f) if f.power => "Power",
-                    _ => "",
+        let mut lines = pair(error_text(error), "");
+        match error {
+            PortError::PortProtection {
+                pins: f,
+                converter_status,
+            } => {
+                let pins = match (f.cc, f.power) {
+                    (true, true) => "CC and power",
+                    (true, false) => "CC",
+                    (false, true) => "Power",
+                    (false, false) => "",
+                };
+                lines[1].push_str(pins).unwrap();
+                if let Some(raw) = converter_status {
+                    write!(lines[1], " {raw:#04x}").unwrap();
                 }
-            } else {
-                ""
-            },
-        );
+            }
+            PortError::ConverterStatus { raw } => write!(lines[1], "STATUS {raw:#04x}").unwrap(),
+            PortError::ConverterMode { raw, .. } => write!(lines[1], "MODE {raw:#04x}").unwrap(),
+            PortError::ConverterCurrentLimitDisabled { raw } => {
+                write!(lines[1], "IOUT_LIMIT {raw:#04x}").unwrap()
+            }
+            PortError::StageReadback { register, raw, .. } => {
+                write!(lines[1], "Reg {register:#04x} = {raw:#x}").unwrap()
+            }
+            PortError::I2c {
+                address, operation, ..
+            } => {
+                use iasis_protocol::I2cOperation::*;
+                let (op, byte) = match operation {
+                    Read { register } => ("R", Some(register)),
+                    Write { register } => ("W", register),
+                    Select { mask } => ("Select", Some(mask)),
+                    DisplayWrite { control } => ("W", Some(control)),
+                };
+                write!(lines[1], "{op} {address:#04x}").unwrap();
+                if let Some(byte) = byte {
+                    write!(lines[1], " {byte:#04x}").unwrap();
+                }
+            }
+            _ => {}
+        }
+        return lines;
     }
     if port.state == PortState::Fault {
         return pair("Port fault", "");
@@ -484,7 +517,7 @@ mod tests {
     fn selection_stays_fixed_and_faults_do_not_steal_focus() {
         let mut status = Status::default();
         status.ports[1].error = Some(PortError::Voltage);
-        status.ports[4].error = Some(PortError::I2c);
+        status.ports[4].error = Some(PortError::Isolated { channel: 4 });
         let mut button = Button::default();
         button.selected = Some(Port::ALL[0]);
         for now in [0, 3000, 15_000, 90_000] {
@@ -545,10 +578,10 @@ mod tests {
             overview(&status, Some(Port::ALL[1])).lines,
             pair("Done", "")
         );
-        status.ports[1].error = Some(PortError::Protection);
+        status.ports[1].error = Some(PortError::HostLimiter);
         assert_eq!(
             overview(&status, Some(Port::ALL[1])).lines[0],
-            "Protection tripped"
+            "Host limiter tripped"
         );
     }
 
@@ -568,8 +601,8 @@ mod tests {
         }
         assert_eq!(view(&status, &button, 150).lines[0], "DFU requested");
         button.selected = Some(Port::ALL[0]);
-        status.ports[0].error = Some(PortError::Protection);
-        assert_eq!(view(&status, &button, 200).lines[0], "Protection tripped");
+        status.ports[0].error = Some(PortError::HostLimiter);
+        assert_eq!(view(&status, &button, 200).lines[0], "Host limiter tripped");
         status.ports[0].error = None;
         assert_eq!(view(&status, &button, 2700).lines, pair("", ""));
     }
@@ -608,7 +641,13 @@ mod tests {
         assert!(!attention(&port));
         assert_eq!(details(&status, &port), pair("", ""));
         port.state = PortState::Fault;
-        port.error = Some(PortError::Protection);
+        port.error = Some(PortError::PortProtection {
+            pins: iasis_protocol::PortFaults {
+                cc: true,
+                power: false,
+            },
+            converter_status: None,
+        });
         port.restore = Some(RestoreStatus {
             ecid: 1,
             phase: RestorePhase::Reported,
@@ -616,7 +655,7 @@ mod tests {
         });
         assert_eq!(label(&port), "ERR");
         assert!(attention(&port));
-        assert_eq!(details(&status, &port), pair("Protection tripped", "Power"));
+        assert_eq!(details(&status, &port), pair("Protection tripped", "CC"));
     }
 
     #[test]
