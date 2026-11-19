@@ -9,7 +9,7 @@ use embedded_graphics::{
     },
     pixelcolor::BinaryColor,
     prelude::*,
-    primitives::{Line, PrimitiveStyle, Rectangle},
+    primitives::{Circle, Line, PrimitiveStyle, Rectangle},
     text::{Baseline, Text},
 };
 use heapless::{String, Vec};
@@ -25,6 +25,7 @@ pub const SIZE: Size = Size::new(128, 64);
 pub const FRAME_MS: u64 = 200;
 const ON: BinaryColor = BinaryColor::On;
 const OFF: BinaryColor = BinaryColor::Off;
+
 const BOLT: &[&str] = &[
     "....##..", "...##...", "..##....", ".#####..", "...##...", "..##....", ".##.....", ".#......",
 ];
@@ -41,17 +42,58 @@ const USB: &[&str] = &[
     "....###....",
 ];
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Face {
+    Idle,
+    Blink,
+    Busy(u8),
+    Fault,
+}
+
+#[derive(PartialEq, Eq)]
+enum Indicator {
+    None,
+    Attention,
+    Activity(u8),
+    Stage(u32),
+}
+
 pub struct View {
     /// Highlighted ports.
     pub ports: u8,
     /// Highlighted ports a hold reaches, drawn filled; the rest are outlined.
     pub targets: u8,
     pub connected: bool,
+    brick: bool,
+    face: Face,
+    columns: [(&'static str, Indicator); 5],
     /// The actions a hold steps through and the one a release would send.
     pub held: Option<(Vec<Gesture, 3>, Gesture)>,
     /// Measured connector voltage beneath each port.
     pub cells: [String<4>; 5],
     pub lines: [String<32>; 2],
+}
+
+impl View {
+    /// SSD1306 pages are eight pixels high. The menubar and port highlights
+    /// share page 1; the lower workspace starts on page 5.
+    pub fn changed_pages(&self, previous: Option<&Self>) -> u8 {
+        let Some(old) = previous else { return 0xff };
+        let mut pages = 0;
+        if (self.brick, self.connected, self.face) != (old.brick, old.connected, old.face) {
+            pages |= 0b0000_0011;
+        }
+        if (self.ports, self.targets) != (old.ports, old.targets) {
+            pages |= 0b0000_0110;
+        }
+        if self.columns != old.columns {
+            pages |= 0b0001_1000;
+        }
+        if self.cells != old.cells || self.lines != old.lines || self.held != old.held {
+            pages |= 0b1110_0000;
+        }
+        pages
+    }
 }
 
 /// The lower workspace shows, in priority order: a board fault, restore
@@ -60,6 +102,38 @@ pub struct View {
 pub fn view(status: &Status, button: &Button, now: u64) -> View {
     let ports = button.marked(status, now);
     let acting = button.armed().is_some() || button.held(now).is_some();
+    let tick = (now / FRAME_MS % 3) as u8;
+    let columns = status.ports.each_ref().map(|port| {
+        let indicator = if attention(port) {
+            Indicator::Attention
+        } else {
+            match port.restore.map(|r| (r.phase, r.progress)) {
+                Some((RestorePhase::Preparing, _) | (RestorePhase::Running, 0)) => {
+                    Indicator::Activity(tick)
+                }
+                Some((RestorePhase::Running, percent)) => {
+                    Indicator::Stage((u32::from(percent.min(100)) * 23).div_ceil(100))
+                }
+                _ => Indicator::None,
+            }
+        };
+        (label(port), indicator)
+    });
+    let face = if status.i2c_root_fault
+        || status.aggregate_power_fault
+        || columns.iter().any(|(_, i)| *i == Indicator::Attention)
+    {
+        Face::Fault
+    } else if columns
+        .iter()
+        .any(|(_, i)| matches!(i, Indicator::Activity(_) | Indicator::Stage(_)))
+    {
+        Face::Busy(tick)
+    } else if now % 6000 >= 5800 {
+        Face::Blink
+    } else {
+        Face::Idle
+    };
     let mut view = View {
         ports,
         targets: if acting {
@@ -68,6 +142,9 @@ pub fn view(status: &Status, button: &Button, now: u64) -> View {
             ports & button.reach()
         },
         connected: button.host_prepared(),
+        brick: status.supply == Supply::Brick,
+        face,
+        columns,
         held: None,
         cells: Default::default(),
         lines: pair("", ""),
@@ -374,15 +451,13 @@ fn name(action: Gesture) -> &'static str {
 
 pub fn draw<D: DrawTarget<Color = BinaryColor>>(
     target: &mut D,
-    status: &Status,
     view: &View,
-    now: u64,
 ) -> Result<(), D::Error> {
     target.clear(OFF)?;
     fill(target, 0, 0, 128, 11)?;
-    face(target, status, now)?;
+    face(target, view.face)?;
     text(target, "iasis", 18, 1, true, OFF)?;
-    if status.supply == Supply::Brick {
+    if view.brick {
         glyph(target, BOLT, 98, 1, OFF)?;
     }
     if view.connected {
@@ -390,7 +465,7 @@ pub fn draw<D: DrawTarget<Color = BinaryColor>>(
     }
     for physical in Port::ALL {
         let x = physical.index() as i32 * 26;
-        let port = &status.ports[physical.index()];
+        let (value, indicator) = &view.columns[physical.index()];
         // A highlighted port a hold reaches is filled; any other
         // highlighted port is outlined.
         let marked = view.ports & (1 << physical.index()) != 0;
@@ -408,27 +483,29 @@ pub fn draw<D: DrawTarget<Color = BinaryColor>>(
             true,
             if target_port { OFF } else { ON },
         )?;
-        let value = label(port);
         text(
             target,
             value,
             x + (23 - value.len() as i32 * 5) / 2,
-            28,
+            26,
             true,
             ON,
         )?;
-        if attention(port) {
-            line(target, (x, 36), (x + 22, 36), ON)?;
-        } else if let Some(job) = port
-            .restore
-            .filter(|r| matches!(r.phase, RestorePhase::Preparing | RestorePhase::Running))
-        {
-            if job.phase == RestorePhase::Running && job.progress > 0 {
-                let width = (u32::from(job.progress.min(100)) * 23).div_ceil(100);
-                fill(target, x, 36, width, 2)?;
-            } else {
-                let offset = (now / FRAME_MS % 19) as i32;
-                line(target, (x + offset, 36), (x + offset + 4, 36), ON)?;
+        match indicator {
+            Indicator::None => {}
+            Indicator::Attention => line(target, (x, 36), (x + 22, 36), ON)?,
+            Indicator::Stage(width) => fill(target, x, 36, *width, 2)?,
+            Indicator::Activity(active) => {
+                for i in 0..3 {
+                    let style = if i == *active {
+                        PrimitiveStyle::with_fill(ON)
+                    } else {
+                        PrimitiveStyle::with_stroke(ON, 1)
+                    };
+                    Circle::new(Point::new(x + 3 + i32::from(i) * 7, 34), 4)
+                        .into_styled(style)
+                        .draw(target)?;
+                }
             }
         }
     }
@@ -466,12 +543,10 @@ pub fn draw<D: DrawTarget<Color = BinaryColor>>(
 pub fn draw_page<D: DrawTarget<Color = BinaryColor>>(
     target: &mut D,
     page: u8,
-    status: &Status,
     view: &View,
-    now: u64,
 ) -> Result<(), D::Error> {
     let area = Rectangle::new(Point::new(0, i32::from(page) * 8), Size::new(128, 8));
-    draw(&mut target.clipped(&area), status, view, now)
+    draw(&mut target.clipped(&area), view)
 }
 
 fn text<D: DrawTarget<Color = BinaryColor>>(
@@ -559,37 +634,23 @@ fn glyph<D: DrawTarget<Color = BinaryColor>>(
     }))
 }
 
-fn face<D: DrawTarget<Color = BinaryColor>>(
-    target: &mut D,
-    status: &Status,
-    now: u64,
-) -> Result<(), D::Error> {
+fn face<D: DrawTarget<Color = BinaryColor>>(target: &mut D, face: Face) -> Result<(), D::Error> {
     line(target, (1, 0), (11, 0), OFF)?;
     line(target, (0, 1), (0, 8), OFF)?;
     line(target, (12, 1), (12, 8), OFF)?;
     line(target, (1, 9), (11, 9), OFF)?;
-    let sad =
-        status.i2c_root_fault || status.aggregate_power_fault || status.ports.iter().any(attention);
-    let busy = status.ports.iter().any(|p| {
-        p.restore
-            .is_some_and(|r| matches!(r.phase, RestorePhase::Preparing | RestorePhase::Running))
-    });
-    let eye = if !sad && !busy && now % 6000 >= 5800 {
-        3
-    } else {
-        2
-    };
+    let eye = if face == Face::Blink { 3 } else { 2 };
     line(target, (3, eye), (3, 3), OFF)?;
     line(target, (9, eye), (9, 3), OFF)?;
     line(target, (6, 2), (6, 4), OFF)?;
     line(target, (5, 4), (6, 4), OFF)?;
-    if busy {
-        let x = 5 + (now / FRAME_MS % 3) as i32;
+    if let Face::Busy(tick) = face {
+        let x = 5 + i32::from(tick);
         line(target, (x, 7), (x, 7), OFF)?;
     } else {
-        let y = if sad { 6 } else { 7 };
+        let y = if face == Face::Fault { 6 } else { 7 };
         line(target, (5, y), (7, y), OFF)?;
-        let y = if sad { 7 } else { 6 };
+        let y = if face == Face::Fault { 7 } else { 6 };
         line(target, (4, y), (4, y), OFF)?;
         line(target, (8, y), (8, y), OFF)?;
     }
@@ -719,7 +780,7 @@ mod tests {
         assert_eq!(label(&status.ports[1]), "?");
         assert_eq!(label(&status.ports[3]), "CHG");
         let mut frame = Frame([[false; 128]; 64]);
-        draw(&mut frame, &status, &view, 0).unwrap();
+        draw(&mut frame, &view).unwrap();
         // The box spans x..x+23 on rows 14..24; column x+2 clears the digit.
         let lit = |port: usize, dx: usize, y: usize| frame.0[y][port * 26 + dx];
         assert!(lit(0, 0, 18) && lit(0, 2, 18));
@@ -949,9 +1010,15 @@ mod tests {
         }
         let mut button = selecting(1);
         let pages = RefCell::new(Capture::default());
+        let mut previous = None;
         // Reuse the previous frame's RAM: every byte, including erased pixels,
         // must be replaced as activity and status content change.
-        for now in [0, 200, 15_000, 17_600, 18_000] {
+        for now in [
+            0, 200, 400, 600, 800, 15_000, 17_600, 17_800, 18_000, 18_200,
+        ] {
+            if now == 400 {
+                status.ports[4].restore.as_mut().unwrap().progress = 0;
+            }
             if now == 17_600 {
                 status = Status::default();
             }
@@ -977,7 +1044,7 @@ mod tests {
             )
             .into_buffered_graphics_mode();
             driver.set_addr_mode(AddrMode::Horizontal).unwrap();
-            draw(&mut driver, &status, &view, now).unwrap();
+            draw(&mut driver, &view).unwrap();
             driver.flush().unwrap();
             if now < 17_600 {
                 let frame = full.borrow();
@@ -986,8 +1053,22 @@ mod tests {
                 for (x, column) in bar_row.iter().enumerate() {
                     assert_eq!(column & (1 << 5) != 0, x < 9);
                 }
+                if (400..=800).contains(&now) {
+                    let active = (now / FRAME_MS % 3) as usize;
+                    for i in 0..3 {
+                        let center = 4 * 26 + 4 + i * 7;
+                        assert_eq!(frame.pixels[4 * 128 + center] & (1 << 3) != 0, i == active);
+                    }
+                }
             }
-            for page in 0..8 {
+            let changed = view.changed_pages(previous.as_ref());
+            match now {
+                0 => assert_eq!(changed, 0xff),
+                200 | 17_800 | 18_000 => assert_eq!(changed, 0b11),
+                18_200 => assert_eq!(changed, 0),
+                _ => {}
+            }
+            for page in (0..8).filter(|p| changed & (1 << p) != 0) {
                 pages.borrow_mut().written = 0;
                 let mut driver = Ssd1306::new(
                     Interface(&pages),
@@ -996,12 +1077,13 @@ mod tests {
                 )
                 .into_buffered_graphics_mode();
                 driver.set_addr_mode(AddrMode::Horizontal).unwrap();
-                draw_page(&mut driver, page, &status, &view, now).unwrap();
+                draw_page(&mut driver, page, &view).unwrap();
                 driver.flush().unwrap();
                 assert_eq!(pages.borrow().written, 128);
                 assert_eq!(pages.borrow().max_write, 128);
             }
             assert_eq!(pages.borrow().pixels, full.borrow().pixels);
+            previous = Some(view);
         }
     }
 }
