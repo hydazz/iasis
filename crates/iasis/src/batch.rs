@@ -572,7 +572,7 @@ mod tests {
         };
         let mut status = Status::default();
         status.ports[2].generation = 12;
-        status.ports[2].state = PortState::Ready;
+        status.ports[2].state = PortState::Contract;
         status.button = Some(protocol::ButtonEvent {
             id: 1,
             session: Some(7),
