@@ -30,10 +30,10 @@ Development USB IDs are `1209:0001`. Set `IASIS_USB_VID` and `IASIS_USB_PID` as 
 
 Ports start enabled and reserve power only while attached. Disabling a port opens CC and discharges VBUS. Re-enabling it also retries a fault. ADC, protection, I²C or voltage faults turn off the affected source requests.
 
-| Supply path     | Target offer           | Budget                                                                                               |
-| --------------- | ---------------------- | ---------------------------------------------------------------------------------------------------- |
-| Host presence   | Fixed 5 V / 0 mA PDO   | 800 mA reserved for Iasis; remaining current selects the aggregate limit below                       |
-| Charging supply | Fixed 5 V / 500 mA PDO | 80% of input power, less 3.5 W for logic, 35 W for a powered CM5 carrier and 6 W per attached target |
+| Supply path     | Target offer                                | Budget                                                                                      |
+| --------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Host presence   | Fixed 5 V / 0 mA PDO                        | 800 mA reserved for Iasis; remaining current selects the aggregate limit below              |
+| Charging supply | Fixed 5, 9, 15 or 20 V, up to 3 A per cable | 80% of qualified input power, less 3.5 W for logic and 35 W when the CM5 carrier is powered |
 
 The host path supports attachment and signalling with charged targets. Its current limit is shared across ports; the 0 mA PDO does not prevent pre-contract draw.
 
@@ -46,11 +46,11 @@ The host path supports attachment and signalling with charged targets. Its curre
 
 Native USB-C Rp supplies the allowance. On legacy A-to-C connections, `host-budget <mA>` declares the remaining allowance including Iasis, up to 1600 mA. It clears on USB reset and never overrides native Rp.
 
-The charging path requires a confirmed CH224 contract, power-good and 7–21 V on the input bus. It configures each converter for 5.10 V with a 1 A limit, checks safe-zero before connecting and checks output voltage before starting PD.
+On the charging input, Iasis requests the highest-power fixed profile it supports, up to 20 V. The host USB port stays at 5 V.
 
-The Rev A charging input supports fixed profiles up to 20 V. Firmware leaves normal 9–20 V input contracts unchanged. If the bus exceeds 21 V (20 V plus tolerance), it requests fixed 20 V and withholds target power until fresh contract, power-good and voltage readings allow it. The host USB port never requests a voltage above 5 V.
+Ports start at 5 V and share the charging budget as targets connect and disconnect. Each target chooses from the profiles its port offers. A port waits if the supply cannot cover its starting allowance. During a restore, Iasis keeps the target at its negotiated voltage while power is available.
 
-When a brick is inserted, attached host-powered ports can keep their output path if the presence limit fits both supplies. Removing the brick from a brick-powered target drops its VBUS and can disconnect USB while the controller stays online. Leave the power source and any inline meter connected throughout a restore.
+Leave the power supply connected throughout a restore. Changing the input can interrupt USB to the targets while the controller stays online.
 
 ## Controls and status
 

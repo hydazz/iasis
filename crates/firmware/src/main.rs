@@ -227,7 +227,9 @@ async fn main(_spawner: Spawner) {
             next.bus_voltage_adc = adc.read(&mut channels[5]).await.ok();
             next.thermistor_adc[0] = adc.read(&mut channels[6]).await.ok();
             next.thermistor_adc[1] = adc.read(&mut channels[7]).await.ok();
-            if Instant::now().as_millis() >= upstream_due {
+            if (!ports.transitioning() || next.supply == Supply::HostPresence)
+                && Instant::now().as_millis() >= upstream_due
+            {
                 if let Ok(outputs) = &mut outputs {
                     upstream.sample(&mut bus, outputs, &mut next).await;
                 }
@@ -236,7 +238,9 @@ async fn main(_spawner: Spawner) {
                     host_deadline.set(upstream.allowance_deadline().max(1));
                 }
             }
-            if Instant::now().as_millis() >= metadata_due {
+            if Instant::now().as_millis() >= metadata_due
+                && (!ports.transitioning() || Instant::now().as_millis() >= metadata_due + 50)
+            {
                 bus.sample(&mut next).await;
                 metadata_due = Instant::now().as_millis() + 50;
             }
@@ -255,27 +259,35 @@ async fn main(_spawner: Spawner) {
                 configured.get() && !suspended.get(),
                 host_budget.get(),
             );
+            let qualified_mv = bus.brick_voltage_mv(&next);
             let host_tier = iasis_pd::power::presence_limit(
                 next.host_allowance_ma,
                 next.bus_voltage_adc,
                 next.ch224_status,
-                next.ch224_current_50ma,
+                qualified_mv.and(next.ch224_current_50ma),
                 brick_power_good,
                 controls.side_power_enabled(),
             );
-            let brick_ports = if next.i2c_root_fault || next.aggregate_power_fault {
+            next.charging_budget_mw = if next.i2c_root_fault || next.aggregate_power_fault {
                 0
             } else {
-                iasis_pd::power::available_ports(
-                    next.bus_voltage_adc,
-                    next.ch224_status,
-                    next.ch224_current_50ma,
-                    brick_power_good,
-                    controls.side_power_enabled(),
-                )
+                qualified_mv.map_or(0, |mv| {
+                    iasis_pd::power::charging_budget_mw(
+                        mv as u16,
+                        next.ch224_current_50ma.unwrap_or(0),
+                        controls.side_power_enabled(),
+                    )
+                })
             };
+            let brick_ports = (next.charging_budget_mw / iasis_pd::Contract::USB_DEFAULT.cost_mw())
+                .min(protocol::PORT_COUNT as u32) as u8;
             let previous_supply = next.supply;
-            next.supply = if host_tier.is_some() && ports.using_host() {
+            next.supply = if next.i2c_root_fault
+                || next.aggregate_power_fault
+                || bus.brick_upgrade_pending(&next)
+            {
+                Supply::Off
+            } else if host_tier.is_some() && ports.restoring_on_host() {
                 Supply::HostPresence
             } else if brick_ports > 0 {
                 Supply::Brick
@@ -284,9 +296,6 @@ async fn main(_spawner: Spawner) {
             } else {
                 Supply::Off
             };
-            if next.i2c_root_fault || next.aggregate_power_fault {
-                next.supply = Supply::Off;
-            }
             next.available_ports = match next.supply {
                 Supply::Off => 0,
                 Supply::HostPresence => 5,
@@ -344,7 +353,9 @@ async fn main(_spawner: Spawner) {
             next.side_power_enabled = controls.side_power_enabled();
             next.shift_outputs_enabled = controls.shift_outputs_enabled();
             next.uptime_ms = Instant::now().as_millis();
-            oled.tick(&mut bus, &next, &button, next.uptime_ms).await;
+            if !ports.transitioning() {
+                oled.tick(&mut bus, &next, &button, next.uptime_ms).await;
+            }
             next.i2c_root_fault |= bus.faulted();
             // USB feedback can arrive during the I²C work above. Apply it
             // before selecting targets for a button action in this pass.
@@ -395,7 +406,7 @@ async fn main(_spawner: Spawner) {
                 }
             }
             status.set(next);
-            if Instant::now().as_millis() >= panel_due {
+            if !ports.transitioning() && Instant::now().as_millis() >= panel_due {
                 let frame = iasis_firmware::panel::indicators(&next, &button, now);
                 if last_led_frame != Some(frame) {
                     let colors = frame.map(|[r, g, b]| smart_leds::RGB8 { r, g, b });
@@ -407,7 +418,11 @@ async fn main(_spawner: Spawner) {
                 panel_due = Instant::now().as_millis() + 100;
             }
             watchdog.feed(Duration::from_secs(2));
-            Timer::after_millis(2).await;
+            if ports.transitioning() {
+                Timer::after_micros(200).await;
+            } else {
+                Timer::after_millis(2).await;
+            }
         }
     };
     join3(usb.run(), sample, guard).await;

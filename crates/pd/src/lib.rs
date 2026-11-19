@@ -7,13 +7,17 @@
 //! [`Link`] owns message counters; callers own retries and power transitions.
 
 mod apple;
+pub mod brick;
 mod link;
 pub mod power;
 mod source;
 
 pub use apple::{APPLE_REBOOT, APPLE_SILICON_DFU, APPLE_T2_DFU};
 pub use link::Link;
-pub use source::{FixedRequest, RequestError, fixed_5v, validate_fixed_5v_request};
+pub use source::{
+    ChangeError, ChangeStep, Contract, FixedRequest, RailChange, RequestError, fixed_5v,
+    fixed_contract, fixed_offers, nominal_limit_ma, validate_fixed_5v_request, voltage_window,
+};
 
 pub const MAX_OBJECTS: usize = 7;
 /// SOP tokens, PACKSYM, header, seven objects and four trailing TX commands.
