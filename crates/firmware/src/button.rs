@@ -1,12 +1,16 @@
 //! One-button target selection, local signalling and host restore confirmation.
 //!
 //! A tap moves the selection through All and each occupied port. Holding steps
-//! through the actions; releasing sends the one reached, and holding past the
-//! last sends nothing.
+//! through the actions the selected targets take; releasing sends the one
+//! reached, and holding past the last sends nothing.
 
+use heapless::Vec;
 use iasis_protocol::{
     ButtonEvent, Gesture, Port, RestoreArm, RestoreDecision, RestorePhase, Status,
 };
+
+/// The order a hold steps through.
+const GESTURES: [Gesture; 3] = [Gesture::Dfu, Gesture::Reboot, Gesture::Restore];
 
 const DEBOUNCE_MS: u64 = 30;
 const HOLD_MS: u64 = 500;
@@ -28,8 +32,8 @@ pub struct Button {
     session: Option<u32>,
     armed: Option<RestoreArm>,
     generations: [u32; 5],
-    /// Selected ports that would accept an action.
-    targets: u8,
+    /// Selected targets each gesture would reach, in `GESTURES` order.
+    targets: [u8; 3],
     raw: bool,
     raw_since: u64,
     pressed: bool,
@@ -49,18 +53,17 @@ impl Button {
         self.armed
     }
 
-    /// Actions a hold steps through, in order.
-    pub fn actions(&self) -> &'static [Gesture] {
-        if self.session.is_some() {
-            &[Gesture::Dfu, Gesture::Reboot, Gesture::Restore]
-        } else {
-            &[Gesture::Dfu, Gesture::Reboot]
-        }
+    /// Actions a hold steps through, in order: those a selected target takes.
+    pub fn actions(&self) -> Vec<Gesture, 3> {
+        GESTURES
+            .into_iter()
+            .filter(|gesture| self.targets[*gesture as usize] != 0)
+            .collect()
     }
 
     /// The action a release would send now.
     pub fn held(&self, now: u64) -> Option<Gesture> {
-        if !self.pressed || self.consumed || self.armed.is_some() || self.targets == 0 {
+        if !self.pressed || self.consumed || self.armed.is_some() {
             return None;
         }
         self.stop(now.saturating_sub(self.pressed_since))
@@ -71,11 +74,18 @@ impl Button {
     pub fn marked(&self, status: &Status, now: u64) -> u8 {
         if let Some(arm) = self.armed {
             arm.ports
-        } else if self.held(now).is_some() {
-            self.targets
+        } else if let Some(gesture) = self.held(now) {
+            self.targets[gesture as usize]
         } else {
             self.selected_mask() & status.occupied_mask()
         }
+    }
+
+    /// Selected targets some hold would reach.
+    pub fn reach(&self) -> u8 {
+        self.targets
+            .into_iter()
+            .fold(0, |all, targets| all | targets)
     }
 
     pub fn notice(&self, now: u64) -> Option<&'static str> {
@@ -164,9 +174,17 @@ impl Button {
             _ => self.vacant_since = None,
         }
         let generations = status.ports.map(|port| port.generation);
-        let targets = self.selected_mask() & status.ready_mask();
+        // A restore request needs a host waiting for it.
+        let targets = GESTURES.map(|gesture| {
+            if gesture == Gesture::Restore && self.session.is_none() {
+                0
+            } else {
+                self.selected_mask() & status.gesture_mask(gesture)
+            }
+        });
+        let reach = targets.into_iter().fold(0, |all, targets| all | targets);
         let moved = targets != self.targets
-            || (0..5).any(|i| targets & (1 << i) != 0 && generations[i] != self.generations[i]);
+            || (0..5).any(|i| reach & (1 << i) != 0 && generations[i] != self.generations[i]);
         // Once an action is on offer its targets must hold until release.
         if moved
             && self.pressed
@@ -240,8 +258,8 @@ impl Button {
                 .find(|port| occupied & (1 << port.index()) != 0);
             return None;
         }
-        if self.targets == 0 {
-            self.tell("No ready targets", now);
+        if self.reach() == 0 {
+            self.tell("No actions available", now);
             return None;
         }
         let gesture = self.stop(held_ms)?;
@@ -257,7 +275,7 @@ impl Button {
         Some(Event::Action(ButtonEvent {
             id: self.next_id,
             gesture,
-            ports: self.targets,
+            ports: self.targets[gesture as usize],
             generations: self.generations,
             session: if gesture == Gesture::Restore {
                 self.session
@@ -271,7 +289,11 @@ impl Button {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iasis_protocol::{PortState, RestoreStatus};
+    use iasis_protocol::{DebugActions, PortState, RestoreStatus};
+
+    /// A Mac's DFU port lists DFU and reboot among its actions.
+    const DFU_PORT: DebugActions =
+        DebugActions::Listed([0x4606, 0x0606, 0x0106, 0x0105, 0, 0, 0, 0, 0, 0, 0, 0]);
 
     struct Rig {
         button: Button,
@@ -292,6 +314,7 @@ mod tests {
             };
             for (i, port) in rig.status.ports.iter_mut().enumerate() {
                 port.generation = 1;
+                port.debug_actions = DFU_PORT;
                 port.state = if occupied & (1 << i) != 0 {
                     PortState::Contract
                 } else {
@@ -376,7 +399,66 @@ mod tests {
         assert_eq!(empty.tap(), None);
         assert_eq!(empty.selected(), None);
         assert_eq!(empty.hold(0), None);
-        assert_eq!(empty.button.notice(empty.now), Some("No ready targets"));
+        assert_eq!(empty.button.notice(empty.now), Some("No actions available"));
+    }
+
+    #[test]
+    fn a_command_needs_the_action_its_message_performs() {
+        use iasis_pd::apple;
+        use iasis_protocol::PortAction;
+        for (command, words) in [
+            (PortAction::DfuAppleSilicon, apple::SILICON_DFU),
+            (PortAction::DfuT2, apple::T2_DFU),
+            (PortAction::Reboot, apple::REBOOT),
+        ] {
+            assert_eq!(command.debug_action(), Some(apple::action(&words)));
+        }
+    }
+
+    #[test]
+    fn a_hold_offers_only_what_the_selected_targets_list() {
+        let mut r = Rig::new(0b01111);
+        // A cable that hides Apple debug, a port without the debug actions,
+        // and one that lists reboot alone.
+        r.status.ports[1].debug_actions = DebugActions::Silent;
+        r.status.ports[2].debug_actions =
+            DebugActions::Listed([0x0302, 0x0501, 0x0301, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        r.status.ports[3].debug_actions =
+            DebugActions::Listed([0x0105, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        r.sample(false, 10);
+        assert_eq!(r.button.actions(), [Gesture::Dfu, Gesture::Reboot]);
+        assert_eq!(r.button.reach(), 0b01001);
+        assert!(action(Gesture::Dfu, 0b00001, None)(r.hold(0)));
+        assert!(action(Gesture::Reboot, 0b01001, None)(r.hold(1)));
+
+        r.tap();
+        r.tap();
+        r.sample(false, 10);
+        assert_eq!(r.selected(), Some(2));
+        assert!(r.button.actions().is_empty());
+        r.press();
+        r.sample(true, HOLD_MS);
+        assert_eq!(r.button.held(r.now), None);
+        assert_eq!(r.release(), None);
+        assert_eq!(r.button.notice(r.now), Some("No actions available"));
+        // It can still be restored: the host may find it already in DFU.
+        r.session = Some(7);
+        r.sample(false, 10);
+        assert_eq!(r.button.actions(), [Gesture::Restore]);
+        assert!(action(Gesture::Restore, 0b00010, Some(7))(r.hold(0)));
+
+        r.tap();
+        r.tap();
+        r.sample(false, 10);
+        assert_eq!(r.selected(), Some(4));
+        assert_eq!(r.button.actions(), [Gesture::Reboot, Gesture::Restore]);
+        assert!(action(Gesture::Reboot, 0b01000, None)(r.hold(0)));
+
+        // An answer still awaited offers nothing yet.
+        r.session = None;
+        r.status.ports[3].debug_actions = DebugActions::Pending;
+        r.sample(false, 10);
+        assert!(r.button.actions().is_empty());
     }
 
     #[test]

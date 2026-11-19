@@ -10,8 +10,8 @@ Messages use vendor control transfers on interface 0.
 | ------------------------ | --------------------------------------------------------- |
 | Request type / recipient | Vendor / interface                                        |
 | `wIndex`                 | `0`                                                       |
-| `wValue`                 | Protocol version, `8`                                     |
-| Maximum payload          | 1024 bytes                                                |
+| `wValue`                 | Protocol version, `9`                                     |
+| Maximum payload          | 1152 bytes                                                |
 | Payload header           | ASCII `IASI`, then a little-endian `u16` protocol version |
 | Payload body             | Postcard-encoded message                                  |
 
@@ -36,6 +36,8 @@ Status reports the brick’s source PDOs, requested voltage and qualified input 
 After a trip the port reports its `error` and `fault_sample` until an attachment next becomes ready, a held-off port sees its target unplugged, or the port is enabled again. The sample records the uptime of the trip, port state, connector ADC, local fault pins, and active and pending contracts. Each contract includes voltage, operating current and current limit. A missing contract is `None`.
 
 `recoveries` counts trips since boot. `pd_write_retries` counts PD frames the port controller refused on a busy line and firmware wrote again. `hard_resets_sent` and `hard_resets_received` count PD hard resets by their sender; each removes VBUS from the target for about a second. `requests_rejected` counts requests the port answered with Reject.
+
+`debug_actions` is the target's answer to the Apple debug Get Action List query, asked once a contract has settled: `Pending` before an answer, `Silent` after three asks without one, or `Listed` with up to twelve action IDs, zero padded. A DFU or reboot command for a target that does not list its action (`0x0106` for Apple Silicon DFU, `0x0105` for reboot and T2 DFU), or a DFU command on a port that does not list DFU USB (`0x0606`), fails with `Unsupported`, or `NotReady` while the answer is pending.
 
 `PortProtection` identifies the local CC or power inputs that triggered the trip. The local power input is shared by the port’s host eFuse and charging converter. If it trips with the converter on, `converter_status` records TPS55288 STATUS after the output switch opens and before converter shutdown, when readable. `HostLimiter` identifies the shared host limiter. TPS55288 errors report the observed STATUS (0x07), MODE (0x06), current-limit (0x02) or failed readback register value. I²C errors identify the operation, 7-bit address, register or mux selection, exposed mux channel mask and failure reason.
 

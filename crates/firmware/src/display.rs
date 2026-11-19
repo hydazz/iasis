@@ -12,11 +12,11 @@ use embedded_graphics::{
     primitives::{Line, PrimitiveStyle, Rectangle},
     text::{Baseline, Text},
 };
-use heapless::String;
+use heapless::{String, Vec};
 use iasis_pd::power::millivolts;
 use iasis_protocol::{
-    CommandError, CommandResult, Gesture, Orientation, Port, PortError, PortState, PortStatus,
-    RestorePhase, Status, Supply,
+    CommandError, CommandResult, Gesture, Orientation, Port, PortAction, PortError, PortState,
+    PortStatus, RestorePhase, Status, Supply,
 };
 
 use crate::button::Button;
@@ -44,9 +44,11 @@ const USB: &[&str] = &[
 pub struct View {
     /// Highlighted ports.
     pub ports: u8,
+    /// Highlighted ports a hold reaches, drawn filled; the rest are outlined.
+    pub targets: u8,
     pub connected: bool,
     /// The actions a hold steps through and the one a release would send.
-    pub held: Option<(&'static [Gesture], Gesture)>,
+    pub held: Option<(Vec<Gesture, 3>, Gesture)>,
     /// Measured connector voltage beneath each port.
     pub cells: [String<4>; 5],
     pub lines: [String<32>; 2],
@@ -56,8 +58,15 @@ pub struct View {
 /// confirmation, the held action, the selected port's fault or job, button
 /// feedback, then readings for the selected port or the whole board.
 pub fn view(status: &Status, button: &Button, now: u64) -> View {
+    let ports = button.marked(status, now);
+    let acting = button.armed().is_some() || button.held(now).is_some();
     let mut view = View {
-        ports: button.marked(status, now),
+        ports,
+        targets: if acting {
+            ports
+        } else {
+            ports & button.reach()
+        },
         connected: button.host_prepared(),
         held: None,
         cells: Default::default(),
@@ -136,6 +145,12 @@ pub fn label(port: &PortStatus) -> &'static str {
         PortState::Unattached => "--",
         PortState::Debouncing => "CC",
         PortState::Starting => "STRT",
+        // Charging only: the target lists neither DFU nor reboot.
+        PortState::Contract
+            if !port.offers(PortAction::DfuAppleSilicon) && !port.offers(PortAction::Reboot) =>
+        {
+            "CHG"
+        }
         PortState::Contract => "RDY",
         PortState::Ready if port.pd_transition => "STRT",
         PortState::Ready => "?",
@@ -248,6 +263,7 @@ fn details(status: &Status, port: &PortStatus) -> [String<32>; 2] {
                 CommandError::Busy => "Target busy",
                 CommandError::Hardware => "Command HW error",
                 CommandError::Transmission => "Signal failed",
+                CommandError::Unsupported => "Target lacks action",
             },
             _ => "",
         }
@@ -375,10 +391,10 @@ pub fn draw<D: DrawTarget<Color = BinaryColor>>(
     for physical in Port::ALL {
         let x = physical.index() as i32 * 26;
         let port = &status.ports[physical.index()];
-        // A highlighted target is filled; any other highlighted port is
-        // outlined, since a hold would pass it by.
+        // A highlighted port a hold reaches is filled; any other
+        // highlighted port is outlined.
         let marked = view.ports & (1 << physical.index()) != 0;
-        let target_port = marked && port.identified();
+        let target_port = view.targets & (1 << physical.index()) != 0;
         if target_port {
             fill(target, x, 14, 23, 10)?;
         } else if marked {
@@ -417,13 +433,13 @@ pub fn draw<D: DrawTarget<Color = BinaryColor>>(
         }
     }
     line(target, (0, 39), (127, 39), ON)?;
-    if let Some((actions, held)) = view.held {
+    if let Some((actions, held)) = &view.held {
         let width = |action: Gesture| name(action).len() as i32 * 6;
         let total: i32 = actions.iter().map(|action| width(*action)).sum();
         let gap = (128 - total) / (actions.len() as i32 + 1);
         let mut x = gap;
         for &action in actions {
-            if action == held {
+            if action == *held {
                 fill(target, x - 3, 45, width(action) as u32 + 5, 14)?;
             }
             text(
@@ -432,7 +448,7 @@ pub fn draw<D: DrawTarget<Color = BinaryColor>>(
                 x,
                 47,
                 false,
-                if action == held { OFF } else { ON },
+                if action == *held { OFF } else { ON },
             )?;
             x += width(action) + gap;
         }
@@ -583,12 +599,16 @@ fn face<D: DrawTarget<Color = BinaryColor>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iasis_protocol::RestoreStatus;
+    use iasis_protocol::{DebugActions, RestoreStatus};
 
+    /// A target on its DFU port, which lists DFU and reboot.
     fn contract(mv: u16, ma: u16) -> PortStatus {
         PortStatus {
             enabled: true,
             state: PortState::Contract,
+            debug_actions: DebugActions::Listed([
+                0x0606, 0x0106, 0x0105, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            ]),
             supply: Supply::Brick,
             contract_mv: mv,
             contract_ma: ma,
@@ -686,20 +706,28 @@ mod tests {
             ..contract(0, 0)
         };
         status.ports[2].error = Some(PortError::Voltage);
-        let button = Button::default();
+        // A contract through a cable that hides Apple debug.
+        status.ports[3] = PortStatus {
+            debug_actions: DebugActions::Silent,
+            ..contract(9000, 2220)
+        };
+        let mut button = Button::default();
+        button.sample(&status, None, None, false, 0);
         let view = view(&status, &button, 0);
-        assert_eq!(view.ports, 0b111);
+        assert_eq!((view.ports, view.targets), (0b1111, 0b0001));
+        assert_eq!(label(&status.ports[0]), "RDY");
         assert_eq!(label(&status.ports[1]), "?");
+        assert_eq!(label(&status.ports[3]), "CHG");
         let mut frame = Frame([[false; 128]; 64]);
         draw(&mut frame, &status, &view, 0).unwrap();
         // The box spans x..x+23 on rows 14..24; column x+2 clears the digit.
         let lit = |port: usize, dx: usize, y: usize| frame.0[y][port * 26 + dx];
         assert!(lit(0, 0, 18) && lit(0, 2, 18));
-        for port in [1, 2] {
+        for port in [1, 2, 3] {
             assert!(lit(port, 0, 18) && lit(port, 22, 18) && lit(port, 2, 14));
             assert!(!lit(port, 2, 18));
         }
-        assert!(!lit(3, 0, 18));
+        assert!(!lit(4, 0, 18));
     }
 
     #[test]
@@ -786,7 +814,10 @@ mod tests {
         let held = view(&status, &button, 600);
         assert_eq!(
             held.held,
-            Some((&[Gesture::Dfu, Gesture::Reboot][..], Gesture::Dfu))
+            Some((
+                Vec::from_slice(&[Gesture::Dfu, Gesture::Reboot]).unwrap(),
+                Gesture::Dfu
+            ))
         );
         // The highlight narrows to the ports the action would reach.
         assert_eq!(held.ports, 1);
@@ -906,7 +937,10 @@ mod tests {
         let mut status = Status::default();
         for (index, port) in status.ports.iter_mut().enumerate() {
             port.vbus_adc = Some(520);
-            port.state = PortState::Contract;
+            *port = PortStatus {
+                vbus_adc: port.vbus_adc,
+                ..contract(0, 0)
+            };
             port.restore = Some(RestoreStatus {
                 ecid: index as u64 + 1,
                 phase: RestorePhase::Running,
