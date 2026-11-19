@@ -131,6 +131,12 @@ impl PortStatus {
             }
     }
 
+    /// The target holds a Power Delivery contract. Every supported target
+    /// negotiates one; a device that stays silent cannot take an action.
+    pub fn identified(&self) -> bool {
+        self.state == PortState::Contract
+    }
+
     pub fn latch_fault(&mut self, error: PortError, sample: FaultSample) {
         if self.fault_sample.is_none() {
             self.error = Some(error);
@@ -401,14 +407,14 @@ impl Status {
         mask
     }
 
-    /// Targets eligible for a local action or a prepared erase.
+    /// Identified targets eligible for a local action or a prepared erase.
     pub fn ready_mask(&self) -> u8 {
         if self.i2c_root_fault || self.aggregate_power_fault {
             return 0;
         }
         let mut mask = 0;
         for (i, port) in self.ports.iter().enumerate() {
-            if matches!(port.state, PortState::Ready | PortState::Contract)
+            if port.identified()
                 && !port.pd_transition
                 && port.error.is_none()
                 && port.command_result != CommandResult::Pending

@@ -136,7 +136,9 @@ pub fn label(port: &PortStatus) -> &'static str {
         PortState::Unattached => "--",
         PortState::Debouncing => "CC",
         PortState::Starting => "STRT",
-        PortState::Ready | PortState::Contract => "RDY",
+        PortState::Contract => "RDY",
+        PortState::Ready if port.pd_transition => "STRT",
+        PortState::Ready => "?",
         PortState::Discharging => "DISC",
         PortState::Fault => "ERR",
     }
@@ -280,8 +282,9 @@ fn amps(out: &mut impl Write, ma: u16) {
     }
 }
 
-/// The measured connector voltage leads. The contract below it is the most
-/// the sink may draw, not its draw: Iasis has no current sense.
+/// The measured connector voltage leads. The contract below it, watts in
+/// brackets, is the most the sink may draw, not its draw: Iasis has no
+/// current sense.
 fn readings(port: &PortStatus) -> [String<32>; 2] {
     if !port.occupied() {
         return pair("No target", "");
@@ -302,30 +305,30 @@ fn readings(port: &PortStatus) -> [String<32>; 2] {
             .unwrap();
     }
     if port.contract_ma > 0 {
-        write!(lines[1], "Contract {}V ", port.contract_mv / 1000).unwrap();
+        write!(lines[1], "{}V ", port.contract_mv / 1000).unwrap();
         amps(&mut lines[1], port.contract_ma);
         lines[1].push_str(" (").unwrap();
         watts(&mut lines[1], contract_mw(port));
         lines[1].push(')').unwrap();
+    } else if port.state == PortState::Ready && !port.pd_transition {
+        lines[1].push_str("Unknown device").unwrap();
     } else if port.supply == Supply::HostPresence {
         lines[1].push_str("Host power").unwrap();
-    } else if port.state == PortState::Ready {
-        lines[1].push_str("No PD contract").unwrap();
     }
     lines
 }
 
-/// Measured input voltage, then the watts contracts reserve out of the pool.
+/// Measured input voltage, then contract watts out of the pool.
 fn supply(status: &Status) -> String<32> {
     let mut line = String::new();
     if status.supply == Supply::Brick {
         if let Some(mv) = status.bus_voltage_adc.and_then(millivolts) {
-            write!(line, "{}.{}V in, ", mv / 1000, mv % 1000 / 100).unwrap();
+            write!(line, "{}.{}V  ", mv / 1000, mv % 1000 / 100).unwrap();
         }
         let reserved: u32 = status.ports.iter().map(contract_mw).sum();
         write!(
             line,
-            "{}/{}W reserved",
+            "{}/{}W",
             (reserved + 500) / 1000,
             (status.charging_budget_mw + 500) / 1000
         )
@@ -372,9 +375,14 @@ pub fn draw<D: DrawTarget<Color = BinaryColor>>(
     for physical in Port::ALL {
         let x = physical.index() as i32 * 26;
         let port = &status.ports[physical.index()];
-        let selected = view.ports & (1 << physical.index()) != 0;
-        if selected {
+        // A highlighted target is filled; any other highlighted port is
+        // outlined, since a hold would pass it by.
+        let marked = view.ports & (1 << physical.index()) != 0;
+        let target_port = marked && port.identified();
+        if target_port {
             fill(target, x, 14, 23, 10)?;
+        } else if marked {
+            outline(target, x, 14, 23, 10)?;
         }
         text(
             target,
@@ -382,7 +390,7 @@ pub fn draw<D: DrawTarget<Color = BinaryColor>>(
             x + 9,
             15,
             true,
-            if selected { OFF } else { ON },
+            if target_port { OFF } else { ON },
         )?;
         let value = label(port);
         text(
@@ -497,6 +505,18 @@ fn fill<D: DrawTarget<Color = BinaryColor>>(
         .draw(target)
 }
 
+fn outline<D: DrawTarget<Color = BinaryColor>>(
+    target: &mut D,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> Result<(), D::Error> {
+    Rectangle::new(Point::new(x, y), Size::new(width, height))
+        .into_styled(PrimitiveStyle::with_stroke(ON, 1))
+        .draw(target)
+}
+
 fn line<D: DrawTarget<Color = BinaryColor>>(
     target: &mut D,
     from: (i32, i32),
@@ -595,7 +615,7 @@ mod tests {
         for now in [0, 3000, 15_000, 90_000] {
             let view = view(&status, &one, now);
             assert_eq!(view.ports, 1);
-            assert_eq!(view.lines, pair("CC2", "Contract 5V 0.9A (4.5W)"));
+            assert_eq!(view.lines, pair("CC2", "5V 0.9A (4.5W)"));
         }
         let empty = selecting(2);
         let vacant = view(&status, &empty, 0);
@@ -616,13 +636,13 @@ mod tests {
             status.ports[0].vbus_adc = raw;
             assert_eq!(
                 view(&status, &button, 0).lines,
-                pair("CC2", "Contract 20V 2.25A (45W)")
+                pair("CC2", "20V 2.25A (45W)")
             );
         }
         status.ports[0].vbus_adc = Some(520);
         assert_eq!(
             view(&status, &button, 0).lines,
-            pair("VBUS 5.03V CC2", "Contract 20V 2.25A (45W)")
+            pair("VBUS 5.03V CC2", "20V 2.25A (45W)")
         );
         status.ports[0] = PortStatus {
             supply: Supply::HostPresence,
@@ -633,7 +653,53 @@ mod tests {
             state: PortState::Ready,
             ..contract(0, 0)
         };
-        assert_eq!(view(&status, &button, 0).lines[1], "No PD contract");
+        assert_eq!(view(&status, &button, 0).lines[1], "Unknown device");
+    }
+
+    #[test]
+    fn a_highlighted_target_is_filled_and_any_other_port_outlined() {
+        struct Frame([[bool; 128]; 64]);
+        impl OriginDimensions for Frame {
+            fn size(&self) -> Size {
+                SIZE
+            }
+        }
+        impl DrawTarget for Frame {
+            type Color = BinaryColor;
+            type Error = core::convert::Infallible;
+            fn draw_iter<I: IntoIterator<Item = Pixel<BinaryColor>>>(
+                &mut self,
+                pixels: I,
+            ) -> Result<(), Self::Error> {
+                for Pixel(point, color) in pixels {
+                    if (0..128).contains(&point.x) && (0..64).contains(&point.y) {
+                        self.0[point.y as usize][point.x as usize] = color.is_on();
+                    }
+                }
+                Ok(())
+            }
+        }
+        let mut status = Status::default();
+        status.ports[0] = contract(9000, 3000);
+        status.ports[1] = PortStatus {
+            state: PortState::Ready,
+            ..contract(0, 0)
+        };
+        status.ports[2].error = Some(PortError::Voltage);
+        let button = Button::default();
+        let view = view(&status, &button, 0);
+        assert_eq!(view.ports, 0b111);
+        assert_eq!(label(&status.ports[1]), "?");
+        let mut frame = Frame([[false; 128]; 64]);
+        draw(&mut frame, &status, &view, 0).unwrap();
+        // The box spans x..x+23 on rows 14..24; column x+2 clears the digit.
+        let lit = |port: usize, dx: usize, y: usize| frame.0[y][port * 26 + dx];
+        assert!(lit(0, 0, 18) && lit(0, 2, 18));
+        for port in [1, 2] {
+            assert!(lit(port, 0, 18) && lit(port, 22, 18) && lit(port, 2, 14));
+            assert!(!lit(port, 2, 18));
+        }
+        assert!(!lit(3, 0, 18));
     }
 
     #[test]
@@ -658,7 +724,7 @@ mod tests {
         let brick = view(&status, &button, 0);
         // An empty port's residual reading is not shown.
         assert_eq!(brick.cells, ["20V", "9.0V", "", "5.0V", ""]);
-        assert_eq!(brick.lines, pair("", "20.1V in, 52/68W reserved"));
+        assert_eq!(brick.lines, pair("", "20.1V  52/68W"));
 
         let host = Status {
             supply: Supply::HostPresence,
@@ -684,10 +750,7 @@ mod tests {
             ..contract(5000, 900)
         };
         let button = selecting(1);
-        assert_eq!(
-            view(&status, &button, 0).lines[1],
-            "Contract 5V 0.9A (4.5W)"
-        );
+        assert_eq!(view(&status, &button, 0).lines[1], "5V 0.9A (4.5W)");
         status.ports[1].restore = Some(RestoreStatus {
             ecid: 1,
             phase: RestorePhase::Running,
@@ -735,10 +798,7 @@ mod tests {
         status.ports[0].error = Some(PortError::HostLimiter);
         assert_eq!(view(&status, &button, 700).lines[0], "Host limiter tripped");
         status.ports[0].error = None;
-        assert_eq!(
-            view(&status, &button, 3200).lines[1],
-            "Contract 5V 0.9A (4.5W)"
-        );
+        assert_eq!(view(&status, &button, 3200).lines[1], "5V 0.9A (4.5W)");
     }
 
     #[test]
