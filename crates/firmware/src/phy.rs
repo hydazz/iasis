@@ -65,6 +65,10 @@ const SOP_DEBUG_PP: [u8; 4] = [0x12, 0x16, 0x1b, 0x13];
 const TRAILER: [u8; 4] = [0xff, 0x14, 0xfe, 0xa1];
 
 type Packet = Vec<u8, 30>;
+/// The data objects of one vendor message.
+pub type Objects = Vec<u32, 7>;
+/// tVDMSenderResponse, with margin for the service pass.
+const DEBUG_REPLY: Duration = Duration::from_millis(60);
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum Tx {
@@ -104,10 +108,13 @@ pub struct Phy<'a> {
     resets_sent: Cell<u16>,
     resets_received: Cell<u16>,
     debug_id: Cell<u8>,
+    /// The last vendor message a target sent over a debug SOP.
+    debug_reply: Cell<Option<Objects>>,
     /// Woken after every service pass; each has one waiter.
     line: Signal<NoopRawMutex, ()>,
     received: Signal<NoopRawMutex, ()>,
     completed: Signal<NoopRawMutex, ()>,
+    answered: Signal<NoopRawMutex, ()>,
     transmitter: Mutex<NoopRawMutex, ()>,
 }
 
@@ -128,9 +135,11 @@ impl<'a> Phy<'a> {
             resets_sent: Cell::new(0),
             resets_received: Cell::new(0),
             debug_id: Cell::new(0),
+            debug_reply: Cell::new(None),
             line: Signal::new(),
             received: Signal::new(),
             completed: Signal::new(),
+            answered: Signal::new(),
             transmitter: Mutex::new(()),
         }
     }
@@ -142,6 +151,7 @@ impl<'a> Phy<'a> {
         self.hard_sent.set(false);
         self.sent.set(None);
         self.inbox.borrow_mut().clear();
+        self.debug_reply.set(None);
         self.failure.set(None);
     }
 
@@ -302,6 +312,13 @@ impl<'a> Phy<'a> {
                 let good_crc = header & 0xf01f == 1;
                 // A revision 2.0 port without vendor messages ignores them.
                 let vendor = header & 0x801f == 15 && body != 0;
+                // Apple debug replies arrive over SOP′ Debug or SOP″ Debug.
+                if matches!(head[0] >> 5, 0b100 | 0b011) && vendor {
+                    let (words, _) = rest[..body].as_chunks::<4>();
+                    let objects = words.iter().map(|word| u32::from_le_bytes(*word));
+                    self.debug_reply.set(Some(objects.collect()));
+                    self.answered.signal(());
+                }
                 if head[0] & 0xe0 == 0xe0 && !good_crc && !vendor {
                     let mut packet = Packet::new();
                     let _ = packet.extend_from_slice(&head[1..]);
@@ -405,6 +422,19 @@ impl<'a> Phy<'a> {
         let id = self.debug_id.get();
         self.debug_id.set((id + 1) & 7);
         self.send(SOP_DEBUG_PP, &apple::message(id, objects)).await
+    }
+
+    /// Send one Apple debug query and take the target's reply. `None` after
+    /// `Tx::Sent` is a target that acknowledged and did not answer.
+    pub async fn ask_debug(&self, objects: &[u32]) -> Result<(Tx, Option<Objects>), PortError> {
+        self.debug_reply.set(None);
+        self.answered.reset();
+        let sent = self.send_debug(objects).await?;
+        if sent != Tx::Sent {
+            return Ok((sent, None));
+        }
+        let _ = with_timeout(DEBUG_REPLY, self.answered.wait()).await;
+        Ok((sent, self.debug_reply.take()))
     }
 }
 

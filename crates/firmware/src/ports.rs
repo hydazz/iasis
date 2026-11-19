@@ -16,9 +16,9 @@ use iasis_pd::{
     power::{self, PortDemand, SinkDemand},
 };
 use iasis_protocol::{
-    CommandError, CommandResult, FaultContract, FaultSample, Orientation, PORT_COUNT, PortAction,
-    PortCommand, PortError, PortFaults, PortState, PortStatus, RestoreFeedback, RestorePhase,
-    Supply,
+    CommandError, CommandResult, DebugActions, FaultContract, FaultSample, Orientation, PORT_COUNT,
+    PortAction, PortCommand, PortError, PortFaults, PortState, PortStatus, RestoreFeedback,
+    RestorePhase, Supply,
 };
 use usbpd::{
     protocol_layer::message::data::{
@@ -66,6 +66,10 @@ const STAGE_REST: Duration = Duration::from_millis(250);
 const OFFER_SETTLE: Duration = Duration::from_secs(1);
 /// tNoResponse: a sink silent for this long holds only the USB default.
 const NO_RESPONSE: Duration = Duration::from_secs(5);
+/// A target is asked for its debug actions this many times before it counts
+/// as silent, once its contract has held for OFFER_SETTLE.
+const ACTION_ASKS: u8 = 3;
+const ACTION_ASK_SPACING: Duration = Duration::from_secs(1);
 /// Failures inside this window count towards holding the port off.
 const STRIKE_WINDOW: Duration = Duration::from_secs(30);
 const STRIKES: u8 = 3;
@@ -208,6 +212,11 @@ impl Ports {
             _ if !matches!(status.state, PortState::Ready | PortState::Contract) => {
                 CommandResult::Failed(CommandError::NotReady)
             }
+            // A target that does not list the action would not answer it.
+            action if !status.offers(action) => CommandResult::Failed(match status.debug_actions {
+                DebugActions::Pending => CommandError::NotReady,
+                _ => CommandError::Unsupported,
+            }),
             action => {
                 port.action.set(Some(action));
                 CommandResult::Pending
@@ -235,6 +244,8 @@ impl Ports {
             listening: Cell::new(Instant::MIN),
             silent: Cell::new(false),
             rejected: Cell::new(0),
+            asks: Cell::new(0),
+            quiet: Cell::new(Instant::MIN),
             fault: Cell::new(None),
             stage_on: Cell::new(false),
             powered: Cell::new(false),
@@ -327,6 +338,10 @@ struct Port<'a> {
     /// No request arrived within NO_RESPONSE.
     silent: Cell<bool>,
     rejected: Cell<u16>,
+    /// Asks left for the target's debug actions.
+    asks: Cell<u8>,
+    /// The last exchange with the sink.
+    quiet: Cell<Instant>,
     fault: Cell<Option<PortError>>,
     stage_on: Cell<bool>,
     powered: Cell<bool>,
@@ -401,10 +416,13 @@ impl Port<'_> {
         }
     }
 
-    /// Begin waiting for a sink's first request.
+    /// Begin waiting for a sink's first request. What an earlier contract
+    /// learned about the target no longer holds.
     fn listen(&self) {
         self.listening.set(Instant::now());
         self.silent.set(false);
+        self.asks.set(ACTION_ASKS);
+        self.update(|status| status.debug_actions = DebugActions::Pending);
     }
 
     /// Tell the allocator what this port holds and wants.
@@ -567,10 +585,10 @@ impl Port<'_> {
             status.fault_sample = None;
         });
 
+        self.quiet.set(Instant::now());
         let policy = Policy {
             port: self,
             accepted: false,
-            quiet: Instant::now(),
             candidate: None,
         };
         let mut source = Source::<_, Clock, _>::new(PdPhy(&self.phy), policy, false);
@@ -587,6 +605,7 @@ impl Port<'_> {
     async fn supervise(&self) -> Result<(), PortError> {
         let mut open_since = None;
         let mut invalid_since = None;
+        let mut ask_due = Instant::MIN;
         loop {
             select(self.phy.changed(), Timer::after_millis(2)).await;
             let failure = self.phy.failure().or(self.fault.take());
@@ -629,6 +648,19 @@ impl Port<'_> {
                     self.signal(action).await?;
                 }
             }
+            // Ask for the debug actions under the rule new offers follow:
+            // the sink silent for OFFER_SETTLE and nothing waiting to be
+            // advertised, since revision 2.0 has no collision avoidance.
+            if !transition
+                && self.contract.get().is_some()
+                && self.asks.get() > 0
+                && self.quiet.get().elapsed() >= OFFER_SETTLE
+                && now >= ask_due
+                && self.offers.get() == self.current_offers()
+            {
+                self.discover().await?;
+                ask_due = Instant::now() + ACTION_ASK_SPACING;
+            }
             let expired = now_ms() >= self.shared.feedback_deadline.get();
             self.update(|status| {
                 status.pd_write_retries = self.phy.retries();
@@ -646,6 +678,25 @@ impl Port<'_> {
             });
             self.publish();
         }
+    }
+
+    /// Ask which Apple debug actions the target's port offers. A target that
+    /// never answers is silent; one busy line is not an answer.
+    async fn discover(&self) -> Result<(), PortError> {
+        let (sent, reply) = self.phy.ask_debug(&apple::ACTION_LIST).await?;
+        let listed = reply.as_deref().and_then(apple::actions);
+        let left = self.asks.get() - u8::from(sent != Tx::Collision || listed.is_some());
+        let result = match listed {
+            Some(list) => DebugActions::Listed(list),
+            None if left == 0 => DebugActions::Silent,
+            None => {
+                self.asks.set(left);
+                return Ok(());
+            }
+        };
+        self.asks.set(0);
+        self.update(|status| status.debug_actions = result);
+        Ok(())
     }
 
     /// Send an Apple debug action. Targets answer an empty vendor header
@@ -896,6 +947,7 @@ impl Port<'_> {
             status.pd_transition = false;
             status.pd_source_pdos = [0; 4];
             status.pd_request = None;
+            status.debug_actions = DebugActions::Pending;
             status.contract_mv = 0;
             status.contract_ma = 0;
             if action.is_some() || status.command_result == CommandResult::Pending {
@@ -1009,8 +1061,6 @@ struct Policy<'a, 'p> {
     port: &'a Port<'p>,
     /// A sink's request was accepted and awaits its supply transition.
     accepted: bool,
-    /// The last exchange with the sink.
-    quiet: Instant,
     /// Offers that differ from the advertised ones, and since when.
     candidate: Option<([u32; 4], Instant)>,
 }
@@ -1031,7 +1081,7 @@ impl DevicePolicyManager for Policy<'_, '_> {
         let PowerSource::FixedVariableSupply(request) = request else {
             return CapabilityResponse::Reject;
         };
-        self.quiet = Instant::now();
+        self.port.quiet.set(Instant::now());
         self.accepted = self.port.accept(request.0);
         if self.accepted {
             CapabilityResponse::Accept
@@ -1049,13 +1099,13 @@ impl DevicePolicyManager for Policy<'_, '_> {
             return Ok(());
         }
         let moved = self.port.transition().await;
-        self.quiet = Instant::now();
+        self.port.quiet.set(Instant::now());
         moved.map_err(|error| self.port.fail(error))
     }
 
     async fn hard_reset(&mut self) -> Result<(), ()> {
         let cycled = self.port.power_cycle().await;
-        self.quiet = Instant::now();
+        self.port.quiet.set(Instant::now());
         cycled.map_err(|error| self.port.fail(error))
     }
 
@@ -1075,7 +1125,7 @@ impl DevicePolicyManager for Policy<'_, '_> {
             } else if self
                 .candidate
                 .is_some_and(|(_, since)| since.elapsed() >= OFFER_SETTLE)
-                && self.quiet.elapsed() >= OFFER_SETTLE
+                && self.port.quiet.get().elapsed() >= OFFER_SETTLE
             {
                 self.candidate = None;
                 self.port.offers.set(offers);
