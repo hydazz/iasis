@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use plist::{Dictionary, Value};
+use plist::{Value, plist};
 
 use super::{AppleDevice, AppleMode, Identity, IdentitySource};
 use crate::topology::UsbDevice;
@@ -22,10 +22,7 @@ pub(super) struct MuxDevice {
 
 pub(super) fn list() -> io::Result<Vec<MuxDevice>> {
     let mut socket = socket()?;
-    let response = mux_request(
-        &mut socket,
-        dictionary([("MessageType", "ListDevices".into())]),
-    )?;
+    let response = mux_request(&mut socket, plist!({ "MessageType": "ListDevices" }))?;
     parse_list(&response)
 }
 
@@ -56,11 +53,11 @@ fn query(id: u32) -> io::Result<AppleDevice> {
     let mut socket = socket()?;
     let response = mux_request(
         &mut socket,
-        dictionary([
-            ("MessageType", "Connect".into()),
-            ("DeviceID", id.into()),
-            ("PortNumber", u32::from(62078_u16.to_be()).into()),
-        ]),
+        plist!({
+            "MessageType": "Connect",
+            "DeviceID": id,
+            "PortNumber": u32::from(62078_u16.to_be()),
+        }),
     )?;
     if response
         .as_dictionary()
@@ -72,7 +69,7 @@ fn query(id: u32) -> io::Result<AppleDevice> {
             "usbmuxd could not connect to the target identity service",
         ));
     }
-    let response = service_request(&mut socket, dictionary([("Request", "QueryType".into())]))?;
+    let response = service_request(&mut socket, plist!({ "Request": "QueryType" }))?;
     let service = response
         .as_dictionary()
         .and_then(|v| v.get("Type"))
@@ -80,18 +77,12 @@ fn query(id: u32) -> io::Result<AppleDevice> {
         .ok_or_else(|| invalid("identity service did not return its type"))?;
     let (request, mode, source) = match service {
         "com.apple.mobile.restored" => (
-            dictionary([
-                ("Request", "QueryValue".into()),
-                ("QueryKey", "HardwareInfo".into()),
-            ]),
+            plist!({ "Request": "QueryValue", "QueryKey": "HardwareInfo" }),
             AppleMode::Restored,
             IdentitySource::Restored,
         ),
         "com.apple.mobile.lockdown" => (
-            dictionary([
-                ("Request", "GetValue".into()),
-                ("Key", "UniqueChipID".into()),
-            ]),
+            plist!({ "Request": "GetValue", "Key": "UniqueChipID" }),
             AppleMode::Normal,
             IdentitySource::Lockdown,
         ),
@@ -100,7 +91,7 @@ fn query(id: u32) -> io::Result<AppleDevice> {
     let response = service_request(&mut socket, request);
     if mode == AppleMode::Restored {
         // Close only this query session, as restored_client_free does.
-        let _ = service_request(&mut socket, dictionary([("Request", "Goodbye".into())]));
+        let _ = service_request(&mut socket, plist!({ "Request": "Goodbye" }));
     }
     let ecid = parse_identity_response(&response?, mode)?;
     Ok(AppleDevice {
@@ -189,15 +180,6 @@ fn socket() -> io::Result<UnixStream> {
     Ok(socket)
 }
 
-fn dictionary<const N: usize>(pairs: [(&str, Value); N]) -> Value {
-    Value::Dictionary(
-        pairs
-            .into_iter()
-            .map(|(key, value)| (key.to_owned(), value))
-            .collect::<Dictionary>(),
-    )
-}
-
 fn xml(mut request: Value) -> io::Result<Vec<u8>> {
     request
         .as_dictionary_mut()
@@ -278,37 +260,29 @@ mod tests {
 
     #[test]
     fn reads_restored_and_lockdown_unique_chip_id_without_string_guessing() {
-        let restored = dictionary([(
-            "HardwareInfo",
-            dictionary([("UniqueChipID", 0x12345678_u64.into())]),
-        )]);
+        let restored = plist!({ "HardwareInfo": { "UniqueChipID": 0x12345678_u64 } });
         assert_eq!(
             parse_identity_response(&restored, AppleMode::Restored).unwrap(),
             0x12345678
         );
         assert_eq!(
-            parse_identity_response(&dictionary([("Value", 42_u64.into())]), AppleMode::Normal)
-                .unwrap(),
+            parse_identity_response(&plist!({ "Value": 42_u64 }), AppleMode::Normal).unwrap(),
             42
         );
         for value in ["42".into(), 0_u64.into(), Value::Boolean(true)] {
             assert!(
-                parse_identity_response(&dictionary([("Value", value)]), AppleMode::Normal)
-                    .is_err()
+                parse_identity_response(&plist!({ "Value": value }), AppleMode::Normal).is_err()
             );
         }
         assert!(
-            parse_identity_response(
-                &dictionary([("Error", "GetProhibited".into())]),
-                AppleMode::Normal
-            )
-            .is_err()
+            parse_identity_response(&plist!({ "Error": "GetProhibited" }), AppleMode::Normal)
+                .is_err()
         );
     }
 
     #[test]
     fn validates_distinct_mux_and_service_framing_and_truncation() {
-        let payload = xml(dictionary([("Value", 42_u64.into())])).unwrap();
+        let payload = xml(plist!({ "Value": 42_u64 })).unwrap();
         let mut mux = Vec::new();
         for word in [payload.len() as u32 + 16, 1, 8, 1] {
             mux.extend(word.to_le_bytes());
