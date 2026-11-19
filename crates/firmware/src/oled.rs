@@ -4,7 +4,11 @@ use iasis_firmware::{
     display::{self, View},
 };
 use iasis_protocol::Status;
-use ssd1306::{Ssd1306Async, command::AddrMode, prelude::*};
+use ssd1306::{
+    Ssd1306Async,
+    command::{AddrMode, CommandAsync},
+    prelude::*,
+};
 
 use embassy_futures::yield_now;
 
@@ -17,16 +21,16 @@ const CHUNK: usize = 32;
 
 pub struct Oled {
     address: Option<u8>,
-    page: u8,
+    pending_pages: u8,
     due: u64,
-    frame: Option<(Status, View, u64)>,
+    frame: Option<View>,
 }
 
 impl Oled {
     pub fn new() -> Self {
         Self {
             address: None,
-            page: 0,
+            pending_pages: 0,
             due: 100,
             frame: None,
         }
@@ -39,8 +43,16 @@ impl Oled {
             self.offline(now);
             return;
         }
-        if now < self.due {
-            return;
+        if self.pending_pages == 0 {
+            if now < self.due {
+                return;
+            }
+            if self.address.is_some() {
+                let next = display::view(status, button, now);
+                self.due = now + display::FRAME_MS;
+                self.pending_pages = next.changed_pages(self.frame.as_ref());
+                self.frame = Some(next);
+            }
         }
         {
             let mut io = io.lock().await;
@@ -51,11 +63,15 @@ impl Oled {
             }
         }
         let result = if let Some(address) = self.address {
-            if self.page == 0 {
-                self.frame = Some((*status, display::view(status, button, now), now));
+            if self.pending_pages == 0 {
+                // Detect an unplug on a static screen without sending pixels.
+                CommandAsync::Noop
+                    .send(&mut Transport { io, address })
+                    .await
+            } else {
+                let index = self.pending_pages.trailing_zeros() as u8;
+                page(io, address, index, self.frame.as_ref().unwrap()).await
             }
-            let (status, view, at) = self.frame.as_ref().unwrap();
-            page(io, address, self.page, status, view, *at).await
         } else {
             // The Adafruit 938 defaults to 0x3d; its address jumper selects 0x3c.
             for address in [0x3d, 0x3c] {
@@ -77,17 +93,14 @@ impl Oled {
         let deselected = io.lock().await.bus.select(None).await.is_ok();
         if result.is_err() || !deselected {
             self.offline(now);
-        } else if self.frame.is_some() {
-            self.page = (self.page + 1) % 8;
-            if self.page == 0 {
-                self.due = self.frame.take().unwrap().2 + display::FRAME_MS;
-            }
+        } else if self.pending_pages != 0 {
+            self.pending_pages &= self.pending_pages - 1;
         }
     }
 
     fn offline(&mut self, now: u64) {
         self.address = None;
-        self.page = 0;
+        self.pending_pages = 0;
         self.frame = None;
         self.due = now + 5000;
     }
@@ -104,14 +117,7 @@ async fn init(io: &SharedIo, address: u8) -> Result<(), DisplayError> {
     driver.set_display_on(false).await
 }
 
-async fn page(
-    io: &SharedIo,
-    address: u8,
-    page: u8,
-    status: &Status,
-    view: &View,
-    now: u64,
-) -> Result<(), DisplayError> {
+async fn page(io: &SharedIo, address: u8, page: u8, view: &View) -> Result<(), DisplayError> {
     // The driver supplies SSD1306 packing and commands; clipping limits flush
     // to 128 data bytes.
     let mut driver = Ssd1306Async::new(
@@ -121,7 +127,7 @@ async fn page(
     )
     .into_buffered_graphics_mode();
     driver.set_addr_mode(AddrMode::Horizontal).await?;
-    display::draw_page(&mut driver, page, status, view, now)?;
+    display::draw_page(&mut driver, page, view)?;
     driver.flush().await?;
     if page == 7 {
         driver.set_display_on(true).await?;
