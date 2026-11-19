@@ -150,7 +150,7 @@ async fn main(_spawner: Spawner) {
     config.manufacturer = Some("Iasis");
     config.product = Some("Iasis");
     config.serial_number = Some(&serial_text);
-    config.device_class = 0xff;
+    config.device_class = 0; // The management interface declares its vendor class.
     config.device_sub_class = 0;
     config.device_protocol = 0;
     config.composite_with_iads = false;
