@@ -1,7 +1,9 @@
 //! USB management of an Iasis board.
 
+pub mod batch;
 pub mod dfu;
 pub mod identity;
+pub mod progress;
 pub mod restore;
 pub mod topology;
 
@@ -35,6 +37,8 @@ pub enum Error {
     Encode,
     #[error("this board connection is read-only")]
     ReadOnly,
+    #[error("this request requires exclusive control of the board")]
+    ExclusiveControlRequired,
     #[error("board does not support ROM updates")]
     UpdateUnsupported,
     #[error("board does not support port control")]
@@ -79,21 +83,22 @@ pub fn discover(ids: UsbIds) -> Result<Vec<DeviceInfo>, Error> {
         .collect())
 }
 
+#[derive(Clone)]
 pub struct Board {
     connection: Connection,
     info: Info,
     topology: Topology,
 }
 
+#[derive(Clone)]
 enum Connection {
     Control(Interface),
-    #[cfg(target_os = "macos")]
+    Listener(nusb::Device),
     Observer(nusb::Device),
-    #[cfg(not(target_os = "macos"))]
-    Observer(Interface),
 }
 
 impl Board {
+    /// Claim the management interface for power, port commands and firmware updates.
     pub fn open(device: &DeviceInfo) -> Result<Self, Error> {
         let interface = device
             .open()
@@ -103,12 +108,14 @@ impl Board {
         Self::from_connection(device, Connection::Control(interface))
     }
 
-    /// macOS permits status reads on endpoint zero while a restore owns the interface.
+    /// Read board status without claiming the management interface.
     pub fn observe(device: &DeviceInfo) -> Result<Self, Error> {
-        let handle = device.open().wait()?;
-        #[cfg(not(target_os = "macos"))]
-        let handle = handle.claim_interface(protocol::INTERFACE).wait()?;
-        Self::from_connection(device, Connection::Observer(handle))
+        Self::from_connection(device, Connection::Observer(device.open().wait()?))
+    }
+
+    /// Read status, manage the restore lease and send feedback alongside direct clients.
+    pub fn listen(device: &DeviceInfo) -> Result<Self, Error> {
+        Self::from_connection(device, Connection::Listener(device.open().wait()?))
     }
 
     fn from_connection(device: &DeviceInfo, connection: Connection) -> Result<Self, Error> {
@@ -252,23 +259,24 @@ impl Board {
     fn write(&self, request: u8, value: &impl Serialize) -> Result<(), Error> {
         let mut buffer = [0; protocol::MAX_PACKET];
         let data = protocol::encode(value, &mut buffer).map_err(|_| Error::Encode)?;
-        let interface = match &self.connection {
-            Connection::Control(interface) => interface,
-            Connection::Observer(_) => return Err(Error::ReadOnly),
+        let transfer = ControlOut {
+            control_type: ControlType::Vendor,
+            recipient: Recipient::Interface,
+            request,
+            value: protocol::VERSION,
+            index: protocol::INTERFACE.into(),
+            data,
         };
-        interface
-            .control_out(
-                ControlOut {
-                    control_type: ControlType::Vendor,
-                    recipient: Recipient::Interface,
-                    request,
-                    value: protocol::VERSION,
-                    index: protocol::INTERFACE.into(),
-                    data,
-                },
-                TIMEOUT,
-            )
-            .wait()?;
+        match &self.connection {
+            Connection::Control(interface) => interface.control_out(transfer, TIMEOUT).wait()?,
+            Connection::Listener(device) => match request {
+                protocol::RESTORE_CONTROL | protocol::RESTORE_FEEDBACK => {
+                    device.control_out(transfer, TIMEOUT).wait()?
+                }
+                _ => return Err(Error::ExclusiveControlRequired),
+            },
+            Connection::Observer(_) => return Err(Error::ReadOnly),
+        }
         Ok(())
     }
 }
@@ -284,7 +292,20 @@ fn read<T: DeserializeOwned>(connection: &Connection, request: u8) -> Result<T, 
     };
     let data = match connection {
         Connection::Control(interface) => interface.control_in(request, TIMEOUT).wait()?,
-        Connection::Observer(device) => device.control_in(request, TIMEOUT).wait()?,
+        Connection::Listener(device) | Connection::Observer(device) => {
+            device.control_in(request, TIMEOUT).wait()?
+        }
     };
     protocol::decode(&data).map_err(Error::Protocol)
+}
+
+pub fn parse_port(value: &str) -> Result<Port, String> {
+    Port::try_from(value.parse::<u8>().map_err(|error| error.to_string())?).map_err(str::to_owned)
+}
+
+pub fn parse_serial(value: &str) -> Result<u64, String> {
+    if value.len() != 16 {
+        return Err("serial must contain sixteen hexadecimal digits".into());
+    }
+    u64::from_str_radix(value, 16).map_err(|error| error.to_string())
 }
