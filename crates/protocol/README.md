@@ -53,7 +53,7 @@ Send a `PortCommand` with a nonzero request ID. USB acceptance queues the comman
 
 ## Button events and restore feedback
 
-Local DFU and reboot events carry the selected physical port mask and attachment generations. An OLED Restore selection sends a preparation request to the active host session. The host prepares the image and targets before issuing a restore arm.
+Local DFU and reboot events carry the selected physical port mask and attachment generations. Holding the button to Restore sends a preparation request for the selected targets to the active host session. The host prepares the image and targets before issuing a restore arm.
 
 A restore arm identifies the session, operation, target mask, attachment generations and deadline in board uptime. The host refreshes its three-second session lease. The arm expires within 20 seconds. A fresh three-second hold confirms the arm once. A tap cancels. USB reset, host-session loss and attachment changes invalidate pending confirmation. The host checks the confirmed identifiers, target ECIDs and current attachments before launching workers.
 
