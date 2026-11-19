@@ -12,7 +12,6 @@ pub struct Oled {
     address: Option<u8>,
     page: u8,
     due: u64,
-    probed: bool,
     frame: Option<(Status, View, u64)>,
 }
 
@@ -22,13 +21,8 @@ impl Oled {
             address: None,
             page: 0,
             due: 100,
-            probed: false,
             frame: None,
         }
-    }
-
-    pub fn present(&self) -> Option<bool> {
-        self.probed.then_some(self.address.is_some())
     }
 
     pub async fn tick(&mut self, bus: &mut Bus, status: &Status, button: &Button, now: u64) {
@@ -39,7 +33,6 @@ impl Oled {
         if now < self.due {
             return;
         }
-        self.probed = true;
         if bus.select(Some(7)).await.is_err() {
             self.offline(now);
             let _ = bus.select(None).await;

@@ -1,5 +1,5 @@
-use crate::button::{Action, Button, Mode};
-use iasis_protocol::{PortState, RestorePhase, Status};
+use crate::button::Button;
+use iasis_protocol::{Gesture, Port, PortState, RestorePhase, Status};
 
 /// RGB values in chain order: status, port 5 through port 1.
 pub fn colors(status: &Status) -> [[u8; 3]; 6] {
@@ -12,23 +12,19 @@ pub fn colors(status: &Status) -> [[u8; 3]; 6] {
     for (index, port) in status.ports.iter().enumerate() {
         pixels[5 - index] = if port.error.is_some() || port.state == PortState::Fault {
             [32, 0, 0]
-        } else if matches!(port.state, PortState::Disabled | PortState::Unattached)
-            || (port.orientation.is_none()
-                && matches!(port.state, PortState::WaitingPower | PortState::Discharging))
-        {
+        } else if !port.occupied() {
             [0; 3]
         } else if let Some(job) = port.restore {
             match job.phase {
                 RestorePhase::Preparing => [16, 8, 0],
                 RestorePhase::Running => [0, 4, 12 + job.progress.min(100) / 5],
-                RestorePhase::Reported => [0, 32, 0],
+                RestorePhase::Reported => [0, 12, 0],
                 RestorePhase::Unconfirmed => [20, 8, 0],
                 RestorePhase::Failed => [32, 0, 0],
             }
         } else {
             match port.state {
                 PortState::Ready | PortState::Contract => [0, 12, 0],
-                PortState::Fault => [32, 0, 0],
                 PortState::WaitingPower => [12, 5, 0],
                 _ => [0, 0, 6],
             }
@@ -37,70 +33,48 @@ pub fn colors(status: &Status) -> [[u8; 3]; 6] {
     pixels
 }
 
-/// Selection modulates brightness, preserving each port's state colour.
+/// Port colour shows state and brightness shows selection: ports outside the
+/// marked set are dimmed, faults excepted. The status LED shows the action a
+/// release would send, or an armed restore.
 pub fn indicators(status: &Status, control: &Button, now: u64) -> [[u8; 3]; 6] {
     let mut pixels = colors(status);
-    let phase = now % 1800;
-    let double_pulse = phase < 120 || (240..360).contains(&phase);
-    let marking =
-        matches!(control.mode, Mode::Selecting | Mode::Actions(_)) || control.armed().is_some();
-    for port in iasis_protocol::Port::ALL {
+    let marked = control.marked(status, now);
+    for port in Port::ALL {
         let pixel = &mut pixels[5 - port.index()];
-        if *pixel == [0; 3] {
+        let state = &status.ports[port.index()];
+        let job = state.restore.map(|job| job.phase);
+        if *pixel == [0; 3]
+            || state.error.is_some()
+            || state.state == PortState::Fault
+            || job == Some(RestorePhase::Failed)
+        {
             continue;
         }
-        let state = &status.ports[port.index()];
-        let fault = state.error.is_some()
-            || state.state == PortState::Fault
-            || state
-                .restore
-                .is_some_and(|job| job.phase == RestorePhase::Failed);
-        if !fault
-            && state
-                .restore
-                .is_some_and(|job| job.phase == RestorePhase::Reported)
-        {
-            *pixel = if control
+        if job == Some(RestorePhase::Reported)
+            && control
                 .completed(port, now)
                 .is_some_and(|since| (now - since) % 400 < 180)
-            {
-                [0, 32, 0]
-            } else {
-                [0, 12, 0]
-            };
+        {
+            *pixel = [0, 32, 0];
         }
-        if marking && control.selected_mask() & (1 << port.index()) != 0 && double_pulse {
-            *pixel = pixel.map(|value| value.saturating_add(value / 2));
+        if marked & (1 << port.index()) == 0 {
+            *pixel = pixel.map(|value| value.div_ceil(4));
         }
     }
     if !status.i2c_root_fault && !status.aggregate_power_fault {
-        pixels[0] = if control.armed().is_some() {
-            if now % 800 < 400 {
+        if control.armed().is_some() {
+            pixels[0] = if now % 800 < 400 {
                 [24, 0, 24]
             } else {
                 [6, 0, 6]
-            }
-        } else {
-            match control.mode {
-                Mode::Selecting => {
-                    if double_pulse {
-                        [20, 20, 20]
-                    } else {
-                        [3, 3, 3]
-                    }
-                }
-                Mode::Actions(action) => {
-                    let (on, dim) = match action {
-                        Action::Dfu => (phase < 180, [0, 8, 24]),
-                        Action::Reboot => (double_pulse, [24, 10, 0]),
-                        Action::Restore | Action::Details => (true, [0, 8, 12]),
-                        Action::Back => (double_pulse, [16, 16, 16]),
-                    };
-                    if on { dim } else { dim.map(|value| value / 6) }
-                }
-                _ => pixels[0],
-            }
-        };
+            };
+        } else if let Some(action) = control.held(now) {
+            pixels[0] = match action {
+                Gesture::Dfu => [0, 8, 24],
+                Gesture::Reboot => [24, 10, 0],
+                Gesture::Restore => [24, 0, 24],
+            };
+        }
     }
     pixels
 }
@@ -108,10 +82,18 @@ pub fn indicators(status: &Status, control: &Button, now: u64) -> [[u8; 3]; 6] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iasis_protocol::{PortState, RestoreStatus};
+    use iasis_protocol::{PortError, RestoreArm, RestoreStatus};
+
+    fn ready() -> Status {
+        let mut status = Status::default();
+        for port in &mut status.ports {
+            port.state = PortState::Contract;
+        }
+        status
+    }
 
     #[test]
-    fn empty_ports_stay_dark_during_all_and_individual_selection() {
+    fn empty_ports_stay_dark_whatever_is_selected() {
         let mut status = Status::default();
         for (port, state) in status.ports.iter_mut().zip([
             PortState::Unattached,
@@ -128,80 +110,97 @@ mod tests {
             phase: RestorePhase::Reported,
             progress: 100,
         });
-        for screen in [true, false] {
-            let mut button = Button::default();
-            button.sample(&status, Some(screen), None, None, false, 0);
-            if !screen {
-                button.mode = Mode::Selecting;
-            }
-            for selected in [None]
-                .into_iter()
-                .chain(iasis_protocol::Port::ALL.map(Some))
-            {
-                button.selected = selected;
-                for now in [0, 150, 250, 500] {
-                    assert_eq!(indicators(&status, &button, now)[1..], [[0; 3]; 5]);
-                }
+        let mut button = Button::default();
+        for selected in [None].into_iter().chain(Port::ALL.map(Some)) {
+            button.selected = selected;
+            for now in [0, 150, 250, 500] {
+                assert_eq!(indicators(&status, &button, now)[1..], [[0; 3]; 5]);
             }
         }
-        status.ports[0].error = Some(iasis_protocol::PortError::HostLimiter);
+        status.ports[0].error = Some(PortError::HostLimiter);
         status.ports[1].orientation = Some(iasis_protocol::Orientation::Cc1);
         assert_eq!(colors(&status)[5], [32, 0, 0]);
         assert_eq!(colors(&status)[4], [12, 5, 0]);
     }
 
     #[test]
-    fn idle_oled_and_details_keep_steady_colours_and_the_menu_marks_its_target() {
-        let mut status = Status::default();
-        status.ports[4].state = PortState::Ready;
+    fn ports_outside_the_selection_dim_and_faults_stay_bright() {
+        let mut status = ready();
+        status.ports[3].state = PortState::Fault;
+        status.ports[4].state = PortState::Unattached;
         let mut button = Button::default();
-        button.sample(&status, Some(true), None, None, false, 0);
         let steady = colors(&status);
-        for selected in [None, Some(iasis_protocol::Port::ALL[4])] {
-            button.selected = selected;
-            for mode in [Mode::Overview, Mode::Details(crate::display::Page::Voltage)] {
-                button.mode = mode;
-                for now in (0..3600).step_by(30) {
-                    assert_eq!(indicators(&status, &button, now), steady);
-                }
-            }
+        for now in (0..3600).step_by(30) {
+            assert_eq!(indicators(&status, &button, now), steady);
         }
-        button.mode = Mode::Actions(Action::Dfu);
-        assert_eq!(indicators(&status, &button, 0)[1], [0, 18, 0]);
-        assert_eq!(indicators(&status, &button, 150)[1], steady[1]);
+        button.selected = Some(Port::ALL[1]);
+        let pixels = indicators(&status, &button, 0);
+        assert_eq!(pixels[0], steady[0]);
+        assert_eq!(pixels[5], [0, 3, 0]);
+        assert_eq!(pixels[4], [0, 12, 0]);
+        assert_eq!(pixels[3], [0, 3, 0]);
+        assert_eq!(pixels[2], [32, 0, 0]);
+        assert_eq!(pixels[1], [0; 3]);
     }
 
     #[test]
-    fn led_selection_preserves_the_fault_colour_and_restore_is_distinct() {
-        let mut status = Status::default();
-        for port in &mut status.ports {
-            port.state = PortState::Contract;
-        }
+    fn the_status_led_shows_the_held_action_an_armed_restore_and_board_faults() {
+        let mut status = ready();
         let mut button = Button::default();
-        button.sample(&status, Some(false), Some(1), None, false, 0);
-        button.mode = Mode::Selecting;
-        button.selected = Some(iasis_protocol::Port::ALL[1]);
-        status.ports[1].state = PortState::Fault;
-        let selected = indicators(&status, &button, 0);
-        assert_eq!(selected[0], [20, 20, 20]);
-        assert_eq!(selected[4], [48, 0, 0]);
-        assert_eq!(selected[5], [0, 12, 0]);
-        assert_eq!(indicators(&status, &button, 200)[4], [32, 0, 0]);
-        button.mode = Mode::Actions(Action::Dfu);
-        assert_eq!(indicators(&status, &button, 0)[0], [0, 8, 24]);
-        button.mode = Mode::Actions(Action::Reboot);
-        assert_eq!(indicators(&status, &button, 250)[0], [24, 10, 0]);
-        let arm = iasis_protocol::RestoreArm {
+        let idle = colors(&status)[0];
+        let mut now = 0;
+        let mut sample = |button: &mut Button, status: &Status, arm, down, elapsed| {
+            now += elapsed;
+            button.sample(status, Some(1), arm, down, now);
+            now
+        };
+        sample(&mut button, &status, None, false, 1);
+        sample(&mut button, &status, None, true, 10);
+        let pressed = sample(&mut button, &status, None, true, 40);
+        assert_eq!(indicators(&status, &button, pressed)[0], idle);
+        for (elapsed, color) in [
+            (500, [0, 8, 24]),
+            (1500, [24, 10, 0]),
+            (1500, [24, 0, 24]),
+            (1500, idle),
+        ] {
+            let now = sample(&mut button, &status, None, true, elapsed);
+            assert_eq!(indicators(&status, &button, now)[0], color);
+        }
+        sample(&mut button, &status, None, false, 10);
+        sample(&mut button, &status, None, false, 40);
+
+        let arm = RestoreArm {
             session: 1,
             id: 1,
             ports: 1,
             generations: [0; 5],
-            expires: 20_000,
+            expires: 60_000,
         };
-        button.sample(&status, Some(false), Some(1), Some(arm), false, 100);
-        assert_eq!(indicators(&status, &button, 100)[0], [24, 0, 24]);
+        sample(&mut button, &status, Some(arm), false, 10);
+        let pixels = indicators(&status, &button, 8000);
+        assert_eq!(pixels[0], [24, 0, 24]);
+        assert_eq!(pixels[5], [0, 12, 0]);
+        assert_eq!(pixels[4], [0, 3, 0]);
+        assert_eq!(indicators(&status, &button, 8400)[0], [6, 0, 6]);
         status.aggregate_power_fault = true;
-        assert_eq!(indicators(&status, &button, 100)[0], [32, 0, 0]);
+        assert_eq!(indicators(&status, &button, 8000)[0], [32, 0, 0]);
+    }
+
+    #[test]
+    fn completion_flashes_then_rests_at_ready_brightness() {
+        let mut status = ready();
+        status.ports[0].restore = Some(RestoreStatus {
+            ecid: 1,
+            phase: RestorePhase::Reported,
+            progress: 100,
+        });
+        let mut button = Button::default();
+        button.sample(&status, None, None, false, 1000);
+        assert_eq!(indicators(&status, &button, 1000)[5], [0, 32, 0]);
+        assert_eq!(indicators(&status, &button, 1200)[5], [0, 12, 0]);
+        assert_eq!(indicators(&status, &button, 1400)[5], [0, 32, 0]);
+        assert_eq!(indicators(&status, &button, 2800)[5], [0, 12, 0]);
     }
 
     #[test]
@@ -209,6 +208,7 @@ mod tests {
         let mut status = Status::default();
         status.ports[0].state = PortState::Contract;
         assert_eq!(colors(&status)[5], [0, 12, 0]);
+        status.ports[4].state = PortState::Contract;
         for phase in [
             RestorePhase::Preparing,
             RestorePhase::Running,

@@ -60,13 +60,25 @@ Leave the power supply connected throughout a restore. Changing the input can in
 
 The [button and CLI controls](../../README.md#use) operate on ready ports. DFU supports Apple Silicon and T2; the button selects Apple Silicon. Commands use the attachment generation to reject requests for a device that has since disconnected.
 
-| LED colour | Meaning                                  |
+| Port light | Meaning                                  |
 | ---------- | ---------------------------------------- |
 | Off        | Empty or disabled target port            |
 | Green      | Ready for signalling or restore complete |
 | Blue       | Activity                                 |
 | Amber      | Preparation, waiting or unknown result   |
 | Red        | Fault or failure                         |
+| Dimmed     | Outside the selection                    |
+
+A fault keeps full brightness whatever is selected. While the button is held, the bright ports are the ones the action will reach.
+
+| Status light    | Meaning                                 |
+| --------------- | --------------------------------------- |
+| Teal            | Running                                 |
+| Blue            | Releasing the button sends DFU          |
+| Amber           | Releasing sends Reboot                  |
+| Purple          | Releasing asks the host for a restore   |
+| Blinking purple | Erase armed: hold 3 s, or tap to cancel |
+| Red             | Board fault; targets are off            |
 
 Some cables, including USB-C to Lightning, can keep the port green after the device is unplugged. Use `iasis ports` to list devices on the host.
 
@@ -74,7 +86,14 @@ Host restore feedback expires after five seconds without an update, changing the
 
 ## OLED
 
-Connect an [Adafruit 938](https://www.adafruit.com/product/938) to the display I²C connector. The 128×64 screen shows all five physical ports. Tap to inspect All or a single port and hold to open its action menu. Details shows connector readings for the selected target. A lightning bolt indicates brick power. The lower area shows available actions, restore progress and faults.
+Connect an [Adafruit 938](https://www.adafruit.com/product/938) to the display I²C connector. The 128×64 screen shows all five physical ports and highlights the selected ones. A lightning bolt indicates brick power and a USB symbol a waiting restore host.
+
+| Selection | Lower area                                                                                          |
+| --------- | --------------------------------------------------------------------------------------------------- |
+| All       | Voltage measured at each occupied connector, then the input voltage and the watts contracts reserve |
+| One port  | Voltage measured at its connector and the plug orientation, then its contract                       |
+
+A contract is the most a target may draw, not what it draws: `Contract 9V 3A (27W)` reserves 27 W of the supply whether or not the target uses it, and `50/68W reserved` totals those reservations against the watts available. Iasis measures voltage, not current. On host power the All view shows the host allowance and the shared target limit. Holding the button lists the actions and highlights the one a release will send. A fault, restore progress or button feedback replaces the readings.
 
 `RDY` means ready for signalling. During a restore run by Iasis, a moving mark means the worker is preparing or has yet to report progress. The bar under each port fills with the current stage and can start over at the next stage. Select a port to read its stage percentage. `DONE` means the worker reported completion. `UNKN` means the outcome is unknown. Restores started separately in Finder or Apple Configurator show progress on the host.
 
