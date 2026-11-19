@@ -4,7 +4,7 @@
 
 ## USB transport
 
-Messages use vendor control transfers on interface 0.
+Messages use vendor control transfers on endpoint zero, addressed to interface 0. On macOS and Linux, clients can read identity and status, manage the restore lease and send worker feedback without claiming the interface. Clients claim interface 0 before issuing a port command, changing the host power allowance or requesting a firmware update.
 
 | Field                    | Value                                                     |
 | ------------------------ | --------------------------------------------------------- |
