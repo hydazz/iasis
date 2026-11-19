@@ -111,6 +111,21 @@ pub fn millivolts(raw: u16) -> Option<u32> {
     (raw <= 4095).then(|| u32::from(raw) * 39_679 / 4095)
 }
 
+/// Only a continuous open CC interval ends the attachment.
+pub fn cc_detached(
+    open_since: &mut Option<u64>,
+    open: bool,
+    now_ms: u64,
+    debounce_ms: u64,
+) -> bool {
+    if open {
+        now_ms - *open_since.get_or_insert(now_ms) >= debounce_ms
+    } else {
+        *open_since = None;
+        false
+    }
+}
+
 pub fn safe_zero(raw: Option<u16>) -> bool {
     raw.and_then(millivolts).is_some_and(|mv| mv < 750)
 }
@@ -267,6 +282,23 @@ mod tests {
 
     fn adc(mv: u32) -> u16 {
         (mv * 4095 / 39_679) as u16
+    }
+
+    #[test]
+    fn a_fault_requires_continuous_cc_disconnect_before_rearming() {
+        let mut since = None;
+        for (now, open, detached) in [
+            (0, false, false),
+            (1000, false, false),
+            (1010, true, false),
+            (1159, true, false),
+            (1160, false, false),
+            (1200, true, false),
+            (1349, true, false),
+            (1350, true, true),
+        ] {
+            assert_eq!(cc_detached(&mut since, open, now, 150), detached);
+        }
     }
 
     #[test]

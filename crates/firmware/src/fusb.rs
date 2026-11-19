@@ -50,6 +50,13 @@ pub async fn attach(bus: &mut Bus, orientation: Orientation) -> Result<(), PortE
     write(bus, 0x08, 0).await?;
     // The new attachment starts with fresh PD transmitter and receiver state.
     write(bus, 0x0c, 0x02).await?;
+    let cc = sense_cc(bus, orientation).await?;
+    write(bus, 0x07, 0x64).await?; // Flush RX, receive debug SOP types.
+    write(bus, 0x03, 0xb4 | cc).await // Source, DFP, PD2, automatic GoodCRC.
+}
+
+/// Apply default Rp and measure the selected CC pin with VBUS independent.
+pub async fn sense_cc(bus: &mut Bus, orientation: Orientation) -> Result<u8, PortError> {
     let cc = if orientation == Orientation::Cc1 {
         1
     } else {
@@ -57,8 +64,11 @@ pub async fn attach(bus: &mut Bus, orientation: Orientation) -> Result<(), PortE
     };
     write(bus, 0x02, 0xc0 | (cc << 2)).await?;
     write(bus, 0x04, 38).await?; // Default-current Rd/open threshold.
-    write(bus, 0x07, 0x64).await?; // Flush RX, receive debug SOP types.
-    write(bus, 0x03, 0xb4 | cc).await // Source, DFP, PD2, automatic GoodCRC.
+    Ok(cc)
+}
+
+pub async fn cc_open(bus: &mut Bus) -> Result<bool, PortError> {
+    Ok(bus.register(0x22, 0x40).await? & 0x20 != 0)
 }
 
 /// Exclude Ra and open CC before applying power. The toggle detector alone

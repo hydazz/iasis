@@ -36,8 +36,15 @@ struct Port {
     stage_on: bool,
     inbox: Option<ReceivedPacket>,
     fault_discharge_until: Option<u64>,
+    fault_cc: Option<FaultCc>,
     feedback_deadline: u64,
     host_expired: bool,
+}
+
+#[derive(Clone, Copy)]
+enum FaultCc {
+    Isolated(Orientation),
+    Measuring(Orientation),
 }
 
 pub struct Ports {
@@ -118,6 +125,7 @@ impl Ports {
                     port.due = now() + 1000;
                     port.status.error = None;
                     port.status.fault_sample = None;
+                    port.fault_cc = None;
                 }
                 port.status.enabled = true;
                 port.status.command_result = CommandResult::Complete;
@@ -331,6 +339,14 @@ impl Port {
     }
 
     fn fail(&mut self, error: PortError) {
+        self.fault_cc = if matches!(
+            error,
+            PortError::Voltage | PortError::PdTimeout | PortError::Protocol
+        ) {
+            self.status.orientation.map(FaultCc::Isolated)
+        } else {
+            None
+        };
         if self.status.fault_sample.is_none() {
             let target = self.transition.map(|change| change.target);
             self.status.fault_sample = Some(iasis_protocol::FaultSample {
@@ -378,6 +394,65 @@ impl Port {
         Ok(())
     }
 
+    async fn poll_fault(
+        &mut self,
+        bus: &mut Bus,
+        controls: &mut Controls,
+        outputs: &mut Outputs,
+        index: usize,
+        supply: Supply,
+    ) -> Result<(), PortError> {
+        let isolated =
+            !self.stage_on && now() >= self.stage_due && power::safe_zero(self.status.vbus_adc);
+        if isolated {
+            outputs.high_voltage(bus, controls, index, false).await?;
+        }
+        if self.fault_discharge_until.is_some_and(|due| now() >= due) {
+            outputs.discharge(bus, controls, index, false).await?;
+            self.fault_discharge_until = None;
+        }
+        let Some(watch) = self.fault_cc else {
+            return Ok(());
+        };
+        let may_sense = isolated
+            && self.fault_discharge_until.is_none()
+            && self.status.enabled
+            && supply != Supply::Off
+            && self
+                .status
+                .faults
+                .is_some_and(|faults| !faults.cc && !faults.power);
+        match (watch, may_sense) {
+            (FaultCc::Isolated(cc), true) => {
+                bus.select(Some(index as u8)).await?;
+                fusb::open(bus).await?;
+                fusb::sense_cc(bus, cc).await?;
+                self.fault_cc = Some(FaultCc::Measuring(cc));
+            }
+            (FaultCc::Measuring(cc), false) => {
+                bus.select(Some(index as u8)).await?;
+                fusb::open(bus).await?;
+                self.fault_cc = Some(FaultCc::Isolated(cc));
+                self.cc_lost = None;
+            }
+            (FaultCc::Measuring(_), true) => {
+                bus.select(Some(index as u8)).await?;
+                if power::cc_detached(&mut self.cc_lost, fusb::cc_open(bus).await?, now(), 150) {
+                    fusb::open(bus).await?;
+                    self.fault_cc = None;
+                    self.cc_lost = None;
+                    self.powered = false;
+                    self.status.error = None;
+                    self.status.fault_sample = None;
+                    self.status.restore = None;
+                    self.status.state = PortState::WaitingPower;
+                }
+            }
+            (FaultCc::Isolated(_), false) => {}
+        }
+        Ok(())
+    }
+
     async fn tick(
         &mut self,
         bus: &mut Bus,
@@ -397,14 +472,7 @@ impl Port {
             restore.phase = RestorePhase::Unconfirmed;
         }
         if self.status.state == PortState::Fault {
-            if !self.stage_on && now() >= self.stage_due && power::safe_zero(self.status.vbus_adc) {
-                outputs.high_voltage(bus, controls, index, false).await?;
-            }
-            if self.fault_discharge_until.is_some_and(|due| now() >= due) {
-                outputs.discharge(bus, controls, index, false).await?;
-                self.fault_discharge_until = None;
-            }
-            return Ok(());
+            return self.poll_fault(bus, controls, outputs, index, supply).await;
         }
         bus.select(Some(index as u8)).await?;
         if !self.initialized {
@@ -543,14 +611,13 @@ impl Port {
                     self.stop(bus, controls, outputs, index).await?;
                     return Ok(());
                 }
+                let detached = power::cc_detached(&mut self.cc_lost, events.cc_open, now(), 15);
                 if events.cc_open {
-                    let since = *self.cc_lost.get_or_insert(now());
-                    if now() - since >= 15 || self.transition.is_some() {
+                    if detached || self.transition.is_some() {
                         self.stop(bus, controls, outputs, index).await?;
                     }
                     return Ok(());
                 }
-                self.cc_lost = None;
                 self.finish_tx(events.tx_ack, events.tx_failed, events.collision)?;
                 if self.tx.is_none()
                     && let Some(packet) = self.inbox.take()
