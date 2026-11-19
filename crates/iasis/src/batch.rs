@@ -13,13 +13,16 @@ use iasis::{
     Board,
     dfu::{self, Attempt, Outcome, Signal},
     identity::{AppleMode, Observation, TargetTracker},
-    restore::{PreparedIpsw, RestoreEngine, RestoreState},
+    restore::{RestoreEngine, RestoreState},
     topology,
 };
 use iasis_protocol::{
     self as protocol, Gesture, Port, PortAction, PortState, RestoreArm, RestoreControl,
     RestoreDecision, RestorePhase, RestoreStatus, Status,
 };
+use indicatif::{MultiProgress, ProgressDrawTarget};
+
+use crate::progress;
 
 #[derive(Args)]
 pub struct Options {
@@ -57,7 +60,7 @@ pub fn run(board: &Board, options: Options) -> Result<()> {
     let engine = RestoreEngine::new(&options.program, &options.logs);
     engine.check_program()?;
     iasis::identity::check_usbmuxd().context("system usbmuxd is unavailable")?;
-    let ipsw = PreparedIpsw::open(&options.ipsw)?;
+    let ipsw = progress::check_ipsw(&options.ipsw)?;
     println!(
         "Prepared {} ({}) for {:?}",
         ipsw.product_version, ipsw.build_version, ipsw.product_types
@@ -126,7 +129,11 @@ pub fn run(board: &Board, options: Options) -> Result<()> {
         .map(|(target, _)| target.ecid)
         .collect::<Vec<_>>();
     let batch = engine.start_erase(&ipsw, &ecids)?;
-    let mut lines = vec![String::new(); targets.len()];
+    let display = MultiProgress::with_draw_target(ProgressDrawTarget::stdout());
+    let rows = targets
+        .iter()
+        .map(|(target, _)| progress::restore_row(&display, target.port, target.ecid))
+        .collect::<Vec<_>>();
     let mut feedback_error = String::new();
     loop {
         let snapshot = topology::discover(board.topology());
@@ -137,19 +144,7 @@ pub fn run(board: &Board, options: Options) -> Result<()> {
             let identity = snapshot
                 .as_ref()
                 .map(|snapshot| target.observe(board.info().serial, snapshot));
-            let line = format!(
-                "port {} ECID {:016x} {:?} {:?} identity {:?} {}",
-                target.port.number(),
-                job.ecid,
-                job.state,
-                job.progress,
-                identity,
-                job.message
-            );
-            if lines[index] != line {
-                println!("{line}");
-                lines[index] = line;
-            }
+            progress::update(&rows[index], job, &identity);
             let phase = match job.state {
                 RestoreState::Starting => RestorePhase::Preparing,
                 RestoreState::Running => RestorePhase::Running,
@@ -181,25 +176,27 @@ pub fn run(board: &Board, options: Options) -> Result<()> {
                         target.port.number()
                     );
                     if feedback_error != message {
-                        eprintln!("{message}");
+                        display.suspend(|| eprintln!("{message}"));
                         feedback_error = message;
                     }
                 }
             }
         }
         if jobs.iter().all(|job| job.state.is_terminal()) {
+            failed |= jobs
+                .iter()
+                .any(|job| job.state != RestoreState::RestoreReported);
             break;
         }
         thread::sleep(Duration::from_secs(1));
     }
-    for job in batch.snapshots() {
-        println!(
-            "ECID {:016x}: {:?}; logs {}",
-            job.ecid,
-            job.state,
-            job.directory.display()
-        );
-        failed |= job.state != RestoreState::RestoreReported;
+    for row in &rows {
+        row.finish_and_clear();
+    }
+    if !display.is_hidden() {
+        for row in &rows {
+            println!("{}  {}", row.prefix(), row.message());
+        }
     }
     ensure!(
         !failed,

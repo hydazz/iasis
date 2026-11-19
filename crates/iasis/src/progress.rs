@@ -1,0 +1,98 @@
+use std::{borrow::Cow, fmt::Write, path::Path, time::Duration};
+
+use anyhow::Result;
+use iasis::{
+    identity::Observation,
+    restore::{PreparedIpsw, RestoreState, RestoreStatus},
+    topology,
+};
+use iasis_protocol::Port;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+
+pub fn waiting(message: impl Into<Cow<'static, str>>) -> ProgressBar {
+    let bar = ProgressBar::new_spinner().with_message(message);
+    if !bar.is_hidden() {
+        bar.enable_steady_tick(Duration::from_millis(100));
+    }
+    bar
+}
+
+pub fn check_ipsw(path: &Path) -> Result<PreparedIpsw> {
+    let _spinner = waiting("Checking IPSW archive");
+    PreparedIpsw::open(path)
+}
+
+pub fn restore_row(display: &MultiProgress, port: Port, ecid: u64) -> ProgressBar {
+    let row = display
+        .add(ProgressBar::new_spinner())
+        .with_style(ProgressStyle::with_template("{prefix:.bold}  {spinner} {wide_msg}").unwrap())
+        .with_prefix(format!("Port {}  ECID {ecid:016x}", port.number()))
+        .with_message("Starting");
+    if !row.is_hidden() {
+        row.enable_steady_tick(Duration::from_millis(100));
+    }
+    row
+}
+
+fn state_name(state: RestoreState) -> &'static str {
+    match state {
+        RestoreState::Starting => "Starting",
+        RestoreState::Running => "Restoring",
+        RestoreState::RestoreReported => "Restore reported complete",
+        RestoreState::Unconfirmed => "Completion unconfirmed",
+        RestoreState::Failed => "Restore failed",
+    }
+}
+
+pub fn update(
+    row: &ProgressBar,
+    job: &RestoreStatus,
+    identity: &Result<Observation, &topology::Error>,
+) {
+    let stage = job
+        .progress
+        .filter(|_| job.state == RestoreState::Running)
+        .map(|p| (p.step, (p.fraction * 100.0) as u64));
+    let status = match stage {
+        Some((step, percent)) => format!("Stage {step}  {percent}%"),
+        None => state_name(job.state).to_owned(),
+    };
+    let connection = match identity {
+        Ok(Observation::Present { mode }) => format!("USB {mode:?}"),
+        Ok(Observation::Missing) => "Target absent from USB".into(),
+        Ok(Observation::IdentityMissing) => "ECID unavailable".into(),
+        Ok(Observation::Ambiguous) => "Ambiguous USB identity".into(),
+        Ok(Observation::Replaced { ecid }) => format!("Replaced by ECID {ecid:016x}"),
+        Ok(Observation::Moved { port }) => format!("Moved to port {}", port.number()),
+        Ok(Observation::BoardChanged) => "Board changed".into(),
+        Err(err) => format!("USB discovery failed: {err}"),
+    };
+    let mut message = format!("{status}  {connection}");
+    if !job.message.is_empty() {
+        write!(message, "  {}", job.message).unwrap();
+    }
+    if job.state.is_terminal() {
+        write!(message, "  Logs {}", job.directory.display()).unwrap();
+    }
+    let message = message.replace(char::is_control, " ");
+    if row.message() == message {
+        return;
+    }
+    if row.is_hidden() {
+        println!("{}  {message}", row.prefix());
+    } else if job.state.is_terminal() {
+        row.disable_steady_tick();
+        row.set_style(ProgressStyle::with_template("{prefix:.bold}  {wide_msg}").unwrap());
+    } else if let Some((_, percent)) = stage {
+        if row.length().is_none() {
+            row.disable_steady_tick();
+            row.set_style(
+                ProgressStyle::with_template("{prefix:.bold}  [{bar:12.cyan/dim}] {wide_msg}")
+                    .unwrap(),
+            );
+            row.set_length(100);
+        }
+        row.set_position(percent);
+    }
+    row.set_message(message);
+}
