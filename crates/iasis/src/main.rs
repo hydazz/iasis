@@ -14,7 +14,7 @@ use iasis::{
     identity::AppleMode,
     topology::{self, Snapshot},
 };
-use iasis_protocol::{CommandResult, DebugActions, Port, PortAction, Status};
+use iasis_protocol::{CommandResult, DebugActions, Link, Port, PortAction, Status};
 
 #[derive(Parser)]
 #[command(version, about = "Manage Iasis ports and controller firmware")]
@@ -222,6 +222,9 @@ fn main() -> Result<()> {
                 for report in reports {
                     let slot = report.slot;
                     println!("port {}  {}", slot.port.number(), report.dfu.describe());
+                    if let Some(link) = current.ports[slot.port.index()].link {
+                        println!("  link {}", link_text(link));
+                    }
                     println!("  SuperSpeed companion {:?}", slot.superspeed);
                     for device in &slot.devices {
                         println!(
@@ -384,6 +387,14 @@ fn signal_result(result: CommandResult) -> &'static str {
     }
 }
 
+fn link_text(link: Link) -> &'static str {
+    match link {
+        Link::Down => "none",
+        Link::Usb2 => "USB 2",
+        Link::Usb3 => "USB 3",
+    }
+}
+
 fn print_status(status: &Status) {
     println!(
         "supply {:?}  host allowance {} mA  aggregate limit {} mA  isolated I²C branches {:02x}  recoveries {}  button {:?}",
@@ -426,6 +437,9 @@ fn print_status(status: &Status) {
             state.command_id,
             state.command_result
         );
+        if let Some(link) = state.link {
+            println!("  link: {}", link_text(link));
+        }
         match state.debug_actions {
             DebugActions::Pending => {}
             DebugActions::Silent => println!("  debug actions: no answer"),
