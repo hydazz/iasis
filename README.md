@@ -50,13 +50,13 @@ target/release/iasis --serial 0123456789abcdef ports --watch
 
 Use the serial from `list`. Add `--device t2` for a T2 Mac. Use `ports --watch` to see the USB mode and identity on each port. If a Mac acknowledges the DFU request and then disappears from USB, check the data cable and the Mac’s [DFU socket](https://support.apple.com/en-us/120694).
 
-| Button gesture        | Action on ready ports                   |
-| --------------------- | --------------------------------------- |
-| Click                 | Apple Silicon DFU                       |
-| Hold for 1.2 seconds  | Reboot connected targets                |
-| Two clicks, then hold | Request a restore from a listening host |
+| Button input           | With an OLED                                               | Without an OLED                   |
+| ---------------------- | ---------------------------------------------------------- | --------------------------------- |
+| Tap from the overview  | Inspect the next target, cycling through All and ports 1–5 | Send DFU to all ready targets     |
+| Hold from the overview | Open actions for the selected target                       | Enter target selection            |
+| In a menu              | Tap to advance and hold to choose                          | Tap to advance and hold to choose |
 
-DFU does not erase a device. You can use the button with Apple Configurator, or run restores with the CLI below. `power <port> off` disables a port; `power <port> on` enables it and retries a fault.
+On the OLED, choose **Details** for electrical readings. DFU and Reboot apply to the selected ready targets. DFU leaves their data intact and works with Apple Configurator. `power <port> off` disables a port. `power <port> on` enables it and retries a fault.
 
 Native USB-C uses the host's advertised current. With a legacy A-to-C connection, set the remaining shared USB allowance, including Iasis and after subtracting other loads:
 
@@ -77,9 +77,9 @@ target/release/iasis ipsw /path/to/UniversalMac.ipsw
 target/release/iasis --serial 0123456789abcdef restore /path/to/UniversalMac.ipsw --ports 1,2,3,4,5 --erase
 ```
 
-**`--erase` erases the selected targets.** To prepare a batch and start it with the button, replace `--ports 1,2,3,4,5` with `--button`. The command waits for a new restore gesture and exits after that batch. Use `--host-ma 1200` to set a legacy host allowance for the batch.
+**`--erase` erases the selected targets.** To confirm a prepared batch on the board, add `--button` to the port list. With an OLED, use `--button` alone to choose targets on the board and select Restore. Preparation can put targets into DFU. When the host has prepared the targets, hold the button for three seconds to confirm the erase, or tap to cancel. Use `--host-ma 1200` to set a legacy host allowance for the batch.
 
-Each target gets its own idevicerestore process, selected by ECID. Logs and working files go under `restores/`, or the directory passed to `--logs`. Allow space for an extracted OS image per worker. Iasis checks the local archive; idevicerestore checks device compatibility and Apple signing.
+The CLI worker requires ordinary DFU (`05ac:1227`) with a unique ECID. Use Apple Configurator for a Mac identified in DFU over Apple Debug USB. Each CLI target gets its own idevicerestore process, selected by ECID. Logs and working files go under `restores/`, or the directory passed to `--logs`. Allow space for an extracted OS image per worker. Iasis checks the local archive; idevicerestore checks device compatibility and Apple signing.
 
 ## Firmware and protocol
 
