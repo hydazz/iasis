@@ -380,8 +380,10 @@ impl Port<'_> {
 
     fn current_offers(&self) -> [u32; 4] {
         let grant = self.shared.grant.get();
+        // An active restore keeps its voltage.
+        let held = restoring(&self.status()).then(|| self.operating_voltage());
         match self.supply.get() {
-            Supply::Brick => iasis_pd::fixed_offers(grant.budget_mw, grant.input_mv),
+            Supply::Brick => iasis_pd::fixed_offers(grant.budget_mw, grant.input_mv, held),
             Supply::HostPresence => iasis_pd::host_offers(),
             Supply::Off => [0; 4],
         }

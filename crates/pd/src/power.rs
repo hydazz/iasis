@@ -411,13 +411,13 @@ mod tests {
             (0x2304_1104, 3000),
             (0x2303_20c8, 3000), // sink requests 2 A on the same profiles
         ] {
-            let offers = crate::fixed_offers(allocate(pool, ports)[1], 19_000);
+            let offers = crate::fixed_offers(allocate(pool, ports)[1], 19_000, None);
             assert_eq!((offers[1] & 0x3ff) * 10, expected_ma);
             demand.accept(offers[1], rdo);
             ports[1].active = Some(crate::fixed_contract(&offers, rdo).unwrap());
             ports[1].wants_more = demand.wants_more();
         }
-        let offers = crate::fixed_offers(allocate(pool, ports)[1], 19_000);
+        let offers = crate::fixed_offers(allocate(pool, ports)[1], 19_000, None);
         assert_eq!((offers[1] & 0x3ff) * 10, 2000);
     }
 
@@ -427,13 +427,41 @@ mod tests {
         let shares = allocate(pool, [sink(); 5]);
         assert_eq!(shares, [13_588; 5]);
         for share in shares {
-            let objects = crate::source::fixed_offers(share, 19_000);
+            let objects = crate::source::fixed_offers(share, 19_000, None);
             let rdo = (1 << 28) | (200 << 10) | 200;
             let accepted = crate::source::fixed_contract(&objects, rdo).unwrap();
             assert_eq!(accepted, contract(5000, 2000));
             assert!(accepted.permitted(share, 19_000));
         }
         assert!(contract(5000, 2000).cost_mw() * 5 <= pool);
+    }
+
+    #[test]
+    fn a_joining_sink_waits_while_the_first_steps_down() {
+        let pool = charging_budget_mw(19_000, 94, false);
+        let mut ports = [PortDemand::default(); 5];
+        ports[0] = sink();
+        let alone = crate::fixed_offers(allocate(pool, ports)[0], 19_000, None);
+        let high = crate::fixed_contract(&alone, (4 << 28) | (270 << 10) | 270).unwrap();
+        assert_eq!(high, contract(20_000, 2700));
+        ports[0].active = Some(high);
+
+        // The old contract exceeds its new share and still occupies the pool.
+        ports[1] = sink();
+        let cut = allocate(pool, ports);
+        assert_eq!(cut, [pool / 2, 0, 0, 0, 0]);
+        assert!(!high.permitted(cut[0], 19_000));
+
+        let offers = crate::fixed_offers(cut[0], 19_000, None);
+        let low = crate::fixed_contract(&offers, (2 << 28) | (300 << 10) | 300).unwrap();
+        assert_eq!(low, contract(9000, 3000));
+        assert!(low.permitted(cut[0], 19_000));
+        ports[0].pending = Some(low);
+        assert_eq!(allocate(pool, ports), cut);
+
+        ports[0].active = Some(low);
+        ports[0].pending = None;
+        assert_eq!(allocate(pool, ports), [pool / 2, pool / 2, 0, 0, 0]);
     }
 
     #[test]
@@ -492,7 +520,7 @@ mod tests {
         let offers = allocate(pool, ports);
         let locked = offers[4];
         assert!(locked < live.cost_mw());
-        let objects = crate::source::fixed_offers(locked, 19_000);
+        let objects = crate::source::fixed_offers(locked, 19_000, Some(20_000));
         let lower = crate::source::fixed_contract(&objects, (4 << 28) | (5 << 10) | 5).unwrap();
         assert_eq!(lower, contract(20_000, 50));
         ports[4].active = Some(lower);

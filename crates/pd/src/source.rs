@@ -73,7 +73,12 @@ fn fixed(mv: u16, ma: u16) -> FixedSupply {
 
 /// Brick-powered offers that fit `budget_mw`, lowest rail first. Zero marks an
 /// absent position. USB suspend and role swaps are not advertised.
-pub fn fixed_offers(budget_mw: u32, input_mv: u16) -> [u32; 4] {
+///
+/// As in the USB PD source power rules, a rail above 5 V appears once it
+/// carries at least the power of the rail below it at 3 A, so no rail offers
+/// less power than a lower one. Rails up to `held_mv` are exempt: a smaller
+/// budget lowers the current of a contract that keeps its voltage.
+pub fn fixed_offers(budget_mw: u32, input_mv: u16, held_mv: Option<u16>) -> [u32; 4] {
     let mut objects = [0; 4];
     for (i, mv) in RAILS_MV.into_iter().enumerate() {
         if !supports_voltage(mv, input_mv) {
@@ -83,7 +88,14 @@ pub fn fixed_offers(budget_mw: u32, input_mv: u16) -> [u32; 4] {
         let upper_ma = budget_mw.saturating_mul(1000) / u32::from(upper_mv);
         // Invert cost_mw in the 50 mA steps available on the converter.
         let ma = (upper_ma.saturating_sub(500).min(3000) / 50 * 50) as u16;
-        if ma == 0 || (i == 0 && ma < Contract::USB_DEFAULT.limit_ma) {
+        let offered = if i == 0 {
+            ma >= Contract::USB_DEFAULT.limit_ma
+        } else if held_mv.is_some_and(|held| mv <= held) {
+            ma > 0
+        } else {
+            u32::from(mv) * u32::from(ma) >= u32::from(RAILS_MV[i - 1]) * 3000
+        };
+        if !offered {
             break;
         }
         let supply = fixed(mv, ma);
@@ -168,13 +180,23 @@ mod tests {
         objects.map(|pdo| (pdo & 0x3ff) * 10)
     }
 
+    fn contract(millivolts: u16, milliamps: u16) -> Contract {
+        Contract {
+            millivolts,
+            operating_ma: milliamps,
+            limit_ma: milliamps,
+        }
+    }
+
     #[test]
     fn first_offer_declares_the_supply_behind_it() {
-        assert_eq!(fixed_offers(u32::MAX, 20_000)[0], 0x0c01_912c);
+        assert_eq!(fixed_offers(u32::MAX, 20_000, None)[0], 0x0c01_912c);
         assert_eq!(host_offers(), [0x0401_9000, 0, 0, 0]);
         assert_eq!(capabilities(&host_offers()).pdos().len(), 1);
         assert_eq!(
-            capabilities(&fixed_offers(u32::MAX, 20_000)).pdos().len(),
+            capabilities(&fixed_offers(u32::MAX, 20_000, None))
+                .pdos()
+                .len(),
             4
         );
     }
@@ -189,9 +211,9 @@ mod tests {
 
     #[test]
     fn offers_fit_the_budget_and_the_qualified_input() {
-        let pdos = fixed_offers(42_275, 20_000);
-        assert_eq!(amps(pdos), [3000, 3000, 2150, 1500]);
-        for (i, expected) in RAILS_MV.into_iter().enumerate() {
+        let pdos = fixed_offers(42_275, 20_000, None);
+        assert_eq!(amps(pdos), [3000, 3000, 2150, 0]);
+        for (i, expected) in RAILS_MV.into_iter().enumerate().take(3) {
             let ma = amps(pdos)[i];
             for flags in [0, MISMATCH] {
                 let contract =
@@ -201,40 +223,84 @@ mod tests {
                 assert!(contract.permitted(44_500, 20_000));
             }
         }
-        let fallback = fixed_offers(17_195, 9000);
-        assert_eq!(amps(fallback), [2700, 1300, 0, 0]);
-        for position in [0, 3, 4, 7] {
+        let fallback = fixed_offers(17_195, 9000, None);
+        assert_eq!(amps(fallback), [2700, 0, 0, 0]);
+        for position in [0, 2, 3, 4, 7] {
             assert_eq!(
                 fixed_contract(&fallback, request(position, 0, 0)),
                 Err(RequestError::ObjectPosition)
             );
         }
-        assert_eq!(fixed_offers(7000, 20_000), [0; 4]);
-        let high = fixed_contract(&pdos, request(4, 1500, 1500)).unwrap();
+        assert_eq!(fixed_offers(7000, 20_000, None), [0; 4]);
+        assert_eq!(amps(fixed_offers(u32::MAX, 9000, None)), [3000, 3000, 0, 0]);
+        let high = contract(20_000, 1500);
         assert!(!high.permitted(40_000, 20_000));
         assert!(!high.permitted(44_500, 9000));
     }
 
     #[test]
-    fn offers_use_the_last_affordable_converter_step_on_each_rail() {
-        for (i, mv) in RAILS_MV.into_iter().enumerate() {
-            for ma in (900..=3000).step_by(50) {
-                let budget = Contract {
-                    millivolts: mv,
-                    operating_ma: ma,
-                    limit_ma: ma,
+    fn a_higher_rail_never_offers_less_power_than_a_lower_one() {
+        for budget in (0..=80_000).step_by(137) {
+            let ma = amps(fixed_offers(budget, 20_000, None));
+            let offered = ma.iter().take_while(|&&ma| ma != 0).count();
+            assert!(ma[offered..].iter().all(|&ma| ma == 0));
+            for i in 0..offered {
+                assert!(contract(RAILS_MV[i], ma[i] as u16).permitted(budget, 20_000));
+                if i + 1 < offered {
+                    assert_eq!(ma[i], 3000);
                 }
-                .cost_mw();
-                assert_eq!(amps(fixed_offers(budget, 20_000))[i], u32::from(ma));
-                assert!(amps(fixed_offers(budget - 1, 20_000))[i] < u32::from(ma));
+                if i > 0 {
+                    assert!(u32::from(RAILS_MV[i]) * ma[i] >= u32::from(RAILS_MV[i - 1]) * 3000);
+                }
             }
         }
-        assert_eq!(amps(fixed_offers(u32::MAX, 20_000)), [3000; 4]);
+        // 9 V, 15 V and 20 V appear at 15 W, 27 W and 45 W.
+        for (mv, below, at, expected) in [
+            (9000, 1650, 1700, [3000, 1700, 0, 0]),
+            (15_000, 1750, 1800, [3000, 3000, 1800, 0]),
+            (20_000, 2200, 2250, [3000, 3000, 3000, 2250]),
+        ] {
+            let mut lower = expected;
+            *lower.iter_mut().rfind(|ma| **ma != 0).unwrap() = 0;
+            let offers = |ma| amps(fixed_offers(contract(mv, ma).cost_mw(), 20_000, None));
+            assert_eq!(offers(below), lower);
+            assert_eq!(offers(at), expected);
+        }
+        assert_eq!(amps(fixed_offers(u32::MAX, 20_000, None)), [3000; 4]);
+    }
+
+    #[test]
+    fn a_held_rail_offers_the_last_affordable_converter_step() {
+        for (i, mv) in RAILS_MV.into_iter().enumerate() {
+            for ma in (900..=3000).step_by(50) {
+                let budget = contract(mv, ma).cost_mw();
+                let offers = |budget| amps(fixed_offers(budget, 20_000, Some(mv)))[i];
+                assert_eq!(offers(budget), u32::from(ma));
+                assert!(offers(budget - 1) < u32::from(ma));
+            }
+        }
+    }
+
+    #[test]
+    fn a_held_rail_keeps_its_voltage_as_the_budget_falls() {
+        let budget = contract(20_000, 50).cost_mw();
+        assert_eq!(
+            amps(fixed_offers(budget, 20_000, Some(20_000))),
+            [1650, 700, 200, 50]
+        );
+        // Rails above the held one follow the power rule.
+        assert_eq!(
+            amps(fixed_offers(budget, 20_000, Some(9000))),
+            [1650, 700, 0, 0]
+        );
+        assert_eq!(amps(fixed_offers(budget, 20_000, None)), [1650, 0, 0, 0]);
+        assert_eq!(fixed_offers(budget - 1, 20_000, Some(20_000))[3], 0);
     }
 
     #[test]
     fn capability_mismatch_reports_demand_without_raising_the_limit() {
-        let pdos = fixed_offers(42_275, 20_000);
+        let pdos = fixed_offers(42_275, 20_000, Some(20_000));
+        assert_eq!(amps(pdos), [3000, 3000, 2150, 1500]);
         let mismatch = fixed_contract(&pdos, request(4, 1000, 3000) | MISMATCH).unwrap();
         assert_eq!((mismatch.operating_ma, mismatch.limit_ma), (1000, 1500));
         assert_eq!(
@@ -253,7 +319,7 @@ mod tests {
 
     #[test]
     fn request_flags_defined_by_later_revisions_do_not_reject_a_request() {
-        let pdos = fixed_offers(u32::MAX, 20_000);
+        let pdos = fixed_offers(u32::MAX, 20_000, None);
         let flags = (1 << 25) | (1 << 24) | (1 << 23) | (1 << 22);
         assert!(fixed_contract(&pdos, request(2, 2000, 2000) | flags).is_ok());
     }

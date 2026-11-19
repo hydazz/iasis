@@ -50,7 +50,7 @@ Native USB-C Rp supplies the allowance. On legacy A-to-C connections, `host-budg
 
 On the charging input, Iasis requests the highest-power fixed profile it supports, up to 20 V. The host USB port stays at 5 V.
 
-Ports start at 5 V and share the charging budget as targets connect and disconnect. Each target chooses from the profiles its port offers. A port waits if the supply cannot cover its starting allowance. During a restore, Iasis keeps the target at its negotiated voltage while power is available.
+Ports start at 5 V and share the charging budget as targets connect and disconnect. Each target chooses from the profiles its port offers. A port adds 9, 15 and 20 V as its share grows: each appears once it can deliver at least the power of the voltage below it at 3 A. A port waits if the supply cannot cover its starting allowance. During a restore, Iasis keeps the target at its negotiated voltage while power is available.
 
 Leave the power supply connected throughout a restore. Changing the input can interrupt USB to the targets while the controller stays online.
 
