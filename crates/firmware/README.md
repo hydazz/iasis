@@ -74,16 +74,18 @@ The [button and CLI controls](../../README.md#use) operate on ready ports. A tar
 
 A fault keeps full brightness whatever is selected. While the button is held, the bright ports are the ones the action will reach.
 
-| Status light    | Meaning                                 |
-| --------------- | --------------------------------------- |
-| Teal            | Running                                 |
-| Blue            | Releasing the button sends DFU          |
-| Amber           | Releasing sends Reboot                  |
-| Purple          | Releasing asks the host for a restore   |
-| Blinking purple | Erase armed: hold 3 s, or tap to cancel |
-| Red             | Board fault; targets are off            |
+| Status light    | Meaning                                              |
+| --------------- | ---------------------------------------------------- |
+| Teal            | Running                                              |
+| Blue            | Releasing the button sends DFU                       |
+| Amber           | Releasing sends Reboot                               |
+| Purple          | Releasing asks the host for a restore                |
+| Blinking purple | Erase armed. Hold until confirmed, or tap to cancel. |
+| Red             | Board fault; targets are off                         |
 
 Some cables, including USB-C to Lightning, can keep the port green after the device is unplugged. Use `iasis ports` to list devices on the host.
+
+At the Erase prompt, hold for three seconds to start the restore. You can keep holding once it starts. Letting go earlier cancels.
 
 Host restore feedback expires after five seconds without an update, changing the LED to unconfirmed without cycling power. Command results and feedback fields are defined in the [protocol](../protocol/README.md).
 
