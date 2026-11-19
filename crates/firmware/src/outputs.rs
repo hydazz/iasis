@@ -57,6 +57,19 @@ impl Outputs {
         Ok(())
     }
 
+    /// Hold the hub in reset, or release it to its pull-up.
+    pub async fn hub_run(&mut self, bus: &mut Bus, run: bool) -> Result<(), PortError> {
+        let direction = bus.register(0x20, 3).await?;
+        if run {
+            return bus.write(0x20, &[3, direction | 0x10]).await;
+        }
+        let value = self.expander & !0x10;
+        bus.write(0x20, &[1, value]).await?;
+        bus.write(0x20, &[3, direction & !0x10]).await?;
+        self.expander = value;
+        Ok(())
+    }
+
     pub async fn new(bus: &mut Bus, controls: &mut Controls) -> Result<Self, PortError> {
         bus.select(None).await?;
         let mut value = bus.register(0x20, 1).await?;
