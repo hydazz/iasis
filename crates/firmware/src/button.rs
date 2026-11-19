@@ -218,6 +218,19 @@ impl Button {
             decision = Some(Event::Decision(RestoreDecision::Cancelled(arm)));
         }
 
+        // A release can be the first sample past the threshold. Count up to
+        // that edge, excluding the time spent debouncing the release.
+        let held_until = if down { now } else { self.raw_since };
+        if let Some(arm) = self.armed
+            && self.pressed
+            && !self.consumed
+            && held_until.saturating_sub(self.pressed_since) >= CONFIRM_MS
+        {
+            self.armed = None;
+            self.consumed = true;
+            self.tell("Erase confirmed", now);
+            return Some(Event::Decision(RestoreDecision::Confirmed(arm)));
+        }
         if down != self.pressed && now.saturating_sub(self.raw_since) >= DEBOUNCE_MS {
             self.pressed = down;
             if down {
@@ -226,17 +239,6 @@ impl Button {
             } else if !self.consumed {
                 return self.release(status, self.raw_since - self.pressed_since, now);
             }
-        }
-        if let Some(arm) = self.armed
-            && self.pressed
-            && down
-            && !self.consumed
-            && now - self.pressed_since >= CONFIRM_MS
-        {
-            self.armed = None;
-            self.consumed = true;
-            self.tell("Restore confirmed", now);
-            return Some(Event::Decision(RestoreDecision::Confirmed(arm)));
         }
         if !down && !self.pressed {
             self.consumed = false;
@@ -584,6 +586,37 @@ mod tests {
         );
         assert_eq!(r.sample(true, 9000), None);
         assert_eq!(r.release(), None);
+        assert_eq!(r.button.armed(), None);
+    }
+
+    #[test]
+    fn a_hold_can_cross_the_confirmation_threshold_between_gpio_samples() {
+        let mut r = Rig::new(0b11111);
+        let arm = r.prepare();
+        r.pending = Some(arm);
+        r.sample(false, 1);
+        r.press();
+        r.sample(true, CONFIRM_MS - DEBOUNCE_MS - 5);
+        assert_eq!(
+            r.sample(false, 5),
+            Some(Event::Decision(RestoreDecision::Confirmed(arm)))
+        );
+        assert_eq!(r.sample(false, DEBOUNCE_MS), None);
+        assert_eq!(r.button.armed(), None);
+    }
+
+    #[test]
+    fn release_debounce_cannot_extend_a_short_hold_into_confirmation() {
+        let mut r = Rig::new(0b11111);
+        let arm = r.prepare();
+        r.pending = Some(arm);
+        r.sample(false, 1);
+        r.press();
+        r.sample(true, CONFIRM_MS - DEBOUNCE_MS - 11);
+        assert_eq!(
+            r.release(),
+            Some(Event::Decision(RestoreDecision::Cancelled(arm)))
+        );
         assert_eq!(r.button.armed(), None);
     }
 
