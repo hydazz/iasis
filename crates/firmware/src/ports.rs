@@ -64,6 +64,8 @@ const STAGE_REST: Duration = Duration::from_millis(250);
 /// New offers are sent once they have held, and the sink has been silent,
 /// for this long.
 const OFFER_SETTLE: Duration = Duration::from_secs(1);
+/// tNoResponse: a sink silent for this long holds only the USB default.
+const NO_RESPONSE: Duration = Duration::from_secs(5);
 /// Failures inside this window count towards holding the port off.
 const STRIKE_WINDOW: Duration = Duration::from_secs(30);
 const STRIKES: u8 = 3;
@@ -230,6 +232,8 @@ impl Ports {
             lowering: Cell::new(None),
             offers: Cell::new([0; 4]),
             sink: Cell::new(SinkDemand::default()),
+            listening: Cell::new(Instant::MIN),
+            silent: Cell::new(false),
             fault: Cell::new(None),
             stage_on: Cell::new(false),
             powered: Cell::new(false),
@@ -317,6 +321,10 @@ struct Port<'a> {
     /// The capabilities last given to the PD engine.
     offers: Cell<[u32; 4]>,
     sink: Cell<SinkDemand>,
+    /// When the port began waiting for a sink's first request.
+    listening: Cell<Instant>,
+    /// No request arrived within NO_RESPONSE.
+    silent: Cell<bool>,
     fault: Cell<Option<PortError>>,
     stage_on: Cell<bool>,
     powered: Cell<bool>,
@@ -391,6 +399,12 @@ impl Port<'_> {
         }
     }
 
+    /// Begin waiting for a sink's first request.
+    fn listen(&self) {
+        self.listening.set(Instant::now());
+        self.silent.set(false);
+    }
+
     /// Tell the allocator what this port holds and wants.
     fn publish(&self) {
         let status = self.status();
@@ -402,7 +416,10 @@ impl Port<'_> {
             attached,
             active: on_brick.then(|| self.enforced.get()),
             pending: self.pending.get().filter(|_| on_brick).map(|(c, _)| c),
-            wants_more: self.contract.get().is_none() || self.sink.get().wants_more(),
+            wants_more: match self.contract.get() {
+                Some(_) => self.sink.get().wants_more(),
+                None => !self.silent.get(),
+            },
             restore_mv: restoring(&status).then(|| self.operating_voltage()),
         });
     }
@@ -540,6 +557,7 @@ impl Port<'_> {
         }
         let offers = self.current_offers();
         self.offers.set(offers);
+        self.listen();
         self.update(|status| {
             status.state = PortState::Ready;
             status.pd_source_pdos = offers;
@@ -578,6 +596,13 @@ impl Port<'_> {
                 return Ok(());
             }
             let now = Instant::now();
+            if !self.silent.get()
+                && self.contract.get().is_none()
+                && now - self.listening.get() >= NO_RESPONSE
+            {
+                self.silent.set(true);
+                self.publish();
+            }
             let transition = self.status().pd_transition;
             if !self.phy.cc_open() {
                 open_since = None;
@@ -760,6 +785,7 @@ impl Port<'_> {
         self.pending.set(None);
         self.lowering.set(None);
         self.sink.set(SinkDemand::default());
+        self.listen();
         self.update(|status| {
             status.pd_transition = true;
             status.state = PortState::Ready;
@@ -987,6 +1013,13 @@ struct Policy<'a, 'p> {
 
 impl DevicePolicyManager for Policy<'_, '_> {
     fn source_capabilities(&mut self) -> SourceCapabilities {
+        // Without a contract there is no request to cross, so each
+        // advertisement carries the present offers.
+        let offers = self.port.current_offers();
+        if self.port.contract.get().is_none() && offers[0] != 0 {
+            self.port.offers.set(offers);
+            self.port.update(|status| status.pd_source_pdos = offers);
+        }
         iasis_pd::capabilities(&self.port.offers.get())
     }
 
