@@ -1,5 +1,6 @@
 //! USB management of an Iasis board.
 
+pub mod dfu;
 pub mod identity;
 pub mod restore;
 pub mod topology;
@@ -182,15 +183,15 @@ impl Board {
         if self.info.capabilities & protocol::CAP_PORT_CONTROL == 0 {
             return Err(Error::PortControlUnsupported);
         }
-        let status = self.status()?.ports[port.index()];
-        if status.generation != generation {
+        let before = self.status()?.ports[port.index()];
+        if before.generation != generation {
             return Err(Error::Command(CommandError::StaleAttachment));
         }
         let command = PortCommand {
             serial: self.info.serial,
             port,
             generation,
-            id: status.command_id.wrapping_add(1).max(1),
+            id: before.command_id.wrapping_add(1).max(1),
             action,
         };
         self.write(protocol::PORT_COMMAND, &command)?;
@@ -198,7 +199,24 @@ impl Board {
         loop {
             let status = self.status()?.ports[port.index()];
             if status.generation != generation {
-                return Err(Error::Command(CommandError::StaleAttachment));
+                let next_generation = status.generation == generation.wrapping_add(1)
+                    && status.command_id == command.id;
+                match action {
+                    // Opening CC advances the generation before discharge completes.
+                    PortAction::Disable if next_generation && !status.enabled => {}
+                    // An already-cabled target may attach before the first read.
+                    // Attachment resets the accepted enable's result to Idle.
+                    PortAction::Enable
+                        if next_generation
+                            && !before.enabled
+                            && status.enabled
+                            && status.orientation.is_some()
+                            && status.command_result == CommandResult::Idle =>
+                    {
+                        return Ok(CommandResult::Complete);
+                    }
+                    _ => return Err(Error::Command(CommandError::StaleAttachment)),
+                }
             }
             if status.command_id == command.id {
                 match status.command_result {
