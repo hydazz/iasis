@@ -144,7 +144,7 @@ mod tests {
                 }
             }
         }
-        status.ports[0].error = Some(iasis_protocol::PortError::Protection);
+        status.ports[0].error = Some(iasis_protocol::PortError::HostLimiter);
         status.ports[1].orientation = Some(iasis_protocol::Orientation::Cc1);
         assert_eq!(colors(&status)[5], [32, 0, 0]);
         assert_eq!(colors(&status)[4], [12, 5, 0]);
