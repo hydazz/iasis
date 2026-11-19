@@ -433,8 +433,13 @@ fn print_status(status: &Status) {
         );
         if let Some(fault) = state.fault_sample {
             println!(
-                "  fault in {:?}  VBUS ADC {:?}  prior contract {} mV  target {} mV / {} mA",
-                fault.state, fault.vbus_adc, fault.contract_mv, fault.target_mv, fault.target_ma
+                "  fault at {} ms in {:?}  VBUS ADC {:?}  pins {:?}  prior {:?}  target {:?}",
+                fault.uptime_ms,
+                fault.state,
+                fault.vbus_adc,
+                fault.faults,
+                fault.contract,
+                fault.target
             );
         }
     }
