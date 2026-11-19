@@ -124,7 +124,13 @@ fn main() -> Result<()> {
     })?;
     let mut boards = Vec::new();
     for device in devices {
-        let board = Board::open(&device).with_context(|| {
+        let board = match cli.command {
+            Command::List | Command::Status { .. } | Command::Ports { .. } => {
+                Board::observe(&device)
+            }
+            _ => Board::open(&device),
+        }
+        .with_context(|| {
             format!(
                 "opening USB bus {} port {:?}",
                 device.bus_id(),
@@ -307,11 +313,39 @@ fn print_status(status: &Status) {
         );
     }
     println!(
-        "bus ADC {:?}  thermistors {:?}  CH224 status {:?}",
-        status.bus_voltage_adc, status.thermistor_adc, status.ch224_status
+        "bus ADC {:?}  CH224 status {:?}",
+        status.bus_voltage_adc, status.ch224_status
     );
+    for (bank, adc) in ["A", "B"].into_iter().zip(status.thermistor_adc) {
+        match adc.and_then(board_temperature) {
+            Some(celsius) => println!("board temperature {bank}  {celsius:.1} °C"),
+            None => println!("board temperature {bank}  unavailable (ADC {adc:?})"),
+        }
+    }
     println!(
         "upstream CC {:?}  orientation {:?}  error {:?}",
         status.upstream_cc, status.upstream_orientation, status.upstream_error
     );
+}
+
+fn board_temperature(adc: u16) -> Option<f64> {
+    if !(1..4095).contains(&adc) {
+        return None;
+    }
+    // The NTC and its pull-up are both 10 kΩ at 25 °C and share the ADC reference.
+    let resistance_ratio = f64::from(adc) / f64::from(4095 - adc);
+    Some((1.0 / 298.15 + resistance_ratio.ln() / 3380.0).recip() - 273.15)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::board_temperature;
+
+    #[test]
+    fn thermistor_matches_nominal_divider_and_rejects_rails() {
+        assert!((board_temperature(2048).unwrap() - 25.0).abs() < 0.1);
+        assert!((board_temperature(1204).unwrap() - 50.0).abs() < 0.2);
+        assert_eq!(board_temperature(0), None);
+        assert_eq!(board_temperature(4095), None);
+    }
 }
