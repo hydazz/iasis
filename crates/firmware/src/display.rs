@@ -155,6 +155,7 @@ fn error_text(error: PortError) -> &'static str {
         PortError::Adc => "ADC unavailable",
         PortError::Protection => "Protection tripped",
         PortError::UnexpectedVbus => "Unexpected VBUS",
+        PortError::StageReadback => "Converter readback",
         PortError::Voltage => "VBUS out of range",
         PortError::DischargeTimeout => "Discharge timeout",
         PortError::Protocol => "PD protocol error",
