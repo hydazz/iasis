@@ -1,12 +1,16 @@
 //! USB management of an Iasis board.
 
+pub mod agent;
 pub mod batch;
 pub mod dfu;
+pub mod home;
 pub mod host;
 pub mod identity;
+pub mod images;
 pub mod progress;
 pub mod restore;
 pub mod topology;
+pub mod view;
 
 use std::{
     thread,
@@ -303,13 +307,17 @@ fn read<T: DeserializeOwned>(connection: &Connection, request: u8) -> Result<(u1
         index: protocol::INTERFACE.into(),
         length: protocol::MAX_PACKET as u16,
     };
-    let data = match connection {
-        Connection::Control(interface) => interface.control_in(request, TIMEOUT).wait()?,
-        Connection::Listener(device) | Connection::Observer(device) => {
-            device.control_in(request, TIMEOUT).wait()?
-        }
+    let ask = || -> Result<(u16, T), Error> {
+        let data = match connection {
+            Connection::Control(interface) => interface.control_in(request, TIMEOUT).wait()?,
+            Connection::Listener(device) | Connection::Observer(device) => {
+                device.control_in(request, TIMEOUT).wait()?
+            }
+        };
+        protocol::decode_any(&data).map_err(Error::Protocol)
     };
-    protocol::decode_any(&data).map_err(Error::Protocol)
+    // A transfer another process abandoned can cost the next one its reply.
+    ask().or_else(|_| ask())
 }
 
 pub fn parse_port(value: &str) -> Result<Port, String> {

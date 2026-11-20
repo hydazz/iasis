@@ -97,8 +97,9 @@ struct Shared {
     rearm: Cell<bool>,
     supply_fault: Cell<Option<PortError>>,
     feedback_deadline: Cell<u64>,
-    /// The host's view, with the attachment it describes.
-    observed: Cell<Option<(u32, Observed)>>,
+    /// The host's view and its image fetch, with the attachment they
+    /// describe.
+    observed: Cell<Option<(u32, Observed, Option<u8>)>>,
     tracker: Cell<Tracker>,
     wake: Signal<NoopRawMutex, ()>,
 }
@@ -112,15 +113,16 @@ impl Shared {
 
     fn snapshot(&self) -> PortStatus {
         let status = self.status.get();
+        let view = self
+            .observed
+            .get()
+            .filter(|(generation, _, _)| *generation == status.generation);
         PortStatus {
             vbus_adc: self.vbus.get(),
             faults: self.pins.get(),
             link: self.link.get(),
-            observed: self
-                .observed
-                .get()
-                .filter(|(generation, _)| *generation == status.generation)
-                .map(|(_, observed)| observed),
+            observed: view.map(|(_, observed, _)| observed),
+            fetch: view.and_then(|(_, _, fetch)| fetch),
             request: self.tracker.get().request(),
             ..status
         }
@@ -206,8 +208,13 @@ impl Ports {
             let status = port.status.get();
             if let Some(report) = report {
                 let entry = iasis_firmware::host_session::entry(&report, index, &status);
-                port.observed
-                    .set(entry.map(|entry| (entry.generation, entry.observed)));
+                port.observed.set(entry.map(|entry| {
+                    (
+                        entry.generation,
+                        entry.observed,
+                        entry.fetch.map(|percent| percent.min(100)),
+                    )
+                }));
                 if let Some(job) = entry.and_then(|entry| entry.restore)
                     && status.state != PortState::Fault
                     && job.ecid != 0

@@ -72,7 +72,7 @@ A colour is what the port holds, a pulse is work under way or a result awaited, 
 | Blue, pulsing   | DFU sent; no host has seen the result                        |
 | Amber, pulsing  | Reboot sent                                                  |
 | Amber, steady   | Waiting for power                                            |
-| Purple, pulsing | Restore preparing or running                                 |
+| Purple, pulsing | Restore image being fetched, or restore preparing or running |
 | Purple, steady  | Restore outcome unknown; check the host                      |
 | Red             | Port fault or failed restore                                 |
 | Dimmed          | Outside the selection                                        |
@@ -105,7 +105,7 @@ If updates stop during preparation or restore, the port turns steady purple afte
 
 Connect an [Adafruit 938](https://www.adafruit.com/product/938) to the display I²C connector. The 128×64 screen shows all five physical ports. Bars beside a port number show its USB link: one for USB 2, two for USB 3. A selected port that a hold would reach is filled; any other selected port is outlined. A lightning bolt indicates brick power and a USB symbol an attached host.
 
-A port reads `DFU` or `REC` while the host sees it in DFU or recovery, `DFU?` for a DFU sent and not yet seen, and `BOOT` after a reboot is sent.
+A port reads `DFU` or `REC` while the host sees it in DFU or recovery, `DFU?` for a DFU sent and not yet seen, `BOOT` after a reboot is sent, and `IMG` with a percentage while the host fetches its restore image.
 
 | Selection | Lower area                                                                                               |
 | --------- | -------------------------------------------------------------------------------------------------------- |
