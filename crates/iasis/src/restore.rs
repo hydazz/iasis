@@ -1,4 +1,4 @@
-//! Shared IPSW preparation and independent upstream idevicerestore processes.
+//! IPSW preparation and ECID-scoped restore and revive workers.
 
 use std::{
     collections::HashSet,
@@ -269,15 +269,26 @@ impl RestoreState {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Progress {
-    /// Upstream stage number. The fraction is within this stage, not overall.
-    pub step: u32,
-    pub fraction: f32,
+    pub name: String,
+    /// Percentage within this stage, when the worker supplies one.
+    pub percent: Option<u8>,
+}
+
+impl std::fmt::Display for Progress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.name)?;
+        if let Some(percent) = self.percent {
+            write!(f, " {percent}%")?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct RestoreStatus {
+    pub operation: Operation,
     pub ecid: u64,
     pub state: RestoreState,
     pub pid: Option<u32>,
@@ -285,6 +296,24 @@ pub struct RestoreStatus {
     pub message: String,
     pub exit_code: Option<i32>,
     pub directory: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Operation {
+    Restore,
+    Revive,
+}
+
+enum Worker<'a> {
+    Erase(&'a PreparedIpsw),
+    Revive(&'a Path),
+}
+
+/// Apple Configurator supplies both DFU identity and data-preserving revive on macOS.
+pub fn configurator() -> Option<&'static Path> {
+    let path = Path::new("/Applications/Apple Configurator.app/Contents/MacOS/cfgutil");
+    (cfg!(target_os = "macos") && path.is_file()).then_some(path)
 }
 
 /// One engine owns the active ECID set. Clone this engine to submit batches
@@ -342,6 +371,20 @@ impl RestoreEngine {
     /// Check all selected archives and reserve every ECID before starting any
     /// worker. The caller supplies the prepared image for each verified target.
     pub fn start_selected(&self, targets: &[(&PreparedIpsw, u64)]) -> Result<RestoreBatch> {
+        let selected: Vec<_> = targets
+            .iter()
+            .map(|(ipsw, ecid)| (Worker::Erase(ipsw), *ecid))
+            .collect();
+        self.start(selected)
+    }
+
+    pub fn start_revive(&self, ecid: u64) -> Result<RestoreBatch> {
+        let program =
+            configurator().context("Revive requires Apple Configurator in /Applications")?;
+        self.start(vec![(Worker::Revive(program), ecid)])
+    }
+
+    fn start(&self, targets: Vec<(Worker<'_>, u64)>) -> Result<RestoreBatch> {
         ensure!(
             !targets.is_empty() && targets.len() <= MAX_RESTORES,
             "select between one and five restore targets"
@@ -352,18 +395,11 @@ impl RestoreEngine {
             "ECID zero means automatic selection and is not allowed"
         );
         ensure!(selected.len() == targets.len(), "duplicate restore ECID");
-        for &(ipsw, _) in targets {
-            ipsw.check_unchanged()?;
+        for (worker, _) in &targets {
+            if let Worker::Erase(ipsw) = worker {
+                ipsw.check_unchanged()?;
+            }
         }
-        // Resolve a caller-supplied relative executable before changing the
-        // worker's working directory. A bare name is resolved through PATH.
-        let program = if self.program.components().count() > 1 {
-            self.program
-                .canonicalize()
-                .context("locating idevicerestore")?
-        } else {
-            self.program.clone()
-        };
         fs::create_dir_all(&self.logs_root).context("creating restore log directory")?;
         let logs_root = self.logs_root.canonicalize()?;
         let mut active = self.active.lock().unwrap();
@@ -377,21 +413,43 @@ impl RestoreEngine {
         );
         // Allocate every log and cache before launching the first target.
         let mut workers = Vec::new();
-        for &(ipsw, ecid) in targets {
+        for (worker, ecid) in targets {
             let directory = tempfile::Builder::new()
                 .prefix(&format!("{ecid:016x}-"))
                 .tempdir_in(&logs_root)
                 .context("creating restore worker directory")?;
-            fs::create_dir(directory.path().join("cache"))?;
+            let (command, operation, image) = match worker {
+                Worker::Erase(ipsw) => {
+                    fs::create_dir(directory.path().join("cache"))?;
+                    let program = if self.program.components().count() > 1 {
+                        self.program
+                            .canonicalize()
+                            .context("locating idevicerestore")?
+                    } else {
+                        self.program.clone()
+                    };
+                    (
+                        restore_command(&program, ipsw.path(), ecid, directory.path()),
+                        Operation::Restore,
+                        Some(ipsw.clone()),
+                    )
+                }
+                Worker::Revive(program) => (
+                    revive_command(program, ecid, directory.path()),
+                    Operation::Revive,
+                    None,
+                ),
+            };
             let stdout = File::create(directory.path().join("stdout.log"))?;
             let stderr = File::create(directory.path().join("stderr.log"))?;
-            workers.push((ipsw, ecid, directory, stdout, stderr));
+            workers.push((command, operation, image, ecid, directory, stdout, stderr));
         }
         active.extend(selected);
         drop(active);
         let mut statuses = Vec::new();
-        for (ipsw, ecid, directory, stdout, stderr) in workers {
+        for (command, operation, image, ecid, directory, stdout, stderr) in workers {
             let status = Arc::new(Mutex::new(RestoreStatus {
+                operation,
                 ecid,
                 state: RestoreState::Starting,
                 pid: None,
@@ -402,12 +460,15 @@ impl RestoreEngine {
             }));
             let worker_status = Arc::clone(&status);
             let active = Arc::clone(&self.active);
-            let program = program.clone();
-            let ipsw = ipsw.clone();
             let spawn = thread::Builder::new()
                 .name(format!("restore-{ecid:x}"))
                 .spawn(move || {
-                    let result = run_worker(&program, &ipsw, &worker_status, stdout, stderr);
+                    let result = image
+                        .as_ref()
+                        .map_or(Ok(()), PreparedIpsw::check_unchanged)
+                        .and_then(|()| {
+                            run_worker(command, operation, &worker_status, stdout, stderr)
+                        });
                     if let Err(error) = result {
                         let mut status = worker_status.lock().unwrap();
                         status.state = RestoreState::Failed;
@@ -468,70 +529,96 @@ fn restore_command(program: &Path, ipsw: &Path, ecid: u64, directory: &Path) -> 
     command
 }
 
+fn revive_command(program: &Path, ecid: u64, directory: &Path) -> Command {
+    let mut command = Command::new(program);
+    command
+        // Configurator buffers JSON progress until exit when stdout is a pipe.
+        // Darwin's stdio honours STDBUF1 for stdout before its first write.
+        .env("STDBUF1", "L")
+        .args([
+            "--format",
+            "JSON",
+            "--progress",
+            "--ecid",
+            &format!("0x{ecid:x}"),
+            "revive",
+        ])
+        .current_dir(directory)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    command
+}
+
 fn run_worker(
-    program: &Path,
-    ipsw: &PreparedIpsw,
+    mut command: Command,
+    operation: Operation,
     status: &Arc<Mutex<RestoreStatus>>,
     stdout_log: File,
     stderr_log: File,
 ) -> Result<()> {
-    ipsw.check_unchanged()?;
-    let (ecid, directory) = {
-        let status = status.lock().unwrap();
-        (status.ecid, status.directory.clone())
-    };
-    let mut child = restore_command(program, ipsw.path(), ecid, &directory)
+    let mut child = command
         .spawn()
-        .context("starting idevicerestore")?;
+        .with_context(|| format!("starting {}", command.get_program().to_string_lossy()))?;
     {
         let mut status = status.lock().unwrap();
         status.pid = Some(child.id());
         status.state = RestoreState::Running;
     }
-    let stdout = child
-        .stdout
-        .take()
-        .context("idevicerestore stdout missing")?;
-    let stderr = child
-        .stderr
-        .take()
-        .context("idevicerestore stderr missing")?;
+    let stdout = child.stdout.take().context("worker stdout missing")?;
+    let stderr = child.stderr.take().context("worker stderr missing")?;
     let (outcome, stdout_result, stderr_result) = thread::scope(|scope| {
-        let out = scope.spawn(|| drain(stdout, stdout_log, status));
-        let err = scope.spawn(|| drain(stderr, stderr_log, status));
+        let out = scope.spawn(|| drain(stdout, stdout_log, status, operation));
+        let err = scope.spawn(|| drain(stderr, stderr_log, status, operation));
         let outcome = child.wait();
         (outcome, out.join(), err.join())
     });
-    let outcome = outcome.context("waiting for idevicerestore")?;
+    let outcome = outcome.context("waiting for recovery worker")?;
     let mut snapshot = status.lock().unwrap();
     snapshot.exit_code = outcome.code();
     let stdout_result = stdout_result.map_err(|_| anyhow::anyhow!("stdout reader panicked"))?;
     let stderr_result = stderr_result.map_err(|_| anyhow::anyhow!("stderr reader panicked"))?;
-    let stdout_result = stdout_result.context("reading idevicerestore stdout")?;
-    let stderr_result = stderr_result.context("reading idevicerestore stderr")?;
+    let stdout_result = stdout_result.context("reading worker stdout")?;
+    let stderr_result = stderr_result.context("reading worker stderr")?;
     let reported = stdout_result || stderr_result;
-    if !outcome.success() {
+    if operation == Operation::Revive && !snapshot.message.is_empty() {
         snapshot.state = RestoreState::Failed;
-        let detail = if snapshot.message.is_empty() {
-            String::new()
-        } else {
-            format!(": {}", snapshot.message)
+    } else if !outcome.success() {
+        snapshot.state = RestoreState::Failed;
+        let tool = match operation {
+            Operation::Restore => "idevicerestore",
+            Operation::Revive => "Apple Configurator",
         };
-        snapshot.message = format!("idevicerestore exited {outcome}{detail}");
+        snapshot.message = if snapshot.message.is_empty() {
+            format!("{tool} exited with {outcome}")
+        } else {
+            format!("{tool} exited with {outcome}: {}", snapshot.message)
+        };
     } else if reported {
         snapshot.state = RestoreState::RestoreReported;
-        snapshot.message = "Restore service reported completion; boot and data erasure are not independently verified".into();
+        snapshot.message = match operation {
+            Operation::Restore => "Restore service reported completion",
+            Operation::Revive => "Apple Configurator reported that Revive completed",
+        }
+        .into();
     } else {
         snapshot.state = RestoreState::Unconfirmed;
-        snapshot.message =
-            "idevicerestore exited successfully without a final restore status".into();
+        snapshot.message = format!(
+            "{} exited successfully without a final result for this device",
+            command.get_program().to_string_lossy()
+        );
     }
     Ok(())
 }
 
 /// Drain both streams regardless of log-write errors so a full pipe cannot
 /// deadlock a restore. Preserve raw bytes; interpret only complete output lines.
-fn drain(input: impl Read, mut log: File, status: &Mutex<RestoreStatus>) -> io::Result<bool> {
+fn drain(
+    input: impl Read,
+    mut log: File,
+    status: &Mutex<RestoreStatus>,
+    operation: Operation,
+) -> io::Result<bool> {
     let mut input = BufReader::new(input);
     let mut line = Vec::new();
     let mut reported = false;
@@ -548,6 +635,11 @@ fn drain(input: impl Read, mut log: File, status: &Mutex<RestoreStatus>) -> io::
         }
         let text = String::from_utf8_lossy(&line);
         let text = text.trim();
+        if operation == Operation::Revive {
+            let mut current = status.lock().unwrap();
+            reported |= configurator_message(text, &mut current);
+            continue;
+        }
         if text == "Status: Restore Finished" {
             reported = true;
         }
@@ -565,14 +657,96 @@ fn drain(input: impl Read, mut log: File, status: &Mutex<RestoreStatus>) -> io::
     Ok(reported)
 }
 
+fn configurator_message(text: &str, status: &mut RestoreStatus) -> bool {
+    let Ok(message) = serde_json::from_str::<serde_json::Value>(text) else {
+        return false;
+    };
+    let matches_target = |field: &str| {
+        let Some([id]) = message[field].as_array().map(Vec::as_slice) else {
+            return false;
+        };
+        id.as_str()
+            .and_then(|id| id.strip_prefix("0x"))
+            .and_then(|hex| u64::from_str_radix(hex, 16).ok())
+            == Some(status.ecid)
+    };
+    let step = message["Step"].as_str();
+    match message["Type"].as_str() {
+        Some("CommandOutput") => {
+            return message["Command"] == "revive" && matches_target("Devices");
+        }
+        Some("Step") => {
+            status.progress = step
+                .filter(|_| matches_target("Devices"))
+                .map(|name| Progress {
+                    name: name.to_owned(),
+                    percent: None,
+                });
+        }
+        Some("Progress") => {
+            // Progress omits Devices. Accept it only inside this ECID's named step.
+            if let Some(progress) = &mut status.progress
+                && Some(progress.name.as_str()) == step
+            {
+                progress.percent = message["Progress"]
+                    .as_f64()
+                    .filter(|f| (0.0..=1.0).contains(f))
+                    .map(|f| (f * 100.0).round() as u8);
+            }
+        }
+        Some("StepComplete") if matches_target("Devices") => {
+            if status
+                .progress
+                .as_ref()
+                .is_some_and(|progress| Some(progress.name.as_str()) == step)
+            {
+                status.progress = None;
+            }
+        }
+        Some("Error")
+            if matches_target("AffectedDevices")
+                || message["AffectedDevices"]
+                    .as_array()
+                    .is_none_or(Vec::is_empty) =>
+        {
+            let description = ["FailureReason", "Detail", "Message"]
+                .into_iter()
+                .filter_map(|key| message[key].as_str())
+                .find(|value| !value.is_empty())
+                .unwrap_or("Revive failed");
+            status.message = match (message["Domain"].as_str(), message["Code"].as_i64()) {
+                (Some(domain), Some(code)) => format!("{description} ({domain} {code})"),
+                _ => description.to_owned(),
+            };
+        }
+        _ => {}
+    }
+    false
+}
+
 fn parse_progress(line: &str) -> Option<Progress> {
     let mut fields = line.strip_prefix("progress: ")?.split_whitespace();
-    let step = fields.next()?.parse().ok()?;
+    let step: u32 = fields.next()?.parse().ok()?;
     let fraction = fields.next()?.parse::<f32>().ok()?;
     if fields.next().is_some() || !fraction.is_finite() || !(0.0..=1.0).contains(&fraction) {
         return None;
     }
-    Some(Progress { step, fraction })
+    // idevicerestore's restore_step values label independent progress counters.
+    let name = match step {
+        0 => "Detecting device".into(),
+        1 => "Preparing device".into(),
+        2 => "Sending filesystem".into(),
+        3 => "Verifying filesystem".into(),
+        4 => "Flashing firmware".into(),
+        5 => "Flashing baseband".into(),
+        6 => "Updating firmware".into(),
+        7 => "Sending image".into(),
+        n => format!("Stage {n}"),
+    };
+    Some(Progress {
+        name,
+        percent: Some((fraction * 100.0).round() as u8),
+    })
 }
 
 #[cfg(test)]
@@ -730,8 +904,8 @@ mod tests {
         assert_eq!(
             parse_progress("progress: 2 0.500000"),
             Some(Progress {
-                step: 2,
-                fraction: 0.5
+                name: "Sending filesystem".into(),
+                percent: Some(50)
             })
         );
         for line in [
@@ -762,6 +936,91 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         batch.snapshots()
+    }
+
+    #[test]
+    fn configurator_attributes_progress_to_its_scoped_step_and_reports_the_device_error() {
+        let mut status = RestoreStatus {
+            operation: Operation::Revive,
+            ecid: 0x21,
+            state: RestoreState::Running,
+            pid: None,
+            progress: None,
+            message: String::new(),
+            exit_code: None,
+            directory: PathBuf::new(),
+        };
+        let mut accept = |event: serde_json::Value| {
+            let reported = configurator_message(&event.to_string(), &mut status);
+            (reported, status.progress.clone(), status.message.clone())
+        };
+        use serde_json::json;
+        let step = "Step 4 of 4: Installing System";
+        let progress = json!({"Type":"Progress","Step":step, "Progress":0.25});
+        assert_eq!(accept(progress.clone()).1, None);
+        accept(json!({"Type":"Step","Step":step,"Devices":["0x22"]}));
+        assert_eq!(accept(progress.clone()).1, None);
+        accept(json!({"Type":"Step","Step":step,"Devices":["0x21"]}));
+        assert_eq!(
+            accept(progress.clone()).1,
+            Some(Progress {
+                name: step.into(),
+                percent: Some(25)
+            })
+        );
+        assert_eq!(
+            accept(json!({"Type":"Progress","Step":step,"Progress":-1}))
+                .1
+                .unwrap()
+                .percent,
+            None
+        );
+        let completed = accept(json!({"Type":"StepComplete","Step":step,"Devices":["0x21"]}));
+        assert!(!completed.0);
+        assert_eq!(completed.1, None);
+        assert_eq!(accept(progress).1, None);
+        let mut error = json!({"Type":"Error","Message":"The device is not connected.",
+            "Detail":"","FailureReason":"","Domain":"ConfigurationUtilityKit.error","Code":603,"AffectedDevices":["0x22"]});
+        assert!(accept(error.clone()).2.is_empty());
+        error["AffectedDevices"] = json!(["0x21"]);
+        assert_eq!(
+            accept(error).2,
+            "The device is not connected. (ConfigurationUtilityKit.error 603)"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn revive_is_ecid_scoped_and_requires_configurators_result() {
+        let temp = tempfile::tempdir().unwrap();
+        let program = executable(
+            temp.path(),
+            r#"
+[ "$1 $2 $3 $4 $6" = "--format JSON --progress --ecid revive" ] && [ "$#" -eq 6 ] || exit 7
+case "$5" in
+  0x21) echo '{"Type":"CommandOutput","Command":"revive","Devices":["0x000021"]}' ;;
+  0x22) echo '{"Type":"CommandOutput","Command":"revive","Devices":["0x21"]}' ;;
+  0x23) echo '{"Type":"CommandOutput","Command":"restore","Devices":["0x23"]}' ;;
+  0x24) echo '{"Type":"Error","Message":"Device disconnected"}' >&2; exit 1 ;;
+esac
+"#,
+        );
+        let engine = RestoreEngine::new("unused", temp.path().join("logs"));
+        let batch = engine
+            .start(
+                [0x21, 0x22, 0x23, 0x24]
+                    .map(|ecid| (Worker::Revive(&program), ecid))
+                    .into(),
+            )
+            .unwrap();
+        let jobs = finish(&batch);
+        assert_eq!(jobs[0].state, RestoreState::RestoreReported);
+        assert_eq!(jobs[1].state, RestoreState::Unconfirmed);
+        assert_eq!(jobs[2].state, RestoreState::Unconfirmed);
+        assert_eq!(jobs[3].state, RestoreState::Failed);
+        assert!(jobs[3].message.contains("Device disconnected"));
+        assert!(jobs.iter().all(|job| job.operation == Operation::Revive));
+        assert!(engine.start(vec![(Worker::Revive(&program), 0)]).is_err());
     }
 
     #[test]
@@ -843,8 +1102,8 @@ printf 'Status: Restore Finished\n'
             assert_eq!(
                 status.progress,
                 Some(Progress {
-                    step: 2,
-                    fraction: 0.5
+                    name: "Sending filesystem".into(),
+                    percent: Some(50)
                 })
             );
             assert!(directories.insert(status.directory.clone()));

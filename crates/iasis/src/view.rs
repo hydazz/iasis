@@ -12,9 +12,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     batch::{Device, Ending},
     dfu::{self, Signal},
-    host::observe,
+    host::{PortJob, observe},
     images::Store,
-    restore::dfu_hardware,
+    restore::{Operation, Progress, dfu_hardware},
     topology::Snapshot,
 };
 
@@ -24,6 +24,7 @@ pub struct PortView {
     pub generation: u32,
     pub occupied: bool,
     pub device: Option<String>,
+    pub ecid: Option<String>,
     pub mode: Option<AppleMode>,
     pub light: Light,
     /// What the board knows and has asked of the target.
@@ -36,11 +37,38 @@ pub struct PortView {
     pub dfu: bool,
     pub reboot: bool,
     pub restore: bool,
+    pub revive: bool,
     pub enabled: bool,
     /// The phase of the restore job on the port.
     pub job: Option<RestorePhase>,
+    /// The worker's current stage and progress within it.
+    pub stage: Option<Progress>,
     /// How the port's last restore ended, from the agent that ran it.
     pub result: Option<Ending>,
+}
+
+impl PortView {
+    pub(crate) fn describe_job(&mut self, job: &PortJob) {
+        if self.generation != job.generation || !self.occupied || self.state == "fault" {
+            return;
+        }
+        self.job = Some(job.status.phase);
+        self.state = job_state(job.status.phase, job.operation).into();
+        self.stage = job
+            .stage
+            .as_ref()
+            .filter(|_| job.status.phase == RestorePhase::Running)
+            .cloned();
+        if matches!(
+            job.status.phase,
+            RestorePhase::Preparing | RestorePhase::Running
+        ) {
+            self.dfu = false;
+            self.reboot = false;
+            self.restore = false;
+            self.revive = false;
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -94,6 +122,7 @@ impl BoardView {
                         generation: state.generation,
                         occupied: state.occupied(),
                         device: None,
+                        ecid: None,
                         mode: state.observed.and_then(|seen| match seen.usb {
                             Usb::Apple(mode) => Some(mode),
                             _ => None,
@@ -110,9 +139,11 @@ impl BoardView {
                         contract: port_contract(state),
                         dfu: available && state.offers(PortAction::DfuAppleSilicon),
                         reboot: available && state.offers(PortAction::Reboot),
+                        revive: false,
                         restore: available && status.restore_session().is_some(),
                         enabled: state.enabled,
                         job: state.restore.map(|job| job.phase),
+                        stage: None,
                         result: None,
                     }
                 })
@@ -131,6 +162,8 @@ impl BoardView {
     ) {
         for (port, row) in Port::ALL.into_iter().zip(&mut self.ports) {
             let assessment = dfu::assess(serial, port, status, snapshot, family.dfu_action(), None);
+            row.revive = crate::restore::configurator().is_some()
+                && revivable(status, snapshot, port).is_some();
             row.dfu = assessment.signal == Signal::Available;
             row.restore &= match assessment.signal {
                 Signal::Available | Signal::PortDfu => true,
@@ -139,10 +172,16 @@ impl BoardView {
                 }
                 _ => false,
             };
-            if row.occupied
-                && status.ports[port.index()].observed == Some(observe(snapshot, port))
-                && let Some(device) = dfu::direct_device(snapshot, port)
-            {
+            let observed = observe(snapshot, port);
+            if !row.occupied || status.ports[port.index()].observed != Some(observed) {
+                row.mode = None;
+                row.usb.clear();
+                continue;
+            }
+            if let Some(device) = dfu::direct_device(snapshot, port) {
+                if matches!(observed.usb, Usb::Apple(mode) if mode != AppleMode::PortDfu) {
+                    row.ecid = observed.ecid.map(|id| format!("{id:016x}"));
+                }
                 let model = device
                     .apple
                     .as_ref()
@@ -203,6 +242,10 @@ impl BoardView {
                 port.number, port.state, port.usb, port.link, port.contract
             );
             text.push_str(line.trim_end());
+            if let Some(stage) = &port.stage {
+                use std::fmt::Write;
+                write!(text, "  {stage}").unwrap();
+            }
             text.push('\n');
         }
         if let Some(notice) = &self.notice {
@@ -210,6 +253,32 @@ impl BoardView {
         }
         text
     }
+}
+
+/// A single direct USB target in recovery can be revived even when its cable
+/// does not support the Power Delivery signals used for entering DFU.
+pub(crate) fn revivable(status: &Status, snapshot: &Snapshot, port: Port) -> Option<u64> {
+    let slot = &status.ports[port.index()];
+    let seen = observe(snapshot, port);
+    (status.host.is_some()
+        && !status.i2c_root_fault
+        && !status.aggregate_power_fault
+        && slot.enabled
+        && matches!(slot.state, PortState::Ready | PortState::Contract)
+        && !slot.pd_transition
+        && slot.error.is_none()
+        && slot.faults.is_none_or(|faults| !faults.power && !faults.cc)
+        && slot.fetch.is_none()
+        && !slot.restoring()
+        && slot.command_result != iasis_protocol::CommandResult::Pending
+        && slot.observed == Some(seen)
+        && matches!(
+            seen.usb,
+            Usb::Apple(AppleMode::Dfu | AppleMode::KisDfu | AppleMode::Recovery)
+        ))
+    .then_some(seen.ecid)
+    .flatten()
+    .filter(|id| *id != 0)
 }
 
 /// What the board knows and has asked of the target.
@@ -221,13 +290,7 @@ fn port_state(port: &PortStatus, uptime_ms: u64) -> String {
         return if port.enabled { "empty" } else { "off" }.into();
     }
     if let Some(job) = port.restore {
-        return match job.phase {
-            RestorePhase::Preparing => "preparing".into(),
-            RestorePhase::Running => format!("restoring {}%", job.progress),
-            RestorePhase::Reported => "restored".into(),
-            RestorePhase::Unconfirmed => "restore unknown".into(),
-            RestorePhase::Failed => "restore failed".into(),
-        };
+        return job_state(job.phase, Operation::Restore).into();
     }
     if let Some(percent) = port.fetch {
         return format!("image {percent}%");
@@ -255,6 +318,17 @@ fn port_state(port: &PortStatus, uptime_ms: u64) -> String {
         _ => "attaching",
     }
     .into()
+}
+
+fn job_state(phase: RestorePhase, operation: Operation) -> &'static str {
+    match phase {
+        RestorePhase::Preparing => "preparing",
+        RestorePhase::Running if operation == Operation::Revive => "reviving",
+        RestorePhase::Running => "restoring",
+        RestorePhase::Reported => "completed",
+        RestorePhase::Unconfirmed => "completion unknown",
+        RestorePhase::Failed => "failed",
+    }
 }
 
 /// What the board's host sees on the port's USB.
@@ -291,4 +365,74 @@ fn port_contract(port: &PortStatus) -> String {
     }
     let amps = f32::from(port.contract_ma) / 1000.0;
     format!("{} V {amps} A", port.contract_mv / 1000)
+}
+
+#[cfg(test)]
+mod stage_tests {
+    use super::*;
+    use iasis_protocol::RestoreStatus;
+
+    #[test]
+    fn a_finished_component_is_not_a_finished_restore() {
+        let mut status = Status::default();
+        status.ports[0].state = PortState::Contract;
+        status.ports[0].generation = 8;
+        let mut job = PortJob {
+            generation: 8,
+            operation: Operation::Restore,
+            stage: Some(Progress {
+                name: "Sending image".into(),
+                percent: Some(100),
+            }),
+            status: RestoreStatus {
+                phase: RestorePhase::Running,
+                ecid: 42,
+                progress: 100,
+            },
+        };
+        status.ports[0].restore = Some(job.status);
+        let info = Info {
+            serial: 1,
+            firmware_version: [0, 1, 0],
+            flash_bytes: 0,
+            capabilities: 0,
+        };
+        let mut view = BoardView::new(&info, &status);
+        let port = &mut view.ports[0];
+        assert_eq!(port.state, "restoring");
+        assert_eq!(port.stage, None);
+        port.describe_job(&job);
+        assert_eq!(
+            port.stage,
+            Some(Progress {
+                name: "Sending image".into(),
+                percent: Some(100)
+            })
+        );
+
+        job.stage = Some(Progress {
+            name: "Sending filesystem".into(),
+            percent: Some(23),
+        });
+        job.status.progress = 23;
+        port.describe_job(&job);
+        assert_eq!(
+            port.stage,
+            Some(Progress {
+                name: "Sending filesystem".into(),
+                percent: Some(23)
+            })
+        );
+        assert_eq!(port.state, "restoring");
+        assert!(view.text().contains("Sending filesystem 23%"));
+
+        let mut next = BoardView::new(&info, &status);
+        next.ports[0].generation += 1;
+        next.ports[0].describe_job(&job);
+        assert!(next.ports[0].stage.is_none());
+        job.status.phase = RestorePhase::Failed;
+        view.ports[0].describe_job(&job);
+        assert!(view.ports[0].stage.is_none());
+        assert_eq!(view.ports[0].state, "failed");
+    }
 }
