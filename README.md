@@ -66,7 +66,7 @@ Port lights outside the selection dim. While the button is held, only the ports 
 
 After a DFU the port pulses blue. It turns steady blue once a host sees the target in DFU, which needs the [host agent](#host-agent). The [light table](crates/firmware/README.md#controls-and-status) lists every colour.
 
-A white port light marks a device Iasis cannot identify; a hold passes it by. DFU leaves their data intact and works with Apple Configurator. `power <port> off` disables a port. `power <port> on` enables it and retries a fault.
+A white port light marks a device Iasis cannot identify; a hold passes it by. DFU leaves their data intact and works with Apple Configurator. `power <port> off` disables a port. `power <port> on` enables it and retries a fault. `brightness <percent>` dims or brightens the lights.
 
 Native USB-C uses the host's advertised current. With a legacy A-to-C connection, set the remaining shared USB allowance, including Iasis and after subtracting other loads:
 
