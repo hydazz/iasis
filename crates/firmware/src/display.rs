@@ -229,6 +229,7 @@ pub fn label(port: &PortStatus) -> &'static str {
         PortState::Unattached => "--",
         PortState::Debouncing => "CC",
         PortState::Starting => "STRT",
+        PortState::Contract if port.wrong_port() => "PORT",
         // Charging only: the target lists neither DFU nor reboot.
         PortState::Contract
             if !port.offers(PortAction::DfuAppleSilicon) && !port.offers(PortAction::Reboot) =>
@@ -404,7 +405,9 @@ fn readings(port: &PortStatus) -> [String<32>; 2] {
         }
         lines[0].push_str(link).unwrap();
     }
-    if port.contract_ma > 0 {
+    if port.wrong_port() {
+        lines[1].push_str("Wrong port?").unwrap();
+    } else if port.contract_ma > 0 {
         write!(lines[1], "{}V ", port.contract_mv / 1000).unwrap();
         amps(&mut lines[1], port.contract_ma);
         lines[1].push_str(" (").unwrap();
@@ -745,6 +748,24 @@ mod tests {
             ..contract(0, 0)
         };
         assert_eq!(view(&status, &button, 0).lines[1], "Unknown device");
+    }
+
+    #[test]
+    fn a_target_on_a_port_without_dfu_usb_reads_as_the_wrong_port() {
+        let mut status = Status::default();
+        // An M1 Mac's other port lists reboot alone; an M5's lists DFU too.
+        for list in [
+            [0x0105, 0x0303, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0x4606, 0x0106, 0x0105, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        ] {
+            status.ports[0] = PortStatus {
+                debug_actions: DebugActions::Listed(list),
+                ..contract(5000, 2000)
+            };
+            assert_eq!(label(&status.ports[0]), "PORT");
+            assert_eq!(view(&status, &selecting(0), 0).lines[1], "Wrong port?");
+        }
+        assert_eq!(label(&contract(5000, 2000)), "RDY");
     }
 
     #[test]
