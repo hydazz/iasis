@@ -12,13 +12,13 @@ use std::{
 };
 
 use anyhow::{Context, Result, ensure};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub const MAX_RESTORES: usize = 5;
 
-/// CRC-checked local archive. Apple authorizes the restore when
+/// Checked local archive. Apple authorizes the restore when
 /// idevicerestore requests a signing ticket for the connected target.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PreparedIpsw {
     path: PathBuf,
     bytes: u64,
@@ -26,7 +26,7 @@ pub struct PreparedIpsw {
     pub product_version: String,
     pub build_version: String,
     pub product_types: Vec<String>,
-    #[serde(skip)]
+    /// Chip and board IDs the archive can erase and install.
     erase_hardware: HashSet<(u32, u32)>,
 }
 
@@ -34,7 +34,17 @@ impl PreparedIpsw {
     /// Read every ZIP member to verify its CRC before any device is touched.
     /// The archive stays in place and can be read by all five workers.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref().canonicalize().context("opening IPSW path")?;
+        Self::read(path.as_ref(), true)
+    }
+
+    /// Describe an archive whose bytes have already been checked against
+    /// their published digest.
+    pub fn open_verified(path: impl AsRef<Path>) -> Result<Self> {
+        Self::read(path.as_ref(), false)
+    }
+
+    fn read(path: &Path, check_members: bool) -> Result<Self> {
+        let path = path.canonicalize().context("opening IPSW path")?;
         let file = File::open(&path).context("opening IPSW")?;
         let metadata = file.metadata()?;
         ensure!(metadata.is_file(), "IPSW must be a regular file");
@@ -58,7 +68,7 @@ impl PreparedIpsw {
                     plist::Value::from_reader(io::Cursor::new(bytes))
                         .context("parsing BuildManifest.plist")?,
                 );
-            } else {
+            } else if check_members {
                 io::copy(&mut entry, &mut io::sink())
                     .with_context(|| format!("checking IPSW member {name}"))?;
             }
@@ -142,6 +152,20 @@ impl PreparedIpsw {
         self.bytes
     }
 
+    pub fn erases(&self, chip: u32, board: u32) -> bool {
+        self.erase_hardware.contains(&(chip, board))
+    }
+
+    /// Version and build in an order where a later release is greater.
+    pub fn release(&self) -> (Vec<u32>, &str) {
+        let version = self
+            .product_version
+            .split('.')
+            .map(|part| part.parse().unwrap_or(0))
+            .collect();
+        (version, &self.build_version)
+    }
+
     pub fn check_unchanged(&self) -> Result<()> {
         let metadata = fs::metadata(&self.path).context("checking prepared IPSW")?;
         ensure!(
@@ -179,12 +203,8 @@ fn manifest_id(value: &plist::Value) -> Option<u32> {
     }
 }
 
-/// Select the unique prepared archive containing an erase identity for the
-/// chip and board reported in an ordinary DFU USB serial descriptor.
-pub fn image_for_dfu<'a>(
-    images: &'a [PreparedIpsw],
-    serial_descriptor: &str,
-) -> Result<&'a PreparedIpsw> {
+/// The chip and board IDs in an ordinary DFU USB serial descriptor.
+pub fn dfu_hardware(serial_descriptor: &str) -> Result<(u32, u32)> {
     let id = |key| -> Result<u32> {
         let mut fields = serial_descriptor
             .split_ascii_whitespace()
@@ -201,7 +221,16 @@ pub fn image_for_dfu<'a>(
     };
     let chip = id("CPID")?;
     ensure!(chip != 0, "invalid zero CPID in DFU serial");
-    let board = id("BDID")?;
+    Ok((chip, id("BDID")?))
+}
+
+/// Select the unique prepared archive containing an erase identity for the
+/// chip and board reported in an ordinary DFU USB serial descriptor.
+pub fn image_for_dfu<'a>(
+    images: &'a [PreparedIpsw],
+    serial_descriptor: &str,
+) -> Result<&'a PreparedIpsw> {
+    let (chip, board) = dfu_hardware(serial_descriptor)?;
     let mut matching = images
         .iter()
         .filter(|image| image.erase_hardware.contains(&(chip, board)));

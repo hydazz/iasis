@@ -1,7 +1,7 @@
 use std::{
     collections::HashSet,
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
 };
@@ -9,9 +9,13 @@ use std::{
 use crate::{
     Board,
     dfu::{self, Attempt, Outcome, Signal},
+    home::Home,
     host::{Jobs, Link},
     identity::{AppleMode, Observation, TargetTracker},
-    restore::{PreparedIpsw, RestoreBatch, RestoreEngine, RestoreState, image_for_dfu},
+    images::{Lease, Network, Store},
+    restore::{
+        PreparedIpsw, RestoreBatch, RestoreEngine, RestoreState, dfu_hardware, image_for_dfu,
+    },
     topology,
 };
 use anyhow::{Context, Result, bail, ensure};
@@ -26,8 +30,9 @@ use crate::progress;
 
 #[derive(Args)]
 pub struct Options {
-    /// Local IPSW; validated once before any target action
-    pub ipsw: PathBuf,
+    /// Restore from this local IPSW instead of the image store, which
+    /// fetches the newest release for each target
+    pub ipsw: Option<PathBuf>,
     /// Physical ports to erase, comma-separated
     #[arg(long, value_delimiter = ',', value_parser = super::parse_port, required_unless_present = "button")]
     pub ports: Vec<Port>,
@@ -45,9 +50,40 @@ pub struct Options {
     pub host_ma: Option<u16>,
     #[arg(long, default_value = "idevicerestore")]
     pub program: PathBuf,
-    #[arg(long, default_value = "restores")]
-    pub logs: PathBuf,
+    /// Worker logs and scratch directories; the cache directory by default
+    #[arg(long)]
+    pub logs: Option<PathBuf>,
 }
+
+/// Where a restore's images come from.
+pub enum Images<'a> {
+    /// Archives the caller named.
+    Given(&'a [PreparedIpsw]),
+    /// The host's store, which fetches what it lacks.
+    Store(&'a Store),
+}
+
+/// Targets a client asked the board's host to restore: each port with the
+/// attachment that was on it when the client asked.
+pub struct Submission {
+    pub targets: Vec<(Port, u32)>,
+    pub at: Instant,
+}
+
+/// A client's request waiting for the board's attendant.
+pub type Requests = Arc<Mutex<Option<Submission>>>;
+
+/// How a port's last restore ended. The board forgets a result when its
+/// target leaves, which a restored target does by restarting.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Ending {
+    pub ecid: String,
+    pub phase: RestorePhase,
+    pub message: String,
+}
+
+/// Each port's last result, until another restore is asked of the port.
+pub type Endings = Arc<Mutex<[Option<Ending>; protocol::PORT_COUNT]>>;
 
 #[derive(Clone, Copy, ValueEnum)]
 pub enum Device {
@@ -56,7 +92,7 @@ pub enum Device {
 }
 
 impl Device {
-    fn dfu_action(self) -> PortAction {
+    pub fn dfu_action(self) -> PortAction {
         match self {
             Self::AppleSilicon => PortAction::DfuAppleSilicon,
             Self::T2 => PortAction::DfuT2,
@@ -68,17 +104,33 @@ impl Device {
 /// session until its workers finish.
 pub fn run(device: &nusb::DeviceInfo, board: &Board, options: Options) -> Result<()> {
     ensure!(options.erase, "restore requires --erase");
-    let engine = RestoreEngine::new(&options.program, &options.logs);
+    let home = Home::locate()?;
+    let logs = options.logs.unwrap_or_else(|| home.cache.join("restores"));
+    let engine = RestoreEngine::new(&options.program, logs);
     engine.check_program()?;
     crate::identity::check_usbmuxd().context("system usbmuxd is unavailable")?;
     // Take the board before the long image check, which another host's
     // session would make pointless.
     let link = Link::open(device, Jobs::default())?;
-    let ipsw = progress::check_ipsw(&options.ipsw)?;
-    println!(
-        "Prepared {} ({}) for {:?}",
-        ipsw.product_version, ipsw.build_version, ipsw.product_types
-    );
+    let given = match &options.ipsw {
+        Some(path) => {
+            let ipsw = progress::check_ipsw(path)?;
+            println!(
+                "Prepared {} ({}) for {:?}",
+                ipsw.product_version, ipsw.build_version, ipsw.product_types
+            );
+            vec![ipsw]
+        }
+        None => Vec::new(),
+    };
+    let store = match options.ipsw {
+        Some(_) => None,
+        None => Some(Store::open(home.cache.join("images"), Network::default())?),
+    };
+    let images = match &store {
+        Some(store) => Images::Store(store),
+        None => Images::Given(&given),
+    };
     if let Some(ma) = options.host_ma {
         board.host_budget(ma)?;
     }
@@ -94,9 +146,8 @@ pub fn run(device: &nusb::DeviceInfo, board: &Board, options: Options) -> Result
                 "On Iasis, tap to select the targets, then hold the button until Restore and release to prepare them for erase."
             );
         }
-        let selected = selection(&link, &options.ports)?;
-        let targets =
-            prepare_selected(board, &link, &selected, action, std::slice::from_ref(&ipsw))?;
+        let selected = selection(&link, &options.ports, None)?.0;
+        let targets = prepare_selected(board, &link, &selected, action, &images)?;
         link.restore_ready(false)?;
         (targets, false)
     } else {
@@ -115,63 +166,148 @@ pub fn run(device: &nusb::DeviceInfo, board: &Board, options: Options) -> Result
             thread::sleep(Duration::from_millis(50));
         };
         let selected = select_ports(&options.ports, &status)?;
-        enter_dfu(board, &selected, action)?
+        let (targets, failed) = enter_dfu(board, &selected, action)?;
+        (resolve(&link, &targets, &images)?, failed)
     };
-    let running = start(
-        board,
-        &engine,
-        std::slice::from_ref(&ipsw),
-        targets,
-        failed,
-        options.button,
-    )?;
-    monitor(&link, running)
+    let running = start(board, &engine, &images, targets, failed, options.button)?;
+    monitor(&link, running, &Endings::default())
 }
 
-/// Handle one board-initiated transaction while other workers keep reporting.
-/// Fails once the link has lost the board.
+/// Handle one restore request while other workers keep reporting: a Restore
+/// hold on the board, which the board then confirms, or a client's request,
+/// which the client confirmed. Returns why a request came to nothing. Fails
+/// once the link has lost the board.
 pub fn listen(
     link: &Arc<Link>,
     device: &nusb::DeviceInfo,
     engine: &RestoreEngine,
-    images: &[PreparedIpsw],
+    images: &Images,
     family: Device,
-) -> Result<()> {
+    requests: &Requests,
+    endings: &Endings,
+) -> Result<Option<String>> {
     let action = family.dfu_action();
     link.restore_ready(true)?;
-    let selected = selection(link, &[])?;
+    let (selected, button) = match selection(link, &[], Some(requests)) {
+        Ok(selected) => selected,
+        // A client named ports that cannot be restored.
+        Err(error) if link.alive() => return Ok(Some(format!("{error:#}"))),
+        Err(error) => return Err(error),
+    };
+    for (port, _) in &selected {
+        endings.lock().unwrap()[port.index()] = None;
+    }
     // A declined or unavailable batch finishes this request. The listener
-    // can immediately accept the next gesture.
+    // can immediately accept the next one.
     let request = (|| -> Result<_> {
         let control = Board::open(device).context("opening board for restore preparation")?;
         ensure!(
             control.info().serial == link.board().info().serial,
             "board serial changed"
         );
-        let targets = prepare_selected(&control, link, &selected, action, images)?;
+        let targets = if button {
+            prepare_selected(&control, link, &selected, action, images)?
+        } else {
+            let (targets, failed) = enter_dfu(&control, &selected, action)?;
+            ensure!(
+                !failed && targets.len() == selected.len(),
+                "not all selected targets reached verified DFU; no restore started"
+            );
+            resolve(link, &targets, images)?
+        };
         start(&control, engine, images, targets, false, true)
     })();
     let running = match request {
         Ok(running) => running,
         Err(error) => {
             eprintln!("Restore request: {error:#}");
-            return Ok(());
+            return Ok(Some(format!("{error:#}")));
         }
     };
-    let reporter = link.clone();
+    let (reporter, endings) = (link.clone(), endings.clone());
     thread::spawn(move || {
-        if let Err(error) = monitor(&reporter, running) {
+        if let Err(error) = monitor(&reporter, running, &endings) {
             eprintln!("Restore: {error:#}");
         }
     });
-    Ok(())
+    Ok(None)
+}
+
+/// Choose each target's image by the chip and board in its DFU descriptor.
+/// The store fetches an image it lacks, which the target's port shows.
+fn resolve(link: &Link, targets: &VerifiedTargets, images: &Images) -> Result<ChosenTargets> {
+    let board = link.board();
+    let snapshot = topology::discover(board.topology())?;
+    let mut hardware = Vec::new();
+    for (target, _) in targets {
+        ensure!(
+            ordinary_dfu(board, target, &snapshot),
+            "port {} lost its DFU identity",
+            target.port.number()
+        );
+        let serial = dfu::direct_device(&snapshot, target.port)
+            .and_then(|device| device.serial_number.as_deref())
+            .context("DFU descriptor has no serial")?;
+        hardware.push(serial.to_owned());
+    }
+    if let Images::Store(store) = images {
+        for ((target, generation), serial) in targets.iter().zip(&hardware) {
+            let (chip, id) = dfu_hardware(serial)?;
+            if store.image_for(chip, id).is_none() {
+                link.fetching(target.port, *generation, Some(0));
+            }
+        }
+    }
+    let chosen = targets
+        .iter()
+        .zip(&hardware)
+        .map(|((target, generation), serial)| {
+            let image = match images {
+                Images::Given(images) => image_for_dfu(images, serial)?.clone(),
+                Images::Store(store) => {
+                    let (chip, id) = dfu_hardware(serial)?;
+                    let mut announced = false;
+                    store.obtain(chip, id, |fetch| {
+                        ensure!(link.alive(), link.failure());
+                        ensure!(
+                            link.status().is_none_or(|status| {
+                                status.ports[target.port.index()].generation == *generation
+                            }),
+                            "the target left while its image was fetched"
+                        );
+                        if let Some(fetch) = fetch {
+                            if !announced {
+                                announced = true;
+                                println!(
+                                    "Port {}: fetching {} ({}), {:.1} GB",
+                                    target.port.number(),
+                                    fetch.version,
+                                    fetch.build,
+                                    fetch.bytes as f64 / 1e9
+                                );
+                            }
+                            let percent = fetch.done * 100 / fetch.bytes.max(1);
+                            link.fetching(target.port, *generation, Some(percent.min(100) as u8));
+                        }
+                        Ok(())
+                    })?
+                }
+            };
+            Ok((target.clone(), *generation, image))
+        })
+        .collect::<Result<ChosenTargets>>()
+        .with_context(|| "choosing restore images");
+    for (target, generation) in targets {
+        link.fetching(target.port, *generation, None);
+    }
+    chosen
 }
 
 fn start(
     board: &Board,
     engine: &RestoreEngine,
-    images: &[PreparedIpsw],
-    mut targets: VerifiedTargets,
+    images: &Images,
+    mut targets: ChosenTargets,
     mut failed: bool,
     require_all: bool,
 ) -> Result<Running> {
@@ -179,8 +315,13 @@ fn start(
     // every physical slot immediately before launching destructive workers.
     let status = board.status()?;
     let snapshot = topology::discover(board.topology())?;
-    targets.retain(|(target, generation)| {
-        let valid = status.ports[target.port.index()].generation == *generation
+    targets.retain(|(target, generation, image)| {
+        let erases = dfu::direct_device(&snapshot, target.port)
+            .and_then(|device| device.serial_number.as_deref())
+            .and_then(|serial| dfu_hardware(serial).ok())
+            .is_some_and(|(chip, id)| image.erases(chip, id));
+        let valid = erases
+            && status.ports[target.port.index()].generation == *generation
             && matches!(
                 status.ports[target.port.index()].state,
                 PortState::Ready | PortState::Contract
@@ -204,52 +345,41 @@ fn start(
         !targets.is_empty(),
         "no selected target reached verified DFU; no restore started"
     );
-    let inputs = images_for_targets(board, &snapshot, &targets, images)?;
+    let inputs: Vec<_> = targets
+        .iter()
+        .map(|(target, _, image)| (image, target.ecid))
+        .collect();
+    // The store keeps each image for as long as a worker reads it.
+    let leases = match images {
+        Images::Store(store) => inputs.iter().map(|(image, _)| store.hold(image)).collect(),
+        Images::Given(_) => Vec::new(),
+    };
     let workers = engine.start_selected(&inputs)?;
     Ok(Running {
-        targets,
+        targets: targets
+            .into_iter()
+            .map(|(target, generation, _)| (target, generation))
+            .collect(),
         workers,
         failed,
+        _leases: leases,
     })
-}
-
-fn images_for_targets<'a>(
-    board: &Board,
-    snapshot: &topology::Snapshot,
-    targets: &VerifiedTargets,
-    images: &'a [PreparedIpsw],
-) -> Result<Vec<(&'a PreparedIpsw, u64)>> {
-    targets
-        .iter()
-        .map(|(target, _)| {
-            ensure!(
-                ordinary_dfu(board, target, snapshot),
-                "port {} lost its DFU identity",
-                target.port.number()
-            );
-            let serial = dfu::direct_device(snapshot, target.port)
-                .and_then(|device| device.serial_number.as_deref())
-                .context("DFU descriptor has no serial")?;
-            let image = image_for_dfu(images, serial)
-                .with_context(|| format!("port {}", target.port.number()))?;
-            image.check_unchanged()?;
-            Ok((image, target.ecid))
-        })
-        .collect()
 }
 
 struct Running {
     targets: VerifiedTargets,
     workers: RestoreBatch,
     failed: bool,
+    _leases: Vec<Lease>,
 }
 
 /// Follow the workers to their end. The link reports each job to the board.
-fn monitor(link: &Link, running: Running) -> Result<()> {
+fn monitor(link: &Link, running: Running, endings: &Endings) -> Result<()> {
     let Running {
         targets,
         workers: batch,
         mut failed,
+        _leases,
     } = running;
     let board = link.board();
     let mut active: HashSet<Port> = targets.iter().map(|(target, _)| target.port).collect();
@@ -298,6 +428,11 @@ fn monitor(link: &Link, running: Running) -> Result<()> {
             if job.state.is_terminal() {
                 failed |= job.state != RestoreState::RestoreReported;
                 active.remove(&target.port);
+                endings.lock().unwrap()[target.port.index()] = Some(Ending {
+                    ecid: format!("{:016x}", job.ecid),
+                    phase,
+                    message: job.message.clone(),
+                });
             }
         }
         if active.is_empty() {
@@ -327,6 +462,8 @@ fn monitor(link: &Link, running: Running) -> Result<()> {
 }
 
 type VerifiedTargets = Vec<(TargetTracker, u32)>;
+/// Verified targets, each with the image that will erase it.
+type ChosenTargets = Vec<(TargetTracker, u32, PreparedIpsw)>;
 
 fn select_ports(ports: &[Port], status: &Status) -> Result<Vec<(Port, u32)>> {
     let mut selected = Vec::new();
@@ -342,28 +479,45 @@ fn select_ports(ports: &[Port], status: &Status) -> Result<Vec<(Port, u32)>> {
     Ok(selected)
 }
 
-/// The ports to restore: those named, or those the board's Restore hold
-/// selects.
-fn selection(link: &Link, ports: &[Port]) -> Result<Vec<(Port, u32)>> {
+/// The ports to restore, and whether the board's button chose them: those
+/// named, those a client asks for, or those the board's Restore hold selects.
+fn selection(
+    link: &Link,
+    ports: &[Port],
+    requests: Option<&Requests>,
+) -> Result<(Vec<(Port, u32)>, bool)> {
     let board = link.board();
     let initial = board.status()?;
     if !ports.is_empty() {
-        return select_ports(ports, &initial);
+        return Ok((select_ports(ports, &initial)?, true));
     }
     let mut last = initial.button.map_or(0, |e| e.id);
     loop {
         ensure!(link.alive(), link.failure());
         let status = board.status()?;
+        if let Some(request) = requests.and_then(|requests| requests.lock().unwrap().take()) {
+            // The request is for the targets the client saw, now.
+            ensure!(
+                request.at.elapsed() < Duration::from_secs(5)
+                    && request.targets.iter().all(|(port, generation)| {
+                        status.ready_mask() & (1 << port.index()) != 0
+                            && status.ports[port.index()].generation == *generation
+                    }),
+                "the selected targets changed or are busy; no restore started"
+            );
+            return Ok((request.targets, false));
+        }
         if let Some(event) = status.button
             && event.id != last
         {
             last = event.id;
             if event.session == Some(link.session()) && event.gesture == Gesture::Restore {
-                return Ok(Port::ALL
+                let selected = Port::ALL
                     .into_iter()
                     .filter(|p| event.ports & (1 << p.index()) != 0)
                     .map(|p| (p, event.generations[p.index()]))
-                    .collect());
+                    .collect();
+                return Ok((selected, true));
             }
         }
         thread::sleep(Duration::from_millis(100));
@@ -376,8 +530,8 @@ fn prepare_selected(
     link: &Link,
     selected: &[(Port, u32)],
     action: PortAction,
-    images: &[PreparedIpsw],
-) -> Result<VerifiedTargets> {
+    images: &Images,
+) -> Result<ChosenTargets> {
     let status = board.status()?;
     let mut draft = RestoreArm {
         session: link.session(),
@@ -399,17 +553,18 @@ fn prepare_selected(
         !failed && targets.len() == selected.len(),
         "not all selected targets reached verified DFU; no erase armed"
     );
+    // Fetching an image can take long enough for a target to leave.
+    let targets = resolve(link, &targets, images)?;
     let status = board.status()?;
     ensure!(
         draft.matches_targets(&status),
         "prepared targets changed; no erase armed"
     );
-    let snapshot = topology::discover(board.topology())?;
-    let matched = images_for_targets(board, &snapshot, &targets, images)?;
-    for ((target, _), (image, ecid)) in targets.iter().zip(matched) {
+    for (target, _, image) in &targets {
         println!(
-            "Prepared port {}, ECID {ecid:016x} for {} ({})",
+            "Prepared port {}, ECID {:016x} for {} ({})",
             target.port.number(),
+            target.ecid,
             image.product_version,
             image.build_version
         );
