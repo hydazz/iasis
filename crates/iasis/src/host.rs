@@ -155,6 +155,7 @@ struct View {
     seen: Seen,
     /// Board uptime at the last sample. A smaller reading is a restart.
     uptime_ms: u64,
+    status: Option<Status>,
 }
 
 fn finished(job: &RestoreStatus) -> bool {
@@ -176,10 +177,12 @@ fn settle(jobs: &mut [Option<(u32, RestoreStatus)>; PORT_COUNT], status: &Status
     }
 }
 
-/// Pair each port's view with the job on the same attachment.
+/// Pair each port's view with the job and the image fetch on the same
+/// attachment.
 fn compose(
     seen: &Seen,
     jobs: &[Option<(u32, RestoreStatus)>; PORT_COUNT],
+    fetching: &[Option<(u32, u8)>; PORT_COUNT],
 ) -> [Option<PortReport>; PORT_COUNT] {
     let mut ports = [None; PORT_COUNT];
     for (index, entry) in ports.iter_mut().enumerate() {
@@ -189,6 +192,9 @@ fn compose(
             restore: jobs[index]
                 .filter(|(job, _)| *job == generation)
                 .map(|(_, status)| status),
+            fetch: fetching[index]
+                .filter(|(fetch, _)| *fetch == generation)
+                .map(|(_, percent)| percent),
         });
     }
     ports
@@ -198,6 +204,7 @@ struct Shared {
     board: Board,
     session: u32,
     jobs: Jobs,
+    fetching: Mutex<[Option<(u32, u8)>; PORT_COUNT]>,
     restore_ready: AtomicBool,
     alive: AtomicBool,
     stop: AtomicBool,
@@ -233,6 +240,7 @@ impl Shared {
         settle(&mut self.jobs.lock().unwrap(), &status, restarted);
         view.uptime_ms = status.uptime_ms;
         view.seen = view.observer.sample(&status, &snapshot);
+        view.status = Some(status);
         Ok(())
     }
 
@@ -246,7 +254,7 @@ impl Shared {
                 id: self.session,
                 restore_ready: self.restore_ready.load(Ordering::Relaxed),
             },
-            ports: compose(&seen, &jobs),
+            ports: compose(&seen, &jobs, &self.fetching.lock().unwrap()),
         };
         match self.board.host_report(&report) {
             Ok(()) => Ok(()),
@@ -357,6 +365,7 @@ impl Link {
             board,
             session,
             jobs,
+            fetching: Mutex::default(),
             restore_ready: AtomicBool::new(false),
             alive: AtomicBool::new(true),
             stop: AtomicBool::new(false),
@@ -453,6 +462,18 @@ impl Link {
     /// Set or clear the restore job on a port's attachment.
     pub fn job(&self, port: Port, generation: u32, status: Option<RestoreStatus>) {
         self.shared.jobs.lock().unwrap()[port.index()] = status.map(|status| (generation, status));
+    }
+
+    /// Say how much of a port's restore image is fetched, or that the fetch
+    /// is over.
+    pub fn fetching(&self, port: Port, generation: u32, percent: Option<u8>) {
+        self.shared.fetching.lock().unwrap()[port.index()] =
+            percent.map(|percent| (generation, percent));
+    }
+
+    /// The board's status at the last sample.
+    pub fn status(&self) -> Option<Status> {
+        self.shared.view.lock().unwrap().status
     }
 
     /// Ask the board to confirm an erase of the selected ports. Each arm is
@@ -624,9 +645,13 @@ mod tests {
         jobs[0] = Some((3, job(RestorePhase::Running)));
         // A job for an earlier attachment of port 2 is not this target's.
         jobs[1] = Some((2, job(RestorePhase::Running)));
-        let report = compose(&view, &jobs);
+        // Nor is an image fetch begun for one.
+        let fetching = [Some((3, 40)), Some((2, 40)), None, None, None];
+        let report = compose(&view, &jobs, &fetching);
         assert_eq!(report[0].unwrap().restore, Some(job(RestorePhase::Running)));
         assert_eq!(report[1].unwrap().restore, None);
+        assert_eq!(report[0].unwrap().fetch, Some(40));
+        assert_eq!(report[1].unwrap().fetch, None);
 
         // A running job stays whatever the board shows. A finished one goes
         // once the board echoes it, or once its attachment has ended.

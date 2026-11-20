@@ -1,24 +1,24 @@
 use std::{
-    fmt::Write as _,
     io::{self, IsTerminal, Write},
+    path::PathBuf,
     thread,
     time::{Duration, Instant},
 };
 
 use iasis::{batch, parse_port, parse_serial, progress};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use clap::{Parser, Subcommand, ValueEnum};
 use iasis::{
     Board, UsbIds,
+    agent::{Client, Reply, Request, State},
     dfu::{self, Attempt, Outcome, Signal},
+    home::Home,
     identity::AppleMode,
     topology::{self, Snapshot},
+    view::{BoardView, port_usb},
 };
-use iasis_protocol::{
-    CommandResult, DebugActions, Link, Port, PortAction, PortState, PortStatus, RestorePhase,
-    Status, Supply, Usb,
-};
+use iasis_protocol::{CommandResult, DebugActions, Link, Port, PortAction, RestorePhase, Status};
 
 #[derive(Parser)]
 #[command(
@@ -47,6 +47,11 @@ enum Command {
     Ipsw { path: std::path::PathBuf },
     /// Erase a selected batch using independent idevicerestore workers
     Restore(batch::Options),
+    /// List and manage restore images
+    Images {
+        #[command(subcommand)]
+        command: Option<ImagesCommand>,
+    },
     /// List boards, firmware versions and USB paths
     List,
     /// Read ADC counts, faults and bus observations
@@ -94,6 +99,20 @@ enum Command {
     },
 }
 
+#[derive(Subcommand)]
+enum ImagesCommand {
+    /// Keep the newest image for a model, such as iPad13,18
+    Keep { model: String },
+    /// Stop keeping a model's image
+    Forget { model: String },
+    /// Check a local IPSW and copy it into the store
+    Add { path: PathBuf },
+    /// Delete an image by its build, such as 26B131
+    Remove { build: String },
+    /// Ask for newer releases now
+    Refresh,
+}
+
 #[derive(Clone, Copy, ValueEnum)]
 enum Power {
     On,
@@ -127,9 +146,29 @@ fn main() -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&prepared)?);
         return Ok(());
     }
+    // The agent keeps the images and the settings, and runs the restores,
+    // while it is running.
+    let mut agent = Client::connect(&Home::locate()?);
+    match (&command, agent.as_mut()) {
+        (Command::Images { command }, Some(agent)) => return images(agent, command.as_ref()),
+        (Command::Images { .. }, None) => {
+            bail!("the agent keeps the restore images; start iasisd")
+        }
+        (Command::Brightness { percent }, Some(agent)) => {
+            return agent.request(&Request::Brightness { percent: *percent });
+        }
+        (Command::Restore(options), Some(agent)) => {
+            let serial = cli
+                .serial
+                .context("this command requires --serial; use `iasis list` to select the board")?;
+            return restore_through(agent, serial, options);
+        }
+        _ => {}
+    }
     if matches!(
         command,
         Command::Bootloader
+            | Command::Brightness { .. }
             | Command::Power { .. }
             | Command::Dfu { .. }
             | Command::Reboot { .. }
@@ -167,7 +206,9 @@ fn main() -> Result<()> {
     }
     let board = &boards[0];
     match command {
-        Command::List | Command::Ipsw { .. } | Command::Watch => unreachable!(),
+        Command::List | Command::Ipsw { .. } | Command::Watch | Command::Images { .. } => {
+            unreachable!()
+        }
         Command::Restore(options) => batch::run(&devices[0], board, options)?,
         Command::Brightness { percent } => board.brightness(percent)?,
         Command::Bootloader => {
@@ -437,10 +478,60 @@ fn list(ids: UsbIds, serial: Option<u64>) -> Result<()> {
     Ok(())
 }
 
-/// Every board's ports, from the boards themselves. A target's USB mode is
-/// what the board's host reports to it, so the view agrees with the lights.
+/// The boards as a running agent shows them, with its images.
+fn agent_text(state: &State) -> String {
+    let mut text = String::new();
+    if state.boards.is_empty() {
+        text.push_str("No Iasis boards found.\n");
+    }
+    for board in &state.boards {
+        text.push_str(&board.text());
+    }
+    if let Some(fetch) = &state.images.fetch {
+        text.push_str(&format!(
+            "Fetching {} ({}): {}%\n",
+            fetch.version,
+            fetch.build,
+            fetch.done * 100 / fetch.bytes.max(1)
+        ));
+    }
+    if let Some(problem) = &state.restore_problem {
+        text.push_str(&format!("Restores unavailable: {problem}\n"));
+    }
+    text
+}
+
+/// Every board's ports. A running agent says what it sees; otherwise the
+/// boards are read directly. A target's USB mode is what the board's host
+/// reports to it, so either view agrees with the lights.
 fn overview(ids: UsbIds, serial: Option<u64>, watch: bool) -> Result<()> {
     let terminal = io::stdout().is_terminal();
+    let show = |text: &str| -> Result<()> {
+        if watch && terminal {
+            print!("\x1b[H\x1b[J");
+        }
+        print!("{text}");
+        io::stdout().flush()?;
+        Ok(())
+    };
+    if let Some(mut agent) = Client::connect(&Home::locate()?).filter(|_| serial.is_none()) {
+        let mut reply = agent.ask(&if watch {
+            Request::Watch
+        } else {
+            Request::State
+        })?;
+        loop {
+            match reply {
+                Reply::State(state) => show(&agent_text(&state))?,
+                Reply::Error(error) => bail!(error),
+                Reply::Ok => {}
+            }
+            if !watch {
+                return Ok(());
+            }
+            reply = agent.receive()?;
+        }
+    }
     loop {
         let mut text = String::new();
         let devices = iasis::discover(ids, serial)?;
@@ -448,57 +539,16 @@ fn overview(ids: UsbIds, serial: Option<u64>, watch: bool) -> Result<()> {
             text.push_str("No Iasis boards found.\n");
         }
         for device in &devices {
-            let (board, status) = match Board::observe(device)
+            match Board::observe(device)
                 .and_then(|board| board.status().map(|status| (board, status)))
             {
-                Ok(read) => read,
-                Err(error) => {
-                    writeln!(text, "{}", unreadable(device, &error))?;
-                    continue;
+                Ok((board, status)) => {
+                    text.push_str(&BoardView::new(board.info(), &status).text());
                 }
-            };
-            let host = match status.host {
-                Some(host) if host.restore_ready => "host attached, restores ready",
-                Some(_) => "host attached",
-                None => "no host: start iasisd to see USB modes",
-            };
-            let supply = match status.supply {
-                Supply::Brick => format!(
-                    "power supply {} V, {} W for targets",
-                    status.brick_requested_mv / 1000,
-                    status.charging_budget_mw / 1000
-                ),
-                Supply::HostPresence => {
-                    format!("host power, {} mA for targets", status.host_limit_ma)
-                }
-                Supply::Off => "targets off".into(),
-            };
-            writeln!(text, "{:016x}  {supply}  {host}", board.info().serial)?;
-            for port in Port::ALL {
-                let state = &status.ports[port.index()];
-                let line = format!(
-                    "  {}  {:<16}{:<34}{:<7}{}",
-                    port.number(),
-                    port_state(state, status.uptime_ms),
-                    port_usb(state),
-                    state
-                        .link
-                        .filter(|_| state.occupied())
-                        .map_or("", |link| match link {
-                            Link::Down => "",
-                            Link::Usb2 => "USB 2",
-                            Link::Usb3 => "USB 3",
-                        }),
-                    port_contract(state),
-                );
-                writeln!(text, "{}", line.trim_end())?;
+                Err(error) => text.push_str(&format!("{}\n", unreadable(device, &error))),
             }
         }
-        if watch && terminal {
-            print!("\x1b[H\x1b[J");
-        }
-        print!("{text}");
-        io::stdout().flush()?;
+        show(&text)?;
         if !watch {
             return Ok(());
         }
@@ -506,82 +556,133 @@ fn overview(ids: UsbIds, serial: Option<u64>, watch: bool) -> Result<()> {
     }
 }
 
-/// What the board knows and has asked of the target.
-fn port_state(port: &PortStatus, uptime_ms: u64) -> String {
-    if port.error.is_some() || port.state == PortState::Fault {
-        return "fault".into();
+fn images(agent: &mut Client, command: Option<&ImagesCommand>) -> Result<()> {
+    match command {
+        Some(ImagesCommand::Keep { model }) => agent.request(&Request::Keep {
+            model: model.clone(),
+        })?,
+        Some(ImagesCommand::Forget { model }) => agent.request(&Request::Forget {
+            model: model.clone(),
+        })?,
+        Some(ImagesCommand::Add { path }) => {
+            let _spinner = progress::waiting("Checking IPSW archive");
+            agent.request(&Request::Import {
+                path: path.canonicalize().context("opening IPSW path")?,
+            })?;
+        }
+        Some(ImagesCommand::Remove { build }) => agent.request(&Request::Remove {
+            build: build.clone(),
+        })?,
+        Some(ImagesCommand::Refresh) => agent.request(&Request::Refresh)?,
+        None => {}
     }
-    if !port.occupied() {
-        return if port.enabled { "empty" } else { "off" }.into();
+    let images = agent.state()?.images;
+    if images.images.is_empty() {
+        println!("No images.");
     }
-    if let Some(job) = port.restore {
-        return match job.phase {
-            RestorePhase::Preparing => "preparing".into(),
-            RestorePhase::Running => format!("restoring {}%", job.progress),
-            RestorePhase::Reported => "restored".into(),
-            RestorePhase::Unconfirmed => "restore unknown".into(),
-            RestorePhase::Failed => "restore failed".into(),
+    for image in &images.images {
+        let models = &image.ipsw.product_types;
+        println!(
+            "{} ({})  {:.1} GB  {}  {}{}",
+            image.ipsw.product_version,
+            image.ipsw.build_version,
+            image.ipsw.bytes() as f64 / 1e9,
+            if image.fetched { "fetched" } else { "added" },
+            models.first().map_or("", String::as_str),
+            match models.len() {
+                0 | 1 => String::new(),
+                count => format!(" and {} more", count - 1),
+            }
+        );
+    }
+    for model in &images.models {
+        let latest = model.latest.as_ref();
+        let state = match (&model.error, latest, &images.fetch) {
+            (_, Some(_), _) if model.ready => "ready".into(),
+            (Some(error), _, _) => error.clone(),
+            (None, Some(latest), Some(fetch)) if fetch.build == latest.build => {
+                format!("fetching {}%", fetch.done * 100 / fetch.bytes.max(1))
+            }
+            (None, Some(_), _) => "waiting to fetch".into(),
+            (None, None, _) => "asking the catalog".into(),
         };
+        println!(
+            "Keeping {} ({}): {}  {state}",
+            model.name,
+            model.identifier,
+            latest.map_or(String::new(), |latest| format!(
+                "{} ({})",
+                latest.version, latest.build
+            )),
+        );
     }
-    if let Some(request) = port.request {
-        return match request.action {
-            PortAction::Reboot => "reboot sent",
-            _ if request.pending(uptime_ms) => "DFU sent",
-            _ => "DFU unverified",
-        }
-        .into();
-    }
-    match port.state {
-        // The target has not yet said which actions its port offers.
-        PortState::Contract if port.debug_actions == DebugActions::Pending => "identifying",
-        PortState::Contract if port.wrong_port() => "wrong port",
-        PortState::Contract
-            if !port.offers(PortAction::DfuAppleSilicon) && !port.offers(PortAction::Reboot) =>
-        {
-            "charging"
-        }
-        PortState::Contract => "ready",
-        PortState::Ready if !port.pd_transition => "unknown device",
-        PortState::WaitingPower => "waiting for power",
-        _ => "attaching",
-    }
-    .into()
+    Ok(())
 }
 
-/// What the board's host sees on the port's USB.
-fn port_usb(port: &PortStatus) -> String {
-    let Some(seen) = port.observed else {
-        return String::new();
-    };
-    let mode = match seen.usb {
-        Usb::Absent => "no USB",
-        Usb::Other => "other USB device",
-        Usb::Ambiguous => "several USB devices",
-        Usb::Apple(mode) => match mode {
-            AppleMode::Dfu => "DFU",
-            AppleMode::KisDfu => "DFU, debug USB",
-            AppleMode::Kis => "debug USB",
-            AppleMode::PortDfu => "port DFU",
-            AppleMode::Recovery => "recovery",
-            AppleMode::Wtf => "WTF",
-            AppleMode::Restored => "restore service",
-            AppleMode::Normal => "booted",
-            // The running system or a restore; nothing has asked which.
-            AppleMode::Mux => "system",
-        },
-    };
-    match seen.ecid {
-        Some(ecid) => format!("{mode} {ecid:016x}"),
-        None => mode.into(),
+/// Ask the running agent for a restore and follow it to its end.
+fn restore_through(agent: &mut Client, serial: u64, options: &batch::Options) -> Result<()> {
+    ensure!(options.erase, "restore requires --erase");
+    ensure!(
+        !options.button,
+        "iasisd is running and already answers the board's Restore hold; make the hold there"
+    );
+    if let Some(path) = &options.ipsw {
+        let _spinner = progress::waiting("Checking IPSW archive");
+        match agent.ask(&Request::Import {
+            path: path.canonicalize().context("opening IPSW path")?,
+        })? {
+            Reply::Error(error) if !error.contains("already in the store") => bail!(error),
+            _ => {}
+        }
     }
-}
-
-fn port_contract(port: &PortStatus) -> String {
-    if port.contract_mv == 0 || !port.occupied() {
-        return String::new();
+    let board = format!("{serial:016x}");
+    let ports: Vec<u8> = options.ports.iter().map(|port| port.number()).collect();
+    agent.request(&Request::Restore {
+        board: board.clone(),
+        ports: ports.clone(),
+    })?;
+    let mut shown = vec![String::new(); ports.len()];
+    let mut reply = agent.ask(&Request::Watch)?;
+    loop {
+        let Reply::State(state) = reply else {
+            bail!("the agent stopped reporting");
+        };
+        let view = state
+            .boards
+            .iter()
+            .find(|view| view.serial == board)
+            .context("the board has gone")?;
+        if view.ports.is_empty() {
+            bail!(view.notice.clone().unwrap_or_default());
+        }
+        let mut ended = Vec::new();
+        for (number, shown) in ports.iter().zip(&mut shown) {
+            let port = &view.ports[usize::from(*number) - 1];
+            let line = format!("{}  {}", port.state, port.usb);
+            if *shown != line {
+                println!("Port {number}  {}", line.trim_end());
+                *shown = line;
+            }
+            ended.push(port.result.clone());
+        }
+        if let Some(notice) = &view.notice {
+            bail!("{notice}");
+        }
+        if ended.iter().all(Option::is_some) {
+            for (number, ending) in ports.iter().zip(ended.iter().flatten()) {
+                println!("Port {number}  {}", ending.message);
+            }
+            ensure!(
+                ended
+                    .iter()
+                    .flatten()
+                    .all(|ending| ending.phase == RestorePhase::Reported),
+                "one or more selected targets failed or remain unconfirmed; inspect worker logs"
+            );
+            return Ok(());
+        }
+        reply = agent.receive()?;
     }
-    let amps = f32::from(port.contract_ma) / 1000.0;
-    format!("{} V {amps} A", port.contract_mv / 1000)
 }
 
 fn print_status(status: &Status) {
