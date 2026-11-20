@@ -22,7 +22,7 @@ picotool load -v -x target/thumbv8m.main-none-eabihf/release/iasis-firmware -t e
 
 Check that `picotool info` finds the intended board before loading. With multiple ROM devices attached, select it using picotool's bus/address options.
 
-For blank flash or a failed application, connect an external host, hold BOOTSEL, press and release RESET, then release BOOTSEL. Both buttons are under the lid. Flashing replaces the application; an interrupted write can be recovered with the same sequence. SWD provides independent access.
+A board with blank flash enumerates as the ROM updater when an external host is connected: skip the `bootloader` command and load the ELF. For a failed application, connect an external host, hold BOOTSEL, press and release RESET, then release BOOTSEL. Both buttons are under the lid. Flashing replaces the application; an interrupted write can be recovered with the same sequence. SWD provides independent access.
 
 Development USB IDs are `1209:0001`. Set `IASIS_USB_VID` and `IASIS_USB_PID` as hexadecimal build variables to override them, and use matching CLI `--vid`/`--pid` arguments.
 
