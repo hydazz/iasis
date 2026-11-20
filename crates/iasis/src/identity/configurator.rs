@@ -224,12 +224,7 @@ static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(Mutex::default);
 pub(crate) fn query(snapshot: &mut Snapshot, mask: u8) {
     let Ok(mut cache) = CACHE.lock() else { return };
     enrich(snapshot, mask, &mut cache, MacAttachment::present, |args| {
-        let bundle = Path::new("/Applications/Apple Configurator.app/Contents/MacOS/cfgutil");
-        let executable = if bundle.is_file() {
-            bundle
-        } else {
-            Path::new("cfgutil")
-        };
+        let executable = crate::restore::configurator().unwrap_or(Path::new("cfgutil"));
         run(
             Command::new(executable)
                 .args(["--format", "JSON"])

@@ -332,6 +332,55 @@ mod tests {
     }
 
     #[test]
+    fn reviving_requires_a_matching_direct_device_and_an_idle_attachment() {
+        use iasis_protocol::{HostSession, Observed, PortState, Status, Usb};
+        let mut snapshot = snapshot();
+        let port = Port::ALL[0];
+        let mut status = Status {
+            host: Some(HostSession {
+                id: 7,
+                restore_ready: false,
+            }),
+            ..Status::default()
+        };
+        let slot = &mut status.ports[0];
+        slot.state = PortState::Ready;
+        slot.enabled = true;
+        for mode in [
+            AppleMode::Dfu,
+            AppleMode::KisDfu,
+            AppleMode::Recovery,
+            AppleMode::Normal,
+            AppleMode::PortDfu,
+        ] {
+            let mut target = device(0x1227, Some(42));
+            target.apple.as_mut().unwrap().mode = mode;
+            snapshot.ports[0].devices = vec![target];
+            status.ports[0].observed = Some(Observed {
+                usb: Usb::Apple(mode),
+                ecid: Some(42),
+            });
+            let expected = matches!(
+                mode,
+                AppleMode::Dfu | AppleMode::KisDfu | AppleMode::Recovery
+            )
+            .then_some(42);
+            assert_eq!(crate::view::revivable(&status, &snapshot, port), expected);
+        }
+        snapshot.ports[0].devices = vec![device(0x1227, Some(42))];
+        assert_eq!(crate::view::revivable(&status, &snapshot, port), None);
+        status.ports[0].observed = Some(Observed {
+            usb: Usb::Apple(AppleMode::Dfu),
+            ecid: Some(42),
+        });
+        status.ports[0].fetch = Some(10);
+        assert_eq!(crate::view::revivable(&status, &snapshot, port), None);
+        status.ports[0].fetch = None;
+        snapshot.ports[1].devices = vec![device(0x1227, Some(42))];
+        assert_eq!(crate::view::revivable(&status, &snapshot, port), None);
+    }
+
+    #[test]
     fn retains_ecid_across_disconnect_and_dfu_recovery_restored() {
         let mut snapshot = snapshot();
         snapshot.ports[0].devices.push(device(0x1227, Some(42)));

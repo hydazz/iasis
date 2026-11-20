@@ -8,13 +8,15 @@ use std::{
 
 use crate::{
     Board,
+    agent::Target,
     dfu::{self, Attempt, Outcome, Signal},
     home::Home,
-    host::{Jobs, Link},
+    host::{Jobs, Link, PortJob},
     identity::{AppleMode, Observation, TargetTracker},
     images::{Lease, Network, Store},
     restore::{
-        PreparedIpsw, RestoreBatch, RestoreEngine, RestoreState, dfu_hardware, image_for_dfu,
+        Operation, PreparedIpsw, RestoreBatch, RestoreEngine, RestoreState, dfu_hardware,
+        image_for_dfu,
     },
     topology,
 };
@@ -67,8 +69,8 @@ pub enum Images<'a> {
 /// attachment that was on it when the client asked.
 pub struct Submission {
     pub session: u32,
-    pub targets: Vec<(Port, u32)>,
-    pub at: Instant,
+    pub targets: Vec<Target>,
+    pub accepted: std::sync::mpsc::SyncSender<Result<(), String>>,
 }
 
 /// A client's request waiting for the board's attendant.
@@ -78,13 +80,38 @@ pub type Requests = Arc<Mutex<Option<Submission>>>;
 /// target leaves, which a restored target does by restarting.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Ending {
-    pub ecid: String,
+    pub operation: Operation,
+    pub log_directory: Option<PathBuf>,
+    pub ecid: Option<String>,
     pub phase: RestorePhase,
     pub message: String,
 }
 
-/// Each port's last result, until another restore is asked of the port.
-pub type Endings = Arc<Mutex<[Option<Ending>; protocol::PORT_COUNT]>>;
+/// A port stays reserved across USB re-enumeration until its worker reports.
+#[derive(Default)]
+pub enum PortWork {
+    #[default]
+    Idle,
+    Active,
+    Finished(Ending),
+}
+
+pub type Endings = Arc<Mutex<[PortWork; protocol::PORT_COUNT]>>;
+
+pub(crate) fn reserve(endings: &Endings, selected: &[Target]) -> Result<()> {
+    let mut slots = endings.lock().unwrap();
+    for Target { port, .. } in selected {
+        ensure!(
+            !matches!(slots[port.index()], PortWork::Active),
+            "port {} already has an active operation",
+            port.number()
+        );
+    }
+    for Target { port, .. } in selected {
+        slots[port.index()] = PortWork::Active;
+    }
+    Ok(())
+}
 
 #[derive(Clone, Copy, ValueEnum)]
 pub enum Device {
@@ -195,8 +222,8 @@ pub fn listen(
         Err(error) if link.alive() => return Ok(Some(format!("{error:#}"))),
         Err(error) => return Err(error),
     };
-    for (port, _) in &selected {
-        endings.lock().unwrap()[port.index()] = None;
+    if button && let Err(error) = reserve(endings, &selected) {
+        return Ok(Some(error.to_string()));
     }
     // A declined or unavailable batch finishes this request. The listener
     // can immediately accept the next one.
@@ -221,6 +248,16 @@ pub fn listen(
     let running = match request {
         Ok(running) => running,
         Err(error) => {
+            let mut slots = endings.lock().unwrap();
+            for target in selected {
+                slots[target.port.index()] = PortWork::Finished(Ending {
+                    operation: Operation::Restore,
+                    ecid: target.ecid.map(|id| format!("{id:016x}")),
+                    log_directory: None,
+                    phase: RestorePhase::Failed,
+                    message: format!("{error:#}"),
+                });
+            }
             eprintln!("Restore request: {error:#}");
             return Ok(Some(format!("{error:#}")));
         }
@@ -232,6 +269,71 @@ pub fn listen(
         }
     });
     Ok(None)
+}
+
+/// Launch Configurator against the verified ECID on the selected attachment.
+pub(crate) fn revive(
+    link: &Arc<Link>,
+    engine: &RestoreEngine,
+    port: Port,
+    generation: u32,
+    ecid: u64,
+    endings: &Endings,
+) -> Result<()> {
+    let board = link.board();
+    let mut snapshot = topology::discover(board.topology())?;
+    crate::identity::query(&mut snapshot, 1 << port.index());
+    let status = board.status()?;
+    ensure!(
+        status.host.is_some_and(|host| host.id == link.session()) && link.alive(),
+        "the board has reconnected"
+    );
+    ensure!(
+        status.ports[port.index()].generation == generation,
+        "the selected device changed"
+    );
+    ensure!(
+        crate::view::revivable(&status, &snapshot, port) == Some(ecid),
+        "Revive needs the selected device in verified DFU or recovery"
+    );
+    let target = TargetTracker::pin(board.info().serial, &snapshot, port)?;
+    reserve(
+        endings,
+        &[Target {
+            port,
+            generation,
+            ecid: Some(ecid),
+        }],
+    )?;
+    let workers = engine.start_revive(ecid).inspect_err(|_| {
+        endings.lock().unwrap()[port.index()] = PortWork::Idle;
+    })?;
+    link.job(
+        port,
+        Some(PortJob {
+            generation,
+            status: RestoreStatus {
+                ecid,
+                phase: RestorePhase::Preparing,
+                progress: 0,
+            },
+            operation: Operation::Revive,
+            stage: None,
+        }),
+    );
+    let running = Running {
+        targets: vec![(target, generation)],
+        workers,
+        failed: false,
+        _leases: Vec::new(),
+    };
+    let (reporter, endings) = (link.clone(), endings.clone());
+    thread::spawn(move || {
+        if let Err(error) = monitor(&reporter, running, &endings) {
+            eprintln!("Revive: {error:#}");
+        }
+    });
+    Ok(())
 }
 
 /// Choose each target's image by the chip and board in its DFU descriptor.
@@ -418,19 +520,24 @@ fn monitor(link: &Link, running: Running, endings: &Endings) -> Result<()> {
             );
             failed |= moved;
             // A target that moved is no longer the one on this port.
-            let feedback = (!moved).then(|| RestoreStatus {
-                ecid: job.ecid,
-                phase,
-                progress: job
-                    .progress
-                    .map_or(0, |p| (p.fraction * 100.0).clamp(0.0, 100.0) as u8),
+            let feedback = (!moved).then(|| PortJob {
+                generation: *generation,
+                status: RestoreStatus {
+                    ecid: job.ecid,
+                    phase,
+                    progress: job.progress.as_ref().and_then(|p| p.percent).unwrap_or(0),
+                },
+                operation: job.operation,
+                stage: job.progress.clone(),
             });
-            link.job(target.port, *generation, feedback);
+            link.job(target.port, feedback);
             if job.state.is_terminal() {
                 failed |= job.state != RestoreState::RestoreReported;
                 active.remove(&target.port);
-                endings.lock().unwrap()[target.port.index()] = Some(Ending {
-                    ecid: format!("{:016x}", job.ecid),
+                endings.lock().unwrap()[target.port.index()] = PortWork::Finished(Ending {
+                    operation: job.operation,
+                    log_directory: Some(job.directory.clone()),
+                    ecid: Some(format!("{:016x}", job.ecid)),
                     phase,
                     message: job.message.clone(),
                 });
@@ -466,15 +573,19 @@ type VerifiedTargets = Vec<(TargetTracker, u32)>;
 /// Verified targets, each with the image that will erase it.
 type ChosenTargets = Vec<(TargetTracker, u32, PreparedIpsw)>;
 
-fn select_ports(ports: &[Port], status: &Status) -> Result<Vec<(Port, u32)>> {
+fn select_ports(ports: &[Port], status: &Status) -> Result<Vec<Target>> {
     let mut selected = Vec::new();
     for &port in ports {
         ensure!(
-            !selected.iter().any(|(other, _)| *other == port),
+            !selected.iter().any(|other: &Target| other.port == port),
             "duplicate port {}",
             port.number()
         );
-        selected.push((port, status.ports[port.index()].generation));
+        selected.push(Target {
+            port,
+            generation: status.ports[port.index()].generation,
+            ecid: None,
+        });
     }
     ensure!(!selected.is_empty(), "no ports selected");
     Ok(selected)
@@ -486,7 +597,7 @@ fn selection(
     link: &Link,
     ports: &[Port],
     requests: Option<&Requests>,
-) -> Result<(Vec<(Port, u32)>, bool)> {
+) -> Result<(Vec<Target>, bool)> {
     let board = link.board();
     let initial = board.status()?;
     if !ports.is_empty() {
@@ -498,16 +609,21 @@ fn selection(
         let status = board.status()?;
         if let Some(request) = requests.and_then(|requests| requests.lock().unwrap().take()) {
             // The request is for the targets the client saw, now.
-            ensure!(
-                status.restore_session() == Some(request.session)
-                    && request.session == link.session()
-                    && request.at.elapsed() < Duration::from_secs(5)
-                    && request.targets.iter().all(|(port, generation)| {
-                        status.ready_mask() & (1 << port.index()) != 0
-                            && status.ports[port.index()].generation == *generation
-                    }),
-                "the selected targets changed or are busy; no restore started"
-            );
+            let current = status.restore_session() == Some(request.session)
+                && request.session == link.session()
+                && request.targets.iter().all(|target| {
+                    status.ready_mask() & (1 << target.port.index()) != 0
+                        && status.ports[target.port.index()].generation == target.generation
+                });
+            if !current {
+                let _ = request
+                    .accepted
+                    .send(Err("the selected targets changed or are busy".into()));
+                continue;
+            }
+            if request.accepted.send(Ok(())).is_err() {
+                continue;
+            }
             return Ok((request.targets, false));
         }
         if let Some(event) = status.button
@@ -518,7 +634,11 @@ fn selection(
                 let selected = Port::ALL
                     .into_iter()
                     .filter(|p| event.ports & (1 << p.index()) != 0)
-                    .map(|p| (p, event.generations[p.index()]))
+                    .map(|port| Target {
+                        port,
+                        generation: event.generations[port.index()],
+                        ecid: None,
+                    })
                     .collect();
                 return Ok((selected, true));
             }
@@ -531,7 +651,7 @@ fn selection(
 fn prepare_selected(
     board: &Board,
     link: &Link,
-    selected: &[(Port, u32)],
+    selected: &[Target],
     action: PortAction,
     images: &Images,
 ) -> Result<ChosenTargets> {
@@ -543,7 +663,10 @@ fn prepare_selected(
         generations: [0; protocol::PORT_COUNT],
         expires: 0,
     };
-    for &(port, generation) in selected {
+    for &Target {
+        port, generation, ..
+    } in selected
+    {
         draft.ports |= 1 << port.index();
         draft.generations[port.index()] = generation;
     }
@@ -617,13 +740,18 @@ fn confirmed(arm: RestoreArm, status: &Status) -> Result<bool> {
 
 fn enter_dfu(
     board: &Board,
-    selected: &[(Port, u32)],
+    selected: &[Target],
     action: PortAction,
 ) -> Result<(VerifiedTargets, bool)> {
     let mut pending = Vec::new();
     let mut targets = Vec::new();
     let mut failed = false;
-    for &(port, generation) in selected {
+    for &Target {
+        port,
+        generation,
+        ecid,
+    } in selected
+    {
         let mut snapshot = topology::discover(board.topology())?;
         if board.status()?.ready_mask() & (1 << port.index()) != 0 {
             snapshot.query_port_identity(port);
@@ -639,6 +767,11 @@ fn enter_dfu(
             failed = true;
             continue;
         }
+        ensure!(
+            ecid.is_none_or(|id| assessment.ecid == Some(id)),
+            "could not verify the selected ECID on port {} before DFU entry",
+            port.number()
+        );
         match (assessment.signal, assessment.usb_mode) {
             (Signal::AlreadyDfu, Some(AppleMode::Dfu)) => {
                 match TargetTracker::pin(board.info().serial, &snapshot, port) {
@@ -754,6 +887,19 @@ fn enter_dfu(
         );
         failed = true;
     }
+    for selected in selected {
+        if let Some(expected) = selected.ecid {
+            ensure!(
+                targets
+                    .iter()
+                    .any(|(target, generation)| target.port == selected.port
+                        && target.ecid == expected
+                        && *generation == selected.generation),
+                "port {} did not reach DFU with the selected ECID; no restore started",
+                selected.port.number()
+            );
+        }
+    }
     if targets.iter().enumerate().any(|(i, (target, _))| {
         targets[..i]
             .iter()
@@ -767,6 +913,36 @@ fn enter_dfu(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn port_reservations_survive_reattachment_and_reject_whole_overlapping_batches() {
+        let slots = Endings::default();
+        let a = Target {
+            port: Port::ALL[0],
+            generation: 9,
+            ecid: Some(17),
+        };
+        let b = Target {
+            port: Port::ALL[1],
+            ..a
+        };
+        reserve(&slots, &[a]).unwrap();
+        let replacement = Target {
+            generation: 10,
+            ecid: Some(18),
+            ..a
+        };
+        assert!(reserve(&slots, &[b, replacement]).is_err());
+        assert!(matches!(slots.lock().unwrap()[1], PortWork::Idle));
+        slots.lock().unwrap()[0] = PortWork::Finished(Ending {
+            operation: Operation::Revive,
+            ecid: Some("0000000000000011".into()),
+            phase: RestorePhase::Failed,
+            message: "Device disconnected".into(),
+            log_directory: None,
+        });
+        reserve(&slots, &[replacement]).unwrap();
+    }
 
     #[test]
     fn only_the_exact_prepared_targets_can_confirm_erase() {
