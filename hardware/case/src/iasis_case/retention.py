@@ -14,16 +14,20 @@ from build123d import (
     Plane,
     Polygon,
     Pos,
+    Rectangle,
     RegularPolygon,
     Rot,
     extrude,
+    loft,
 )
 
 FIT = 0.10
 SCREW_D, SCREW_CLEAR = 3.0, 3.4
 HEAD_D, HEAD_H = 6.0, 2.6
+HEAD_RECESS = HEAD_H + 0.2
+HEAD_CLEAR = HEAD_D + 0.4
 NUT_AF, NUT_H = 5.5, 2.4
-NUT_FIT, NUT_PLAY = 0.15, 0.3
+NUT_CLEARANCE, NUT_PLAY = 0.1, 0.2
 BOSS_D = 9.2
 BASE = (Align.CENTER, Align.CENTER, Align.MIN)
 
@@ -39,6 +43,7 @@ class Fastener:
     bearing: float  # under-head face; screw points toward +Z
     length: float
     angle: float  # nut-loading direction, measured from +X
+    nut_clearance: float = NUT_CLEARANCE  # total across-flats allowance
 
     @property
     def tip(self) -> float:
@@ -54,16 +59,37 @@ class Fastener:
 
     @cached_property
     def pocket(self) -> Part:
-        af = NUT_AF + 2 * NUT_FIT
+        af = NUT_AF + self.nut_clearance
         hexagon = extrude(RegularPolygon(af / 2, 6, major_radius=False), NUT_H + NUT_PLAY)
         entry = Pos(4, 0, 0) * Box(8, af, NUT_H + NUT_PLAY, align=BASE)
-        return cast(Part, self.place * (hexagon + entry))
+        height = NUT_H + NUT_PLAY
+        mouth = loft(
+            [
+                Pos(3.3, 0, height / 2) * (Plane.YZ * Rectangle(af, height)),
+                Pos(BOSS_D / 2, 0, height / 2) * (Plane.YZ * Rectangle(af + 1.0, height + 1.0)),
+            ]
+        )
+        return cast(Part, self.place * (hexagon + entry + mouth))
 
     @cached_property
     def bore(self) -> Part:
         return Pos(self.x, self.y, self.bearing - 0.1) * Cylinder(
             SCREW_CLEAR / 2, self.length + 0.4, align=BASE
         )
+
+    @cached_property
+    def head_cut(self) -> Part:
+        recess = Pos(self.x, self.y, self.bearing - HEAD_RECESS - 0.1) * Cylinder(
+            HEAD_CLEAR / 2, HEAD_RECESS + 0.1, align=BASE
+        )
+        # Two anchored bridge layers close the counterbore before the round bore.
+        bridge = Pos(self.x, self.y, self.bearing - 0.1) * Box(
+            SCREW_CLEAR, HEAD_CLEAR, 0.3, align=BASE
+        )
+        passage = Pos(self.x, self.y, self.bearing - 0.1) * Box(
+            SCREW_CLEAR, SCREW_CLEAR, 0.5, align=BASE
+        )
+        return cast(Part, recess + bridge + passage + self.bore)
 
     @cached_property
     def receiver_cut(self) -> Part:

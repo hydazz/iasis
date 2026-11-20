@@ -251,7 +251,7 @@ class Layout:
         for edge, angle in ((left, 0), (right, 180)):
             end = [h for h in self.holes if abs(h.X - edge) < 1]
             for h in (min(end, key=lambda h: h.Y), max(end, key=lambda h: h.Y)):
-                mounts.append(Fastener(h.X, h.Y, self.z_bottom, 15, angle))
+                mounts.append(Fastener(h.X, h.Y, self.z_bottom + retention.HEAD_RECESS, 12, angle))
         return tuple(mounts)
 
     def fastener_at(self, hole: Vector) -> Fastener | None:
@@ -441,7 +441,15 @@ def tray(lay: Layout) -> Part:
     body -= Compound([_wall_cut(o) for o in lay.openings])
     body -= Compound(retention.guide_pockets(lay.length / 2, lay.split))
     for f in lay.fasteners:
-        body -= f.bore
+        # Reinforce the recessed head below the PCB support face.
+        shoulder = f.bearing + 0.4
+        body += Pos(f.x, f.y, z0 + FLOOR - 0.1) * Cylinder(
+            4.2, shoulder - z0 - FLOOR + 0.1, align=BASE
+        )
+        body += Pos(f.x, f.y, shoulder) * Cone(
+            4.2, STANDOFF_D / 2, 4.2 - STANDOFF_D / 2, align=BASE
+        )
+        body -= f.head_cut
     if lay.battery is not None:
         body -= lay.battery.pocket + lay.battery.channel
     body.label = "tray"
