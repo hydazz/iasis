@@ -4,11 +4,12 @@ import Foundation
 nonisolated enum AgentRequest: Encodable, Equatable {
     case watch
     /// Erases the targets. The user has confirmed.
-    case restore(board: String, ports: [Int])
+    case restore(board: String, session: UInt32, targets: [RestoreTarget])
     case dfu(board: String, port: Int)
     case reboot(board: String, port: Int)
     case power(board: String, port: Int, on: Bool)
-    case brightness(percent: Int)
+    case rename(board: String, name: String)
+    case brightness(board: String, percent: Int)
     case keep(model: String)
     case forget(model: String)
     case importImage(path: String)
@@ -16,7 +17,7 @@ nonisolated enum AgentRequest: Encodable, Equatable {
     case refresh
 
     private enum CodingKeys: String, CodingKey {
-        case op, board, port, ports, on, percent, model, path, build
+        case op, board, port, session, targets, name, on, percent, model, path, build
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -24,10 +25,11 @@ nonisolated enum AgentRequest: Encodable, Equatable {
         switch self {
         case .watch:
             try fields.encode("watch", forKey: .op)
-        case let .restore(board, ports):
+        case let .restore(board, session, targets):
             try fields.encode("restore", forKey: .op)
             try fields.encode(board, forKey: .board)
-            try fields.encode(ports, forKey: .ports)
+            try fields.encode(session, forKey: .session)
+            try fields.encode(targets, forKey: .targets)
         case let .dfu(board, port):
             try fields.encode("dfu", forKey: .op)
             try fields.encode(board, forKey: .board)
@@ -41,7 +43,12 @@ nonisolated enum AgentRequest: Encodable, Equatable {
             try fields.encode(board, forKey: .board)
             try fields.encode(port, forKey: .port)
             try fields.encode(on, forKey: .on)
-        case let .brightness(percent):
+        case let .rename(board, name):
+            try fields.encode("rename", forKey: .op)
+            try fields.encode(board, forKey: .board)
+            try fields.encode(name, forKey: .name)
+        case let .brightness(board, percent):
+            try fields.encode(board, forKey: .board)
             try fields.encode("brightness", forKey: .op)
             try fields.encode(percent, forKey: .percent)
         case let .keep(model):
