@@ -71,6 +71,13 @@ enum Command {
         #[arg(value_parser = clap::value_parser!(u16).range(0..=1600))]
         milliamps: u16,
     },
+    /// Set the indicator brightness in percent of full; 50 is the default
+    Brightness {
+        #[arg(value_parser = clap::value_parser!(u8).range(
+            iasis_protocol::BRIGHTNESS_MIN as i64..=iasis_protocol::BRIGHTNESS_MAX as i64
+        ))]
+        percent: u8,
+    },
     /// Enable attachment power or disable a port; requires --serial
     Power {
         #[arg(value_parser = parse_port)]
@@ -168,6 +175,7 @@ fn main() -> Result<()> {
     match command {
         Command::List | Command::Ipsw { .. } | Command::Watch => unreachable!(),
         Command::Restore(options) => batch::run(&devices[0], board, options)?,
+        Command::Brightness { percent } => board.brightness(percent)?,
         Command::HostBudget { milliamps } => {
             board.host_budget(milliamps)?;
             println!(
@@ -606,7 +614,7 @@ fn print_status(status: &Status) {
         status.watchdog_reason,
         status.retained_update
     );
-    println!("host {:?}", status.host);
+    println!("host {:?}  brightness {}%", status.host, status.brightness);
     println!(
         "CM5 power {}  I²C root fault {}  timeouts {}  expander {:?}  port capacity {}",
         status.side_power_enabled,
