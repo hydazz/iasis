@@ -65,7 +65,8 @@ private struct BoardSettings: View {
     let board: AgentState.Board
     let model: AgentModel
     @State private var draft: String?
-    @State private var brightness: Double?
+    @State private var lightLevel = LightLevelEdit()
+    @State private var writing: Task<Void, Never>?
 
     var body: some View {
         LabeledContent("Name") {
@@ -77,18 +78,32 @@ private struct BoardSettings: View {
                 .disabled(draft == nil || draft == board.name)
         }
         Slider(
-            value: Binding(get: { brightness ?? Double(board.brightness) }, set: { brightness = $0 }),
-            in: 10 ... 100,
-            step: 1
+            value: Binding(get: { lightLevel.value(reading: board.brightness) }, set: { lightLevel.drag(to: $0) }),
+            in: 10 ... 100
         ) {
             Text("Light brightness")
         } onEditingChanged: { editing in
-            if !editing, let brightness {
-                model.perform(.brightness(board: board.serial, percent: Int(brightness)))
-                self.brightness = nil
+            if !editing, let percent = lightLevel.release(reading: board.brightness) {
+                let previous = writing
+                writing = Task {
+                    await previous?.value
+                    if await !(model.send(.brightness(board: board.serial, percent: percent))) {
+                        lightLevel.reconcile(percent)
+                    }
+                }
             }
         }
-        .accessibilityValue("\(Int(brightness ?? Double(board.brightness))) percent")
+        .accessibilityValue("\(Int(lightLevel.value(reading: board.brightness).rounded())) percent")
+        .onChange(of: board.brightness) { _, reading in lightLevel.reconcile(reading) }
+        .task(id: lightLevel.submitted) {
+            guard let percent = lightLevel.submitted else { return }
+            await writing?.value
+            // Another client can overwrite the setting between two watch samples.
+            try? await Task.sleep(for: .seconds(2))
+            if !Task.isCancelled {
+                lightLevel.reconcile(percent)
+            }
+        }
         .onChange(of: board.name) { _, name in
             if draft == name {
                 draft = nil
