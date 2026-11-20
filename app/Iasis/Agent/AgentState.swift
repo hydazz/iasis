@@ -150,7 +150,7 @@ extension AgentState.Port {
         case "ready" where shortName != nil: nil
         default: state.prefix(1).uppercased() + state.dropFirst()
         }
-        let label = shortName.map { "\(number). \($0)" } ?? "Port \(number)"
+        let label = shortName.map { "Port \(number) · \($0)" } ?? "Port \(number)"
         return status.map { "\(label) · \($0)" } ?? label
     }
 
