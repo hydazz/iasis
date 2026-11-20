@@ -50,6 +50,11 @@ enum Command {
     Ipsw { path: std::path::PathBuf },
     /// Erase a selected batch using independent idevicerestore workers
     Restore(batch::Options),
+    /// Revive a device with Apple Configurator, keeping its data
+    Revive {
+        #[arg(value_parser = parse_port)]
+        port: Port,
+    },
     /// List and manage restore images
     Images {
         #[command(subcommand)]
@@ -161,6 +166,11 @@ fn main() -> Result<()> {
         (Command::Images { .. }, None) => {
             bail!("the agent keeps the restore images; start iasisd")
         }
+        (Command::Revive { port }, Some(agent)) => {
+            let serial = serial.context("select a board with --board NAME or --serial SERIAL")?;
+            return revive_through(agent, serial, *port);
+        }
+        (Command::Revive { .. }, None) => bail!("Revive requires the running macOS agent"),
         (Command::Restore(options), Some(agent)) => {
             let serial = serial.context("select a board with --board NAME or --serial SERIAL")?;
             return restore_through(agent, serial, options);
@@ -208,7 +218,11 @@ fn main() -> Result<()> {
     }
     let board = &boards[0];
     match command {
-        Command::List | Command::Ipsw { .. } | Command::Watch | Command::Images { .. } => {
+        Command::List
+        | Command::Ipsw { .. }
+        | Command::Watch
+        | Command::Images { .. }
+        | Command::Revive { .. } => {
             unreachable!()
         }
         Command::Restore(options) => batch::run(&devices[0], board, options)?,
@@ -682,8 +696,14 @@ fn restore_through(agent: &mut Client, serial: u64, options: &batch::Options) ->
                 .find(|p| p.number == *number && p.restore)
                 .with_context(|| format!("port {number} cannot be restored"))?;
             Ok(Target {
-                port: *number,
+                port: Port::try_from(*number).map_err(anyhow::Error::msg)?,
                 generation: port.generation,
+                ecid: port
+                    .ecid
+                    .as_deref()
+                    .map(parse_serial)
+                    .transpose()
+                    .map_err(anyhow::Error::msg)?,
             })
         })
         .collect::<Result<_>>()?;
@@ -701,6 +721,43 @@ fn restore_through(agent: &mut Client, serial: u64, options: &batch::Options) ->
         session,
         targets,
     })?;
+    follow_work(agent, &board, &ports, None)
+}
+
+fn revive_through(agent: &mut Client, serial: u64, port: Port) -> Result<()> {
+    let board = format!("{serial:016x}");
+    let state = agent.state()?;
+    let view = state
+        .boards
+        .iter()
+        .find(|b| b.serial == board)
+        .context("the board is not connected")?;
+    let session = view.session.context("the board is not attended")?;
+    let selected = view
+        .ports
+        .iter()
+        .find(|p| p.number == port.number() && p.revive)
+        .context("Revive needs Apple Configurator and a verified device in DFU or recovery")?;
+    let ecid = selected
+        .ecid
+        .clone()
+        .context("the device has no verified ECID")?;
+    agent.request(&Request::Revive {
+        board: board.clone(),
+        session,
+        port: port.number(),
+        generation: selected.generation,
+        ecid: ecid.clone(),
+    })?;
+    follow_work(agent, &board, &[port.number()], Some(&ecid))
+}
+
+fn follow_work(
+    agent: &mut Client,
+    board: &str,
+    ports: &[u8],
+    revive_ecid: Option<&str>,
+) -> Result<()> {
     let mut shown = vec![String::new(); ports.len()];
     let mut reply = agent.ask(&Request::Watch)?;
     loop {
@@ -718,26 +775,35 @@ fn restore_through(agent: &mut Client, serial: u64, options: &batch::Options) ->
         let mut ended = Vec::new();
         for (number, shown) in ports.iter().zip(&mut shown) {
             let port = &view.ports[usize::from(*number) - 1];
-            let line = format!("{}  {}", port.state, port.usb);
+            let line = match &port.stage {
+                Some(stage) => format!("{}  {stage}  {}", port.state, port.usb),
+                None => format!("{}  {}", port.state, port.usb),
+            };
             if *shown != line {
                 println!("Port {number}  {}", line.trim_end());
                 *shown = line;
             }
-            ended.push(port.result.clone());
-        }
-        if let Some(notice) = &view.notice {
-            bail!("{notice}");
+            ended.push(port.result.as_ref().filter(|ending| match revive_ecid {
+                Some(ecid) => {
+                    ending.operation == iasis::restore::Operation::Revive
+                        && ending.ecid.as_deref() == Some(ecid)
+                }
+                None => ending.operation == iasis::restore::Operation::Restore,
+            }));
         }
         if ended.iter().all(Option::is_some) {
             for (number, ending) in ports.iter().zip(ended.iter().flatten()) {
                 println!("Port {number}  {}", ending.message);
+                if let Some(directory) = &ending.log_directory {
+                    println!("  Logs: {}", directory.display());
+                }
             }
             ensure!(
                 ended
                     .iter()
                     .flatten()
                     .all(|ending| ending.phase == RestorePhase::Reported),
-                "one or more selected targets failed or remain unconfirmed; inspect worker logs"
+                "one or more selected operations failed or remain unconfirmed"
             );
             return Ok(());
         }
