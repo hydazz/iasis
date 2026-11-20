@@ -2,6 +2,7 @@
 
 #[cfg(target_os = "macos")]
 pub(crate) mod configurator;
+pub(crate) mod models;
 mod mux;
 
 /// Check the existing local daemon; no device connection or pairing is made.
