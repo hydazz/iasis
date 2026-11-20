@@ -64,7 +64,7 @@ MIN_GAP = 0.3  # smallest gap between the case and a part
 WALL = 1.2
 TOP = 1.6
 FLOOR = 2.0
-STANDOFF = 3.0  # clear space under the board
+FLOOR_DEPTH = 3.0  # tray floor below the board STEP origin
 TOP_CHAMFER = 0.8  # 45 degrees, supported when the cover prints top down
 BASE_CHAMFER = 0.6
 PORT_EDGE_R = 0.5  # outer edge of each USB-C opening
@@ -72,8 +72,12 @@ FOOT_D, FOOT_H = 8.0, 3.0  # adhesive bumper envelope
 
 # Board support
 HOLE_D = 3.2  # the board's M3 drill, which identifies the case holes
-LOCATOR_D, LOCATOR_OVER = 2.9, 0.8
-BOARD_HOLD_GAP = 0.15
+PCB_CAPTURE = 1.80  # 1.6 mm finished PCB plus one 0.2 mm layer across the printed seats
+LOCATOR_D, LOCATOR_INSERT = 3.1, 1.6
+LOCATOR_TAPER = 0.4
+LOCATOR_CLEARANCE = 0.20  # total socket diameter allowance
+LOCATOR_END_GAP = 1.2  # blind socket extends beyond the seated peg tip
+LOCATOR_RELIEF = 0.4  # the plain socket locates the shell without bearing on the board
 PILLAR_D = 6.6  # inside the mounting holes' 7 mm courtyard
 STANDOFF_D = 7.0
 
@@ -259,6 +263,15 @@ class Layout:
             (f for f in self.fasteners if math.hypot(f.x - hole.X, f.y - hole.Y) < 0.01), None
         )
 
+    @property
+    def support_z(self) -> float:
+        """Tray bearing face, referenced to the component side of the finished PCB."""
+        return self.seat - PCB_CAPTURE
+
+    @property
+    def locator_face(self) -> float:
+        return self.seat + LOCATOR_RELIEF
+
     def top_inside(self, display: Display | None = None) -> float:
         if display in self._roofs:
             return self._roofs[display]
@@ -330,7 +343,7 @@ def layout(
         length=size.X + 2 * (CLEARANCE + WALL),
         width=size.Y + 2 * (CLEARANCE + port_wall),
         port_wall=port_wall,
-        z_bottom=-(STANDOFF + FLOOR),
+        z_bottom=-(FLOOR_DEPTH + FLOOR),
         corner_r=corner + CLEARANCE + min(WALL, port_wall),
         holes=board.holes(HOLE_D),
         parts_top=max(
@@ -423,23 +436,25 @@ def tray(lay: Layout) -> Part:
     body = extrude(Pos(0, 0, z0) * _outline(lay), amount=lay.split - z0)
     body = chamfer(body.edges().group_by(Axis.Z)[0], BASE_CHAMFER)
     body -= extrude(Pos(0, 0, z0 + FLOOR) * lay.cavity, amount=lay.split - z0 - FLOOR + 1, dir=Z_UP)
+    floor_top = z0 + FLOOR
     body += Compound(
         [
-            Pos(h.X, h.Y, z0 + FLOOR - 0.1) * Cylinder(STANDOFF_D / 2, STANDOFF + 0.1, align=BASE)
+            Pos(h.X, h.Y, floor_top - 0.1)
+            * Cylinder(STANDOFF_D / 2, lay.support_z - floor_top + 0.1, align=BASE)
             for h in lay.holes
         ]
     )
+    taper_z = lay.locator_face + LOCATOR_INSERT - LOCATOR_TAPER
     for h in lay.holes:
         if lay.fastener_at(h) is not None:
             continue
-        body += Pos(h.X, h.Y, -0.1) * Cylinder(
-            LOCATOR_D / 2, lay.seat + LOCATOR_OVER - 0.3, align=BASE
+        body += Pos(h.X, h.Y, lay.support_z - 0.1) * Cylinder(
+            LOCATOR_D / 2, taper_z - lay.support_z + 0.1, align=BASE
         )
-        body += Pos(h.X, h.Y, lay.seat + LOCATOR_OVER - 0.4) * Cone(
-            LOCATOR_D / 2, LOCATOR_D / 2 - 0.4, 0.4, align=BASE
+        body += Pos(h.X, h.Y, taper_z) * Cone(
+            LOCATOR_D / 2, LOCATOR_D / 2 - LOCATOR_TAPER, LOCATOR_TAPER, align=BASE
         )
     body -= Compound([_wall_cut(o) for o in lay.openings])
-    body -= Compound(retention.guide_pockets(lay.length / 2, lay.split))
     for f in lay.fasteners:
         # Reinforce the recessed head below the PCB support face.
         shoulder = f.bearing + 0.4
@@ -469,9 +484,6 @@ def cover(lay: Layout, name: str, display: Display | None) -> Cover:
 
     # Pillars and display posts project from the roof into the cavity.
     intrusions: dict[str, Part] = {}
-    intrusions |= {
-        f"guide {i + 1}": p for i, p in enumerate(retention.guides(lay.length / 2, lay.split))
-    }
     cuts: list[Part] = []
     # A hole nearer the edge than the pillar's radius gets a pillar cut flush with the board edge,
     # clear of the tray wall that rises beyond it.
@@ -479,8 +491,8 @@ def cover(lay: Layout, name: str, display: Display | None) -> Cover:
     edge = extrude(Pos(0, 0, lay.seat) * board_edge, amount=top_in - lay.seat + 1, dir=Z_UP)
     outside = extrude(Pos(0, 0, lay.seat) * _outline(lay), amount=top_in - lay.seat + 1)
     for i, h in enumerate(lay.holes):
-        bottom = lay.seat + BOARD_HOLD_GAP
         if (f := lay.fastener_at(h)) is not None:
+            bottom = lay.seat
             stem_top = 4.2
             shoulder = stem_top + (retention.BOSS_D - PILLAR_D) / 2
             pillar = (
@@ -495,11 +507,14 @@ def cover(lay: Layout, name: str, display: Display | None) -> Cover:
             pillar = cast(Part, pillar & outside) - f.receiver_cut
             cuts.append(f.receiver_cut)
         else:
+            bottom = lay.locator_face
             pillar = Pos(h.X, h.Y, bottom) * Cylinder(
                 PILLAR_D / 2, top_in - bottom + 0.5, align=BASE
             )
             pillar -= Pos(h.X, h.Y, bottom - 0.1) * Cylinder(
-                (LOCATOR_D + 2 * CLEARANCE) / 2, LOCATOR_OVER + CLEARANCE, align=BASE
+                (LOCATOR_D + LOCATOR_CLEARANCE) / 2,
+                LOCATOR_INSERT + LOCATOR_END_GAP + 0.1,
+                align=BASE,
             )
             pillar &= edge
         intrusions[f"pillar {i + 1}"] = cast(Part, pillar)
