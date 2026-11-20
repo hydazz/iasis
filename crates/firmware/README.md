@@ -96,7 +96,7 @@ Some cables, including USB-C to Lightning, can keep the port green after the dev
 
 At the Erase prompt, hold for three seconds to start the restore. You can keep holding once it starts. Letting go earlier cancels.
 
-A restore failure reported by the host lights that port red at full brightness. The OLED labels it `FAIL` and shows `Restore failed` when the port is selected. The result belongs to the current USB-C attachment. A detach clears it, including one caused by restarting the target. A manual Configurator restore needs a host process to relay its result to the board.
+A restore or revive failure reported by the host lights that port red at full brightness. The OLED labels it `FAIL` and shows `Install failed` when the port is selected. The result belongs to the current USB-C attachment. A detach clears it, including one caused by restarting the target. A manual Configurator restore needs a host process to relay its result to the board.
 
 If updates stop during preparation or restore, the port turns steady purple after five seconds and power stays on. Terminal results have no heartbeat timeout. Command results and feedback fields are defined in the [protocol](../protocol/README.md).
 
