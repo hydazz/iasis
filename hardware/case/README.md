@@ -9,7 +9,7 @@ A printed case with a screw-fastened lid and captive button. Choose a plain lid 
 | Case                  | Printed body size       |
 | --------------------- | ----------------------- |
 | Main board, plain lid | 136 × 104.6 × 17.1 mm   |
-| Main board, OLED lid  | 136 × 104.6 × 19.6 mm   |
+| Main board, OLED lid  | 136 × 104.6 × 17.6 mm   |
 | CM5, plain lid        | 212.6 × 104.6 × 20.1 mm |
 | CM5, OLED lid         | 212.6 × 104.6 × 20.1 mm |
 
@@ -29,6 +29,7 @@ The build exports both populated boards and writes the case parts to `build/case
 | `print/cover-passive.stl` / `print/cover-display.stl`   | Lid, top down                               |
 | `print/button-passive.stl` / `print/button-display.stl` | Matching button, face down                  |
 | `print/cover-*-lettering.stl`                           | Optional aligned lid inlays                 |
+| `print/display-pins.stl`                                | Four printed OLED mounting pins             |
 | `print/cm5-*.stl`                                       | Corresponding CM5 parts; uses the same feet |
 | `iasis-case.step` / `iasis-cm5-case.step`               | Assemblies with both lid options            |
 
@@ -38,11 +39,10 @@ The STLs are already oriented for printing. The STEP assemblies include screw, n
 
 Both sizes use the same hardware.
 
-| Quantity     | Part                                       |
-| ------------ | ------------------------------------------ |
-| 4            | M3 × 12 mm pan-head screws and M3 hex nuts |
-| 4, OLED only | M2.5 × 4 mm pan-head screws                |
-| 4            | Small self-adhesive rubber feet            |
+| Quantity | Part                                       |
+| -------- | ------------------------------------------ |
+| 4        | M3 × 12 mm pan-head screws and M3 hex nuts |
+| 4        | Small self-adhesive rubber feet            |
 
 Use the listed screw lengths to avoid reaching the lid's outer face.
 
@@ -58,9 +58,7 @@ Open the case lid-down to keep the button and nuts in place. BOOTSEL and RESET a
 
 ### OLED assembly
 
-With the lid face down, place the OLED on its four mounting posts, with the flex edge toward the target ports. Fit four M2.5 × 4 mm screws through the PCB's corner holes into the printed posts. Tighten gently by hand until the PCB is held against the supports. Keep pressure off the glass.
-
-Connect the Qwiic cable before closing. The display can stay attached when opening the case.
+Point the OLED's flex edge toward the target ports. Rest its mounting ears on the four posts and press a printed pin through each corner hole until its head seats against the PCB. Keep pressure on the mounting ears and off the glass. Use whichever STEMMA QT socket the Qwiic cable reaches.
 
 ### CM5 assembly
 
