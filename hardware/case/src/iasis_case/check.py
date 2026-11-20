@@ -72,8 +72,12 @@ def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
         if any(_overlap(foot, f.driver) > 1e-3 for f in lay.fasteners):
             r.fail("adhesive foot blocks a case screw")
 
-    if case.FOOT_H - retention.HEAD_H < 0.3:
-        r.fail("feet leave less than 0.3 mm nominal clearance below the screw heads")
+    for f in lay.fasteners:
+        inset = f.screw.bounding_box().min.Z - lay.z_bottom
+        if inset < 0.19:
+            r.fail("case screw head projects beyond its 0.2 mm recess allowance")
+        if any(_overlap(Pos(0, 0, -d) * f.screw, tray) > 1e-3 for d in (1, 3, 6, 12)):
+            r.fail("case screw cannot withdraw through its counterbore")
 
     r.lines.append("walls and floor")
     outline = board.body.bounding_box()
@@ -91,6 +95,12 @@ def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
             case.STANDOFF_D / 2, case.STANDOFF, align=case.BASE
         )
         _clear(r, f"standoff {i + 1}", standoff, parts)
+    for i, f in enumerate(lay.fasteners, 1):
+        support = tray & (
+            Pos(f.x, f.y, floor_top)
+            * Cylinder(retention.HEAD_CLEAR / 2 + 1, case.STANDOFF, align=case.BASE)
+        )
+        _clear(r, f"counterbore support {i}", support, parts)
 
     movement = (case.HOLE_D - case.LOCATOR_D) / 2 + retention.FIT
     if movement > case.CLEARANCE + 1e-6:
