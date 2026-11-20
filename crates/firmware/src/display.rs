@@ -351,7 +351,7 @@ fn details(status: &Status, port: &PortStatus) -> [String<32>; 2] {
         return match job.phase {
             RestorePhase::Preparing => pair("Preparing", ""),
             RestorePhase::Running => {
-                let mut lines = pair("Restoring", "");
+                let mut lines = pair("Installing", "");
                 if job.progress > 0 {
                     write!(lines[1], "Stage {}%", job.progress.min(100)).unwrap();
                 }
@@ -359,7 +359,7 @@ fn details(status: &Status, port: &PortStatus) -> [String<32>; 2] {
             }
             RestorePhase::Reported => pair("Done", ""),
             RestorePhase::Unconfirmed => pair("Host lost", "Check host"),
-            RestorePhase::Failed => pair("Restore failed", "Check host"),
+            RestorePhase::Failed => pair("Install failed", "Check host"),
         };
     }
     if let Some(percent) = port.fetch {
@@ -1044,11 +1044,11 @@ mod tests {
         });
         assert_eq!(
             view(&status, &button, 0).lines,
-            pair("Restoring", "Stage 100%")
+            pair("Installing", "Stage 100%")
         );
         assert_eq!(view(&status, &Button::default(), 0).lines[0], "");
         status.ports[1].restore.as_mut().unwrap().progress = 0;
-        assert_eq!(view(&status, &button, 0).lines, pair("Restoring", ""));
+        assert_eq!(view(&status, &button, 0).lines, pair("Installing", ""));
         status.ports[1].restore.as_mut().unwrap().phase = RestorePhase::Reported;
         assert_eq!(view(&status, &button, 0).lines, pair("Done", ""));
         status.ports[1].error = Some(PortError::HostLimiter);
