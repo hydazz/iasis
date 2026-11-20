@@ -68,7 +68,7 @@ The [button and CLI controls](../../README.md#use) operate on ready ports. A tar
 | White      | Powered device without a PD contract     |
 | Blue       | Activity                                 |
 | Amber      | Preparation, waiting or unknown result   |
-| Red        | Fault or failure                         |
+| Red        | Port fault or failed restore             |
 | Dimmed     | Outside the selection                    |
 
 A fault keeps full brightness whatever is selected. While the button is held, the bright ports are the ones the action will reach.
@@ -86,7 +86,9 @@ Some cables, including USB-C to Lightning, can keep the port green after the dev
 
 At the Erase prompt, hold for three seconds to start the restore. You can keep holding once it starts. Letting go earlier cancels.
 
-Host restore feedback expires after five seconds without an update, changing the LED to unconfirmed without cycling power. Command results and feedback fields are defined in the [protocol](../protocol/README.md).
+A restore failure reported by the host lights that port red at full brightness. The OLED labels it `FAIL` and shows `Restore failed` when the port is selected. The result belongs to the current USB-C attachment. A detach clears it, including one caused by restarting the target. A manual Configurator restore needs a host process to relay its result to the board.
+
+If updates stop during preparation or restore, the port turns amber after five seconds and power stays on. Terminal results have no heartbeat timeout. Command results and feedback fields are defined in the [protocol](../protocol/README.md).
 
 ## OLED
 
