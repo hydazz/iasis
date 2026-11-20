@@ -2,7 +2,7 @@ use std::{borrow::Cow, fmt::Write, path::Path, time::Duration};
 
 use crate::{
     identity::Observation,
-    restore::{PreparedIpsw, RestoreState, RestoreStatus},
+    restore::{Operation, PreparedIpsw, RestoreState, RestoreStatus},
     topology,
 };
 use anyhow::Result;
@@ -34,12 +34,17 @@ pub fn restore_row(display: &MultiProgress, port: Port, ecid: u64) -> ProgressBa
     row
 }
 
-fn state_name(state: RestoreState) -> &'static str {
+fn state_name(state: RestoreState, operation: Operation) -> &'static str {
     match state {
         RestoreState::Starting => "Starting",
+        RestoreState::Running if operation == Operation::Revive => "Reviving",
         RestoreState::Running => "Restoring",
+        RestoreState::RestoreReported if operation == Operation::Revive => {
+            "Revive reported complete"
+        }
         RestoreState::RestoreReported => "Restore reported complete",
         RestoreState::Unconfirmed => "Completion unconfirmed",
+        RestoreState::Failed if operation == Operation::Revive => "Revive failed",
         RestoreState::Failed => "Restore failed",
     }
 }
@@ -51,12 +56,11 @@ pub fn update(
 ) {
     let stage = job
         .progress
-        .filter(|_| job.state == RestoreState::Running)
-        .map(|p| (p.step, (p.fraction * 100.0) as u64));
-    let status = match stage {
-        Some((step, percent)) => format!("Stage {step}  {percent}%"),
-        None => state_name(job.state).to_owned(),
-    };
+        .as_ref()
+        .filter(|_| job.state == RestoreState::Running);
+    let status = stage
+        .map(ToString::to_string)
+        .unwrap_or_else(|| state_name(job.state, job.operation).into());
     let connection = match identity {
         Ok(Observation::Present { mode }) => format!("USB {mode:?}"),
         Ok(Observation::Missing) => "Target absent from USB".into(),
@@ -83,7 +87,7 @@ pub fn update(
     } else if job.state.is_terminal() {
         row.disable_steady_tick();
         row.set_style(ProgressStyle::with_template("{prefix:.bold}  {wide_msg}").unwrap());
-    } else if let Some((_, percent)) = stage {
+    } else if let Some(percent) = stage.and_then(|stage| stage.percent) {
         if row.length().is_none() {
             row.disable_steady_tick();
             row.set_style(
@@ -92,7 +96,13 @@ pub fn update(
             );
             row.set_length(100);
         }
-        row.set_position(percent);
+        row.set_position(u64::from(percent));
+    } else if row.length().is_some() {
+        row.unset_length();
+        row.set_style(
+            ProgressStyle::with_template("{prefix:.bold}  {spinner} {wide_msg}").unwrap(),
+        );
+        row.enable_steady_tick(Duration::from_millis(100));
     }
     row.set_message(message);
 }
