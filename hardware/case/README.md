@@ -25,7 +25,7 @@ The print-oriented STLs are in `build/case/iasis/print/`. Print the tray, button
 
 Use PLA, a 0.4 mm nozzle and 0.20 mm layers. The button prints face down for a textured finish. For its retaining flange, use **Normal (auto)** supports with **On build plate only** in Bambu Studio.
 
-For a second colour on the lettering, import the lid and its matching `-lettering.stl` as parts of one object. The lid alone has recessed markings.
+For a second colour on the lettering and button ring, import the lid and its matching `-lettering.stl` as parts of one object. The lid alone has recessed markings.
 
 Both sizes use four M3 × 12 mm pan-head screws, four M3 hex nuts and four small self-adhesive rubber feet. Longer screws can reach the lid face.
 
