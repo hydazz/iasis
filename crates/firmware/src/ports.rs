@@ -175,6 +175,22 @@ impl Ports {
         }
     }
 
+    /// No target is powered and a new attachment still has to debounce.
+    pub fn idle(&self) -> bool {
+        self.ports.iter().all(|port| {
+            matches!(
+                port.status.get().state,
+                PortState::Disabled | PortState::WaitingPower | PortState::Unattached
+            )
+        })
+    }
+
+    pub fn settings_busy(&self, now: u64) -> bool {
+        self.ports
+            .iter()
+            .any(|port| port.snapshot().settings_busy(now))
+    }
+
     pub fn restoring_on_host(&self) -> bool {
         self.ports.iter().any(|port| {
             let status = port.status.get();

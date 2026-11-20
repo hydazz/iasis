@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Observation
 import OSLog
 
@@ -7,29 +7,11 @@ import OSLog
 final class AgentModel {
     /// The agent's latest state, or nil while no agent answers.
     private(set) var state: AgentState?
-    /// Why the last request was refused.
-    private(set) var failure: String?
-    /// The port whose erase is waiting for the user's word.
-    private(set) var confirming: PortID?
-
     private let agent: any AgentService
     private var watching: Task<Void, Never>?
 
     init(agent: any AgentService) {
         self.agent = agent
-    }
-
-    /// A port is busy with something the user should leave alone.
-    var isBusy: Bool {
-        ports.contains { $0.light.pulse }
-    }
-
-    var hasFault: Bool {
-        ports.contains { $0.light.hue == .red }
-    }
-
-    private var ports: [AgentState.Port] {
-        state?.boards.flatMap(\.ports) ?? []
     }
 
     /// Follow the agent for as long as the app runs, across its restarts.
@@ -47,7 +29,6 @@ final class AgentModel {
                     Log.agent.debug("Agent unavailable: \(error.localizedDescription)")
                 }
                 state = nil
-                confirming = nil
                 try? await Task.sleep(for: .seconds(2))
             }
         }
@@ -55,39 +36,16 @@ final class AgentModel {
 
     func perform(_ request: AgentRequest) {
         Task {
-            await send(request)
+            do {
+                try await agent.send(request)
+            } catch {
+                Log.agent.error("Request refused: \(error.localizedDescription)")
+                let alert = NSAlert()
+                alert.messageText = "Action Failed"
+                alert.informativeText = error.localizedDescription
+                NSApp.activate()
+                alert.runModal()
+            }
         }
-    }
-
-    func send(_ request: AgentRequest) async {
-        do {
-            try await agent.send(request)
-            failure = nil
-        } catch {
-            Log.agent.error("Request refused: \(error.localizedDescription)")
-            failure = error.localizedDescription
-        }
-    }
-
-    func dismissFailure() {
-        failure = nil
-    }
-
-    /// Ask the user before erasing a port's target.
-    func askToRestore(_ port: PortID) {
-        confirming = port
-    }
-
-    func cancelRestore() {
-        confirming = nil
-    }
-
-    /// Erase and restore the port the user has just confirmed.
-    func confirmRestore() {
-        guard let port = confirming else {
-            return
-        }
-        confirming = nil
-        perform(.restore(board: port.board, ports: [port.port]))
     }
 }

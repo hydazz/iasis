@@ -433,9 +433,20 @@ impl Inner {
             .retain(|image| !paths.iter().any(|path| path == image.ipsw.path()));
     }
 
+    fn devices(&self) -> Result<Vec<Device>> {
+        let devices = self.catalog.devices()?;
+        let mut state = self.lock();
+        state.saved.devices.clone_from(&devices);
+        self.save(&state);
+        Ok(devices)
+    }
+
     /// Ask the catalog about each model that is due, fetch one missing
     /// release, clear out what that leaves behind, then wait.
     fn work(&self) {
+        if self.lock().saved.devices.is_empty() {
+            let _ = self.devices();
+        }
         loop {
             let due: Vec<String> = {
                 let mut state = self.lock();
@@ -651,12 +662,24 @@ impl Store {
         self.0.changed.notify_all();
     }
 
-    fn devices(&self) -> Result<Vec<Device>> {
-        let devices = self.0.catalog.devices()?;
-        let mut state = self.0.lock();
-        state.saved.devices.clone_from(&devices);
-        self.0.save(&state);
-        Ok(devices)
+    pub(crate) fn device_name(
+        &self,
+        identifier: Option<&str>,
+        hardware: Option<(u32, u32)>,
+    ) -> Option<String> {
+        if identifier.is_none() && hardware.is_none() {
+            return None;
+        }
+        self.0
+            .lock()
+            .saved
+            .devices
+            .iter()
+            .find(|device| {
+                identifier == Some(device.identifier.as_str())
+                    || hardware.is_some_and(|ids| device.hardware.contains(&ids))
+            })
+            .map(|device| device.name.clone())
     }
 
     /// Keep the newest image for a model from now on.
@@ -673,7 +696,7 @@ impl Store {
         let listed = known(&self.0.lock().saved.devices);
         let device = match listed {
             Some(device) => device,
-            None => known(&self.devices()?)
+            None => known(&self.0.devices()?)
                 .with_context(|| format!("the catalog lists no model {identifier}"))?,
         };
         let mut state = self.0.lock();
@@ -754,7 +777,7 @@ impl Store {
             recently
         };
         (!asked)
-            .then(|| self.devices())
+            .then(|| self.0.devices())
             .transpose()?
             .and_then(|devices| known(&devices))
             .with_context(|| format!("no known model has CPID:{chip:04X} BDID:{board:02X}"))

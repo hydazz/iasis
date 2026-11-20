@@ -43,12 +43,13 @@ Connect the host and charged targets. Ports are numbered 1–5, starting at the 
 
 ```sh
 target/release/iasis
-target/release/iasis --serial 0123456789abcdef status
-target/release/iasis --serial 0123456789abcdef dfu 1
-target/release/iasis --serial 0123456789abcdef ports --watch
+target/release/iasis list
+target/release/iasis --serial 0123456789abcdef rename "Bench A"
+target/release/iasis --board "Bench A" dfu 1
+target/release/iasis --board "Bench A" ports --watch
 ```
 
-`iasis` alone lists every board and its ports; `iasis watch` keeps the list current. Commands take the serial it prints. Add `--device t2` for a T2 Mac. Use `ports --watch` to see the USB mode, identity and link (none, USB 2 or USB 3) on each port. If a Mac acknowledges the DFU request and then disappears from USB, check the data cable and the Mac’s [DFU socket](https://support.apple.com/en-us/120694).
+`iasis` alone lists every board and its ports; `iasis watch` keeps the list current. Select a board by name or by the serial from `iasis list`. Names match without case, can contain spaces and punctuation, and fit the OLED’s 16 printable ASCII characters. If two boards share a name, select by serial. An empty name clears the label. Add `--device t2` for a T2 Mac. Use `ports --watch` to see the USB mode, identity and link (none, USB 2 or USB 3) on each port. If a Mac acknowledges the DFU request and then disappears from USB, check the data cable and the Mac’s [DFU socket](https://support.apple.com/en-us/120694).
 
 The button selects targets with a tap and acts on them with a hold, with or without an OLED.
 
@@ -66,7 +67,7 @@ Port lights outside the selection dim. While the button is held, only the ports 
 
 After a DFU the port pulses blue. It turns steady blue once a host sees the target in DFU, which needs the [host agent](#host-agent). The [light table](crates/firmware/README.md#controls-and-status) lists every colour.
 
-A white port light marks a device Iasis cannot identify; a hold passes it by. DFU leaves their data intact and works with Apple Configurator. `power <port> off` disables a port. `power <port> on` enables it and retries a fault. `brightness <percent>` dims or brightens the lights; with the [agent](#host-agent) running it applies to every board and is set again whenever one starts.
+A white port light marks a device Iasis cannot identify; a hold passes it by. DFU leaves their data intact and works with Apple Configurator. `power <port> off` disables a port. `power <port> on` enables it and retries a fault. The selected board stores its name and light brightness in flash.
 
 Native USB-C uses the host's advertised current. With a legacy A-to-C connection, set the remaining shared USB allowance, including Iasis and after subtracting other loads:
 
@@ -90,7 +91,7 @@ It does three things:
 - It keeps the [restore images](#images) and fetches the ones it lacks.
 - It runs the restores that a board's button or a client asks for.
 
-The status light is green and the OLED shows a USB symbol while a host is attached. One host holds a board at a time. The `iasis` commands work alongside the agent, and `iasis restore`, `iasis images` and `iasis brightness` go through it. Other clients use its [local socket](crates/iasis/README.md).
+The status light is green and the OLED shows a USB symbol while a host is attached. One host holds a board at a time. The `iasis` commands work alongside the agent, and `iasis restore` and `iasis images` use it when running. Other clients use its [local socket](crates/iasis/README.md).
 
 On macOS, the [menu bar app](app/README.md) shows the same boards and ports, sends the same actions, and its installer starts the agent at login.
 

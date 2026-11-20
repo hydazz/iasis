@@ -1,4 +1,7 @@
-use core::{cell::Cell, future::Future};
+use core::{
+    cell::{Cell, RefCell},
+    future::Future,
+};
 
 use embassy_futures::select::{Either, select};
 use embassy_time::{Duration, Instant, Timer};
@@ -144,8 +147,19 @@ pub struct Management<'a> {
     pub configured: &'a Cell<bool>,
     pub suspended: &'a Cell<bool>,
     pub host_budget: &'a Cell<u16>,
-    pub brightness: &'a Cell<u8>,
+    pub settings: &'a RefCell<crate::SettingsStore>,
+    pub ports: &'a crate::ports::Ports,
+    pub button_armed: &'a Cell<bool>,
     pub session: &'a Session,
+}
+
+impl Management<'_> {
+    fn settings_busy(&self, now: u64) -> bool {
+        self.command.get().is_some()
+            || self.button_armed.get()
+            || self.session.awaiting_button(now)
+            || self.ports.settings_busy(now)
+    }
 }
 
 fn matches(request: &Request) -> bool {
@@ -197,7 +211,11 @@ impl Handler for Management<'_> {
             _ if request.value != protocol::VERSION => return Some(InResponse::Rejected),
             protocol::GET_STATUS => {
                 let mut status = self.status.get();
+                let store = self.settings.borrow();
+                status.settings = store.settings;
+                status.settings_full = store.full();
                 let now = embassy_time::Instant::now().as_millis();
+                status.settings_busy = self.settings_busy(now);
                 status.host = self.session.active(now);
                 let session = status.host.map(|host| host.id);
                 status.restore_decision = status.restore_decision.filter(|decision| {
@@ -237,10 +255,14 @@ impl Handler for Management<'_> {
             _ if request.value != protocol::VERSION => Some(OutResponse::Rejected),
             protocol::HOST_REPORT if self.configured.get() && !self.suspended.get() => {
                 let accepted = protocol::decode::<protocol::HostReport>(data).is_ok_and(|report| {
-                    report.serial == self.info.serial
-                        && self
-                            .session
-                            .report(report, embassy_time::Instant::now().as_millis())
+                    let now = embassy_time::Instant::now().as_millis();
+                    if report.serial != self.info.serial
+                        || !self.session.report(report.session, now)
+                    {
+                        return false;
+                    }
+                    self.ports.host(Some(report), true, now);
+                    true
                 });
                 Some(if accepted {
                     OutResponse::Accepted
@@ -271,13 +293,14 @@ impl Handler for Management<'_> {
                 }
                 _ => Some(OutResponse::Rejected),
             },
-            protocol::LIGHTS => match protocol::decode::<protocol::Lights>(data) {
-                Ok(lights)
-                    if lights.serial == self.info.serial
-                        && (protocol::BRIGHTNESS_MIN..=protocol::BRIGHTNESS_MAX)
-                            .contains(&lights.brightness) =>
+            protocol::SETTINGS => match protocol::decode::<protocol::SettingsRequest>(data) {
+                Ok(request)
+                    if request.serial == self.info.serial
+                        && self.settings.borrow_mut().save(
+                            request.change,
+                            self.settings_busy(embassy_time::Instant::now().as_millis()),
+                        ) =>
                 {
-                    self.brightness.set(lights.brightness);
                     Some(OutResponse::Accepted)
                 }
                 _ => Some(OutResponse::Rejected),

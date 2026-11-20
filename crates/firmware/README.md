@@ -78,7 +78,7 @@ A colour is what the port holds, a pulse is work under way or a result awaited, 
 
 A fault keeps full brightness whatever is selected. While the button is held, the bright ports are the ones the action will reach.
 
-`iasis brightness <percent>` sets all six lights from 10 to 100. The board starts at 50 and returns to it when it restarts.
+`iasis --board "Bench A" brightness 35` sets all six lights on Bench A to 35 percent. The range is 10 to 100 percent, with a factory setting of 50. Each board keeps its name and brightness through restarts and firmware updates. Its name appears in the OLED title bar.
 
 Iasis cannot tell a target in DFU from a running one: the target looks the same on its power pins either way. Only a host sees the USB mode, so blue turns steady when [`iasisd`](../../README.md#host-agent) or a restore command reports DFU on that port, and the report is forgotten three seconds after the host stops. Without a host a sent DFU keeps pulsing until the target is unplugged or restarted. With one, a DFU not seen within 15 seconds gives way to the mode the host does see. Green means an identified target, not a started one.
 
