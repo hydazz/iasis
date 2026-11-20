@@ -155,7 +155,7 @@ struct View {
     seen: Seen,
     /// Board uptime at the last sample. A smaller reading is a restart.
     uptime_ms: u64,
-    status: Option<Status>,
+    sample: Option<(Status, Snapshot)>,
 }
 
 fn finished(job: &RestoreStatus) -> bool {
@@ -234,13 +234,14 @@ impl Shared {
         }
         let mut view = self.view.lock().unwrap();
         let restarted = status.uptime_ms < view.uptime_ms;
-        if restarted {
-            view.observer = Observer::default();
-        }
         settle(&mut self.jobs.lock().unwrap(), &status, restarted);
+        if restarted {
+            self.fail(anyhow!("the board restarted"));
+            bail!("the board restarted");
+        }
         view.uptime_ms = status.uptime_ms;
         view.seen = view.observer.sample(&status, &snapshot);
-        view.status = Some(status);
+        view.sample = Some((status, snapshot));
         Ok(())
     }
 
@@ -471,9 +472,27 @@ impl Link {
             percent.map(|percent| (generation, percent));
     }
 
+    pub(crate) fn board_view(
+        &self,
+        store: &crate::images::Store,
+        family: crate::batch::Device,
+    ) -> Option<crate::view::BoardView> {
+        let view = self.shared.view.lock().unwrap();
+        let (status, snapshot) = view.sample.as_ref()?;
+        let mut board = crate::view::BoardView::new(self.board().info(), status);
+        board.describe_devices(self.board().info().serial, status, snapshot, store, family);
+        Some(board)
+    }
+
     /// The board's status at the last sample.
     pub fn status(&self) -> Option<Status> {
-        self.shared.view.lock().unwrap().status
+        self.shared
+            .view
+            .lock()
+            .unwrap()
+            .sample
+            .as_ref()
+            .map(|(status, _)| *status)
     }
 
     /// Ask the board to confirm an erase of the selected ports. Each arm is
@@ -606,6 +625,7 @@ mod tests {
         assert_eq!(mode(&usb, five), Usb::Apple(AppleMode::Recovery));
         // Configurator's answer for the same enumeration names the mode.
         usb.ports[1].devices[0].apple = Some(AppleDevice {
+            model: None,
             mode: AppleMode::KisDfu,
             identity: Identity::Known {
                 ecid: 9,

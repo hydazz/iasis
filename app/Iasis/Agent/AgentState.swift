@@ -7,15 +7,21 @@ nonisolated struct AgentState: Decodable, Equatable {
     var images: ImageStore
     /// Why the agent cannot run restores, when it cannot.
     var restoreProblem: String?
-    var brightness: Int
+
+    func title(for board: Board) -> String {
+        let matches = boards.filter { $0.displayName.caseInsensitiveCompare(board.displayName) == .orderedSame }
+        guard matches.count > 1 else { return board.displayName }
+        let suffix = board.serial.suffix(4)
+        let unique = !matches.contains { $0.serial != board.serial && $0.serial.hasSuffix(suffix) }
+        return "\(board.displayName) · \(unique ? String(suffix) : board.serial)"
+    }
 
     struct Board: Decodable, Equatable, Identifiable {
         var serial: String
-        var firmware: String
-        var supply: String
-        var host: Bool
-        var restores: Bool
+        var name: String
+        var session: UInt32?
         var brightness: Int
+        var settingsBusy: Bool
         var ports: [Port]
         /// Why the board cannot be read, or why its last restore request came
         /// to nothing.
@@ -24,20 +30,28 @@ nonisolated struct AgentState: Decodable, Equatable {
         var id: String {
             serial
         }
+
+        var displayName: String {
+            name.isEmpty ? "Iasis" : name
+        }
+
+        var visiblePorts: [Port] {
+            ports.filter { $0.occupied || !$0.enabled }
+        }
     }
 
     struct Port: Decodable, Equatable, Identifiable {
         var number: Int
-        var light: Light
+        var occupied: Bool
+        var generation: UInt32
+        var device: String?
+        var mode: String?
         var state: String
-        var usb: String
-        var link: String
-        var contract: String
+        var light: Light
         var dfu: Bool
         var reboot: Bool
         var restore: Bool
         var enabled: Bool
-        var job: RestorePhase?
         var result: Ending?
 
         var id: Int {
@@ -45,21 +59,9 @@ nonisolated struct AgentState: Decodable, Equatable {
         }
     }
 
-    /// What a port's light shows on the board.
     struct Light: Decodable, Equatable {
-        var hue: Hue
+        var hue: String
         var pulse: Bool
-        var dim: Bool
-    }
-
-    enum Hue: String, Decodable {
-        case off, red, green, white, blue, amber, purple
-
-        /// A hue from a newer agent shows as an unidentified device.
-        init(from decoder: any Decoder) throws {
-            let name = try decoder.singleValueContainer().decode(String.self)
-            self = Hue(rawValue: name) ?? .white
-        }
     }
 
     enum RestorePhase: String, Decodable {
@@ -128,8 +130,70 @@ nonisolated struct AgentState: Decodable, Equatable {
     }
 }
 
-/// One port of one board.
-nonisolated struct PortID: Hashable {
-    var board: String
-    var port: Int
+extension AgentState.Port {
+    var target: RestoreTarget {
+        RestoreTarget(port: number, generation: generation)
+    }
+
+    var shortName: String? {
+        device?.components(separatedBy: " (").first
+    }
+
+    var inDFU: Bool {
+        mode == "dfu" || mode == "kis_dfu"
+    }
+
+    var menuTitle: String {
+        let status: String? = switch state {
+        case "ready" where inDFU, "charging" where inDFU: "DFU"
+        case "ready" where mode == "recovery": "Recovery"
+        case "ready" where shortName != nil: nil
+        default: state.prefix(1).uppercased() + state.dropFirst()
+        }
+        let label = shortName.map { "\(number). \($0)" } ?? "Port \(number)"
+        return status.map { "\(label) · \($0)" } ?? label
+    }
+
+    var symbol: String {
+        let name = (device ?? "").lowercased()
+        if name.hasPrefix("ipad") {
+            return "ipad"
+        }
+        if name.hasPrefix("iphone") {
+            return "iphone"
+        }
+        if name.hasPrefix("macbook") {
+            return "laptopcomputer"
+        }
+        if name.hasPrefix("mac mini") {
+            return "macmini"
+        }
+        if name.hasPrefix("mac studio") {
+            return "macstudio"
+        }
+        if name.hasPrefix("mac pro") {
+            return "macpro.gen3"
+        }
+        if name.hasPrefix("imac") {
+            return "desktopcomputer"
+        }
+        if name.hasPrefix("mac") {
+            return "macwindow"
+        }
+        if name.hasPrefix("homepod mini") {
+            return "homepodmini"
+        }
+        if name.hasPrefix("homepod") || name.hasPrefix("audioaccessory") {
+            return "homepod"
+        }
+        if name.hasPrefix("apple tv") || name.hasPrefix("appletv") {
+            return "appletv"
+        }
+        return "cable.connector"
+    }
+}
+
+nonisolated struct RestoreTarget: Encodable, Equatable {
+    let port: Int
+    let generation: UInt32
 }
