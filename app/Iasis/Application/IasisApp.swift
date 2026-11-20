@@ -20,6 +20,13 @@ struct IasisApp: App {
         }
         .menuBarExtraStyle(.menu)
 
+        Window("About Iasis", id: AboutView.windowID) {
+            AboutView()
+        }
+        .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
+
         Settings {
             SettingsView(model: model)
         }
