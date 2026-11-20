@@ -10,7 +10,7 @@ Messages use vendor control transfers on endpoint zero, addressed to interface 0
 | ------------------------ | --------------------------------------------------------- |
 | Request type / recipient | Vendor / interface                                        |
 | `wIndex`                 | `0`                                                       |
-| `wValue`                 | Protocol version, `12`                                    |
+| `wValue`                 | Protocol version, `13`                                    |
 | Maximum payload          | 1344 bytes                                                |
 | Payload header           | ASCII `IASI`, then a little-endian `u16` protocol version |
 | Payload body             | Postcard-encoded message                                  |
@@ -79,6 +79,10 @@ Each report replaces the last. A port entry carries the attachment generation it
 A DFU request older than 15 seconds is unverified: sent, and seen by no host.
 
 A port entry can also carry the host's restore job for that attachment: a nonzero ECID, a phase and progress from 0–100 within the current restore stage. Detach clears it; five seconds without a report that carries it changes an active job to `Unconfirmed`. A port with an active or unconfirmed job refuses DFU and reboot commands with `Busy`.
+
+`fetch` in a port entry is the percentage of that target's restore image the host has fetched, while it is fetching one. Status returns it on the port for as long as reports carry it.
+
+`PortStatus::light` gives the hue of each port's light, whether it pulses and whether it is dimmed, from the fields above. Firmware and host clients both use it.
 
 ## Button events and restore arms
 
