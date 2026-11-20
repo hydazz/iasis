@@ -9,6 +9,7 @@ from build123d import (
     Align,
     Box,
     Compound,
+    Cone,
     Cylinder,
     Part,
     Plane,
@@ -128,21 +129,16 @@ class DisplayMount:
     roof: float
     thickness: float
     holes: tuple[tuple[float, float], ...]
-
-    screw_d: float = 2.5
-    screw_length: float = 4.0
-    head_d: float = 5.0
-    head_h: float = 2.2
-    post_d: float = 4.0
-    pilot_d: float = 2.2
+    post_d: float = 4.6
+    pilot_d: float = 2.4
+    pin_d: float = 2.3
+    embed: float = 2.4
+    head_d: float = 4.8
+    head_h: float = 1.2
 
     @property
     def rear(self) -> float:
         return self.face - self.thickness
-
-    @property
-    def tip(self) -> float:
-        return self.rear + self.screw_length
 
     @cached_property
     def centres(self) -> tuple[tuple[float, float], ...]:
@@ -150,39 +146,35 @@ class DisplayMount:
 
     @cached_property
     def pilots(self) -> list[Part]:
-        # Smooth bores: the screws form their threads in the printed posts.
-        return [
-            Pos(x, y, self.face - 0.1)
-            * Cylinder(self.pilot_d / 2, self.tip - self.face + 0.3, align=BASE)
-            for x, y in self.centres
-        ]
+        bore = Pos(0, 0, self.face) * Cylinder(self.pilot_d / 2, self.embed + 0.2, align=BASE)
+        entry = Pos(0, 0, self.face - 0.01) * Cone(
+            self.pilot_d / 2 + 0.2, self.pilot_d / 2, 0.21, align=BASE
+        )
+        return [cast(Part, Pos(x, y, 0) * (bore + entry)) for x, y in self.centres]
 
     @cached_property
     def posts(self) -> list[Part]:
+        post = Pos(0, 0, self.face) * Cylinder(
+            self.post_d / 2, self.roof - self.face + 0.5, align=BASE
+        )
+        # The wide root stays above the glass; the post is rigid, not a spring.
+        post += Pos(0, 0, self.roof - 0.3) * Cone(self.post_d / 2, 3.1, 0.3, align=BASE)
         return [
-            cast(
-                Part,
-                Pos(x, y, self.face)
-                * Cylinder(self.post_d / 2, self.roof - self.face + 0.5, align=BASE)
-                - pilot,
-            )
+            cast(Part, Pos(x, y, 0) * post - pilot)
             for (x, y), pilot in zip(self.centres, self.pilots, strict=True)
         ]
 
     @cached_property
-    def heads(self) -> list[Part]:
-        return [
-            Pos(x, y, self.rear - self.head_h) * Cylinder(self.head_d / 2, self.head_h, align=BASE)
-            for x, y in self.centres
-        ]
+    def pin(self) -> Part:
+        """Printed head-down; the head seats against the actual PCB thickness."""
+        length = self.thickness + self.embed
+        head = Cylinder(self.head_d / 2, self.head_h, align=BASE)
+        stem = Pos(0, 0, self.head_h) * Cylinder(self.pin_d / 2, length - 0.4, align=BASE)
+        tip = Pos(0, 0, self.head_h + length - 0.4) * Cone(
+            self.pin_d / 2, self.pin_d / 2 - 0.2, 0.4, align=BASE
+        )
+        return cast(Part, head + stem + tip)
 
     @cached_property
-    def screws(self) -> list[Part]:
-        return [
-            cast(
-                Part,
-                head
-                + Pos(x, y, self.rear) * Cylinder(self.screw_d / 2, self.screw_length, align=BASE),
-            )
-            for (x, y), head in zip(self.centres, self.heads, strict=True)
-        ]
+    def pins(self) -> list[Part]:
+        return [Pos(x, y, self.rear - self.head_h) * self.pin for x, y in self.centres]
