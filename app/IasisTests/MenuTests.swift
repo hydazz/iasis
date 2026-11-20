@@ -34,6 +34,35 @@ struct MenuTests {
         #expect(!items.contains { $0.title.contains("Empty") })
     }
 
+    @Test func progressLeavesTheNativeDeviceSubmenusInPlace() async throws {
+        var state = try Fixtures.state
+        state.boards[0].ports[2].state = "downloading image"
+        state.boards[0].ports[2].stage = .init(name: "Downloading image", percent: 23)
+        let agent = FakeAgent(reports: [state])
+        let model = AgentModel(agent: agent)
+        model.start()
+        for _ in 0 ..< 100 where model.state == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let menu = NSHostingMenu(rootView: MenuView(model: model))
+        menu.update()
+        let original = menu.items.filter { $0.title.hasPrefix("Port ") }
+        try #require(original.count == 4)
+        let submenus = original.compactMap(\.submenu)
+        for percent in [24, 25, 26] {
+            state.boards[0].ports[2].stage?.percent = UInt8(percent)
+            state.images.fetch?.done += 1_234_567
+            await agent.publish(state)
+            for _ in 0 ..< 100 where model.state != state {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            menu.update()
+            let current = menu.items.filter { $0.title.hasPrefix("Port ") }
+            #expect(current.elementsEqual(original, by: { $0 === $1 }))
+            #expect(current.compactMap(\.submenu).elementsEqual(submenus, by: { $0 === $1 }))
+        }
+    }
+
     @Test func duplicateNamesAndDisabledPortsRemainAddressable() throws {
         var state = try Fixtures.state
         var other = state.boards[0]
