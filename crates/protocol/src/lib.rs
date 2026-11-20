@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 12;
+pub const VERSION: u16 = 13;
 pub const MAX_PACKET: usize = 1344;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
@@ -140,6 +140,9 @@ pub struct PortStatus {
     pub observed: Option<Observed>,
     /// The last DFU or reboot sent to the target, until its effect is known.
     pub request: Option<Request>,
+    /// Percent of the restore image the host has fetched for this target,
+    /// while it is fetching one.
+    pub fetch: Option<u8>,
 }
 
 /// USB mode of an Apple device.
@@ -230,7 +233,87 @@ pub enum DebugActions {
     Listed([u16; MAX_ACTIONS]),
 }
 
+/// The colour of a port's light.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Hue {
+    Off,
+    Red,
+    Green,
+    White,
+    Blue,
+    Amber,
+    Purple,
+}
+
+/// What a port's light shows: the hue is what the port holds, a pulse is
+/// work under way or a result awaited, and a steady light holds until
+/// someone acts.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Light {
+    pub hue: Hue,
+    pub pulse: bool,
+    /// Half brightness: a target still attaching or waiting for power.
+    pub dim: bool,
+}
+
 impl PortStatus {
+    /// The port's light. Blue is DFU: pulsing once it is sent, and steady
+    /// once a host sees it, which only a host can.
+    pub fn light(&self) -> Light {
+        let light = |hue, pulse| Light {
+            hue,
+            pulse,
+            dim: false,
+        };
+        if self.error.is_some() || self.state == PortState::Fault {
+            return light(Hue::Red, false);
+        }
+        if !self.occupied() {
+            return light(Hue::Off, false);
+        }
+        if let Some(job) = self.restore {
+            return match job.phase {
+                RestorePhase::Preparing | RestorePhase::Running => light(Hue::Purple, true),
+                // Nobody is driving it and nobody knows how it ended.
+                RestorePhase::Unconfirmed => light(Hue::Purple, false),
+                RestorePhase::Reported => light(Hue::Green, false),
+                RestorePhase::Failed => light(Hue::Red, false),
+            };
+        }
+        if self.fetch.is_some() {
+            return light(Hue::Purple, true);
+        }
+        match self.observed.map(|seen| seen.usb) {
+            Some(Usb::Apple(
+                AppleMode::Dfu | AppleMode::KisDfu | AppleMode::Recovery | AppleMode::Wtf,
+            )) => return light(Hue::Blue, false),
+            // A restore some other tool is running.
+            Some(Usb::Apple(AppleMode::Restored)) => return light(Hue::Purple, true),
+            _ => {}
+        }
+        match self.request.map(|request| request.action) {
+            Some(PortAction::Reboot) => return light(Hue::Amber, true),
+            Some(_) => return light(Hue::Blue, true),
+            None => {}
+        }
+        match self.state {
+            PortState::Contract => light(Hue::Green, false),
+            // Powered, and silent on Power Delivery.
+            PortState::Ready if !self.pd_transition => light(Hue::White, false),
+            PortState::WaitingPower => Light {
+                hue: Hue::Amber,
+                pulse: false,
+                dim: true,
+            },
+            _ => Light {
+                hue: Hue::White,
+                pulse: false,
+                dim: true,
+            },
+        }
+    }
+
     /// A target is on the connector, or left a fault that is still reported.
     pub fn occupied(&self) -> bool {
         self.error.is_some()
@@ -341,6 +424,8 @@ pub struct PortReport {
     pub generation: u32,
     pub observed: Observed,
     pub restore: Option<RestoreStatus>,
+    /// Percent of this target's restore image fetched so far.
+    pub fetch: Option<u8>,
 }
 
 /// Everything a host knows about the board's targets. The first report of a
@@ -788,6 +873,7 @@ mod tests {
                     action: PortAction::Reboot,
                     at_ms: u64::MAX,
                 }),
+                fetch: Some(u8::MAX),
             }; PORT_COUNT],
             bus_voltage_adc: Some(u16::MAX),
             thermistor_adc: [Some(u16::MAX); 2],
@@ -897,7 +983,7 @@ mod tests {
         assert_eq!(
             packet,
             &[
-                b'I', b'A', b'S', b'I', 12, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
+                b'I', b'A', b'S', b'I', 13, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
             ]
         );
         let length = packet.len();
