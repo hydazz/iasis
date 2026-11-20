@@ -3,18 +3,21 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 10;
-pub const MAX_PACKET: usize = 1152;
+pub const VERSION: u16 = 11;
+pub const MAX_PACKET: usize = 1344;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
 pub const GET_STATUS: u8 = 2;
 pub const ENTER_BOOTLOADER: u8 = 3;
 pub const PORT_COMMAND: u8 = 4;
 pub const HOST_BUDGET: u8 = 5;
-pub const RESTORE_FEEDBACK: u8 = 6;
-pub const RESTORE_CONTROL: u8 = 7;
+pub const HOST_REPORT: u8 = 6;
+pub const HOST_CONTROL: u8 = 7;
 pub const RESTORE_ARM_MS: u64 = 20_000;
-pub const RESTORE_SESSION_MS: u64 = 3000;
+/// A host session ends this long after its last report.
+pub const HOST_SESSION_MS: u64 = 3000;
+/// A DFU or reboot request waits this long for its effect.
+pub const REQUEST_MS: u64 = 15_000;
 
 // pid.codes private experimentation IDs, replace for distributed firmware.
 pub const DEVELOPMENT_VID: u16 = 0x1209;
@@ -128,6 +131,71 @@ pub struct PortStatus {
     /// The USB link the hub holds with the target. `None` while the hub
     /// cannot be read.
     pub link: Option<Link>,
+    /// What the host finds on this attachment's USB, while a host reports.
+    pub observed: Option<Observed>,
+    /// The last DFU or reboot sent to the target, until its effect is known.
+    pub request: Option<Request>,
+}
+
+/// USB mode of an Apple device.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AppleMode {
+    Dfu,
+    PortDfu,
+    Recovery,
+    Wtf,
+    /// Apple Debug USB; whether the target is in DFU is not established.
+    Kis,
+    KisDfu,
+    /// A usbmux-capable descriptor whose service has not been identified.
+    Mux,
+    Restored,
+    Normal,
+}
+
+/// What a host finds on a port's USB.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Usb {
+    /// Nothing enumerates: no data path, or a target that has not started USB.
+    Absent,
+    /// A device that is not an Apple target.
+    Other,
+    /// Several devices, so no single target can be named.
+    Ambiguous,
+    Apple(AppleMode),
+}
+
+/// A host's view of one attachment. Only a host sees a target's USB mode; the
+/// board cannot tell DFU from a running system.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Observed {
+    pub usb: Usb,
+    pub ecid: Option<u64>,
+}
+
+impl Observed {
+    /// The target's DFU is on this port's USB.
+    pub fn dfu(&self) -> bool {
+        matches!(self.usb, Usb::Apple(AppleMode::Dfu | AppleMode::KisDfu))
+    }
+}
+
+/// A DFU or reboot the board sent. The target's acknowledgement does not
+/// establish the result.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Request {
+    pub action: PortAction,
+    /// Board uptime when the request went out.
+    pub at_ms: u64,
+}
+
+impl Request {
+    /// Still inside the time the target takes to act.
+    pub fn pending(&self, uptime_ms: u64) -> bool {
+        uptime_ms.saturating_sub(self.at_ms) < REQUEST_MS
+    }
 }
 
 /// A target's USB link, as the hub reports its downstream port. `Down` is a
@@ -192,6 +260,16 @@ impl PortStatus {
         matches!(self.debug_actions, DebugActions::Listed(list) if !list.contains(&DFU_USB))
     }
 
+    /// A restore is under way or its outcome is unknown.
+    pub fn restoring(&self) -> bool {
+        self.restore.is_some_and(|job| {
+            matches!(
+                job.phase,
+                RestorePhase::Preparing | RestorePhase::Running | RestorePhase::Unconfirmed
+            )
+        })
+    }
+
     pub fn latch_fault(&mut self, error: PortError, sample: FaultSample) {
         if self.fault_sample.is_none() {
             self.error = Some(error);
@@ -243,18 +321,44 @@ pub enum RestoreDecision {
     Cancelled(RestoreArm),
 }
 
+/// The host attached to a board. One host at a time holds the session; its
+/// reports renew it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum RestoreControl {
-    Begin(u32),
-    KeepAlive(u32),
+pub struct HostSession {
+    pub id: u32,
+    /// The host can prepare a restore when the button asks for one.
+    pub restore_ready: bool,
+}
+
+/// A host's view of one port, bound to the attachment it describes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PortReport {
+    pub generation: u32,
+    pub observed: Observed,
+    pub restore: Option<RestoreStatus>,
+}
+
+/// Everything a host knows about the board's targets. The first report of a
+/// new session takes the board; later ones renew it and replace the last.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct HostReport {
+    pub serial: u64,
+    pub session: HostSession,
+    pub ports: [Option<PortReport>; PORT_COUNT],
+}
+
+/// What the session's host asks beyond its reports: an erase to confirm on
+/// the board, or to give the board up.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum HostControl {
     Arm(RestoreArm),
     End(u32),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct RestoreControlRequest {
+pub struct HostControlRequest {
     pub serial: u64,
-    pub control: RestoreControl,
+    pub control: HostControl,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -272,14 +376,6 @@ pub struct RestoreStatus {
     pub phase: RestorePhase,
     /// Current idevicerestore stage, not a percentage of the whole restore.
     pub progress: u8,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct RestoreFeedback {
-    pub serial: u64,
-    pub port: Port,
-    pub generation: u32,
-    pub status: RestoreStatus,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -467,9 +563,18 @@ pub struct Status {
     pub supply: Supply,
     pub button: Option<ButtonEvent>,
     pub restore_decision: Option<RestoreDecision>,
+    /// The host holding the board's session.
+    pub host: Option<HostSession>,
 }
 
 impl Status {
+    /// The session a restore request goes to: a host that can prepare one.
+    pub fn restore_session(&self) -> Option<u32> {
+        self.host
+            .filter(|host| host.restore_ready)
+            .map(|host| host.id)
+    }
+
     /// Ports the button can select and the panel lights.
     pub fn occupied_mask(&self) -> u8 {
         let mut mask = 0;
@@ -480,13 +585,15 @@ impl Status {
     }
 
     /// Ready targets a button gesture reaches. DFU and reboot go only where
-    /// the target lists them; a restore request reaches every ready target,
-    /// since the host may find one already in DFU.
+    /// the target lists them. A restore request needs a host that can prepare
+    /// one and reaches every ready target, since the host may find one
+    /// already in DFU.
     pub fn gesture_mask(&self, gesture: Gesture) -> u8 {
         let action = match gesture {
             Gesture::Dfu => PortAction::DfuAppleSilicon,
             Gesture::Reboot => PortAction::Reboot,
-            Gesture::Restore => return self.ready_mask(),
+            Gesture::Restore if self.restore_session().is_some() => return self.ready_mask(),
+            Gesture::Restore => return 0,
         };
         let mut mask = 0;
         for (i, port) in self.ports.iter().enumerate() {
@@ -506,12 +613,7 @@ impl Status {
                 && !port.pd_transition
                 && port.error.is_none()
                 && port.command_result != CommandResult::Pending
-                && !port.restore.is_some_and(|job| {
-                    matches!(
-                        job.phase,
-                        RestorePhase::Preparing | RestorePhase::Running | RestorePhase::Unconfirmed
-                    )
-                })
+                && !port.restoring()
             {
                 mask |= 1 << i;
             }
@@ -546,15 +648,22 @@ pub fn encode<'a, T: Serialize>(
 }
 
 pub fn decode<'a, T: Deserialize<'a>>(data: &'a [u8]) -> Result<T, DecodeError> {
+    match decode_any(data)? {
+        (VERSION, value) => Ok(value),
+        (version, _) => Err(DecodeError::Version(version)),
+    }
+}
+
+/// Decode a frame from a sender of any protocol version, with that version.
+/// `Info` and `BootloaderRequest` keep one layout so that a tool can name and
+/// update a board whose firmware speaks another version.
+pub fn decode_any<'a, T: Deserialize<'a>>(data: &'a [u8]) -> Result<(u16, T), DecodeError> {
     if data.len() < HEADER_SIZE || data.len() > MAX_PACKET || data[..4] != MAGIC {
         return Err(DecodeError::Header);
     }
     let version = u16::from_le_bytes([data[4], data[5]]);
-    if version != VERSION {
-        return Err(DecodeError::Version(version));
-    }
     match postcard::take_from_bytes(&data[HEADER_SIZE..]) {
-        Ok((value, [])) => Ok(value),
+        Ok((value, [])) => Ok((version, value)),
         _ => Err(DecodeError::Payload),
     }
 }
@@ -657,6 +766,14 @@ mod tests {
                     phase: RestorePhase::Failed,
                     progress: 100,
                 }),
+                observed: Some(Observed {
+                    usb: Usb::Apple(AppleMode::KisDfu),
+                    ecid: Some(u64::MAX),
+                }),
+                request: Some(Request {
+                    action: PortAction::Reboot,
+                    at_ms: u64::MAX,
+                }),
             }; PORT_COUNT],
             bus_voltage_adc: Some(u16::MAX),
             thermistor_adc: [Some(u16::MAX); 2],
@@ -692,6 +809,10 @@ mod tests {
                 generations: [u32::MAX; PORT_COUNT],
                 expires: u64::MAX,
             })),
+            host: Some(HostSession {
+                id: u32::MAX,
+                restore_ready: true,
+            }),
         };
         let mut buffer = [0; MAX_PACKET];
         let packet = encode(&status, &mut buffer).unwrap();
@@ -729,6 +850,17 @@ mod tests {
         assert_eq!(status.ready_mask(), 0b01111);
         assert_eq!(status.gesture_mask(Gesture::Dfu), 0b00001);
         assert_eq!(status.gesture_mask(Gesture::Reboot), 0b00101);
+        // A restore request needs a host that can prepare one.
+        assert_eq!(status.gesture_mask(Gesture::Restore), 0);
+        status.host = Some(HostSession {
+            id: 1,
+            restore_ready: false,
+        });
+        assert_eq!(status.gesture_mask(Gesture::Restore), 0);
+        status.host = Some(HostSession {
+            id: 1,
+            restore_ready: true,
+        });
         assert_eq!(status.gesture_mask(Gesture::Restore), 0b01111);
         assert!(status.ports[0].offers(PortAction::DfuT2));
         assert!(!status.ports[2].offers(PortAction::DfuT2));
@@ -750,7 +882,7 @@ mod tests {
         assert_eq!(
             packet,
             &[
-                b'I', b'A', b'S', b'I', 10, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
+                b'I', b'A', b'S', b'I', 11, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
             ]
         );
         let length = packet.len();
@@ -763,6 +895,8 @@ mod tests {
             decode::<Info>(&buffer[..length]),
             Err(DecodeError::Version(1))
         );
+        // The identity frame reads the same from any version.
+        assert_eq!(decode_any::<Info>(&buffer[..length]), Ok((1, info)));
         buffer[0] = 0;
         assert_eq!(decode::<Info>(&buffer[..length]), Err(DecodeError::Header));
     }

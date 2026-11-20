@@ -144,18 +144,16 @@ async fn main(_spawner: Spawner) {
     let configured = Cell::new(false);
     let suspended = Cell::new(false);
     let host_budget = Cell::new(0u16);
-    let feedback = Cell::new([None; protocol::PORT_COUNT]);
-    let restore_session = usb::RestoreSession::default();
+    let session = usb::Session::default();
     let mut management = usb::Management {
         info,
-        restore_session: &restore_session,
+        session: &session,
         status: &status,
         update: &update,
         command: &command,
         configured: &configured,
         suspended: &suspended,
         host_budget: &host_budget,
-        feedback: &feedback,
     };
 
     let mut config = Config::new(USB_VID, USB_PID);
@@ -375,20 +373,14 @@ async fn main(_spawner: Spawner) {
             next.uptime_ms = Instant::now().as_millis();
             oled.tick(&io, &next, &button, next.uptime_ms).await;
             next.i2c_root_fault |= io.lock().await.bus.faulted();
-            // USB feedback can arrive during the I²C work above. Apply it
+            // A host report can arrive during the I²C work above. Apply it
             // before selecting targets for a button action in this pass.
-            for update in feedback
-                .replace([None; protocol::PORT_COUNT])
-                .into_iter()
-                .flatten()
-            {
-                ports.feedback(update);
-            }
-            next.ports = ports.statuses();
             let now = Instant::now().as_millis();
-            let session = restore_session.active(now);
-            let pending = restore_session.take_arm(now);
-            if let Some(event) = button.sample(&next, session, pending, confirm.is_low(), now) {
+            next.host = session.active(now);
+            ports.host(session.take_report(now), next.host.is_some(), now);
+            next.ports = ports.statuses();
+            let pending = session.take_arm(now);
+            if let Some(event) = button.sample(&next, pending, confirm.is_low(), now) {
                 match event {
                     iasis_firmware::button::Event::Decision(decision) => {
                         next.restore_decision = Some(decision);

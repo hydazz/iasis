@@ -60,21 +60,30 @@ Leave the power supply connected throughout a restore. Changing the input can in
 
 The [button and CLI controls](../../README.md#use) operate on ready ports. A target is identified by its Power Delivery contract. Once the contract has settled, Iasis asks the target which Apple debug actions its port offers, and sends DFU or reboot only where the target lists them. DFU also needs the port to list DFU USB, which a Mac does on its [DFU port](https://support.apple.com/en-us/120694) alone: told to enter DFU from another port, some Macs restart into DFU where no host can reach them. Those ports still take reboot. A target that lists neither still charges and can be restored once it is in DFU by other means; a USB-C to Lightning cable does not carry Apple debug. `iasis status` prints each port's list. DFU supports Apple Silicon and T2; the button selects Apple Silicon. Commands use the attachment generation to reject requests for a device that has since disconnected.
 
-| Port light | Meaning                                  |
-| ---------- | ---------------------------------------- |
-| Off        | Empty or disabled target port            |
-| Green      | Ready for signalling or restore complete |
-| White      | Powered device without a PD contract     |
-| Blue       | Activity                                 |
-| Amber      | Preparation, waiting or unknown result   |
-| Red        | Port fault or failed restore             |
-| Dimmed     | Outside the selection                    |
+A colour is what the port holds, a pulse is something sent or lost track of, and brightness is the selection.
+
+| Port light      | Meaning                                                      |
+| --------------- | ------------------------------------------------------------ |
+| Off             | Empty or disabled target port                                |
+| Green           | Identified target, or restore complete                       |
+| White           | Powered device without a PD contract; dim while one attaches |
+| Blue, steady    | A host sees the target in DFU or recovery                    |
+| Blue, pulsing   | DFU sent; no host has seen the result                        |
+| Amber, pulsing  | Reboot sent                                                  |
+| Amber, steady   | Waiting for power                                            |
+| Purple, steady  | Restoring; brighter as the stage advances                    |
+| Purple, pulsing | Restore preparing, or its host has stopped reporting         |
+| Red             | Port fault or failed restore                                 |
+| Dimmed          | Outside the selection                                        |
 
 A fault keeps full brightness whatever is selected. While the button is held, the bright ports are the ones the action will reach.
 
+Iasis cannot tell a target in DFU from a running one: the target looks the same on its power pins either way. Only a host sees the USB mode, so blue turns steady when [`iasisd`](../../README.md#host-agent) or a restore command reports DFU on that port, and the report is forgotten three seconds after the host stops. Without a host a sent DFU keeps pulsing until the target is unplugged or restarted. With one, a DFU not seen within 15 seconds gives way to the mode the host does see. Green means an identified target, not a started one.
+
 | Status light    | Meaning                                              |
 | --------------- | ---------------------------------------------------- |
-| Teal            | Running                                              |
+| Green           | A host is attached                                   |
+| White           | No host; the button still sends DFU and Reboot       |
 | Blue            | Releasing the button sends DFU                       |
 | Amber           | Releasing sends Reboot                               |
 | Purple          | Releasing asks the host for a restore                |
@@ -87,11 +96,13 @@ At the Erase prompt, hold for three seconds to start the restore. You can keep h
 
 A restore failure reported by the host lights that port red at full brightness. The OLED labels it `FAIL` and shows `Restore failed` when the port is selected. The result belongs to the current USB-C attachment. A detach clears it, including one caused by restarting the target. A manual Configurator restore needs a host process to relay its result to the board.
 
-If updates stop during preparation or restore, the port turns amber after five seconds and power stays on. Terminal results have no heartbeat timeout. Command results and feedback fields are defined in the [protocol](../protocol/README.md).
+If updates stop during preparation or restore, the port pulses purple after five seconds and power stays on. Terminal results have no heartbeat timeout. Command results and feedback fields are defined in the [protocol](../protocol/README.md).
 
 ## OLED
 
-Connect an [Adafruit 938](https://www.adafruit.com/product/938) to the display I²C connector. The 128×64 screen shows all five physical ports. Bars beside a port number show its USB link: one for USB 2, two for USB 3. A selected port that a hold would reach is filled; any other selected port is outlined. A lightning bolt indicates brick power and a USB symbol a waiting restore host.
+Connect an [Adafruit 938](https://www.adafruit.com/product/938) to the display I²C connector. The 128×64 screen shows all five physical ports. Bars beside a port number show its USB link: one for USB 2, two for USB 3. A selected port that a hold would reach is filled; any other selected port is outlined. A lightning bolt indicates brick power and a USB symbol an attached host.
+
+A port reads `DFU` or `REC` while the host sees it in DFU or recovery, `DFU?` for a DFU sent and not yet seen, and `BOOT` after a reboot is sent.
 
 | Selection | Lower area                                                                                               |
 | --------- | -------------------------------------------------------------------------------------------------------- |

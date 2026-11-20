@@ -45,10 +45,6 @@ pub struct Button {
 }
 
 impl Button {
-    pub fn host_prepared(&self) -> bool {
-        self.session.is_some()
-    }
-
     pub fn armed(&self) -> Option<RestoreArm> {
         self.armed
     }
@@ -128,11 +124,11 @@ impl Button {
     pub fn sample(
         &mut self,
         status: &Status,
-        session: Option<u32>,
         pending_arm: Option<RestoreArm>,
         down: bool,
         now: u64,
     ) -> Option<Event> {
+        let session = status.restore_session();
         if down != self.raw {
             self.raw = down;
             self.raw_since = now;
@@ -174,14 +170,7 @@ impl Button {
             _ => self.vacant_since = None,
         }
         let generations = status.ports.map(|port| port.generation);
-        // A restore request needs a host waiting for it.
-        let targets = GESTURES.map(|gesture| {
-            if gesture == Gesture::Restore && self.session.is_none() {
-                0
-            } else {
-                self.selected_mask() & status.gesture_mask(gesture)
-            }
-        });
+        let targets = GESTURES.map(|gesture| self.selected_mask() & status.gesture_mask(gesture));
         let reach = targets.into_iter().fold(0, |all, targets| all | targets);
         let moved = targets != self.targets
             || (0..5).any(|i| reach & (1 << i) != 0 && generations[i] != self.generations[i]);
@@ -291,7 +280,7 @@ impl Button {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iasis_protocol::{DebugActions, PortState, RestoreStatus};
+    use iasis_protocol::{DebugActions, HostSession, PortState, RestoreStatus};
 
     /// A Mac's DFU port lists DFU and reboot among its actions.
     const DFU_PORT: DebugActions =
@@ -329,13 +318,12 @@ mod tests {
 
         fn sample(&mut self, down: bool, elapsed: u64) -> Option<Event> {
             self.now += elapsed;
-            self.button.sample(
-                &self.status,
-                self.session,
-                self.pending.take(),
-                down,
-                self.now,
-            )
+            self.status.host = self.session.map(|id| HostSession {
+                id,
+                restore_ready: true,
+            });
+            self.button
+                .sample(&self.status, self.pending.take(), down, self.now)
         }
 
         fn press(&mut self) {

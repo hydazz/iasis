@@ -25,7 +25,7 @@ mise run deps
 mise run host:build
 ```
 
-The macOS and Linux build produces `target/release/iasis` for direct board control and `target/release/iasisd` for [button restores](#button-restores). Linux needs read/write access to the management USB device.
+The macOS and Linux build produces `target/release/iasis` for direct board control and `target/release/iasisd`, the [host agent](#host-agent). Linux needs read/write access to the management USB device.
 
 | Task               | Output                                                             |
 | ------------------ | ------------------------------------------------------------------ |
@@ -42,13 +42,13 @@ Builds, checks and previews are separate tasks. Python tools share the root `.ve
 Connect the host and charged targets. Ports are numbered 1–5, starting at the dot on the case.
 
 ```sh
-target/release/iasis list
+target/release/iasis
 target/release/iasis --serial 0123456789abcdef status
 target/release/iasis --serial 0123456789abcdef dfu 1
 target/release/iasis --serial 0123456789abcdef ports --watch
 ```
 
-Use the serial from `list`. Add `--device t2` for a T2 Mac. Use `ports --watch` to see the USB mode, identity and link (none, USB 2 or USB 3) on each port. If a Mac acknowledges the DFU request and then disappears from USB, check the data cable and the Mac’s [DFU socket](https://support.apple.com/en-us/120694).
+`iasis` alone lists every board and its ports; `iasis watch` keeps the list current. Commands take the serial it prints. Add `--device t2` for a T2 Mac. Use `ports --watch` to see the USB mode, identity and link (none, USB 2 or USB 3) on each port. If a Mac acknowledges the DFU request and then disappears from USB, check the data cable and the Mac’s [DFU socket](https://support.apple.com/en-us/120694).
 
 The button selects targets with a tap and acts on them with a hold, with or without an OLED.
 
@@ -64,6 +64,8 @@ A hold steps through the actions the selected targets take, in this order: the f
 
 Port lights outside the selection dim. While the button is held, only the ports the action will reach stay bright. An emptied port stays selected for 30 seconds so a replacement target takes its place.
 
+After a DFU the port pulses blue. It turns steady blue once a host sees the target in DFU, which needs the [host agent](#host-agent). The [light table](crates/firmware/README.md#controls-and-status) lists every colour.
+
 A white port light marks a device Iasis cannot identify; a hold passes it by. DFU leaves their data intact and works with Apple Configurator. `power <port> off` disables a port. `power <port> on` enables it and retries a fault.
 
 Native USB-C uses the host's advertised current. With a legacy A-to-C connection, set the remaining shared USB allowance, including Iasis and after subtracting other loads:
@@ -73,6 +75,18 @@ target/release/iasis --serial 0123456789abcdef host-budget 1200
 ```
 
 The [firmware power table](crates/firmware/README.md#port-power) lists the limits.
+
+### Host agent
+
+`iasisd` attends every connected board. It tells each board which USB mode its targets are in, so a port light turns steady blue when its target really is in DFU, however it got there. It needs no arguments:
+
+```sh
+target/release/iasisd
+```
+
+The status light is green and the OLED shows a USB symbol while a host is attached. One host holds a board at a time: `iasis restore` attaches for its own run, so stop `iasisd` before using it. The other `iasis` commands work alongside the agent.
+
+To run it in the background for your login session, prefix the command with `systemd-run --user --unit=iasisd --` on Linux or `launchctl submit -l local.iasisd --` on macOS. For automatic startup at login, use absolute paths in a systemd user service's `ExecStart` or a user LaunchAgent's `ProgramArguments` in `~/Library/LaunchAgents/` with `RunAtLoad` enabled. On macOS the agent belongs to the login session, as Apple Configurator restores do.
 
 ### Restore
 
@@ -103,17 +117,15 @@ To restore the default behaviour, run `defaults delete com.apple.AMPDeviceDiscov
 
 #### Button restores
 
-To leave the board ready for repeated restores, run the optional listener in a terminal. Download the IPSWs beforehand and pass each file with `--ipsw`. A mixed batch can use several images. Each selected target must match exactly one.
+Give the agent restore images to have it answer the board's Restore hold. Download the IPSWs beforehand and pass each file with `--ipsw`. A mixed batch can use several images. Each selected target must match exactly one.
 
 ```sh
-"$PWD/target/release/iasisd" --serial 0123456789abcdef \
+"$PWD/target/release/iasisd" \
   --ipsw /path/to/UniversalMac.ipsw --ipsw /path/to/iPad.ipsw \
   --program "$(command -v idevicerestore)" --logs "$HOME/restores"
 ```
 
-The OLED USB symbol means `iasisd` or a foreground `iasis restore --button` is listening. Tap to select targets, then hold until the status light turns purple and release. Preparation can put the targets into DFU. Once the erase is ready, hold for three seconds to confirm or tap to cancel. The daemon keeps listening after cancellation and while workers run. You can still use `iasis` to talk directly to the board.
-
-To run the command above in the background for your login session, prefix it with `systemd-run --user --unit=iasisd --` on Linux or `launchctl submit -l local.iasisd --` on macOS. For automatic startup at login, use absolute paths in a systemd user service's `ExecStart` or a user LaunchAgent's `ProgramArguments` in `~/Library/LaunchAgents/` with `RunAtLoad` enabled.
+Tap to select targets, then hold until the status light turns purple and release. The hold offers Restore only while a host with images is attached; a foreground `iasis restore --button` is one too. Preparation can put the targets into DFU. Once the erase is ready, hold for three seconds to confirm or tap to cancel. The agent keeps listening after cancellation and while workers run.
 
 #### Example restore times
 
