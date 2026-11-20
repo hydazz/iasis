@@ -1,0 +1,59 @@
+[tools]
+periphery = "3.8.0"
+swiftformat = "0.64.6"
+
+[tasks.format]
+run = "swiftformat Iasis IasisTests"
+
+[tasks.fmt-check]
+run = "swiftformat Iasis IasisTests --lint"
+
+[tasks.build]
+description = "Unsigned"
+run = """
+xcodebuild build \
+  -project Iasis.xcodeproj \
+  -scheme Iasis \
+  -destination 'generic/platform=macOS' \
+  CODE_SIGNING_ALLOWED=NO
+"""
+
+[tasks.periphery]
+run = """
+periphery scan \
+  --project Iasis.xcodeproj \
+  --schemes Iasis \
+  --format xcode \
+  --strict \
+  --disable-update-check \
+  --relative-results \
+  -- \
+  -destination 'platform=macOS' \
+  CODE_SIGNING_ALLOWED=NO
+"""
+
+[tasks.lint]
+depends = [":periphery"]
+
+[tasks.test]
+run = """
+xcodebuild test \
+  -project Iasis.xcodeproj \
+  -scheme Iasis \
+  -destination 'platform=macOS' \
+  CODE_SIGNING_ALLOWED=NO
+"""
+
+[tasks.package]
+description = "Unsigned .pkg"
+run = """
+xcodebuild build \
+  -project Iasis.xcodeproj \
+  -scheme Iasis \
+  -configuration Release \
+  -destination 'generic/platform=macOS' \
+  -derivedDataPath build \
+  ARCHS=arm64 \
+  CODE_SIGNING_ALLOWED=NO
+scripts/package.sh build/Build/Products/Release/Iasis.app build/Iasis.pkg
+"""

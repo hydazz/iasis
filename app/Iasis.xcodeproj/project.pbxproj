@@ -1,0 +1,512 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 110;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1A5100202F00000000A0E012 /* iasisd in Embed Host Tools */ = {isa = PBXBuildFile; fileRef = 1A5100222F00000000A0E012 /* iasisd */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		1A5100212F00000000A0E012 /* iasis in Embed Host Tools */ = {isa = PBXBuildFile; fileRef = 1A5100232F00000000A0E012 /* iasis */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		1A5100032F00000000A0E012 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1A5100002F00000000A0E012 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1A5100012F00000000A0E012;
+			remoteInfo = Iasis;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		1A5100242F00000000A0E012 /* Embed Host Tools */ = {
+			isa = PBXCopyFilesBuildPhase;
+			dstPath = Contents/Helpers;
+			dstSubfolder = Wrapper;
+			files = (
+				1A5100202F00000000A0E012 /* iasisd in Embed Host Tools */,
+				1A5100212F00000000A0E012 /* iasis in Embed Host Tools */,
+			);
+			name = "Embed Host Tools";
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		1A5100042F00000000A0E012 /* Iasis.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Iasis.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A5100052F00000000A0E012 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
+		1A5100062F00000000A0E012 /* IasisTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = IasisTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A5100222F00000000A0E012 /* iasisd */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = iasisd; path = "$(DERIVED_FILE_DIR)/HostTools/iasisd"; sourceTree = "<absolute>"; };
+		1A5100232F00000000A0E012 /* iasis */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = iasis; path = "$(DERIVED_FILE_DIR)/HostTools/iasis"; sourceTree = "<absolute>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		1A5100072F00000000A0E012 /* Iasis */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Iasis;
+			sourceTree = "<group>";
+		};
+		1A5100082F00000000A0E012 /* IasisTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = IasisTests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		1A5100092F00000000A0E012 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
+		1A51000A2F00000000A0E012 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1A51000B2F00000000A0E012 = {
+			isa = PBXGroup;
+			children = (
+				1A5100072F00000000A0E012 /* Iasis */,
+				1A5100082F00000000A0E012 /* IasisTests */,
+				1A51000C2F00000000A0E012 /* Config */,
+				1A51000D2F00000000A0E012 /* Products */,
+				1A5100252F00000000A0E012 /* Host Tools */,
+			);
+			sourceTree = "<group>";
+		};
+		1A51000C2F00000000A0E012 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				1A5100052F00000000A0E012 /* Version.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		1A51000D2F00000000A0E012 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				1A5100042F00000000A0E012 /* Iasis.app */,
+				1A5100062F00000000A0E012 /* IasisTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		1A5100252F00000000A0E012 /* Host Tools */ = {
+			isa = PBXGroup;
+			children = (
+				1A5100222F00000000A0E012 /* iasisd */,
+				1A5100232F00000000A0E012 /* iasis */,
+			);
+			name = "Host Tools";
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1A5100012F00000000A0E012 /* Iasis */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A51000E2F00000000A0E012 /* Build configuration list for PBXNativeTarget "Iasis" */;
+			buildPhases = (
+				1A51000F2F00000000A0E012 /* Sources */,
+				1A5100092F00000000A0E012 /* Frameworks */,
+				1A5100102F00000000A0E012 /* Resources */,
+				1A5100262F00000000A0E012 /* Build Host Tools */,
+				1A5100242F00000000A0E012 /* Embed Host Tools */,
+			);
+			buildRules = (
+			);
+			fileSystemSynchronizedGroups = (
+				1A5100072F00000000A0E012 /* Iasis */,
+			);
+			name = Iasis;
+			productName = Iasis;
+			productReference = 1A5100042F00000000A0E012 /* Iasis.app */;
+			productType = "com.apple.product-type.application";
+		};
+		1A5100022F00000000A0E012 /* IasisTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A5100112F00000000A0E012 /* Build configuration list for PBXNativeTarget "IasisTests" */;
+			buildPhases = (
+				1A5100122F00000000A0E012 /* Sources */,
+				1A51000A2F00000000A0E012 /* Frameworks */,
+				1A5100132F00000000A0E012 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				1A5100142F00000000A0E012 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				1A5100082F00000000A0E012 /* IasisTests */,
+			);
+			name = IasisTests;
+			productName = IasisTests;
+			productReference = 1A5100062F00000000A0E012 /* IasisTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		1A5100002F00000000A0E012 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2720;
+				LastUpgradeCheck = 2720;
+				TargetAttributes = {
+					1A5100012F00000000A0E012 = {
+						CreatedOnToolsVersion = 27.2;
+					};
+					1A5100022F00000000A0E012 = {
+						CreatedOnToolsVersion = 27.2;
+						TestTargetID = 1A5100012F00000000A0E012;
+					};
+				};
+			};
+			buildConfigurationList = 1A5100152F00000000A0E012 /* Build configuration list for PBXProject "Iasis" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 1A51000B2F00000000A0E012;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 110;
+			productRefGroup = 1A51000D2F00000000A0E012 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				1A5100012F00000000A0E012 /* Iasis */,
+				1A5100022F00000000A0E012 /* IasisTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1A5100102F00000000A0E012 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+		1A5100132F00000000A0E012 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		1A5100262F00000000A0E012 /* Build Host Tools */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			inputPaths = (
+				"$(SRCROOT)/scripts/build-host-tools.sh",
+			);
+			name = "Build Host Tools";
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/HostTools/iasisd",
+				"$(DERIVED_FILE_DIR)/HostTools/iasis",
+			);
+			shellPath = /bin/sh;
+			shellScript = (
+				"\"${SRCROOT}/scripts/build-host-tools.sh\"",
+				"",
+			);
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1A51000F2F00000000A0E012 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+		1A5100122F00000000A0E012 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		1A5100142F00000000A0E012 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1A5100012F00000000A0E012 /* Iasis */;
+			targetProxy = 1A5100032F00000000A0E012 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		1A5100162F00000000A0E012 /* Debug configuration for PBXProject "Iasis" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = SMLKBTR495;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = "$(RECOMMENDED_MACOSX_DEPLOYMENT_TARGET)";
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		1A5100172F00000000A0E012 /* Release configuration for PBXProject "Iasis" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = SMLKBTR495;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = "$(RECOMMENDED_MACOSX_DEPLOYMENT_TARGET)";
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		1A5100182F00000000A0E012 /* Debug configuration for PBXNativeTarget "Iasis" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 1A5100052F00000000A0E012 /* Version.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = SMLKBTR495;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hydaz.Iasis;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				REGISTER_APP_GROUPS = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		1A5100192F00000000A0E012 /* Release configuration for PBXNativeTarget "Iasis" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 1A5100052F00000000A0E012 /* Version.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = SMLKBTR495;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hydaz.Iasis;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				REGISTER_APP_GROUPS = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		1A51001A2F00000000A0E012 /* Debug configuration for PBXNativeTarget "IasisTests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = SMLKBTR495;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hydaz.IasisTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Iasis.app/Contents/MacOS/Iasis";
+			};
+			name = Debug;
+		};
+		1A51001B2F00000000A0E012 /* Release configuration for PBXNativeTarget "IasisTests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = SMLKBTR495;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hydaz.IasisTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Iasis.app/Contents/MacOS/Iasis";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1A51000E2F00000000A0E012 /* Build configuration list for PBXNativeTarget "Iasis" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A5100182F00000000A0E012 /* Debug configuration for PBXNativeTarget "Iasis" */,
+				1A5100192F00000000A0E012 /* Release configuration for PBXNativeTarget "Iasis" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		1A5100112F00000000A0E012 /* Build configuration list for PBXNativeTarget "IasisTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A51001A2F00000000A0E012 /* Debug configuration for PBXNativeTarget "IasisTests" */,
+				1A51001B2F00000000A0E012 /* Release configuration for PBXNativeTarget "IasisTests" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		1A5100152F00000000A0E012 /* Build configuration list for PBXProject "Iasis" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A5100162F00000000A0E012 /* Debug configuration for PBXProject "Iasis" */,
+				1A5100172F00000000A0E012 /* Release configuration for PBXProject "Iasis" */,
+			);
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 1A5100002F00000000A0E012 /* Project object */;
+	validationLevel = 1;
+}
