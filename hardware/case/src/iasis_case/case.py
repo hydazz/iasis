@@ -26,7 +26,6 @@ from build123d import (
     Cone,
     Cylinder,
     Face,
-    FontStyle,
     GeomType,
     Kind,
     Part,
@@ -115,6 +114,7 @@ WINDOW = (3.0, 1.6)
 BUTTON = "SW1171"
 BUTTON_D, BUTTON_FIT = 10.0, 0.10  # radial fit in the cover
 BUTTON_BORE_R = BUTTON_D / 2 + BUTTON_FIT
+BUTTON_RING_W = 0.7  # one continuous line on the bed-facing layer
 BUTTON_GUIDE_D = 14.0
 BUTTON_FLANGE_D = 13.0
 BUTTON_FLANGE_H = 1.2
@@ -162,7 +162,6 @@ SLOT_W = 2.6
 
 # Marks
 TEXT_DEPTH = 0.4  # two 0.20 mm layers, flush with the top
-TEXT_SIZE = 4.5
 WORDMARK = "iasis"
 WORDMARK_SIZE = 8.0
 
@@ -628,35 +627,15 @@ def _artwork(lay: Layout) -> list[Sketch]:
     host, power, first = (lay.board.box(ref).center() for ref in ("J901", "J1001", "J401"))
     status = lay.board.box("D1170").center()
     sw = lay.board.box(BUTTON).center()
+    ring = Sketch((Circle(BUTTON_BORE_R + BUTTON_RING_W) - Circle(BUTTON_BORE_R)).faces())
     marks = [
         Pos(host.X, lay.y_rear - 7) * icon("laptop-minimal"),
         Pos(power.X, lay.y_rear - 7) * icon("plug"),
         Pos(first.X, lay.y_front + 7) * Circle(1),
         Pos(status.X, lay.y_front + 7) * icon("activity", size=5.5),
+        Pos(sw.X, sw.Y) * ring,
         Pos(lay.control_left + 15, sw.Y) * Text(WORDMARK, font_size=WORDMARK_SIZE),
     ]
-    gesture_x = sw.X - (BUTTON_D / 2 + BUTTON_FIT) - 3 - 4.1
-    label_right = gesture_x - 4.1 - 3
-    for action, y in (("DFU", sw.Y + 6), ("REBOOT", sw.Y), ("RESTORE", sw.Y - 6)):
-        marks.append(
-            Pos(label_right, y)
-            * Text(
-                action,
-                font_size=TEXT_SIZE,
-                font_style=FontStyle.BOLD,
-                align=(Align.MAX, Align.CENTER),
-            )
-        )
-        if action == "DFU":
-            marks.append(Pos(gesture_x, y) * Circle(0.6))
-        elif action == "REBOOT":
-            marks.append(Pos(gesture_x, y) * SlotOverall(3, 1.2))
-        else:
-            marks += [
-                Pos(gesture_x - 3.5, y) * Circle(0.6),
-                Pos(gesture_x - 1.1, y) * Circle(0.6),
-                Pos(gesture_x + 2.6, y) * SlotOverall(3, 1.2),
-            ]
     for ref, symbol in (("S:J401", "usb"), ("S:J501", "square-terminal")):
         if ref in lay.ports:
             marks.append(Pos(lay.board.box(ref).center().X, lay.y_rear - 7) * icon(symbol, size=8))
