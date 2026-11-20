@@ -40,7 +40,7 @@ Both sizes use the same hardware.
 
 | Quantity     | Part                                       |
 | ------------ | ------------------------------------------ |
-| 4            | M3 × 15 mm pan-head screws and M3 hex nuts |
+| 4            | M3 × 12 mm pan-head screws and M3 hex nuts |
 | 4, OLED only | M2.5 × 4 mm pan-head screws                |
 | 4            | Small self-adhesive rubber feet            |
 
@@ -53,10 +53,10 @@ Use PLA, a 0.4 mm nozzle, 0.20 mm layers and no supports. For multicolour markin
 1. Slide four M3 nuts into the inward-facing slots in the lid's outer mounting posts.
 2. Set the PCB on the tray's locating pegs and fit the button from inside the lid.
 3. Lower the lid onto the tray, engaging the end guides. Keep the nuts seated while handling the lid.
-4. Fit the four 15 mm screws from underneath. Tighten by hand until the seam closes; the screws fasten the shell without clamping the PCB.
+4. Fit the four 12 mm screws from underneath. Tighten by hand until the seam closes; the screws fasten the shell without clamping the PCB.
 5. Stick four rubber feet near the corners of the flat underside, leaving the screw heads accessible.
 
-To open, remove the four underside screws and lift the lid straight up. The feet provide clearance beneath the screw heads and can stay attached. The empty case also closes without the PCB. BOOTSEL and RESET are under the lid. The dot marks port 1; [button gestures](../../README.md#use) are printed beside the button.
+To open, remove the four underside screws and lift the lid straight up. The empty case also closes without the PCB. BOOTSEL and RESET are under the lid. The dot marks port 1; [button gestures](../../README.md#use) are printed beside the button.
 
 ### OLED assembly
 
