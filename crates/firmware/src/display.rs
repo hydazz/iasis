@@ -15,8 +15,8 @@ use embedded_graphics::{
 use heapless::{String, Vec};
 use iasis_pd::power::millivolts;
 use iasis_protocol::{
-    CommandError, CommandResult, Gesture, Link, Port, PortAction, PortError, PortState, PortStatus,
-    RestorePhase, Status, Supply,
+    AppleMode, CommandError, CommandResult, Gesture, Link, Port, PortAction, PortError, PortState,
+    PortStatus, RestorePhase, Status, Supply, Usb,
 };
 
 use crate::button::Button;
@@ -143,7 +143,7 @@ pub fn view(status: &Status, button: &Button, now: u64) -> View {
         } else {
             ports & button.reach()
         },
-        connected: button.host_prepared(),
+        connected: status.host.is_some(),
         brick: status.supply == Supply::Brick,
         face,
         bars: status.ports.each_ref().map(|port| match port.link {
@@ -222,6 +222,20 @@ pub fn label(port: &PortStatus) -> &'static str {
             RestorePhase::Unconfirmed => "UNKN",
             RestorePhase::Failed => "FAIL",
         };
+    }
+    if matches!(port.state, PortState::Ready | PortState::Contract) {
+        // What a host sees comes before what the board asked for.
+        match port.observed.map(|seen| seen.usb) {
+            Some(Usb::Apple(AppleMode::Dfu | AppleMode::KisDfu)) => return "DFU",
+            Some(Usb::Apple(AppleMode::Recovery)) => return "REC",
+            Some(Usb::Apple(AppleMode::Restored)) => return "RSTR",
+            _ => {}
+        }
+        match port.request.map(|request| request.action) {
+            Some(PortAction::Reboot) => return "BOOT",
+            Some(_) => return "DFU?",
+            None => {}
+        }
     }
     match port.state {
         PortState::Disabled => "OFF",
@@ -337,6 +351,17 @@ fn details(status: &Status, port: &PortStatus) -> [String<32>; 2] {
             write!(lines[1], "Host budget {}mA", status.host_allowance_ma).unwrap();
         }
         return lines;
+    }
+    if let Some(request) = port.request
+        && matches!(port.state, PortState::Ready | PortState::Contract)
+        && !port.observed.is_some_and(|seen| seen.dfu())
+    {
+        return match request.action {
+            PortAction::Reboot => pair("Reboot sent", ""),
+            // Only a host can see the target's DFU.
+            _ if status.host.is_some() => pair("DFU sent", "Waiting for USB"),
+            _ => pair("DFU sent", "No host to confirm"),
+        };
     }
     let message = if matches!(port.state, PortState::Ready | PortState::Contract) {
         match port.command_result {
@@ -751,6 +776,60 @@ mod tests {
     }
 
     #[test]
+    fn a_host_names_the_mode_and_a_sent_dfu_waits_for_one() {
+        use iasis_protocol::{HostSession, Observed, Request};
+        let mut status = Status::default();
+        status.ports[0] = contract(9000, 3000);
+        let button = selecting(0);
+        let seen = |mode| {
+            Some(Observed {
+                usb: Usb::Apple(mode),
+                ecid: Some(1),
+            })
+        };
+        assert_eq!(label(&status.ports[0]), "RDY");
+        status.ports[0].request = Some(Request {
+            action: PortAction::DfuAppleSilicon,
+            at_ms: 0,
+        });
+        assert_eq!(label(&status.ports[0]), "DFU?");
+        assert_eq!(
+            view(&status, &button, 0).lines,
+            pair("DFU sent", "No host to confirm")
+        );
+        status.host = Some(HostSession {
+            id: 1,
+            restore_ready: false,
+        });
+        assert!(view(&status, &button, 0).connected);
+        // The host still sees the running system while the target restarts.
+        status.ports[0].observed = seen(AppleMode::Normal);
+        assert_eq!(label(&status.ports[0]), "DFU?");
+        assert_eq!(
+            view(&status, &button, 0).lines,
+            pair("DFU sent", "Waiting for USB")
+        );
+        for mode in [AppleMode::Dfu, AppleMode::KisDfu] {
+            status.ports[0].observed = seen(mode);
+            assert_eq!(label(&status.ports[0]), "DFU");
+            assert_eq!(view(&status, &button, 0).lines, pair("", "9V 3A (27W)"));
+        }
+        // DFU a host sees needs no request behind it.
+        status.ports[0].request = None;
+        assert_eq!(label(&status.ports[0]), "DFU");
+        status.ports[0].observed = seen(AppleMode::Recovery);
+        assert_eq!(label(&status.ports[0]), "REC");
+        status.ports[0].observed = seen(AppleMode::Normal);
+        assert_eq!(label(&status.ports[0]), "RDY");
+        status.ports[0].request = Some(Request {
+            action: PortAction::Reboot,
+            at_ms: 0,
+        });
+        assert_eq!(label(&status.ports[0]), "BOOT");
+        assert_eq!(view(&status, &button, 0).lines, pair("Reboot sent", ""));
+    }
+
+    #[test]
     fn a_target_on_a_port_without_dfu_usb_reads_as_the_wrong_port() {
         let mut status = Status::default();
         // An M1 Mac's other port lists reboot alone; an M5's lists DFU too.
@@ -804,7 +883,7 @@ mod tests {
             ..contract(9000, 2220)
         };
         let mut button = Button::default();
-        button.sample(&status, None, None, false, 0);
+        button.sample(&status, None, false, 0);
         let view = view(&status, &button, 0);
         assert_eq!((view.ports, view.targets), (0b1111, 0b0001));
         assert_eq!(label(&status.ports[0]), "RDY");
@@ -932,7 +1011,7 @@ mod tests {
         });
         let mut button = Button::default();
         for (down, now) in [(false, 0), (true, 50), (true, 80), (true, 600)] {
-            button.sample(&status, None, None, down, now);
+            button.sample(&status, None, down, now);
         }
         let held = view(&status, &button, 600);
         assert_eq!(
@@ -945,7 +1024,7 @@ mod tests {
         // The highlight narrows to the ports the action would reach.
         assert_eq!(held.ports, 1);
         for now in [610, 640] {
-            button.sample(&status, None, None, false, now);
+            button.sample(&status, None, false, now);
         }
         assert_eq!(view(&status, &button, 650).lines[0], "DFU requested");
         button.selected = Some(Port::ALL[0]);
@@ -1089,7 +1168,7 @@ mod tests {
                 15_000 => {
                     status.ports[1].restore = None;
                     for at in [14_000, 14_100, 15_000] {
-                        button.sample(&status, None, None, true, at);
+                        button.sample(&status, None, true, at);
                     }
                 }
                 17_600 => button = Button::default(),

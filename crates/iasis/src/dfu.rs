@@ -1,8 +1,7 @@
 //! DFU observations for one physical connector and one attachment generation.
 
 use iasis_protocol::{
-    CommandResult, DebugActions, Port, PortAction, PortError, PortState, PortStatus, RestorePhase,
-    Status, Supply,
+    CommandResult, DebugActions, Port, PortAction, PortError, PortState, PortStatus, Status, Supply,
 };
 use serde::Serialize;
 
@@ -296,12 +295,7 @@ fn matching_mac_transports(snapshot: &Snapshot, port: Port) -> bool {
 }
 
 pub fn job_in_progress(p: &PortStatus) -> bool {
-    p.restore.is_some_and(|r| {
-        matches!(
-            r.phase,
-            RestorePhase::Preparing | RestorePhase::Running | RestorePhase::Unconfirmed
-        )
-    })
+    p.restoring()
 }
 
 pub fn assess(
