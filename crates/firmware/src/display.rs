@@ -110,6 +110,9 @@ pub fn view(status: &Status, button: &Button, now: u64) -> View {
             Indicator::Attention
         } else {
             match port.restore.map(|r| (r.phase, r.progress)) {
+                None if port.fetch.is_some() => {
+                    Indicator::Stage((u32::from(port.fetch.unwrap_or(0)) * 23).div_ceil(100))
+                }
                 Some((RestorePhase::Preparing, _) | (RestorePhase::Running, 0)) => {
                     Indicator::Activity(tick)
                 }
@@ -222,6 +225,9 @@ pub fn label(port: &PortStatus) -> &'static str {
             RestorePhase::Unconfirmed => "UNKN",
             RestorePhase::Failed => "FAIL",
         };
+    }
+    if port.fetch.is_some() {
+        return "IMG";
     }
     if matches!(port.state, PortState::Ready | PortState::Contract) {
         // What a host sees comes before what the board asked for.
@@ -340,6 +346,11 @@ fn details(status: &Status, port: &PortStatus) -> [String<32>; 2] {
             RestorePhase::Unconfirmed => pair("Host lost", "Check host"),
             RestorePhase::Failed => pair("Restore failed", "Check host"),
         };
+    }
+    if let Some(percent) = port.fetch {
+        let mut lines = pair("Fetching image", "");
+        write!(lines[1], "{percent}%").unwrap();
+        return lines;
     }
     if port.state == PortState::WaitingPower {
         let mut lines = pair("Waiting for power", "");
@@ -817,6 +828,14 @@ mod tests {
         // DFU a host sees needs no request behind it.
         status.ports[0].request = None;
         assert_eq!(label(&status.ports[0]), "DFU");
+        // The host fetching the target's restore image says how far it is.
+        status.ports[0].fetch = Some(43);
+        assert_eq!(label(&status.ports[0]), "IMG");
+        assert_eq!(
+            view(&status, &button, 0).lines,
+            pair("Fetching image", "43%")
+        );
+        status.ports[0].fetch = None;
         status.ports[0].observed = seen(AppleMode::Recovery);
         assert_eq!(label(&status.ports[0]), "REC");
         status.ports[0].observed = seen(AppleMode::Normal);

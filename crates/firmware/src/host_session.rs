@@ -144,6 +144,7 @@ mod tests {
                 ecid: Some(1),
             },
             restore: None,
+            fetch: None,
         });
         let mut port = PortStatus {
             generation: 7,
