@@ -5,7 +5,7 @@
 //! light while a release would send it, a port pulsing once it is sent, and
 //! steady once a host sees the target's DFU. Only a host can make it steady.
 
-use crate::button::Button;
+use crate::{button::Button, egg};
 use iasis_protocol::{
     BRIGHTNESS_MAX, BRIGHTNESS_MIN, Gesture, Hue, Port, PortStatus, RestorePhase, Status,
 };
@@ -68,8 +68,20 @@ pub fn dim(frame: [[u8; 3]; 6], brightness: u8) -> [[u8; 3]; 6] {
 
 /// RGB values in chain order: status, port 5 through port 1. The status light
 /// shows the action a release would send or an armed restore; otherwise green
-/// while a host holds the board and white while it stands alone.
+/// while a host holds the board and white while it stands alone. The Easter
+/// egg takes every light but a faulted port's.
 pub fn indicators(status: &Status, control: &Button, now: u64) -> [[u8; 3]; 6] {
+    if let Some(played) = control.egg(now) {
+        let mut pixels = egg::lights(played / egg::FRAME_MS);
+        // A fault stays red.
+        for index in Port::ALL {
+            let state = &status.ports[index.index()];
+            if state.light().hue == Hue::Red {
+                pixels[5 - index.index()] = port(state).0;
+            }
+        }
+        return pixels;
+    }
     let mut pixels = [OFF; 6];
     pixels[0] = if status.i2c_root_fault || status.aggregate_power_fault {
         RED
@@ -371,6 +383,45 @@ mod tests {
         assert_eq!(indicators(&status, &button, 1200)[5], GREEN);
         assert_eq!(indicators(&status, &button, 1400)[5], [0, 32, 0]);
         assert_eq!(indicators(&status, &button, 2800)[5], GREEN);
+    }
+
+    #[test]
+    fn the_easter_egg_runs_a_rainbow_along_the_lights_and_a_fault_stays_red() {
+        let mut status = ready();
+        status.ports[1].state = PortState::Unattached;
+        status.ports[3].state = PortState::Fault;
+        let mut button = Button::default();
+        for (down, now) in [(false, 1), (true, 10), (true, 40), (true, 10_010)] {
+            button.sample(&status, None, down, now);
+        }
+        for now in (10_010..12_410).step_by(100) {
+            let pixels = indicators(&status, &button, now);
+            assert_eq!(pixels[2], RED);
+            // Every other light is lit, occupied or not, at one brightness.
+            for light in [0, 1, 3, 4, 5] {
+                assert_eq!(pixels[light].into_iter().map(u16::from).sum::<u16>(), 32);
+            }
+            assert!(pixels[0] != pixels[1] && pixels[4] != pixels[5]);
+            // A colour reaches the next light towards port 1 four frames on.
+            let later = indicators(&status, &button, now + 400);
+            for light in [1, 4, 5] {
+                assert_eq!(later[light], pixels[light - 1]);
+            }
+        }
+        // The press that ends it hands the lights back.
+        for (down, now) in [
+            (false, 13_000),
+            (false, 13_040),
+            (true, 13_100),
+            (true, 13_140),
+        ] {
+            button.sample(&status, None, down, now);
+        }
+        let pixels = indicators(&status, &button, 13_140);
+        assert_eq!(
+            (pixels[0], pixels[2], pixels[4], pixels[5]),
+            (WHITE, RED, OFF, GREEN)
+        );
     }
 
     #[test]

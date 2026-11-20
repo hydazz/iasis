@@ -19,7 +19,7 @@ use iasis_protocol::{
     PortStatus, RestorePhase, Status, Supply, Usb,
 };
 
-use crate::button::Button;
+use crate::{button::Button, egg};
 
 pub const SIZE: Size = Size::new(128, 64);
 pub const FRAME_MS: u64 = 200;
@@ -59,6 +59,10 @@ enum Indicator {
 }
 
 pub struct View {
+    /// When the next frame is due.
+    pub due: u64,
+    /// The Easter egg frame, which takes the whole screen.
+    pub egg: Option<u64>,
     /// Highlighted ports.
     pub ports: u8,
     /// Highlighted ports a hold reaches, drawn filled; the rest are outlined.
@@ -81,6 +85,9 @@ impl View {
     /// share page 1; the lower workspace starts on page 5.
     pub fn changed_pages(&self, previous: Option<&Self>) -> u8 {
         let Some(old) = previous else { return 0xff };
+        if self.egg != old.egg {
+            return 0xff;
+        }
         let mut pages = 0;
         if (self.brick, self.connected, self.face) != (old.brick, old.connected, old.face) {
             pages |= 0b0000_0011;
@@ -139,7 +146,11 @@ pub fn view(status: &Status, button: &Button, now: u64) -> View {
     } else {
         Face::Idle
     };
+    let egg = button.egg(now);
     let mut view = View {
+        // An Easter egg frame is drawn as it starts, so none is skipped.
+        due: now + egg.map_or(FRAME_MS, |played| egg::FRAME_MS - played % egg::FRAME_MS),
+        egg: egg.map(|played| played / egg::FRAME_MS),
         ports,
         targets: if acting {
             ports
@@ -499,6 +510,9 @@ pub fn draw<D: DrawTarget<Color = BinaryColor>>(
     target: &mut D,
     view: &View,
 ) -> Result<(), D::Error> {
+    if let Some(frame) = view.egg {
+        return egg::draw(target, frame);
+    }
     target.clear(OFF)?;
     fill(target, 0, 0, 128, 11)?;
     face(target, view.face)?;
@@ -1103,6 +1117,35 @@ mod tests {
         assert_eq!(label(&port), "ERR");
         assert!(attention(&port));
         assert_eq!(details(&status, &port), pair("Protection tripped", "CC"));
+    }
+
+    #[test]
+    fn the_easter_egg_redraws_every_page_as_each_frame_starts() {
+        let status = Status::default();
+        let mut button = Button::default();
+        let plain = view(&status, &button, 0);
+        assert_eq!((plain.egg, plain.due), (None, FRAME_MS));
+        for (down, now) in [(false, 1), (true, 10), (true, 40), (true, 10_010)] {
+            button.sample(&status, None, down, now);
+        }
+        let first = view(&status, &button, 10_010);
+        assert_eq!((first.egg, first.due), (Some(0), 10_110));
+        assert_eq!(first.changed_pages(Some(&plain)), 0xff);
+        // A frame drawn late is still followed on time.
+        let second = view(&status, &button, 10_140);
+        assert_eq!((second.egg, second.due), (Some(1), 10_210));
+        assert_eq!(second.changed_pages(Some(&first)), 0xff);
+        for (down, now) in [
+            (false, 10_200),
+            (false, 10_240),
+            (true, 10_300),
+            (true, 10_340),
+        ] {
+            button.sample(&status, None, down, now);
+        }
+        let after = view(&status, &button, 10_340);
+        assert_eq!((after.egg, after.due), (None, 10_340 + FRAME_MS));
+        assert_eq!(after.changed_pages(Some(&second)), 0xff);
     }
 
     #[test]
