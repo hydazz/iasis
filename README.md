@@ -87,7 +87,9 @@ target/release/iasis --serial 0123456789abcdef restore /path/to/UniversalMac.ips
 
 **`--erase` erases the selected targets.** Add `--button` to confirm the erase on the board. Omit `--ports` with `--button` to choose targets there too. Use `--host-ma 1200` to set a legacy host allowance for the batch.
 
-Each target needs ordinary DFU (`05ac:1227`) with a unique ECID. Use Apple Configurator for a Mac identified in DFU over Apple Debug USB. Each target gets its own idevicerestore process, selected by ECID. In a terminal, each port has a progress row. Percentages apply to the current restore stage. Redirecting output records each change on its own line. Logs and working files go under `restores/`, or the directory passed to `--logs`. Allow space for an extracted OS image per worker. Iasis checks the local archive and matches it to the target's chip and board IDs. idevicerestore checks Apple signing.
+Iasis runs one idevicerestore process per ordinary DFU target (`05ac:1227`) on macOS and Linux, selected by its unique ECID. For Apple Debug USB DFU (`05ac:1881`), use Iasis to put the Mac in DFU and Apple Configurator on the host Mac to restore it.
+
+In a terminal, each port has a progress row. Percentages apply to the current restore stage. Redirecting output records each change on its own line. Logs and working files go under `restores/`, or the directory passed to `--logs`. Allow space for an extracted OS image per worker. Iasis checks the local archive and matches it to the target's chip and board IDs. idevicerestore checks Apple signing.
 
 When restoring new Macs with Configurator, keep the host session unlocked until Configurator confirms completion. A locked host can defer the target’s USB network interface and time out waiting for it to boot. Allow disk space for one expanded IPSW per target, even when one Configurator command restores the whole batch.
 
@@ -112,6 +114,27 @@ To leave the board ready for repeated restores, run the optional listener in a t
 The OLED USB symbol means `iasisd` or a foreground `iasis restore --button` is listening. Tap to select targets, then hold until the status light turns purple and release. Preparation can put the targets into DFU. Once the erase is ready, hold for three seconds to confirm or tap to cancel. The daemon keeps listening after cancellation and while workers run. You can still use `iasis` to talk directly to the board.
 
 To run the command above in the background for your login session, prefix it with `systemd-run --user --unit=iasisd --` on Linux or `launchctl submit -l local.iasisd --` on macOS. For automatic startup at login, use absolute paths in a systemd user service's `ExecStart` or a user LaunchAgent's `ProgramArguments` in `~/Library/LaunchAgents/` with `RunAtLoad` enabled.
+
+#### Example restore times
+
+These Rev A timings use a cached macOS 27.0 IPSW. The single-Mac column times the restore worker. The five-Mac column times the whole command on one hub, including preparation.
+
+| Target      | Image transfer        | Restore worker                               |                     One Mac | Five together |
+| ----------- | --------------------- | -------------------------------------------- | --------------------------: | ------------: |
+| M1 Air      | USB 2                 | idevicerestore                               |                     15m 06s |       58m 14s |
+| M1 Air      | USB 2                 | idevicerestore, experimental binary FileData |                     12m 36s |       47m 57s |
+| M1 Air      | USB 2                 | Apple Configurator                           | 17m 01s (alongside an iPad) |       51m 22s |
+| M5 Air      | USB 3, 10 Gb/s        | Apple Configurator                           |               4m 07s–5m 33s |             — |
+| MacBook Neo | USB 2 debug transport | Apple Configurator                           |                     22m 28s |             — |
+
+The five M1s shared a 480 Mb/s uplink and reached 45 MB/s combined. Across two boards, ten jobs overlapped for 4m 52s and at least eight Macs transferred data together.
+
+Use USB 2 as a planning estimate for M1–M3 and USB 3 for M4 or newer Macs with a SuperSpeed restore link. Five-Mac USB 3 time is unmeasured. The Neo advertised SuperSpeed while its image travelled over USB 2.
+
+| Other benches                                       |                                                                   Reported batch time |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------: |
+| University of Utah, ten MacBooks on Acroname hubs   |           [35–40 min](https://apple.lib.utah.edu/macbook-imaging-automation-journey/) |
+| Twocanoes, fifteen Macs on its USB 3 restore system | [Under 10 min](https://tperfitt.twocanoes.com/2026/04/19/dfu-restore-for-mac-is.html) |
 
 ## Firmware and protocol
 
