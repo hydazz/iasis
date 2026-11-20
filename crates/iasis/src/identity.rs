@@ -37,6 +37,7 @@ pub enum Identity {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct AppleDevice {
     pub mode: AppleMode,
+    pub model: Option<String>,
     pub identity: Identity,
 }
 
@@ -66,7 +67,11 @@ impl AppleDevice {
         } else {
             serial.map(parse_ecid).unwrap_or(Identity::Missing)
         };
-        Some(Self { mode, identity })
+        Some(Self {
+            mode,
+            identity,
+            model: None,
+        })
     }
 }
 
@@ -337,6 +342,7 @@ mod tests {
             }
         );
         snapshot.ports[0].devices[0].apple = Some(AppleDevice {
+            model: None,
             mode: AppleMode::Restored,
             identity: Identity::Known {
                 ecid: 42,

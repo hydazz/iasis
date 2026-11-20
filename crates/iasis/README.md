@@ -15,24 +15,25 @@ The agent listens on a Unix socket that only its user can open:
 
 A client writes requests and reads replies as JSON, one to a line. A request is an object with an `op`:
 
-| `op`         | Other fields          | Effect                                                         |
-| ------------ | --------------------- | -------------------------------------------------------------- |
-| `state`      |                       | Reply with the state once                                      |
-| `watch`      |                       | Reply with the state now and again each time it changes        |
-| `restore`    | `board`, `ports`      | Erase and restore the targets on these ports                   |
-| `dfu`        | `board`, `port`       | Send DFU                                                       |
-| `reboot`     | `board`, `port`       | Send a reboot                                                  |
-| `power`      | `board`, `port`, `on` | Enable or disable a port                                       |
-| `brightness` | `percent`             | Set every board's lights, now and whenever one starts          |
-| `keep`       | `model`               | Keep the newest image for a model, such as `iPad13,18`         |
-| `forget`     | `model`               | Stop keeping a model's image                                   |
-| `import`     | `path`                | Check a local IPSW and copy it into the store                  |
-| `remove`     | `build`               | Delete an image, and stop keeping the models it was newest for |
-| `refresh`    |                       | Ask for newer releases now                                     |
+| `op`         | Other fields                  | Effect                                                         |
+| ------------ | ----------------------------- | -------------------------------------------------------------- |
+| `state`      |                               | Reply with the state once                                      |
+| `watch`      |                               | Reply with the state now and again each time it changes        |
+| `restore`    | `board`, `session`, `targets` | Erase and restore the confirmed attachments                    |
+| `dfu`        | `board`, `port`               | Send DFU                                                       |
+| `reboot`     | `board`, `port`               | Send a reboot                                                  |
+| `power`      | `board`, `port`, `on`         | Enable or disable a port                                       |
+| `brightness` | `board`, `percent`            | Save one board’s light level                                   |
+| `rename`     | `board`, `name`               | Save one board’s display name                                  |
+| `keep`       | `model`                       | Keep the newest image for a model, such as `iPad13,18`         |
+| `forget`     | `model`                       | Stop keeping a model's image                                   |
+| `import`     | `path`                        | Check a local IPSW and copy it into the store                  |
+| `remove`     | `build`                       | Delete an image, and stop keeping the models it was newest for |
+| `refresh`    |                               | Ask for newer releases now                                     |
 
 `board` is the serial as sixteen hexadecimal digits, and ports are numbered 1 to 5. A reply is `"ok"`, `{"error": "…"}` or `{"state": {…}}`. After `watch` the connection carries only states.
 
-**A `restore` request erases its targets with no further confirmation.** A client asks its user first. The request names the targets the client saw: it is refused if one has been unplugged or replaced, or if the board is already preparing a restore.
+**A `restore` request erases its targets with no further confirmation.** A client asks its user first. Copy the board’s `session` and each selected port’s `generation` from the state the operator reviewed. Each entry in `targets` has the form `{"port":2,"generation":4}`. A changed attachment or session requires a fresh confirmation.
 
 ```sh
 printf '{"op":"state"}\n' | nc -U "$HOME/Library/Application Support/iasis/agent.sock"
@@ -45,14 +46,15 @@ printf '{"op":"state"}\n' | nc -U "$HOME/Library/Application Support/iasis/agent
 | `boards`          | Every attached board                       |
 | `images`          | The image store                            |
 | `restore_problem` | Why the agent cannot run restores, or null |
-| `brightness`      | The brightness the agent sets, in percent  |
 
-Each board has its `serial`, `firmware` version, a `supply` description, `host` and `restores` (a host holds the board, and it takes restore requests), `brightness`, its `ports` and a `notice`: why the board cannot be read, or why its last restore request came to nothing.
+Each board has its `serial`, `name` (empty for an unnamed board), `session` ID, `firmware` version, a `supply` description, `host` and `restores` (a host holds the board, and it takes restore requests), `brightness`, `settings_busy`, its `ports` and a `notice`: why the board cannot be read, or why its last restore request came to nothing.
 
 Each port has:
 
 | Field                      | Meaning                                                                        |
 | -------------------------- | ------------------------------------------------------------------------------ |
+| `generation`, `occupied`   | Current attachment generation and whether the port is occupied                 |
+| `device`, `mode`           | Known USB device name and Apple mode, each nullable                            |
 | `number`                   | 1 to 5                                                                         |
 | `light`                    | What the port's light shows: `hue`, `pulse` and `dim`                          |
 | `state`                    | What the board knows and has asked of the target, as text                      |

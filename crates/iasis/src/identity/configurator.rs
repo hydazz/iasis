@@ -143,7 +143,7 @@ fn confirm(
     targets: &[MacAttachment],
     present: &impl Fn(MacAttachment) -> bool,
     mut execute: impl FnMut(&[String]) -> Option<Reply>,
-) -> HashMap<MacAttachment, u64> {
+) -> HashMap<MacAttachment, (u64, String)> {
     let mut confirmed = HashMap::new();
     let Some(list) = execute(&["list".into()]) else {
         return confirmed;
@@ -202,13 +202,13 @@ fn confirm(
                     && revision.bytes().all(|b| b.is_ascii_digit())
             })
         {
-            confirmed.insert(key, row.ecid);
+            confirmed.insert(key, (row.ecid, row.model.clone()));
         }
     }
     confirmed
 }
 
-type Cache = HashMap<MacAttachment, (Instant, Option<u64>)>;
+type Cache = HashMap<MacAttachment, (Instant, Option<(u64, String)>)>;
 static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(Mutex::default);
 
 pub(super) fn query(snapshot: &mut Snapshot, mask: u8) {
@@ -253,6 +253,7 @@ fn enrich(
             {
                 apple.mode = AppleMode::Kis;
                 apple.identity = Identity::Missing;
+                apple.model = None;
             }
         }
         let mut apple = entry.devices.iter_mut().filter(|d| d.apple.is_some());
@@ -282,16 +283,17 @@ fn enrich(
     if !missing.is_empty() {
         let hits = confirm(&missing, &present, execute);
         for key in missing {
-            let hit = hits.get(&key).copied();
+            let hit = hits.get(&key).cloned();
             let expires = Instant::now() + Duration::from_secs(if hit.is_some() { 5 } else { 2 });
             cache.insert(key, (expires, hit));
         }
     }
     for (key, apple) in candidates {
-        if let Some((_, Some(id))) = cache.get(&key)
+        if let Some((_, Some((id, model)))) = cache.get(&key)
             && present(key)
         {
             apple.mode = AppleMode::KisDfu;
+            apple.model = Some(model.clone());
             apple.identity = Identity::Known {
                 ecid: *id,
                 source: IdentitySource::Configurator,

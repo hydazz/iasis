@@ -7,6 +7,7 @@ pub mod host_session;
 pub mod hub;
 pub mod panel;
 pub mod request;
+pub mod settings;
 
 #[cfg(test)]
 mod stage_test;
