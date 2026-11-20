@@ -149,6 +149,7 @@ WINDOW_MARGIN = 0.5  # window beyond the active area, each side
 WINDOW_BEVEL = 1.4  # 45 degree chamfer round the window's outer edge
 GLASS_GAP = 0.4  # glass face to the inside of the top; clears the tape over the flex
 DISPLAY_HOLE_D = 2.5
+DISPLAY_EAR_R = 2.54
 
 
 COVERS = {"passive": None, "display": OLED}
@@ -568,18 +569,26 @@ def _display(lay: Layout, d: Display, top_in: float, top_out: float) -> tuple[Pa
 
     gx, gy, gw, gh, gt = d.glass
     face = top_in - GLASS_GAP - gt  # the module PCB's top face
-    module = Pos(x, y, face) * Box(pw, pd, pt, align=(Align.CENTER, Align.CENTER, Align.MAX))
+    # The front mounting ears are semicircular, with a notch between them.
+    r = DISPLAY_EAR_R
+    outline = RectangleRounded(pw, pd, r)
+    outline -= Pos(0, -pd / 2 + r) * Rectangle(pw + 2, 2 * r)
+    for hx in (-pw / 2 + r, pw / 2 - r):
+        outline += Pos(hx, -pd / 2 + r) * Circle(r)
+        outline += Pos(hx, -pd / 2 + 1.5 * r) * Rectangle(2 * r, r)
+    module = extrude(Pos(x, y, face) * Sketch(outline.faces()), amount=-pt)
     for hx, hy in d.holes:
         module -= Pos(x + hx, y + hy, face - pt - 0.1) * Cylinder(
             DISPLAY_HOLE_D / 2, pt + 0.2, align=BASE
         )
-    back = Pos(x, y, face - pt) * Box(pw, pd, d.back, align=(Align.CENTER, Align.CENTER, Align.MAX))
-    # The vendor STEP leaves these mounting corners free of rear components and flex.
-    for hx, hy in d.holes:
-        back -= Pos(x + hx, y + hy, face - pt - d.back - 0.1) * Cylinder(
-            3.8, d.back + 0.2, align=BASE
-        )
-    module += back
+    # Vendor components occupy the middle strip; the mounting-ear margins are bare.
+    back = Pos(x, y, face - pt) * Box(
+        pw, pd - 4 * r, d.back, align=(Align.CENTER, Align.CENTER, Align.MAX)
+    )
+    flex = Pos(x, -9, face - pt) * Box(
+        22.2, 11.2, 0.3, align=(Align.CENTER, Align.CENTER, Align.MAX)
+    )
+    module += back + flex
     module += Pos(x + gx, y + gy, face) * Box(gw, gh, gt, align=BASE)
     module.label = f"{d.name} envelope"
     return window, cast(Part, module)
