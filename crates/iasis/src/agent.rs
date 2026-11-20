@@ -26,6 +26,7 @@ use crate::{
     discover,
     home::Home,
     host::{Jobs, Link},
+    identity::models::Models,
     images::{Network, Snapshot, Store},
     parse_serial,
     restore::RestoreEngine,
@@ -184,6 +185,7 @@ impl Attendance {
 pub struct Agent {
     home: Home,
     store: Store,
+    models: Arc<Models>,
     engine: RestoreEngine,
     family: batch::Device,
     restore_problem: Mutex<Option<String>>,
@@ -229,6 +231,7 @@ impl Agent {
             .unwrap_or_else(|| home.cache.join("restores"));
         Ok(Arc::new(Self {
             store: Store::open(home.cache.join("images"), Network::default())?,
+            models: Arc::new(Models::open(home.cache.join("device-models.json"))),
             engine: RestoreEngine::new(&options.program, logs),
             family: options.family,
             restore_problem: Mutex::new(None),
@@ -409,7 +412,7 @@ impl Agent {
 
     /// Hold one board's host session until the board or the session is lost.
     fn attend(&self, device: &DeviceInfo, board: &Attendance) -> Result<()> {
-        let link = Arc::new(Link::open(device, board.jobs.clone())?);
+        let link = Arc::new(Link::open(device, board.jobs.clone(), self.models.clone())?);
         println!("Board {:016x}: attending", link.board().info().serial);
         *board.device.lock().unwrap() = Some(device.clone());
         *board.link.lock().unwrap() = Some(link.clone());
