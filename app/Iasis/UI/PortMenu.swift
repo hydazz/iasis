@@ -1,47 +1,48 @@
 import SwiftUI
 
 struct PortMenu: View {
-    let board: AgentState.Board
-    let boardTitle: String
-    let port: AgentState.Port
+    let port: DeviceMenuState.Port
     let model: AgentModel
 
     var body: some View {
         Menu {
-            if let device = port.device, device != port.shortName {
-                Text(device)
+            if let detail = port.detail {
+                Text(detail)
             }
-            if port.mode == "kis_dfu" {
+            if port.configuratorRestore {
                 Text("Use Apple Configurator to restore this Mac.")
             }
-            if let result = port.result {
-                Text("Last restore: \(result.message)")
+            action("Enter DFU", request: port.dfu)
+            action("Restart", request: port.restart)
+            if let revive = port.revive {
+                action("Revive", request: revive)
             }
-            Button("Enter DFU") {
-                model.perform(.dfu(board: board.serial, port: port.number))
-            }
-            .disabled(!port.dfu)
-            Button("Restart") {
-                model.perform(.reboot(board: board.serial, port: port.number))
-            }
-            .disabled(!port.reboot)
             Button("Restore…") {
-                if let session = board.session, confirmErase() {
-                    model.perform(.restore(board: board.serial, session: session, targets: [port.target]))
+                if let restore = port.restore, confirm(restore) {
+                    model.perform(restore.request)
                 }
             }
-            .disabled(!port.restore || board.session == nil)
+            .disabled(port.restore == nil)
         } label: {
-            Label(port.menuTitle, systemImage: port.symbol)
+            Label(port.title, systemImage: port.symbol)
         }
         .labelStyle(.titleAndIcon)
     }
 
-    private func confirmErase() -> Bool {
+    private func action(_ title: LocalizedStringKey, request: AgentRequest?) -> some View {
+        Button(title) {
+            if let request {
+                model.perform(request)
+            }
+        }
+        .disabled(request == nil)
+    }
+
+    private func confirm(_ restore: RestoreConfirmation) -> Bool {
         // A native menu closes before its action runs, so it cannot host a sheet.
         let alert = NSAlert()
-        alert.messageText = "Restore \(port.shortName ?? "the device")?"
-        alert.informativeText = "All data on the device connected to port \(port.number) of \(boardTitle) will be erased and the system software reinstalled."
+        alert.messageText = restore.title
+        alert.informativeText = restore.message
         alert.alertStyle = .warning
         let cancel = alert.addButton(withTitle: "Cancel")
         cancel.keyEquivalent = "\r"
