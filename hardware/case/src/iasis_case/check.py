@@ -54,7 +54,7 @@ def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
     printed = [
         tray,
         *(c.part for c in covers.values()),
-        *(c.button for c in covers.values()),
+        lay.button,
     ]
     for part in printed:
         if part.is_valid and len(part.solids()) == 1 and part.volume > 0:
@@ -132,7 +132,7 @@ def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
 
     for name, c in covers.items():
         r.lines.append(f"cover {name}")
-        top = lay.top_inside(case.COVERS[name])
+        top = lay.top_inside
         roof = c.part & (
             Pos(0, 0, top) * Box(lay.length + 2, lay.width + 2, case.TOP + 1, align=case.BASE)
         )
@@ -147,12 +147,16 @@ def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
         for label, solid in c.intrusions.items():
             _clear(r, label, solid, parts)
         switch = board.parts[case.BUTTON]
-        if c.button.distance_to(switch) > 1e-4 or _overlap(c.button, switch) > 1e-3:
-            r.fail("button stem does not rest on switch actuator")
+        if lay.button.distance_to(switch) > 1e-4 or _overlap(lay.button, switch) > 1e-3:
+            r.fail("button does not rest on switch actuator")
         else:
-            r.ok("button stem rests on switch actuator without preload")
+            r.ok("button rests on switch actuator without preload")
+        guide = c.intrusions["button guide"]
+        guide_box = guide.bounding_box()
+        if guide_box.size.Z - 0.5 < 2.5:
+            r.fail("button lacks a substantial cylindrical guide below the roof")
         for travel in (0.0, case.BUTTON_TRAVEL):
-            pressed = Pos(0, 0, -travel) * c.button
+            pressed = Pos(0, 0, -travel) * lay.button
             if _overlap(pressed, c.part) > 1e-3:
                 r.fail(f"button catches cover at {travel:.2f} mm travel")
             _clear(
@@ -161,7 +165,16 @@ def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
                 pressed,
                 [p for p in parts if p[0] != case.BUTTON],
             )
-        if _overlap(Pos(0, 0, 1) * c.button, c.part) > 1e-3:
+            sb = board.box(case.BUTTON)
+            allowed_contact = Pos(
+                sb.center().X, sb.center().Y, sb.max.Z - travel - 0.01
+            ) * Cylinder(case.BUTTON_ACTUATOR_D / 2, travel + 0.02, align=case.BASE)
+            if _overlap(pressed, switch - allowed_contact) > 1e-3:
+                r.fail(f"button catches the stationary switch body at {travel:.2f} mm travel")
+        for dx, dy in ((-0.15, 0), (0.15, 0), (0, -0.15), (0, 0.15)):
+            if _overlap(Pos(dx, dy, 0) * lay.button, guide) < 0.01:
+                r.fail(f"button guide does not limit lateral motion {dx},{dy} mm")
+        if _overlap(Pos(0, 0, 1) * lay.button, c.part) > 1e-3:
             r.ok("button flange retains cap beneath roof")
         else:
             r.fail("button cap can escape through cover")
@@ -176,7 +189,7 @@ def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
                 r,
                 "display envelope to button",
                 c.display,
-                [("button", c.button, c.button.bounding_box())],
+                [("button", lay.button, lay.button.bounding_box())],
             )
             _display_retention(r, c)
             assert c.display_mount is not None
