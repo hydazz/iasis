@@ -46,17 +46,33 @@ nonisolated struct AgentState: Decodable, Equatable {
         var generation: UInt32
         var device: String?
         var mode: String?
+        var ecid: String?
+        var link: String
+        var contract: String
         var state: String
         var light: Light
         var dfu: Bool
         var reboot: Bool
         var restore: Bool
+        var revive: Bool
         var enabled: Bool
+        var lastSeen: LastSeen?
+        var stage: Stage?
         var result: Ending?
 
         var id: Int {
             number
         }
+    }
+
+    struct LastSeen: Decodable, Equatable {
+        var device: String?
+        var ecid: String
+    }
+
+    struct Stage: Decodable, Equatable {
+        var name: String
+        var percent: UInt8?
     }
 
     struct Light: Decodable, Equatable {
@@ -72,9 +88,22 @@ nonisolated struct AgentState: Decodable, Equatable {
         case failed = "Failed"
     }
 
-    /// How a port's last restore ended.
+    enum Operation: String, Decodable {
+        case restore, revive
+
+        var title: String {
+            switch self {
+            case .restore: "Restore"
+            case .revive: "Revive"
+            }
+        }
+    }
+
+    /// The last worker result on this physical port.
     struct Ending: Decodable, Equatable {
-        var ecid: String
+        var operation: Operation
+        var logDirectory: String?
+        var ecid: String?
         var phase: RestorePhase
         var message: String
     }
@@ -132,7 +161,7 @@ nonisolated struct AgentState: Decodable, Equatable {
 
 extension AgentState.Port {
     var target: RestoreTarget {
-        RestoreTarget(port: number, generation: generation)
+        RestoreTarget(port: number, generation: generation, ecid: ecid)
     }
 
     var shortName: String? {
@@ -196,4 +225,5 @@ extension AgentState.Port {
 nonisolated struct RestoreTarget: Encodable, Equatable {
     let port: Int
     let generation: UInt32
+    var ecid: String?
 }
