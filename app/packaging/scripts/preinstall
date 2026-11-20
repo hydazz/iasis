@@ -1,0 +1,19 @@
+#!/bin/sh
+# Stop the agent and the menu bar app before their files are replaced.
+
+set -eu
+
+console_user="$(/usr/bin/stat -f '%Su' /dev/console)"
+
+case "${console_user}" in
+    "" | root | loginwindow)
+        exit 0
+        ;;
+esac
+
+user_id="$(/usr/bin/id -u "${console_user}" 2>/dev/null)" || exit 0
+[ "${user_id}" -ge 500 ] || exit 0
+
+for label in com.hydaz.Iasis com.hydaz.Iasis.agent; do
+    /bin/launchctl bootout "gui/${user_id}/${label}" 2>/dev/null || true
+done
