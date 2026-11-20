@@ -26,6 +26,7 @@ use nusb::{DeviceInfo, transfer::TransferError};
 use crate::{
     Board, Topology, dfu,
     identity::AppleDevice,
+    restore::{Operation, Progress},
     topology::{self, Snapshot, UsbDevice},
 };
 
@@ -39,7 +40,15 @@ const IDENTIFY_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Restore jobs by port, each with the attachment it runs on. They outlive a
 /// link, so a job keeps reporting after the board reconnects.
-pub type Jobs = Arc<Mutex<[Option<(u32, RestoreStatus)>; PORT_COUNT]>>;
+pub type Jobs = Arc<Mutex<[Option<PortJob>; PORT_COUNT]>>;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PortJob {
+    pub generation: u32,
+    pub status: RestoreStatus,
+    pub operation: Operation,
+    pub stage: Option<Progress>,
+}
 
 /// A port's attachment generation and what the host finds there.
 pub type Seen = [Option<(u32, Observed)>; PORT_COUNT];
@@ -59,21 +68,22 @@ pub fn observe(snapshot: &Snapshot, port: Port) -> Observed {
         return none(Usb::Other);
     };
     let ecid = apple.ecid();
-    let elsewhere = ecid.is_some_and(|ecid| {
-        snapshot
-            .ports
-            .iter()
-            .filter(|other| other.port != port)
-            .flat_map(|other| &other.devices)
-            .any(|other| other.apple.as_ref().and_then(AppleDevice::ecid) == Some(ecid))
-    });
-    if elsewhere {
+    if ecid.is_some_and(|ecid| appears_elsewhere(snapshot, port, ecid)) {
         return none(Usb::Ambiguous);
     }
     Observed {
         usb: Usb::Apple(apple.mode),
         ecid,
     }
+}
+
+fn appears_elsewhere(snapshot: &Snapshot, port: Port, ecid: u64) -> bool {
+    snapshot
+        .ports
+        .iter()
+        .filter(|other| other.port != port)
+        .flat_map(|other| &other.devices)
+        .any(|device| device.apple.as_ref().and_then(AppleDevice::ecid) == Some(ecid))
 }
 
 /// Reports a port only once two samples in a row agree. The board and the
@@ -166,10 +176,11 @@ fn finished(job: &RestoreStatus) -> bool {
 /// nothing left to report: the board keeps it until the target leaves. A
 /// restarted board counts its attachments from zero again, so no job from
 /// before describes them.
-fn settle(jobs: &mut [Option<(u32, RestoreStatus)>; PORT_COUNT], status: &Status, restarted: bool) {
+fn settle(jobs: &mut [Option<PortJob>; PORT_COUNT], status: &Status, restarted: bool) {
     for (slot, port) in jobs.iter_mut().zip(&status.ports) {
-        let done = slot.is_some_and(|(generation, job)| {
-            finished(&job) && (generation != port.generation || port.restore == Some(job))
+        let done = slot.as_ref().is_some_and(|job| {
+            finished(&job.status)
+                && (job.generation != port.generation || port.restore == Some(job.status))
         });
         if restarted || done {
             *slot = None;
@@ -181,7 +192,7 @@ fn settle(jobs: &mut [Option<(u32, RestoreStatus)>; PORT_COUNT], status: &Status
 /// attachment.
 fn compose(
     seen: &Seen,
-    jobs: &[Option<(u32, RestoreStatus)>; PORT_COUNT],
+    jobs: &[Option<PortJob>; PORT_COUNT],
     fetching: &[Option<(u32, u8)>; PORT_COUNT],
 ) -> [Option<PortReport>; PORT_COUNT] {
     let mut ports = [None; PORT_COUNT];
@@ -190,8 +201,9 @@ fn compose(
             generation,
             observed,
             restore: jobs[index]
-                .filter(|(job, _)| *job == generation)
-                .map(|(_, status)| status),
+                .as_ref()
+                .filter(|job| job.generation == generation)
+                .map(|job| job.status),
             fetch: fetching[index]
                 .filter(|(fetch, _)| *fetch == generation)
                 .map(|(_, percent)| percent),
@@ -248,14 +260,17 @@ impl Shared {
     /// Send the current view and jobs, renewing the session.
     fn send(&self) -> Result<(), Unsent> {
         let seen = self.view.lock().unwrap().seen;
-        let jobs = *self.jobs.lock().unwrap();
         let report = HostReport {
             serial: self.board.info().serial,
             session: HostSession {
                 id: self.session,
                 restore_ready: self.restore_ready.load(Ordering::Relaxed),
             },
-            ports: compose(&seen, &jobs, &self.fetching.lock().unwrap()),
+            ports: compose(
+                &seen,
+                &self.jobs.lock().unwrap(),
+                &self.fetching.lock().unwrap(),
+            ),
         };
         match self.board.host_report(&report) {
             Ok(()) => Ok(()),
@@ -463,8 +478,8 @@ impl Link {
     }
 
     /// Set or clear the restore job on a port's attachment.
-    pub fn job(&self, port: Port, generation: u32, status: Option<RestoreStatus>) {
-        self.shared.jobs.lock().unwrap()[port.index()] = status.map(|status| (generation, status));
+    pub fn job(&self, port: Port, job: Option<PortJob>) {
+        self.shared.jobs.lock().unwrap()[port.index()] = job;
     }
 
     /// Say how much of a port's restore image is fetched, or that the fetch
@@ -483,6 +498,15 @@ impl Link {
         let (status, snapshot) = view.sample.as_ref()?;
         let mut board = crate::view::BoardView::new(self.board().info(), status);
         board.describe_devices(self.board().info().serial, status, snapshot, store, family);
+        for (port, job) in board
+            .ports
+            .iter_mut()
+            .zip(self.shared.jobs.lock().unwrap().iter())
+        {
+            if let Some(job) = job {
+                port.describe_job(job);
+            }
+        }
         Some(board)
     }
 
@@ -663,10 +687,16 @@ mod tests {
         };
         let mut status = attached([Some(3), Some(4), None, None, None]);
         let view: Seen = [Some((3, seen)), Some((4, seen)), None, None, None];
-        let mut jobs = [None; PORT_COUNT];
-        jobs[0] = Some((3, job(RestorePhase::Running)));
+        let on = |generation, phase| PortJob {
+            generation,
+            status: job(phase),
+            operation: Operation::Restore,
+            stage: None,
+        };
+        let mut jobs = [const { None }; PORT_COUNT];
+        jobs[0] = Some(on(3, RestorePhase::Running));
         // A job for an earlier attachment of port 2 is not this target's.
-        jobs[1] = Some((2, job(RestorePhase::Running)));
+        jobs[1] = Some(on(2, RestorePhase::Running));
         // Nor is an image fetch begun for one.
         let fetching = [Some((3, 40)), Some((2, 40)), None, None, None];
         let report = compose(&view, &jobs, &fetching);
@@ -679,27 +709,21 @@ mod tests {
         // once the board echoes it, or once its attachment has ended.
         settle(&mut jobs, &status, false);
         assert!(jobs[0].is_some() && jobs[1].is_some());
-        jobs[0] = Some((3, job(RestorePhase::Reported)));
-        jobs[1] = Some((2, job(RestorePhase::Failed)));
+        jobs[0] = Some(on(3, RestorePhase::Reported));
+        jobs[1] = Some(on(2, RestorePhase::Failed));
         settle(&mut jobs, &status, false);
         assert_eq!(
             jobs,
-            [
-                Some((3, job(RestorePhase::Reported))),
-                None,
-                None,
-                None,
-                None
-            ]
+            [Some(on(3, RestorePhase::Reported)), None, None, None, None]
         );
         status.ports[0].restore = Some(job(RestorePhase::Reported));
         settle(&mut jobs, &status, false);
-        assert_eq!(jobs, [None; PORT_COUNT]);
+        assert_eq!(jobs, [const { None }; PORT_COUNT]);
 
         // After a board restart the same generation is another attachment.
-        jobs[0] = Some((3, job(RestorePhase::Running)));
+        jobs[0] = Some(on(3, RestorePhase::Running));
         settle(&mut jobs, &status, true);
-        assert_eq!(jobs, [None; PORT_COUNT]);
+        assert_eq!(jobs, [const { None }; PORT_COUNT]);
     }
 
     #[test]

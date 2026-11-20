@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Board, UsbIds,
-    batch::{self, Endings, Images, Requests, Submission},
+    batch::{self, Endings, Images, PortWork, Requests, Submission},
     discover,
     home::Home,
     host::{Jobs, Link},
@@ -51,10 +51,42 @@ pub struct State {
     pub restore_problem: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Target {
-    pub port: u8,
+    pub port: Port,
     pub generation: u32,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "optional_ecid"
+    )]
+    pub ecid: Option<u64>,
+}
+
+mod optional_ecid {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(id: &Option<u64>, serializer: S) -> Result<S::Ok, S::Error> {
+        match id {
+            Some(id) => serializer.serialize_str(&format!("{id:016x}")),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<u64>, D::Error> {
+        Option::<String>::deserialize(deserializer)?
+            .map(|text| {
+                super::parse_serial(&text)
+                    .ok()
+                    .filter(|id| *id != 0)
+                    .ok_or_else(|| {
+                        serde::de::Error::custom("expected a nonzero 16-digit hexadecimal ECID")
+                    })
+            })
+            .transpose()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -70,6 +102,14 @@ pub enum Request {
         board: String,
         session: u32,
         targets: Vec<Target>,
+    },
+    /// Repair one identified device in DFU or recovery and preserve its data.
+    Revive {
+        board: String,
+        session: u32,
+        port: u8,
+        generation: u32,
+        ecid: String,
     },
     Dfu {
         board: String,
@@ -150,29 +190,31 @@ pub struct Agent {
     boards: Mutex<BTreeMap<u64, Arc<Attendance>>>,
 }
 
-fn restore_targets(
-    status: &iasis_protocol::Status,
-    selected: &[Target],
-) -> Result<Vec<(Port, u32)>> {
-    let mut targets = Vec::new();
+fn restore_targets(status: &iasis_protocol::Status, selected: &[Target]) -> Result<Vec<Target>> {
+    let mut targets: Vec<Target> = Vec::new();
     for target in selected {
-        let number = target.port;
-        let port = Port::try_from(number)
-            .ok()
-            .context("ports are numbered 1 to 5")?;
+        let port = target.port;
+        let number = port.number();
         ensure!(
             status.ready_mask() & (1 << port.index()) != 0,
             "port {number} has no ready target"
         );
         ensure!(
-            !targets.iter().any(|(other, _)| *other == port),
+            !targets.iter().any(|other| other.port == port),
             "port {number} is named twice"
         );
         ensure!(
             target.generation == status.ports[port.index()].generation,
             "the device on port {number} changed"
         );
-        targets.push((port, target.generation));
+        ensure!(
+            target.ecid.is_none_or(|id| status.ports[port.index()]
+                .observed
+                .and_then(|seen| seen.ecid)
+                == Some(id)),
+            "the device identity on port {number} changed"
+        );
+        targets.push(*target);
     }
     ensure!(!targets.is_empty(), "no ports selected");
     Ok(targets)
@@ -211,7 +253,18 @@ impl Agent {
                         Some(mut view) => {
                             let endings = board.endings.lock().unwrap();
                             for (port, ending) in view.ports.iter_mut().zip(endings.iter()) {
-                                port.result.clone_from(ending);
+                                match ending {
+                                    PortWork::Idle => {}
+                                    PortWork::Active => {
+                                        port.restore = false;
+                                        port.revive = false;
+                                        port.reboot = false;
+                                        port.dfu = false;
+                                    }
+                                    PortWork::Finished(result) => {
+                                        port.result = Some(result.clone())
+                                    }
+                                }
                             }
                             view.notice = notice;
                             view
@@ -265,28 +318,31 @@ impl Agent {
         let status = link.status().context("the board has not been read yet")?;
         ensure!(session == link.session(), "the board has reconnected");
         let targets = restore_targets(&status, selected)?;
-        // From here the notice is this request's.
-        *board.notice.lock().unwrap() = None;
+        let (accepted, receipt) = std::sync::mpsc::sync_channel(0);
         {
             let mut slot = board.requests.lock().unwrap();
             ensure!(slot.is_none(), "the board is preparing another restore");
+            batch::reserve(&board.endings, &targets)?;
+            *board.notice.lock().unwrap() = None;
             *slot = Some(Submission {
                 session,
                 targets,
-                at: Instant::now(),
+                accepted,
             });
         }
-        // An idle attendant takes the request at once. A busy one must not
-        // find it later, when the user has moved on.
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while board.requests.lock().unwrap().is_some() {
-            if Instant::now() >= deadline {
-                *board.requests.lock().unwrap() = None;
-                bail!("the board is preparing another restore");
+        // A busy attendant cannot launch a timed-out request. The rendezvous
+        // succeeds only while this client is still waiting for acceptance.
+        let result = receipt.recv_timeout(Duration::from_secs(2));
+        drop(receipt);
+        if !matches!(result, Ok(Ok(()))) {
+            let mut slots = board.endings.lock().unwrap();
+            for target in selected {
+                slots[target.port.index()] = PortWork::Idle;
             }
-            thread::sleep(Duration::from_millis(50));
         }
-        Ok(())
+        result
+            .context("the board did not accept the restore request")?
+            .map_err(anyhow::Error::msg)
     }
 
     pub fn handle(&self, request: Request) -> Reply {
@@ -297,6 +353,28 @@ impl Agent {
                 session,
                 targets,
             } => self.restore(&board, session, &targets),
+            Request::Revive {
+                board,
+                session,
+                port,
+                generation,
+                ecid,
+            } => (|| {
+                let (attendance, link) = self.board(&board)?;
+                ensure!(link.session() == session, "the board has reconnected");
+                let port = Port::try_from(port)
+                    .ok()
+                    .context("ports are numbered 1 to 5")?;
+                let ecid = parse_serial(&ecid).map_err(anyhow::Error::msg)?;
+                batch::revive(
+                    &link,
+                    &self.engine,
+                    port,
+                    generation,
+                    ecid,
+                    &attendance.endings,
+                )
+            })(),
             Request::Dfu { board, port } => self.command(&board, port, self.family.dfu_action()),
             Request::Reboot { board, port } => self.command(&board, port, PortAction::Reboot),
             Request::Power { board, port, on } => self.command(
@@ -345,8 +423,8 @@ impl Agent {
                 if let Some(problem) = problem {
                     ensure!(link.alive(), link.failure());
                     link.restore_ready(false)?;
-                    if board.requests.lock().unwrap().take().is_some() {
-                        *board.notice.lock().unwrap() = Some(problem);
+                    if let Some(request) = board.requests.lock().unwrap().take() {
+                        let _ = request.accepted.send(Err(problem));
                     }
                     thread::sleep(Duration::from_millis(500));
                 } else {
@@ -619,13 +697,53 @@ mod tests {
     use iasis_protocol::{PortState, Status};
 
     #[test]
+    fn restore_rejects_an_ecid_swap_in_the_same_physical_attachment() {
+        let mut status = Status::default();
+        status.ports[0].state = PortState::Contract;
+        status.ports[0].generation = 7;
+        status.ports[0].observed = Some(iasis_protocol::Observed {
+            usb: iasis_protocol::Usb::Apple(iasis_protocol::AppleMode::Normal),
+            ecid: Some(42),
+        });
+        let wire = r#"{"port":1,"generation":7,"ecid":"000000000000002a"}"#;
+        let selected: Target = serde_json::from_str(wire).unwrap();
+        assert_eq!(serde_json::to_string(&selected).unwrap(), wire);
+        assert!(restore_targets(&status, &[selected]).is_ok());
+        status.ports[0].observed.as_mut().unwrap().ecid = Some(43);
+        assert!(restore_targets(&status, &[selected]).is_err());
+        status.ports[0].observed = None;
+        assert!(restore_targets(&status, &[selected]).is_err());
+        assert!(
+            restore_targets(
+                &status,
+                &[Target {
+                    ecid: None,
+                    ..selected
+                }]
+            )
+            .is_ok()
+        );
+        for bad in [
+            "0",
+            "fffffffffffffffff",
+            "0000000000000000",
+            "remembered Mac",
+        ] {
+            assert!(
+                serde_json::from_str::<Target>(&wire.replace("000000000000002a", bad)).is_err()
+            );
+        }
+    }
+
+    #[test]
     fn confirmation_pins_the_attachment_on_each_selected_port() {
         let mut status = Status::default();
         status.ports[0].state = PortState::Contract;
         status.ports[0].generation = 7;
         let targets = [Target {
-            port: 1,
+            port: Port::ALL[0],
             generation: 7,
+            ecid: None,
         }];
         assert!(restore_targets(&status, &targets).is_ok());
         status.ports[0].generation = 8;
