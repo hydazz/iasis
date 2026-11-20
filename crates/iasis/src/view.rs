@@ -15,7 +15,7 @@ use crate::{
     host::{PortJob, observe},
     images::Store,
     restore::{Operation, Progress, dfu_hardware},
-    topology::Snapshot,
+    topology::{Snapshot, UsbDevice},
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -25,6 +25,7 @@ pub struct PortView {
     pub occupied: bool,
     pub device: Option<String>,
     pub ecid: Option<String>,
+    pub last_seen: Option<LastSeen>,
     pub mode: Option<AppleMode>,
     pub light: Light,
     /// What the board knows and has asked of the target.
@@ -45,6 +46,55 @@ pub struct PortView {
     pub stage: Option<Progress>,
     /// How the port's last restore ended, from the agent that ran it.
     pub result: Option<Ending>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LastSeen {
+    pub ecid: String,
+    pub device: Option<String>,
+}
+
+/// A model identifier, DFU hardware IDs and the product string can name the
+/// same device at different points in its USB enumeration.
+#[derive(Default)]
+pub(crate) struct DeviceName {
+    identifier: Option<String>,
+    hardware: Option<(u32, u32)>,
+    product: Option<String>,
+}
+
+impl DeviceName {
+    pub(crate) fn read(&mut self, device: &UsbDevice) {
+        let identifier = device.apple.as_ref().and_then(|apple| apple.model.as_ref());
+        let hardware = device
+            .apple
+            .as_ref()
+            .and(device.serial_number.as_deref())
+            .and_then(|s| dfu_hardware(s).ok());
+        if identifier
+            .zip(self.identifier.as_ref())
+            .is_some_and(|(a, b)| a != b)
+            || hardware.zip(self.hardware).is_some_and(|(a, b)| a != b)
+        {
+            *self = Self::default();
+        }
+        if let Some(identifier) = identifier {
+            self.identifier = Some(identifier.clone());
+        }
+        if hardware.is_some() {
+            self.hardware = hardware;
+        }
+        if let Some(product) = &device.product {
+            self.product = Some(product.clone());
+        }
+    }
+
+    pub(crate) fn display(&self, store: &Store) -> Option<String> {
+        store
+            .device_name(self.identifier.as_deref(), self.hardware)
+            .or_else(|| self.identifier.clone())
+            .or_else(|| self.product.clone())
+    }
 }
 
 impl PortView {
@@ -123,6 +173,7 @@ impl BoardView {
                         occupied: state.occupied(),
                         device: None,
                         ecid: None,
+                        last_seen: None,
                         mode: state.observed.and_then(|seen| match seen.usb {
                             Usb::Apple(mode) => Some(mode),
                             _ => None,
@@ -182,19 +233,9 @@ impl BoardView {
                 if matches!(observed.usb, Usb::Apple(mode) if mode != AppleMode::PortDfu) {
                     row.ecid = observed.ecid.map(|id| format!("{id:016x}"));
                 }
-                let model = device
-                    .apple
-                    .as_ref()
-                    .and_then(|apple| apple.model.as_deref());
-                let hardware = device
-                    .apple
-                    .as_ref()
-                    .and(device.serial_number.as_deref())
-                    .and_then(|serial| dfu_hardware(serial).ok());
-                row.device = store
-                    .device_name(model, hardware)
-                    .or_else(|| model.map(str::to_owned))
-                    .or_else(|| device.product.clone());
+                let mut name = DeviceName::default();
+                name.read(device);
+                row.device = name.display(store);
             }
         }
     }

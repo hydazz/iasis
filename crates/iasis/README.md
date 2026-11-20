@@ -58,6 +58,7 @@ Each port has:
 | ------------------------------------ | ---------------------------------------------------------------------------------------------- |
 | `generation`, `occupied`             | Current attachment generation and whether the port is occupied                                 |
 | `ecid`                               | Verified Apple device ECID as sixteen hexadecimal digits, or null                              |
+| `last_seen`                          | Previously observed `device` and `ecid` while USB is absent on the same attachment, or null    |
 | `device`, `mode`                     | Known USB device name and Apple mode, each nullable                                            |
 | `number`                             | 1 to 5                                                                                         |
 | `light`                              | What the port's light shows: `hue`, `pulse` and `dim`                                          |
