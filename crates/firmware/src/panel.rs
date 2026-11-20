@@ -1,81 +1,117 @@
-use crate::button::Button;
-use iasis_protocol::{Gesture, Port, PortState, RestorePhase, Status};
+//! The six indicator lights.
+//!
+//! Hue is what a port holds, motion is how sure the board is, and brightness
+//! is the selection. Blue is DFU on every light: the status light while a
+//! release would send it, a port pulsing once it is sent, and steady once a
+//! host sees the target's DFU. Only a host can make it steady.
 
-/// RGB values in chain order: status, port 5 through port 1.
-pub fn colors(status: &Status) -> [[u8; 3]; 6] {
-    let mut pixels = [[0; 3]; 6];
-    pixels[0] = if status.i2c_root_fault || status.aggregate_power_fault {
-        [32, 0, 0]
-    } else {
-        [0, 8, 12]
-    };
-    for (index, port) in status.ports.iter().enumerate() {
-        pixels[5 - index] = if port.error.is_some() || port.state == PortState::Fault {
-            [32, 0, 0]
-        } else if !port.occupied() {
-            [0; 3]
-        } else if let Some(job) = port.restore {
-            match job.phase {
-                RestorePhase::Preparing => [16, 8, 0],
-                RestorePhase::Running => [0, 4, 12 + job.progress.min(100) / 5],
-                RestorePhase::Reported => [0, 12, 0],
-                RestorePhase::Unconfirmed => [20, 8, 0],
-                RestorePhase::Failed => [32, 0, 0],
+use crate::button::Button;
+use iasis_protocol::{
+    AppleMode, Gesture, Port, PortAction, PortState, PortStatus, RestorePhase, Status, Usb,
+};
+
+const OFF: [u8; 3] = [0; 3];
+const RED: [u8; 3] = [32, 0, 0];
+const GREEN: [u8; 3] = [0, 12, 0];
+const WHITE: [u8; 3] = [8, 8, 8];
+const BLUE: [u8; 3] = [0, 8, 24];
+const AMBER: [u8; 3] = [24, 10, 0];
+const PURPLE: [u8; 3] = [24, 0, 24];
+const PULSE_MS: u64 = 1200;
+
+/// A port's colour and whether it is steady. A pulse marks something asked
+/// for or lost track of, not something seen.
+fn port(port: &PortStatus) -> ([u8; 3], bool) {
+    if port.error.is_some() || port.state == PortState::Fault {
+        return (RED, true);
+    }
+    if !port.occupied() {
+        return (OFF, true);
+    }
+    if let Some(job) = port.restore {
+        return match job.phase {
+            RestorePhase::Preparing | RestorePhase::Unconfirmed => (PURPLE, false),
+            RestorePhase::Running => {
+                let level = 10 + job.progress.min(100) / 8;
+                ([level, 0, level + 2], true)
             }
-        } else {
-            match port.state {
-                PortState::Contract => [0, 12, 0],
-                // Powered, and silent on Power Delivery.
-                PortState::Ready if !port.pd_transition => [8, 8, 8],
-                PortState::WaitingPower => [12, 5, 0],
-                _ => [0, 0, 6],
-            }
+            RestorePhase::Reported => (GREEN, true),
+            RestorePhase::Failed => (RED, true),
         };
     }
-    pixels
+    match port.observed.map(|seen| seen.usb) {
+        Some(Usb::Apple(
+            AppleMode::Dfu | AppleMode::KisDfu | AppleMode::Recovery | AppleMode::Wtf,
+        )) => return (BLUE, true),
+        // A restore some other tool is running.
+        Some(Usb::Apple(AppleMode::Restored)) => return (PURPLE, true),
+        _ => {}
+    }
+    match port.request.map(|request| request.action) {
+        Some(PortAction::Reboot) => return (AMBER, false),
+        Some(_) => return (BLUE, false),
+        None => {}
+    }
+    match port.state {
+        PortState::Contract => (GREEN, true),
+        // Powered, and silent on Power Delivery.
+        PortState::Ready if !port.pd_transition => (WHITE, true),
+        PortState::WaitingPower => ([12, 5, 0], true),
+        _ => (WHITE.map(|value| value.div_ceil(2)), true),
+    }
 }
 
-/// Port colour shows state and brightness shows selection: ports outside the
-/// marked set are dimmed, faults excepted. The status LED shows the action a
-/// release would send, or an armed restore.
+fn pulse(color: [u8; 3], now: u64) -> [u8; 3] {
+    let phase = now % PULSE_MS;
+    let rise = phase.min(PULSE_MS - phase);
+    let scale = 64 + rise * 192 / (PULSE_MS / 2);
+    color.map(|value| (u64::from(value) * scale).div_ceil(256) as u8)
+}
+
+/// RGB values in chain order: status, port 5 through port 1. The status light
+/// shows the action a release would send or an armed restore; otherwise green
+/// while a host holds the board and white while it stands alone.
 pub fn indicators(status: &Status, control: &Button, now: u64) -> [[u8; 3]; 6] {
-    let mut pixels = colors(status);
+    let mut pixels = [OFF; 6];
+    pixels[0] = if status.i2c_root_fault || status.aggregate_power_fault {
+        RED
+    } else if control.armed().is_some() {
+        if now % 800 < 400 {
+            PURPLE
+        } else {
+            PURPLE.map(|value| value / 4)
+        }
+    } else if let Some(action) = control.held(now) {
+        match action {
+            Gesture::Dfu => BLUE,
+            Gesture::Reboot => AMBER,
+            Gesture::Restore => PURPLE,
+        }
+    } else if status.host.is_some() {
+        [0, 10, 2]
+    } else {
+        WHITE
+    };
     let marked = control.marked(status, now);
-    for port in Port::ALL {
-        let pixel = &mut pixels[5 - port.index()];
-        let state = &status.ports[port.index()];
+    for index in Port::ALL {
+        let state = &status.ports[index.index()];
+        let (color, steady) = port(state);
+        let pixel = &mut pixels[5 - index.index()];
+        *pixel = if steady { color } else { pulse(color, now) };
         let job = state.restore.map(|job| job.phase);
-        if *pixel == [0; 3]
-            || state.error.is_some()
-            || state.state == PortState::Fault
-            || job == Some(RestorePhase::Failed)
-        {
+        // A fault never dims.
+        if color == OFF || color == RED {
             continue;
         }
         if job == Some(RestorePhase::Reported)
             && control
-                .completed(port, now)
+                .completed(index, now)
                 .is_some_and(|since| (now - since) % 400 < 180)
         {
             *pixel = [0, 32, 0];
         }
-        if marked & (1 << port.index()) == 0 {
+        if marked & (1 << index.index()) == 0 {
             *pixel = pixel.map(|value| value.div_ceil(4));
-        }
-    }
-    if !status.i2c_root_fault && !status.aggregate_power_fault {
-        if control.armed().is_some() {
-            pixels[0] = if now % 800 < 400 {
-                [24, 0, 24]
-            } else {
-                [6, 0, 6]
-            };
-        } else if let Some(action) = control.held(now) {
-            pixels[0] = match action {
-                Gesture::Dfu => [0, 8, 24],
-                Gesture::Reboot => [24, 10, 0],
-                Gesture::Restore => [24, 0, 24],
-            };
         }
     }
     pixels
@@ -84,7 +120,9 @@ pub fn indicators(status: &Status, control: &Button, now: u64) -> [[u8; 3]; 6] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iasis_protocol::{DebugActions, PortError, RestoreArm, RestoreStatus};
+    use iasis_protocol::{
+        DebugActions, HostSession, Observed, PortError, Request, RestoreArm, RestoreStatus,
+    };
 
     fn ready() -> Status {
         let mut status = Status::default();
@@ -94,6 +132,24 @@ mod tests {
                 DebugActions::Listed([0x0606, 0x0106, 0x0105, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         }
         status
+    }
+
+    fn steady(status: &Status) -> [[u8; 3]; 6] {
+        indicators(status, &Button::default(), 0)
+    }
+
+    fn seen(mode: AppleMode) -> Option<Observed> {
+        Some(Observed {
+            usb: Usb::Apple(mode),
+            ecid: Some(1),
+        })
+    }
+
+    fn host(restore_ready: bool) -> Option<HostSession> {
+        Some(HostSession {
+            id: 1,
+            restore_ready,
+        })
     }
 
     #[test]
@@ -108,23 +164,28 @@ mod tests {
         ]) {
             port.state = state;
         }
-        // A stale completion cannot illuminate a disconnected target.
+        // Nothing left over from a target that has gone lights its port.
         status.ports[4].restore = Some(RestoreStatus {
             ecid: 1,
             phase: RestorePhase::Reported,
             progress: 100,
         });
+        status.ports[0].request = Some(Request {
+            action: PortAction::DfuAppleSilicon,
+            at_ms: 0,
+        });
+        status.ports[2].observed = seen(AppleMode::Dfu);
         let mut button = Button::default();
         for selected in [None].into_iter().chain(Port::ALL.map(Some)) {
             button.selected = selected;
             for now in [0, 150, 250, 500] {
-                assert_eq!(indicators(&status, &button, now)[1..], [[0; 3]; 5]);
+                assert_eq!(indicators(&status, &button, now)[1..], [OFF; 5]);
             }
         }
         status.ports[0].error = Some(PortError::HostLimiter);
         status.ports[1].orientation = Some(iasis_protocol::Orientation::Cc1);
-        assert_eq!(colors(&status)[5], [32, 0, 0]);
-        assert_eq!(colors(&status)[4], [12, 5, 0]);
+        assert_eq!(steady(&status)[5], RED);
+        assert_eq!(steady(&status)[4], [12, 5, 0]);
     }
 
     #[test]
@@ -133,40 +194,44 @@ mod tests {
         status.ports[3].state = PortState::Fault;
         status.ports[4].state = PortState::Unattached;
         let mut button = Button::default();
-        let steady = colors(&status);
+        let all = steady(&status);
         for now in (0..3600).step_by(30) {
-            assert_eq!(indicators(&status, &button, now), steady);
+            assert_eq!(indicators(&status, &button, now), all);
         }
         button.selected = Some(Port::ALL[1]);
         let pixels = indicators(&status, &button, 0);
-        assert_eq!(pixels[0], steady[0]);
+        assert_eq!(pixels[0], all[0]);
         assert_eq!(pixels[5], [0, 3, 0]);
-        assert_eq!(pixels[4], [0, 12, 0]);
+        assert_eq!(pixels[4], GREEN);
         assert_eq!(pixels[3], [0, 3, 0]);
-        assert_eq!(pixels[2], [32, 0, 0]);
-        assert_eq!(pixels[1], [0; 3]);
+        assert_eq!(pixels[2], RED);
+        assert_eq!(pixels[1], OFF);
     }
 
     #[test]
-    fn the_status_led_shows_the_held_action_an_armed_restore_and_board_faults() {
+    fn the_status_light_shows_the_host_the_held_action_an_arm_and_board_faults() {
         let mut status = ready();
+        assert_eq!(steady(&status)[0], WHITE);
+        status.host = host(false);
+        let connected = steady(&status)[0];
+        assert_eq!(connected, [0, 10, 2]);
+        status.host = host(true);
         let mut button = Button::default();
-        let idle = colors(&status)[0];
         let mut now = 0;
         let mut sample = |button: &mut Button, status: &Status, arm, down, elapsed| {
             now += elapsed;
-            button.sample(status, Some(1), arm, down, now);
+            button.sample(status, arm, down, now);
             now
         };
         sample(&mut button, &status, None, false, 1);
         sample(&mut button, &status, None, true, 10);
         let pressed = sample(&mut button, &status, None, true, 40);
-        assert_eq!(indicators(&status, &button, pressed)[0], idle);
+        assert_eq!(indicators(&status, &button, pressed)[0], connected);
         for (elapsed, color) in [
-            (500, [0, 8, 24]),
-            (1500, [24, 10, 0]),
-            (1500, [24, 0, 24]),
-            (1500, idle),
+            (500, BLUE),
+            (1500, AMBER),
+            (1500, PURPLE),
+            (1500, connected),
         ] {
             let now = sample(&mut button, &status, None, true, elapsed);
             assert_eq!(indicators(&status, &button, now)[0], color);
@@ -183,12 +248,12 @@ mod tests {
         };
         sample(&mut button, &status, Some(arm), false, 10);
         let pixels = indicators(&status, &button, 8000);
-        assert_eq!(pixels[0], [24, 0, 24]);
-        assert_eq!(pixels[5], [0, 12, 0]);
+        assert_eq!(pixels[0], PURPLE);
+        assert_eq!(pixels[5], GREEN);
         assert_eq!(pixels[4], [0, 3, 0]);
         assert_eq!(indicators(&status, &button, 8400)[0], [6, 0, 6]);
         status.aggregate_power_fault = true;
-        assert_eq!(indicators(&status, &button, 8000)[0], [32, 0, 0]);
+        assert_eq!(indicators(&status, &button, 8000)[0], RED);
     }
 
     #[test]
@@ -196,41 +261,113 @@ mod tests {
         let mut status = ready();
         status.ports[2].state = PortState::Ready;
         let mut button = Button::default();
-        assert_eq!(indicators(&status, &button, 0)[3], [8, 8, 8]);
+        assert_eq!(indicators(&status, &button, 0)[3], WHITE);
         // A hard reset is a target between contracts, not an unknown device.
         status.ports[2].pd_transition = true;
-        assert_eq!(colors(&status)[3], [0, 0, 6]);
+        assert_eq!(steady(&status)[3], [4, 4, 4]);
         status.ports[2].pd_transition = false;
         for (down, now) in [(false, 1), (true, 10), (true, 40), (true, 600)] {
-            button.sample(&status, None, None, down, now);
+            button.sample(&status, None, down, now);
         }
         let held = indicators(&status, &button, 600);
-        assert_eq!(held[0], [0, 8, 24]);
+        assert_eq!(held[0], BLUE);
         assert_eq!(held[3], [2, 2, 2]);
-        assert_eq!(held[4], [0, 12, 0]);
+        assert_eq!(held[4], GREEN);
     }
 
     #[test]
-    fn completion_flashes_then_rests_at_ready_brightness() {
+    fn a_sent_dfu_pulses_until_a_host_sees_it() {
         let mut status = ready();
-        status.ports[0].restore = Some(RestoreStatus {
-            ecid: 1,
-            phase: RestorePhase::Reported,
-            progress: 100,
+        status.ports[0].request = Some(Request {
+            action: PortAction::DfuAppleSilicon,
+            at_ms: 0,
         });
+        let button = Button::default();
+        let frames: [[u8; 3]; 4] =
+            [0, 300, 600, 900].map(|now| indicators(&status, &button, now)[5]);
+        assert_eq!(frames[0], [0, 2, 6]);
+        assert_eq!(frames[2], BLUE);
+        assert_eq!(frames[1], frames[3]);
+        assert!(frames[0] != frames[1] && frames[1] != frames[2]);
+        // Every frame stays blue: no red, and never dark.
+        for now in (0..2400).step_by(100) {
+            let [red, _, blue] = indicators(&status, &button, now)[5];
+            assert!(red == 0 && blue >= 6);
+        }
+        for mode in [AppleMode::Dfu, AppleMode::KisDfu, AppleMode::Recovery] {
+            status.ports[0].observed = seen(mode);
+            for now in [0, 300, 600] {
+                assert_eq!(indicators(&status, &button, now)[5], BLUE);
+            }
+        }
+        // A host that sees the running system leaves the request pulsing
+        // until the board withdraws it.
+        for mode in [
+            AppleMode::Normal,
+            AppleMode::Mux,
+            AppleMode::PortDfu,
+            AppleMode::Kis,
+        ] {
+            status.ports[0].observed = seen(mode);
+            assert_eq!(indicators(&status, &button, 0)[5], [0, 2, 6]);
+            status.ports[0].request = None;
+            assert_eq!(indicators(&status, &button, 0)[5], GREEN);
+            status.ports[0].request = Some(Request {
+                action: PortAction::DfuAppleSilicon,
+                at_ms: 0,
+            });
+        }
+        status.ports[0].observed = None;
+        status.ports[0].request = Some(Request {
+            action: PortAction::Reboot,
+            at_ms: 0,
+        });
+        assert_eq!(indicators(&status, &button, 600)[5], AMBER);
+        assert_eq!(indicators(&status, &button, 0)[5], [6, 3, 0]);
+    }
+
+    #[test]
+    fn a_restore_is_purple_and_completion_flashes_green() {
+        let mut status = ready();
+        let mut job = RestoreStatus {
+            ecid: 1,
+            phase: RestorePhase::Preparing,
+            progress: 0,
+        };
         let mut button = Button::default();
-        button.sample(&status, None, None, false, 1000);
+        let mut look = |job: RestoreStatus, now| {
+            status.ports[0].restore = Some(job);
+            indicators(&status, &button, now)[5]
+        };
+        assert_eq!(look(job, 600), PURPLE);
+        assert_eq!(look(job, 0), [6, 0, 6]);
+        job.phase = RestorePhase::Unconfirmed;
+        assert_eq!(look(job, 0), [6, 0, 6]);
+        job.phase = RestorePhase::Running;
+        assert_eq!(look(job, 0), [10, 0, 12]);
+        assert_eq!(look(job, 300), [10, 0, 12]);
+        job.progress = 100;
+        assert_eq!(look(job, 0), [22, 0, 24]);
+        job.phase = RestorePhase::Failed;
+        assert_eq!(look(job, 0), RED);
+        // Another tool's restore, seen by the host.
+        status.ports[1].observed = seen(AppleMode::Restored);
+        assert_eq!(steady(&status)[4], PURPLE);
+
+        job.phase = RestorePhase::Reported;
+        status.ports[0].restore = Some(job);
+        button.sample(&status, None, false, 1000);
         assert_eq!(indicators(&status, &button, 1000)[5], [0, 32, 0]);
-        assert_eq!(indicators(&status, &button, 1200)[5], [0, 12, 0]);
+        assert_eq!(indicators(&status, &button, 1200)[5], GREEN);
         assert_eq!(indicators(&status, &button, 1400)[5], [0, 32, 0]);
-        assert_eq!(indicators(&status, &button, 2800)[5], [0, 12, 0]);
+        assert_eq!(indicators(&status, &button, 2800)[5], GREEN);
     }
 
     #[test]
     fn board_order_and_brightness_reservation_are_preserved() {
         let mut status = Status::default();
         status.ports[0].state = PortState::Contract;
-        assert_eq!(colors(&status)[5], [0, 12, 0]);
+        assert_eq!(steady(&status)[5], GREEN);
         status.ports[4].state = PortState::Contract;
         for phase in [
             RestorePhase::Preparing,
@@ -245,8 +382,10 @@ mod tests {
                     phase,
                     progress,
                 });
-                for pixel in colors(&status) {
-                    assert!(pixel.into_iter().map(u16::from).sum::<u16>() <= 85);
+                for now in [0, 300, 600] {
+                    for pixel in indicators(&status, &Button::default(), now) {
+                        assert!(pixel.into_iter().map(u16::from).sum::<u16>() <= 85);
+                    }
                 }
             }
         }

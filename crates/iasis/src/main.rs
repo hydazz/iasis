@@ -1,5 +1,6 @@
 use std::{
-    io::{self, Write},
+    fmt::Write as _,
+    io::{self, IsTerminal, Write},
     thread,
     time::{Duration, Instant},
 };
@@ -14,10 +15,16 @@ use iasis::{
     identity::AppleMode,
     topology::{self, Snapshot},
 };
-use iasis_protocol::{CommandResult, DebugActions, Link, Port, PortAction, Status};
+use iasis_protocol::{
+    CommandResult, DebugActions, Link, Port, PortAction, PortState, PortStatus, RestorePhase,
+    Status, Supply, Usb,
+};
 
 #[derive(Parser)]
-#[command(version, about = "Manage Iasis ports and controller firmware")]
+#[command(
+    version,
+    about = "Manage Iasis ports and controller firmware. Without a command, show every board's ports."
+)]
 struct Cli {
     /// Board serial, sixteen hexadecimal digits
     #[arg(long, global = true, value_parser = parse_serial)]
@@ -29,11 +36,13 @@ struct Cli {
     #[arg(long, global = true, default_value = "0001", value_parser = parse_id)]
     pid: u16,
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand)]
 enum Command {
+    /// Show every board's ports and keep the view current
+    Watch,
     /// Validate a local IPSW without opening USB devices
     Ipsw { path: std::path::PathBuf },
     /// Erase a selected batch using independent idevicerestore workers
@@ -101,13 +110,23 @@ fn parse_id(value: &str) -> Result<u16, String> {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    if let Command::Ipsw { path } = &cli.command {
+    let ids = UsbIds {
+        vendor: cli.vid,
+        product: cli.pid,
+    };
+    let command = match cli.command {
+        None => return overview(ids, cli.serial, false),
+        Some(Command::Watch) => return overview(ids, cli.serial, true),
+        Some(Command::List) => return list(ids, cli.serial),
+        Some(command) => command,
+    };
+    if let Command::Ipsw { path } = &command {
         let prepared = progress::check_ipsw(path)?;
         println!("{}", serde_json::to_string_pretty(&prepared)?);
         return Ok(());
     }
     if matches!(
-        cli.command,
+        command,
         Command::Bootloader
             | Command::Power { .. }
             | Command::Dfu { .. }
@@ -118,20 +137,12 @@ fn main() -> Result<()> {
     {
         bail!("this command requires --serial; use `iasis list` to select the board");
     }
-    let devices = iasis::discover(
-        UsbIds {
-            vendor: cli.vid,
-            product: cli.pid,
-        },
-        cli.serial,
-    )?;
+    let devices = iasis::discover(ids, cli.serial)?;
     let mut boards = Vec::new();
-    for device in devices {
-        let board = match cli.command {
-            Command::List | Command::Status { .. } | Command::Ports { .. } => {
-                Board::observe(&device)
-            }
-            _ => Board::open(&device),
+    for device in &devices {
+        let board = match command {
+            Command::Status { .. } | Command::Ports { .. } => Board::observe(device),
+            _ => Board::open(device),
         }
         .with_context(|| {
             format!(
@@ -147,22 +158,6 @@ fn main() -> Result<()> {
         );
         boards.push(board);
     }
-    if matches!(cli.command, Command::List) {
-        if boards.is_empty() {
-            println!("No Iasis boards found.");
-        }
-        for board in boards {
-            let info = board.info();
-            let [major, minor, patch] = info.firmware_version;
-            println!(
-                "{:016x}  firmware {major}.{minor}.{patch}  bus {} port {:?}",
-                info.serial,
-                board.topology().bus,
-                board.topology().port_chain
-            );
-        }
-        return Ok(());
-    }
     if boards.len() != 1 {
         bail!(
             "expected one Iasis board, found {}; use --serial to select one",
@@ -170,9 +165,9 @@ fn main() -> Result<()> {
         );
     }
     let board = &boards[0];
-    match cli.command {
-        Command::List | Command::Ipsw { .. } => unreachable!(),
-        Command::Restore(options) => batch::run(board, options)?,
+    match command {
+        Command::List | Command::Ipsw { .. } | Command::Watch => unreachable!(),
+        Command::Restore(options) => batch::run(&devices[0], board, options)?,
         Command::HostBudget { milliamps } => {
             board.host_budget(milliamps)?;
             println!(
@@ -410,6 +405,189 @@ fn link_text(link: Link) -> &'static str {
     }
 }
 
+/// A board that cannot be read is still listed, with the reason: it may run
+/// firmware for another protocol version and need an update.
+fn unreadable(device: &nusb::DeviceInfo, error: &iasis::Error) -> String {
+    let serial = device.serial_number().unwrap_or("unknown serial");
+    match error {
+        // Firmware older than protocol 11 answers only its own version.
+        iasis::Error::Transfer(nusb::transfer::TransferError::Stall) => format!(
+            "{serial}  does not answer this tool; update its firmware with the tool it was built with, or through BOOTSEL"
+        ),
+        _ => format!("{serial}  {error}"),
+    }
+}
+
+fn list(ids: UsbIds, serial: Option<u64>) -> Result<()> {
+    let devices = iasis::discover(ids, serial)?;
+    if devices.is_empty() {
+        println!("No Iasis boards found.");
+    }
+    for device in &devices {
+        match Board::observe(device).and_then(|board| board.current().map(|()| board)) {
+            Ok(board) => {
+                let info = board.info();
+                let [major, minor, patch] = info.firmware_version;
+                println!(
+                    "{:016x}  firmware {major}.{minor}.{patch}  bus {} port {:?}",
+                    info.serial,
+                    board.topology().bus,
+                    board.topology().port_chain
+                );
+            }
+            Err(error) => println!("{}", unreadable(device, &error)),
+        }
+    }
+    Ok(())
+}
+
+/// Every board's ports, from the boards themselves. A target's USB mode is
+/// what the board's host reports to it, so the view agrees with the lights.
+fn overview(ids: UsbIds, serial: Option<u64>, watch: bool) -> Result<()> {
+    let terminal = io::stdout().is_terminal();
+    loop {
+        let mut text = String::new();
+        let devices = iasis::discover(ids, serial)?;
+        if devices.is_empty() {
+            text.push_str("No Iasis boards found.\n");
+        }
+        for device in &devices {
+            let (board, status) = match Board::observe(device)
+                .and_then(|board| board.status().map(|status| (board, status)))
+            {
+                Ok(read) => read,
+                Err(error) => {
+                    writeln!(text, "{}", unreadable(device, &error))?;
+                    continue;
+                }
+            };
+            let host = match status.host {
+                Some(host) if host.restore_ready => "host attached, restores ready",
+                Some(_) => "host attached",
+                None => "no host: start iasisd to see USB modes",
+            };
+            let supply = match status.supply {
+                Supply::Brick => format!(
+                    "power supply {} V, {} W for targets",
+                    status.brick_requested_mv / 1000,
+                    status.charging_budget_mw / 1000
+                ),
+                Supply::HostPresence => {
+                    format!("host power, {} mA for targets", status.host_limit_ma)
+                }
+                Supply::Off => "targets off".into(),
+            };
+            writeln!(text, "{:016x}  {supply}  {host}", board.info().serial)?;
+            for port in Port::ALL {
+                let state = &status.ports[port.index()];
+                let line = format!(
+                    "  {}  {:<16}{:<34}{:<7}{}",
+                    port.number(),
+                    port_state(state, status.uptime_ms),
+                    port_usb(state),
+                    state
+                        .link
+                        .filter(|_| state.occupied())
+                        .map_or("", |link| match link {
+                            Link::Down => "",
+                            Link::Usb2 => "USB 2",
+                            Link::Usb3 => "USB 3",
+                        }),
+                    port_contract(state),
+                );
+                writeln!(text, "{}", line.trim_end())?;
+            }
+        }
+        if watch && terminal {
+            print!("\x1b[H\x1b[J");
+        }
+        print!("{text}");
+        io::stdout().flush()?;
+        if !watch {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(500));
+    }
+}
+
+/// What the board knows and has asked of the target.
+fn port_state(port: &PortStatus, uptime_ms: u64) -> String {
+    if port.error.is_some() || port.state == PortState::Fault {
+        return "fault".into();
+    }
+    if !port.occupied() {
+        return if port.enabled { "empty" } else { "off" }.into();
+    }
+    if let Some(job) = port.restore {
+        return match job.phase {
+            RestorePhase::Preparing => "preparing".into(),
+            RestorePhase::Running => format!("restoring {}%", job.progress),
+            RestorePhase::Reported => "restored".into(),
+            RestorePhase::Unconfirmed => "restore unknown".into(),
+            RestorePhase::Failed => "restore failed".into(),
+        };
+    }
+    if let Some(request) = port.request {
+        return match request.action {
+            PortAction::Reboot => "reboot sent",
+            _ if request.pending(uptime_ms) => "DFU sent",
+            _ => "DFU unverified",
+        }
+        .into();
+    }
+    match port.state {
+        // The target has not yet said which actions its port offers.
+        PortState::Contract if port.debug_actions == DebugActions::Pending => "identifying",
+        PortState::Contract if port.wrong_port() => "wrong port",
+        PortState::Contract
+            if !port.offers(PortAction::DfuAppleSilicon) && !port.offers(PortAction::Reboot) =>
+        {
+            "charging"
+        }
+        PortState::Contract => "ready",
+        PortState::Ready if !port.pd_transition => "unknown device",
+        PortState::WaitingPower => "waiting for power",
+        _ => "attaching",
+    }
+    .into()
+}
+
+/// What the board's host sees on the port's USB.
+fn port_usb(port: &PortStatus) -> String {
+    let Some(seen) = port.observed else {
+        return String::new();
+    };
+    let mode = match seen.usb {
+        Usb::Absent => "no USB",
+        Usb::Other => "other USB device",
+        Usb::Ambiguous => "several USB devices",
+        Usb::Apple(mode) => match mode {
+            AppleMode::Dfu => "DFU",
+            AppleMode::KisDfu => "DFU, debug USB",
+            AppleMode::Kis => "debug USB",
+            AppleMode::PortDfu => "port DFU",
+            AppleMode::Recovery => "recovery",
+            AppleMode::Wtf => "WTF",
+            AppleMode::Restored => "restore service",
+            AppleMode::Normal => "booted",
+            // The running system or a restore; nothing has asked which.
+            AppleMode::Mux => "system",
+        },
+    };
+    match seen.ecid {
+        Some(ecid) => format!("{mode} {ecid:016x}"),
+        None => mode.into(),
+    }
+}
+
+fn port_contract(port: &PortStatus) -> String {
+    if port.contract_mv == 0 || !port.occupied() {
+        return String::new();
+    }
+    let amps = f32::from(port.contract_ma) / 1000.0;
+    format!("{} V {amps} A", port.contract_mv / 1000)
+}
+
 fn print_status(status: &Status) {
     println!(
         "supply {:?}  host allowance {} mA  aggregate limit {} mA  isolated I²C branches {:02x}  recoveries {}  button {:?}",
@@ -428,6 +606,7 @@ fn print_status(status: &Status) {
         status.watchdog_reason,
         status.retained_update
     );
+    println!("host {:?}", status.host);
     println!(
         "CM5 power {}  I²C root fault {}  timeouts {}  expander {:?}  port capacity {}",
         status.side_power_enabled,
@@ -454,6 +633,16 @@ fn print_status(status: &Status) {
         );
         if let Some(link) = state.link {
             println!("  link: {}", link_text(link));
+        }
+        if state.observed.is_some() {
+            println!("  host sees: {}", port_usb(state));
+        }
+        if let Some(request) = state.request {
+            println!(
+                "  request: {:?} sent {} ms ago",
+                request.action,
+                status.uptime_ms.saturating_sub(request.at_ms)
+            );
         }
         match state.debug_actions {
             DebugActions::Pending => {}

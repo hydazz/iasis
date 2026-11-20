@@ -11,14 +11,15 @@ use embassy_futures::select::{Either3, select, select3};
 use embassy_rp::gpio::Input;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use embassy_time::{Duration, Instant, Timer};
+use iasis_firmware::request::Tracker;
 use iasis_pd::{
     Contract, apple,
     power::{self, PortDemand, SinkDemand},
 };
 use iasis_protocol::{
-    CommandError, CommandResult, DebugActions, FaultContract, FaultSample, Link, Orientation,
-    PORT_COUNT, PortAction, PortCommand, PortError, PortFaults, PortState, PortStatus,
-    RestoreFeedback, RestorePhase, Supply,
+    CommandError, CommandResult, DebugActions, FaultContract, FaultSample, HostReport, Link,
+    Observed, Orientation, PORT_COUNT, PortAction, PortCommand, PortError, PortFaults, PortState,
+    PortStatus, RestorePhase, Supply,
 };
 use usbpd::{
     protocol_layer::message::data::{
@@ -96,6 +97,9 @@ struct Shared {
     rearm: Cell<bool>,
     supply_fault: Cell<Option<PortError>>,
     feedback_deadline: Cell<u64>,
+    /// The host's view, with the attachment it describes.
+    observed: Cell<Option<(u32, Observed)>>,
+    tracker: Cell<Tracker>,
     wake: Signal<NoopRawMutex, ()>,
 }
 
@@ -107,11 +111,18 @@ impl Shared {
     }
 
     fn snapshot(&self) -> PortStatus {
+        let status = self.status.get();
         PortStatus {
             vbus_adc: self.vbus.get(),
             faults: self.pins.get(),
             link: self.link.get(),
-            ..self.status.get()
+            observed: self
+                .observed
+                .get()
+                .filter(|(generation, _)| *generation == status.generation)
+                .map(|(_, observed)| observed),
+            request: self.tracker.get().request(),
+            ..status
         }
     }
 }
@@ -173,7 +184,7 @@ impl Ports {
     pub fn restoring_on_host(&self) -> bool {
         self.ports.iter().any(|port| {
             let status = port.status.get();
-            status.supply == Supply::HostPresence && restoring(&status)
+            status.supply == Supply::HostPresence && status.restoring()
         })
     }
 
@@ -187,19 +198,31 @@ impl Ports {
         }
     }
 
-    pub fn feedback(&self, request: RestoreFeedback) -> PortStatus {
-        let port = &self.ports[request.port.index()];
-        let status = port.status.get();
-        if request.generation == status.generation
-            && status.orientation.is_some()
-            && status.state != PortState::Fault
-            && request.status.ecid != 0
-            && request.status.progress <= 100
-        {
-            port.update(|status| status.restore = Some(request.status));
-            port.feedback_deadline.set(now_ms() + 5000);
+    /// Take the host's newest report, forget its view once it has gone and
+    /// settle the requests the ports are waiting on. A report describes an
+    /// attachment; one for an earlier attachment says nothing about this one.
+    pub fn host(&self, report: Option<HostReport>, present: bool, now: u64) {
+        for (index, port) in self.ports.iter().enumerate() {
+            let status = port.status.get();
+            if let Some(report) = report {
+                let entry = iasis_firmware::host_session::entry(&report, index, &status);
+                port.observed
+                    .set(entry.map(|entry| (entry.generation, entry.observed)));
+                if let Some(job) = entry.and_then(|entry| entry.restore)
+                    && status.state != PortState::Fault
+                    && job.ecid != 0
+                    && job.progress <= 100
+                {
+                    port.update(|status| status.restore = Some(job));
+                    port.feedback_deadline.set(now + 5000);
+                }
+            } else if !present {
+                port.observed.set(None);
+            }
+            let mut tracker = port.tracker.get();
+            tracker.update(&port.snapshot(), now);
+            port.tracker.set(tracker);
         }
-        port.snapshot()
     }
 
     pub fn command(&self, command: PortCommand) -> PortStatus {
@@ -223,7 +246,8 @@ impl Ports {
             _ if status.generation != command.generation => {
                 CommandResult::Failed(CommandError::StaleAttachment)
             }
-            _ if port.action.get().is_some() || status.pd_transition => {
+            // A restore owns its target until it ends or the target leaves.
+            _ if port.action.get().is_some() || status.pd_transition || status.restoring() => {
                 CommandResult::Failed(CommandError::Busy)
             }
             _ if !matches!(status.state, PortState::Ready | PortState::Contract) => {
@@ -301,15 +325,6 @@ pub async fn shutdown(io: &mut Io, brick: bool) {
             }
         }
     }
-}
-
-fn restoring(status: &PortStatus) -> bool {
-    status.restore.is_some_and(|job| {
-        matches!(
-            job.phase,
-            RestorePhase::Preparing | RestorePhase::Running | RestorePhase::Unconfirmed
-        )
-    })
 }
 
 /// Protection trips and hardware disagreements wait for a person. Protocol
@@ -429,7 +444,7 @@ impl Port<'_> {
                 let available =
                     iasis_pd::fixed_offers(grant.budget_mw, grant.input_mv, grant.brick_5v_pdo);
                 let advertised = self.offers.get();
-                let steady = restoring(&self.status())
+                let steady = self.status().restoring()
                     || self.sink.get().state() == power::DemandState::Satisfied;
                 if self.contract.get().is_some()
                     && steady
@@ -473,7 +488,7 @@ impl Port<'_> {
             } else {
                 power::DemandState::Unknown
             },
-            restoring: restoring(&status),
+            restoring: status.restoring(),
         });
     }
 
@@ -765,6 +780,12 @@ impl Port<'_> {
             Tx::Collision => CommandResult::Failed(CommandError::Transmission),
         };
         self.update(|status| status.command_result = result);
+        if matches!(
+            result,
+            CommandResult::Acknowledged | CommandResult::Unconfirmed
+        ) {
+            self.shared.tracker.set(Tracker::sent(action, now_ms()));
+        }
         Ok(())
     }
 
@@ -780,7 +801,7 @@ impl Port<'_> {
         let funded = self.supply.get() == Supply::HostPresence
             || target.permitted(grant.budget_mw, grant.input_mv);
         // An active restore keeps its voltage.
-        let steady = !restoring(&self.status()) || target.millivolts == self.operating_voltage();
+        let steady = !self.status().restoring() || target.millivolts == self.operating_voltage();
         if funded && steady {
             self.pending.set(Some((target, rdo)));
             self.publish();
