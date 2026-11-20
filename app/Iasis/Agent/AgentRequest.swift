@@ -5,6 +5,7 @@ nonisolated enum AgentRequest: Encodable, Equatable {
     case watch
     /// Erases the targets. The user has confirmed.
     case restore(board: String, session: UInt32, targets: [RestoreTarget])
+    case revive(board: String, session: UInt32, port: Int, generation: UInt32, ecid: String)
     case dfu(board: String, port: Int)
     case reboot(board: String, port: Int)
     case power(board: String, port: Int, on: Bool)
@@ -17,7 +18,7 @@ nonisolated enum AgentRequest: Encodable, Equatable {
     case refresh
 
     private enum CodingKeys: String, CodingKey {
-        case op, board, port, session, targets, name, on, percent, model, path, build
+        case op, board, port, session, targets, generation, ecid, name, on, percent, model, path, build
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -30,6 +31,13 @@ nonisolated enum AgentRequest: Encodable, Equatable {
             try fields.encode(board, forKey: .board)
             try fields.encode(session, forKey: .session)
             try fields.encode(targets, forKey: .targets)
+        case let .revive(board, session, port, generation, ecid):
+            try fields.encode("revive", forKey: .op)
+            try fields.encode(board, forKey: .board)
+            try fields.encode(session, forKey: .session)
+            try fields.encode(port, forKey: .port)
+            try fields.encode(generation, forKey: .generation)
+            try fields.encode(ecid, forKey: .ecid)
         case let .dfu(board, port):
             try fields.encode("dfu", forKey: .op)
             try fields.encode(board, forKey: .board)
@@ -90,5 +98,12 @@ nonisolated enum AgentReply: Decodable, Equatable {
             _ = try decoder.singleValueContainer().decode(String.self)
             self = .ok
         }
+    }
+}
+
+extension AgentState.Port {
+    func reviveRequest(on board: AgentState.Board) -> AgentRequest? {
+        guard revive, let session = board.session, let ecid else { return nil }
+        return .revive(board: board.serial, session: session, port: number, generation: generation, ecid: ecid)
     }
 }

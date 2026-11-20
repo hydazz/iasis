@@ -2,9 +2,11 @@
 
 The menu bar cable dims when disconnected. A ring over its tail shows activity, and a red exclamation mark means a board or port needs attention.
 
-The Iasis menu shows connected devices under their board names. Open a device’s submenu for DFU, restart and restore. Restore asks for confirmation before sending the request to the agent.
+The Iasis menu shows connected devices under their board names. Open a device’s submenu for DFU, restart and recovery actions. Restore asks for confirmation before sending the request to the agent.
 
-About Iasis shows what the port and status lights mean.
+Open Devices to follow an operation’s current stage or select several devices on the same board to restore together. Double-click a row for the device’s identity, connection details and the last operation’s log. If USB disappears while a port stays electrically attached, Get Info can show the last device seen there.
+
+Revive uses Apple Configurator to repair one identified device in DFU or Recovery and attempts to preserve its data. Restore erases the selected devices. About Iasis explains the port and status lights.
 
 In Settings, select a board to rename it or adjust its lights. The board keeps both settings when moved to another Mac. The Images tab manages restore images. The Finder preference applies to all connected Apple devices.
 
