@@ -7,8 +7,7 @@
 
 use crate::button::Button;
 use iasis_protocol::{
-    AppleMode, BRIGHTNESS_MAX, BRIGHTNESS_MIN, Gesture, Port, PortAction, PortState, PortStatus,
-    RestorePhase, Status, Usb,
+    BRIGHTNESS_MAX, BRIGHTNESS_MIN, Gesture, Hue, Port, PortStatus, RestorePhase, Status,
 };
 
 const OFF: [u8; 3] = [0; 3];
@@ -20,44 +19,24 @@ const AMBER: [u8; 3] = [24, 10, 0];
 const PURPLE: [u8; 3] = [24, 0, 24];
 const PULSE_MS: u64 = 1200;
 
-/// A port's colour and whether it is steady. A pulse marks a port that is
-/// busy; a steady colour will hold until someone acts.
+/// A port's colour and whether it is steady.
 fn port(port: &PortStatus) -> ([u8; 3], bool) {
-    if port.error.is_some() || port.state == PortState::Fault {
-        return (RED, true);
-    }
-    if !port.occupied() {
-        return (OFF, true);
-    }
-    if let Some(job) = port.restore {
-        return match job.phase {
-            RestorePhase::Preparing | RestorePhase::Running => (PURPLE, false),
-            // Nobody is driving it and nobody knows how it ended.
-            RestorePhase::Unconfirmed => (PURPLE, true),
-            RestorePhase::Reported => (GREEN, true),
-            RestorePhase::Failed => (RED, true),
-        };
-    }
-    match port.observed.map(|seen| seen.usb) {
-        Some(Usb::Apple(
-            AppleMode::Dfu | AppleMode::KisDfu | AppleMode::Recovery | AppleMode::Wtf,
-        )) => return (BLUE, true),
-        // A restore some other tool is running.
-        Some(Usb::Apple(AppleMode::Restored)) => return (PURPLE, false),
-        _ => {}
-    }
-    match port.request.map(|request| request.action) {
-        Some(PortAction::Reboot) => return (AMBER, false),
-        Some(_) => return (BLUE, false),
-        None => {}
-    }
-    match port.state {
-        PortState::Contract => (GREEN, true),
-        // Powered, and silent on Power Delivery.
-        PortState::Ready if !port.pd_transition => (WHITE, true),
-        PortState::WaitingPower => ([12, 5, 0], true),
-        _ => (WHITE.map(|value| value.div_ceil(2)), true),
-    }
+    let light = port.light();
+    let color = match light.hue {
+        Hue::Off => OFF,
+        Hue::Red => RED,
+        Hue::Green => GREEN,
+        Hue::White => WHITE,
+        Hue::Blue => BLUE,
+        Hue::Amber => AMBER,
+        Hue::Purple => PURPLE,
+    };
+    let color = if light.dim {
+        color.map(|value| value.div_ceil(2))
+    } else {
+        color
+    };
+    (color, !light.pulse)
 }
 
 fn pulse(color: [u8; 3], now: u64) -> [u8; 3] {
@@ -140,8 +119,8 @@ pub fn indicators(status: &Status, control: &Button, now: u64) -> [[u8; 3]; 6] {
 mod tests {
     use super::*;
     use iasis_protocol::{
-        BRIGHTNESS_DEFAULT, DebugActions, HostSession, Observed, PortError, Request, RestoreArm,
-        RestoreStatus,
+        AppleMode, BRIGHTNESS_DEFAULT, DebugActions, HostSession, Observed, PortAction, PortError,
+        PortState, Request, RestoreArm, RestoreStatus, Usb,
     };
 
     fn ready() -> Status {
@@ -374,6 +353,12 @@ mod tests {
         assert_eq!(look(job, 600), PURPLE);
         job.phase = RestorePhase::Failed;
         assert_eq!(look(job, 0), RED);
+        // The host fetching a target's image is restore work too.
+        status.ports[2].observed = seen(AppleMode::Dfu);
+        status.ports[2].fetch = Some(40);
+        assert_eq!(steady(&status)[3], [6, 0, 6]);
+        status.ports[2].fetch = None;
+        assert_eq!(steady(&status)[3], BLUE);
         // Another tool's restore, seen by the host.
         status.ports[1].observed = seen(AppleMode::Restored);
         assert_eq!(steady(&status)[4], [6, 0, 6]);
