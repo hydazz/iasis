@@ -1,0 +1,22 @@
+#!/bin/sh
+# Start the agent and the menu bar app for the user at the console. Anyone
+# else gets them at their next login.
+
+set -eu
+
+console_user="$(/usr/bin/stat -f '%Su' /dev/console)"
+
+case "${console_user}" in
+    "" | root | loginwindow)
+        exit 0
+        ;;
+esac
+
+user_id="$(/usr/bin/id -u "${console_user}" 2>/dev/null)" || exit 0
+[ "${user_id}" -ge 500 ] || exit 0
+
+domain="gui/${user_id}"
+for label in com.hydaz.Iasis.agent com.hydaz.Iasis; do
+    /bin/launchctl bootout "${domain}/${label}" 2>/dev/null || true
+    /bin/launchctl bootstrap "${domain}" "/Library/LaunchAgents/${label}.plist"
+done
