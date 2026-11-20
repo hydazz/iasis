@@ -32,6 +32,11 @@ struct MenuView: View {
             Text("Agent Not Running")
         }
         Divider()
+        Button("Devices") {
+            NSApp.activate()
+            openWindow(id: DevicesView.windowID)
+        }
+        .keyboardShortcut("1")
         Button("About Iasis") {
             NSApp.activate()
             openWindow(id: AboutView.windowID)
