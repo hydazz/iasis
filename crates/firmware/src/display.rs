@@ -68,6 +68,7 @@ pub struct View {
     /// Highlighted ports a hold reaches, drawn filled; the rest are outlined.
     pub targets: u8,
     pub connected: bool,
+    name: iasis_protocol::BoardName,
     brick: bool,
     face: Face,
     /// Bars beside each port number: one for a USB 2 link, two for USB 3.
@@ -89,7 +90,9 @@ impl View {
             return 0xff;
         }
         let mut pages = 0;
-        if (self.brick, self.connected, self.face) != (old.brick, old.connected, old.face) {
+        if (self.name, self.brick, self.connected, self.face)
+            != (old.name, old.brick, old.connected, old.face)
+        {
             pages |= 0b0000_0011;
         }
         if (self.ports, self.targets, self.bars) != (old.ports, old.targets, old.bars) {
@@ -150,6 +153,7 @@ pub fn view(status: &Status, button: &Button, now: u64) -> View {
     let mut view = View {
         // An Easter egg frame is drawn as it starts, so none is skipped.
         due: now + egg.map_or(FRAME_MS, |played| egg::FRAME_MS - played % egg::FRAME_MS),
+        name: status.settings.name,
         egg: egg.map(|played| played / egg::FRAME_MS),
         ports,
         targets: if acting {
@@ -516,7 +520,15 @@ pub fn draw<D: DrawTarget<Color = BinaryColor>>(
     target.clear(OFF)?;
     fill(target, 0, 0, 128, 11)?;
     face(target, view.face)?;
-    text(target, "iasis", 18, 1, true, OFF)?;
+    let title = view.name.as_str();
+    text(
+        target,
+        if title.is_empty() { "Iasis" } else { title },
+        18,
+        1,
+        true,
+        OFF,
+    )?;
     if view.brick {
         glyph(target, BOLT, 98, 1, OFF)?;
     }
@@ -932,6 +944,17 @@ mod tests {
             assert!(!lit(port, 2, 18));
         }
         assert!(!lit(4, 0, 18));
+    }
+
+    #[test]
+    fn renaming_a_board_refreshes_its_title() {
+        let mut status = Status::default();
+        let button = Button::default();
+        let before = view(&status, &button, 0);
+        status.settings.name = iasis_protocol::BoardName::new("Workshop Bench 2").unwrap();
+        let after = view(&status, &button, 0);
+        assert_eq!(after.name, status.settings.name);
+        assert_eq!(after.changed_pages(Some(&before)), 0b11);
     }
 
     #[test]
