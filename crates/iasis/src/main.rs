@@ -11,7 +11,7 @@ use anyhow::{Context, Result, bail, ensure};
 use clap::{Parser, Subcommand, ValueEnum};
 use iasis::{
     Board, UsbIds,
-    agent::{Client, Reply, Request, State},
+    agent::{Client, Reply, Request, State, Target},
     dfu::{self, Attempt, Outcome, Signal},
     home::Home,
     identity::AppleMode,
@@ -29,6 +29,9 @@ struct Cli {
     /// Board serial, sixteen hexadecimal digits
     #[arg(long, global = true, value_parser = parse_serial)]
     serial: Option<u64>,
+    /// Select a board by its display name (case-insensitive)
+    #[arg(long, global = true, conflicts_with = "serial")]
+    board: Option<String>,
     /// USB vendor ID in hexadecimal
     #[arg(long, global = true, default_value = "1209", value_parser = parse_id)]
     vid: u16,
@@ -62,7 +65,7 @@ enum Command {
         #[arg(long)]
         watch: bool,
     },
-    /// Disable target power and enter the ROM updater; requires --serial
+    /// Disable target power and enter the ROM updater
     Bootloader,
     /// Enumerate USB2 and SuperSpeed devices by physical connector
     Ports {
@@ -71,6 +74,8 @@ enum Command {
         #[arg(long)]
         watch: bool,
     },
+    /// Set the board name on its display and in host tools; an empty name clears it
+    Rename { name: String },
     /// Set the indicator brightness in percent of full; 50 is the default
     Brightness {
         #[arg(value_parser = clap::value_parser!(u8).range(
@@ -78,21 +83,21 @@ enum Command {
         ))]
         percent: u8,
     },
-    /// Enable attachment power or disable a port; requires --serial
+    /// Enable attachment power or disable a port
     Power {
         #[arg(value_parser = parse_port)]
         port: Port,
         #[arg(value_enum)]
         state: Power,
     },
-    /// Send an Apple DFU VDM; does not start a restore; requires --serial
+    /// Send an Apple DFU VDM; does not start a restore
     Dfu {
         #[arg(value_parser = parse_port)]
         port: Port,
         #[arg(long, value_enum, default_value = "apple-silicon")]
         device: AppleDevice,
     },
-    /// Send an Apple reboot VDM; requires --serial
+    /// Send an Apple reboot VDM
     Reboot {
         #[arg(value_parser = parse_port)]
         port: Port,
@@ -135,32 +140,29 @@ fn main() -> Result<()> {
         vendor: cli.vid,
         product: cli.pid,
     };
-    let command = match cli.command {
-        None => return overview(ids, cli.serial, false),
-        Some(Command::Watch) => return overview(ids, cli.serial, true),
-        Some(Command::List) => return list(ids, cli.serial),
-        Some(command) => command,
-    };
-    if let Command::Ipsw { path } = &command {
+    if let Some(Command::Ipsw { path }) = &cli.command {
         let prepared = progress::check_ipsw(path)?;
         println!("{}", serde_json::to_string_pretty(&prepared)?);
         return Ok(());
     }
-    // The agent keeps the images and the settings, and runs the restores,
-    // while it is running.
+    let serial = match cli.board {
+        Some(name) => Some(resolve_name(ids, &name)?),
+        None => cli.serial,
+    };
+    let command = match cli.command {
+        None => return overview(ids, serial, false),
+        Some(Command::Watch) => return overview(ids, serial, true),
+        Some(Command::List) => return list(ids, serial),
+        Some(command) => command,
+    };
     let mut agent = Client::connect(&Home::locate()?);
     match (&command, agent.as_mut()) {
         (Command::Images { command }, Some(agent)) => return images(agent, command.as_ref()),
         (Command::Images { .. }, None) => {
             bail!("the agent keeps the restore images; start iasisd")
         }
-        (Command::Brightness { percent }, Some(agent)) => {
-            return agent.request(&Request::Brightness { percent: *percent });
-        }
         (Command::Restore(options), Some(agent)) => {
-            let serial = cli
-                .serial
-                .context("this command requires --serial; use `iasis list` to select the board")?;
+            let serial = serial.context("select a board with --board NAME or --serial SERIAL")?;
             return restore_through(agent, serial, options);
         }
         _ => {}
@@ -168,16 +170,17 @@ fn main() -> Result<()> {
     if matches!(
         command,
         Command::Bootloader
+            | Command::Rename { .. }
             | Command::Brightness { .. }
             | Command::Power { .. }
             | Command::Dfu { .. }
             | Command::Reboot { .. }
             | Command::Restore(_)
-    ) && cli.serial.is_none()
+    ) && serial.is_none()
     {
-        bail!("this command requires --serial; use `iasis list` to select the board");
+        bail!("select a board with --board NAME or --serial SERIAL; see `iasis list`");
     }
-    let devices = iasis::discover(ids, cli.serial)?;
+    let devices = iasis::discover(ids, serial)?;
     let mut boards = Vec::new();
     for device in &devices {
         let board = match command {
@@ -192,15 +195,14 @@ fn main() -> Result<()> {
             )
         })?;
         anyhow::ensure!(
-            cli.serial
-                .is_none_or(|serial| serial == board.info().serial),
+            serial.is_none_or(|serial| serial == board.info().serial),
             "board serial changed"
         );
         boards.push(board);
     }
     if boards.len() != 1 {
         bail!(
-            "expected one Iasis board, found {}; use --serial to select one",
+            "expected one Iasis board, found {}; use --board NAME or --serial SERIAL",
             boards.len()
         );
     }
@@ -210,6 +212,7 @@ fn main() -> Result<()> {
             unreachable!()
         }
         Command::Restore(options) => batch::run(&devices[0], board, options)?,
+        Command::Rename { name } => board.rename(&name)?,
         Command::Brightness { percent } => board.brightness(percent)?,
         Command::Bootloader => {
             board.enter_bootloader()?;
@@ -455,19 +458,52 @@ fn unreadable(device: &nusb::DeviceInfo, error: &iasis::Error) -> String {
     }
 }
 
+fn resolve_name(ids: UsbIds, name: &str) -> Result<u64> {
+    ensure!(!name.is_empty(), "select an unnamed board by serial");
+    // Pin the name to its serial before opening an interface for any command.
+    let mut hits = Vec::new();
+    for device in iasis::discover(ids, None)? {
+        let board = Board::observe(&device)?;
+        if board.current().is_err() {
+            continue;
+        }
+        if board
+            .status()?
+            .settings
+            .name
+            .as_str()
+            .eq_ignore_ascii_case(name)
+        {
+            hits.push(board.info().serial);
+        }
+    }
+    match hits.as_slice() {
+        [serial] => Ok(*serial),
+        [] => bail!("no connected board named {name:?}; see `iasis list`"),
+        _ => bail!("multiple boards named {name:?}; select one with --serial"),
+    }
+}
+
 fn list(ids: UsbIds, serial: Option<u64>) -> Result<()> {
     let devices = iasis::discover(ids, serial)?;
     if devices.is_empty() {
         println!("No Iasis boards found.");
     }
     for device in &devices {
-        match Board::observe(device).and_then(|board| board.current().map(|()| board)) {
-            Ok(board) => {
+        match Board::observe(device)
+            .and_then(|board| board.status().map(|status| (board, status.settings.name)))
+        {
+            Ok((board, name)) => {
                 let info = board.info();
                 let [major, minor, patch] = info.firmware_version;
                 println!(
-                    "{:016x}  firmware {major}.{minor}.{patch}  bus {} port {:?}",
+                    "{:016x}  {}  firmware {major}.{minor}.{patch}  bus {} port {:?}",
                     info.serial,
+                    if name.as_str().is_empty() {
+                        "(unnamed)"
+                    } else {
+                        name.as_str()
+                    },
                     board.topology().bus,
                     board.topology().port_chain
                 );
@@ -626,6 +662,31 @@ fn restore_through(agent: &mut Client, serial: u64, options: &batch::Options) ->
         !options.button,
         "iasisd is running and already answers the board's Restore hold; make the hold there"
     );
+    let board = format!("{serial:016x}");
+    let Reply::State(state) = agent.ask(&Request::State)? else {
+        bail!("the agent did not return its boards");
+    };
+    let view = state
+        .boards
+        .iter()
+        .find(|b| b.serial == board)
+        .context("the board is not connected")?;
+    let session = view.session.context("the board is not attended")?;
+    let ports: Vec<u8> = options.ports.iter().map(|p| p.number()).collect();
+    let targets = ports
+        .iter()
+        .map(|number| {
+            let port = view
+                .ports
+                .iter()
+                .find(|p| p.number == *number && p.restore)
+                .with_context(|| format!("port {number} cannot be restored"))?;
+            Ok(Target {
+                port: *number,
+                generation: port.generation,
+            })
+        })
+        .collect::<Result<_>>()?;
     if let Some(path) = &options.ipsw {
         let _spinner = progress::waiting("Checking IPSW archive");
         match agent.ask(&Request::Import {
@@ -635,11 +696,10 @@ fn restore_through(agent: &mut Client, serial: u64, options: &batch::Options) ->
             _ => {}
         }
     }
-    let board = format!("{serial:016x}");
-    let ports: Vec<u8> = options.ports.iter().map(|port| port.number()).collect();
     agent.request(&Request::Restore {
         board: board.clone(),
-        ports: ports.clone(),
+        session,
+        targets,
     })?;
     let mut shown = vec![String::new(); ports.len()];
     let mut reply = agent.ask(&Request::Watch)?;
@@ -703,7 +763,10 @@ fn print_status(status: &Status) {
         status.watchdog_reason,
         status.retained_update
     );
-    println!("host {:?}  brightness {}%", status.host, status.brightness);
+    println!(
+        "host {:?}  brightness {}%",
+        status.host, status.settings.brightness
+    );
     println!(
         "CM5 power {}  I²C root fault {}  timeouts {}  expander {:?}  port capacity {}",
         status.side_power_enabled,

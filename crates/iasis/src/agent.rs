@@ -6,7 +6,6 @@
 
 use std::{
     collections::BTreeMap,
-    fs,
     path::PathBuf,
     sync::{
         Arc, Mutex,
@@ -17,7 +16,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
-use iasis_protocol::{BRIGHTNESS_DEFAULT, BRIGHTNESS_MAX, BRIGHTNESS_MIN, Port, PortAction};
+use iasis_protocol::{Port, PortAction};
 use nusb::DeviceInfo;
 use serde::{Deserialize, Serialize};
 
@@ -50,7 +49,12 @@ pub struct State {
     pub images: Snapshot,
     /// Why the agent cannot run restores, when it cannot.
     pub restore_problem: Option<String>,
-    pub brightness: u8,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Target {
+    pub port: u8,
+    pub generation: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -64,7 +68,8 @@ pub enum Request {
     /// its user to confirm.
     Restore {
         board: String,
-        ports: Vec<u8>,
+        session: u32,
+        targets: Vec<Target>,
     },
     Dfu {
         board: String,
@@ -79,8 +84,12 @@ pub enum Request {
         port: u8,
         on: bool,
     },
-    /// Set every board's lights, now and whenever one is attached.
+    Rename {
+        board: String,
+        name: String,
+    },
     Brightness {
+        board: String,
         percent: u8,
     },
     /// Keep the newest image for a model.
@@ -110,11 +119,6 @@ pub enum Reply {
     State(Box<State>),
 }
 
-#[derive(Serialize, Deserialize)]
-struct Settings {
-    brightness: u8,
-}
-
 /// A board the agent has seen. Its jobs outlive each session with it.
 #[derive(Default)]
 struct Attendance {
@@ -142,18 +146,41 @@ pub struct Agent {
     store: Store,
     engine: RestoreEngine,
     family: batch::Device,
-    brightness: Mutex<u8>,
     restore_problem: Mutex<Option<String>>,
     boards: Mutex<BTreeMap<u64, Arc<Attendance>>>,
+}
+
+fn restore_targets(
+    status: &iasis_protocol::Status,
+    selected: &[Target],
+) -> Result<Vec<(Port, u32)>> {
+    let mut targets = Vec::new();
+    for target in selected {
+        let number = target.port;
+        let port = Port::try_from(number)
+            .ok()
+            .context("ports are numbered 1 to 5")?;
+        ensure!(
+            status.ready_mask() & (1 << port.index()) != 0,
+            "port {number} has no ready target"
+        );
+        ensure!(
+            !targets.iter().any(|(other, _)| *other == port),
+            "port {number} is named twice"
+        );
+        ensure!(
+            target.generation == status.ports[port.index()].generation,
+            "the device on port {number} changed"
+        );
+        targets.push((port, target.generation));
+    }
+    ensure!(!targets.is_empty(), "no ports selected");
+    Ok(targets)
 }
 
 impl Agent {
     pub fn new(options: &Options) -> Result<Arc<Self>> {
         let home = Home::locate()?;
-        fs::create_dir_all(&home.state).context("creating the settings directory")?;
-        let settings = fs::read(home.state.join("settings.json"))
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<Settings>(&bytes).ok());
         let logs = options
             .logs
             .clone()
@@ -162,7 +189,6 @@ impl Agent {
             store: Store::open(home.cache.join("images"), Network::default())?,
             engine: RestoreEngine::new(&options.program, logs),
             family: options.family,
-            brightness: Mutex::new(settings.map_or(BRIGHTNESS_DEFAULT, |s| s.brightness)),
             restore_problem: Mutex::new(None),
             boards: Mutex::default(),
             home,
@@ -178,9 +204,11 @@ impl Agent {
                 .map(|(serial, board)| {
                     let link = board.link.lock().unwrap().clone();
                     let notice = board.notice.lock().unwrap().clone();
-                    match link.as_ref().and_then(|link| Some((link, link.status()?))) {
-                        Some((link, status)) => {
-                            let mut view = BoardView::new(link.board().info(), &status);
+                    match link
+                        .as_ref()
+                        .and_then(|link| link.board_view(&self.store, self.family))
+                    {
+                        Some(mut view) => {
                             let endings = board.endings.lock().unwrap();
                             for (port, ending) in view.ports.iter_mut().zip(endings.iter()) {
                                 port.result.clone_from(ending);
@@ -197,7 +225,6 @@ impl Agent {
                 .collect(),
             images: self.store.snapshot(),
             restore_problem: self.restore_problem.lock().unwrap().clone(),
-            brightness: *self.brightness.lock().unwrap(),
         }
     }
 
@@ -230,34 +257,21 @@ impl Agent {
     }
 
     /// Hand a client's restore request to the board's attendant.
-    fn restore(&self, serial: &str, ports: &[u8]) -> Result<()> {
+    fn restore(&self, serial: &str, session: u32, selected: &[Target]) -> Result<()> {
         if let Some(problem) = self.restore_problem.lock().unwrap().clone() {
             bail!(problem);
         }
         let (board, link) = self.board(serial)?;
         let status = link.status().context("the board has not been read yet")?;
-        let mut targets = Vec::new();
-        for &number in ports {
-            let port = Port::try_from(number)
-                .ok()
-                .context("ports are numbered 1 to 5")?;
-            ensure!(
-                status.ready_mask() & (1 << port.index()) != 0,
-                "port {number} has no ready target"
-            );
-            ensure!(
-                !targets.iter().any(|(other, _)| *other == port),
-                "port {number} is named twice"
-            );
-            targets.push((port, status.ports[port.index()].generation));
-        }
-        ensure!(!targets.is_empty(), "no ports selected");
+        ensure!(session == link.session(), "the board has reconnected");
+        let targets = restore_targets(&status, selected)?;
         // From here the notice is this request's.
         *board.notice.lock().unwrap() = None;
         {
             let mut slot = board.requests.lock().unwrap();
             ensure!(slot.is_none(), "the board is preparing another restore");
             *slot = Some(Submission {
+                session,
                 targets,
                 at: Instant::now(),
             });
@@ -275,31 +289,14 @@ impl Agent {
         Ok(())
     }
 
-    fn brightness(&self, percent: u8) -> Result<()> {
-        ensure!(
-            (BRIGHTNESS_MIN..=BRIGHTNESS_MAX).contains(&percent),
-            "brightness is {BRIGHTNESS_MIN} to {BRIGHTNESS_MAX} percent"
-        );
-        *self.brightness.lock().unwrap() = percent;
-        fs::write(
-            self.home.state.join("settings.json"),
-            serde_json::to_vec_pretty(&Settings {
-                brightness: percent,
-            })?,
-        )
-        .context("saving the settings")?;
-        for board in self.boards.lock().unwrap().values() {
-            if board.link.lock().unwrap().is_some() {
-                board.control()?.brightness(percent)?;
-            }
-        }
-        Ok(())
-    }
-
     pub fn handle(&self, request: Request) -> Reply {
         let result = match request {
             Request::State | Request::Watch => return Reply::State(Box::new(self.state())),
-            Request::Restore { board, ports } => self.restore(&board, &ports),
+            Request::Restore {
+                board,
+                session,
+                targets,
+            } => self.restore(&board, session, &targets),
             Request::Dfu { board, port } => self.command(&board, port, self.family.dfu_action()),
             Request::Reboot { board, port } => self.command(&board, port, PortAction::Reboot),
             Request::Power { board, port, on } => self.command(
@@ -311,7 +308,12 @@ impl Agent {
                     PortAction::Disable
                 },
             ),
-            Request::Brightness { percent } => self.brightness(percent),
+            Request::Brightness { board, percent } => self
+                .board(&board)
+                .and_then(|(board, _)| Ok(board.control()?.brightness(percent)?)),
+            Request::Rename { board, name } => self
+                .board(&board)
+                .and_then(|(board, _)| Ok(board.control()?.rename(&name)?)),
             Request::Keep { model } => self.store.want(&model),
             Request::Forget { model } => self.store.forget(&model),
             Request::Import { path } => self.store.import(&path).map(|_| ()),
@@ -332,13 +334,6 @@ impl Agent {
         let link = Arc::new(Link::open(device, board.jobs.clone())?);
         println!("Board {:016x}: attending", link.board().info().serial);
         *board.device.lock().unwrap() = Some(device.clone());
-        let brightness = *self.brightness.lock().unwrap();
-        if let Err(error) = board
-            .control()
-            .and_then(|control| Ok(control.brightness(brightness)?))
-        {
-            eprintln!("Board {:016x}: {error:#}", link.board().info().serial);
-        }
         *board.link.lock().unwrap() = Some(link.clone());
         // Whatever kept an earlier attempt from the board is over.
         *board.notice.lock().unwrap() = None;
@@ -461,6 +456,7 @@ impl Agent {
 mod socket {
     use super::*;
     use std::{
+        fs,
         io::{BufRead, BufReader, Write},
         os::unix::{
             fs::PermissionsExt,
@@ -614,5 +610,25 @@ impl Client {
 
     pub fn request(&mut self, _: &Request) -> Result<()> {
         bail!("the agent has no socket on this platform")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iasis_protocol::{PortState, Status};
+
+    #[test]
+    fn confirmation_pins_the_attachment_on_each_selected_port() {
+        let mut status = Status::default();
+        status.ports[0].state = PortState::Contract;
+        status.ports[0].generation = 7;
+        let targets = [Target {
+            port: 1,
+            generation: 7,
+        }];
+        assert!(restore_targets(&status, &targets).is_ok());
+        status.ports[0].generation = 8;
+        assert!(restore_targets(&status, &targets).is_err());
     }
 }

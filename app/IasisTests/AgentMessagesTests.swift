@@ -8,9 +8,11 @@ struct AgentMessagesTests {
         let board = try #require(state.boards.first)
         #expect(board.serial == "a0e012192cdfdb67")
         #expect(board.ports.map(\.number) == [1, 2, 3, 4, 5])
-        #expect(board.ports[1].light == .init(hue: .blue, pulse: false, dim: false))
-        #expect(board.ports[2].job == .running)
-        #expect(board.ports[2].light.pulse)
+        #expect(board.name == "Repair Bench")
+        #expect(board.visiblePorts.map(\.number) == [2, 3, 4, 5])
+        #expect(board.ports[1].menuTitle == "2. MacBook Air · DFU")
+        #expect(board.ports[1].symbol == "laptopcomputer")
+        #expect(board.ports[2].menuTitle == "3. iPad · Restoring 43%")
         #expect(board.ports[3].result?.phase == .reported)
         #expect(state.images.images.first?.buildVersion == "26B131")
         #expect(state.images.models.first?.latest?.build == "24B156")
@@ -36,20 +38,13 @@ struct AgentMessagesTests {
         #expect(try Fixtures.decode(#"{"error":"no such board"}"#) == .error("no such board"))
     }
 
-    @Test func aHueFromANewerAgentIsAnUnidentifiedDevice() throws {
-        let light = try JSONDecoder().decode(
-            AgentState.Light.self,
-            from: Data(#"{"hue":"teal","pulse":false,"dim":false}"#.utf8)
-        )
-        #expect(light.hue == .white)
-    }
-
     @Test(arguments: [
         (AgentRequest.watch, #"{"op":"watch"}"#),
-        (.restore(board: "a0e0", ports: [2, 3]), #"{"board":"a0e0","op":"restore","ports":[2,3]}"#),
+        (.restore(board: "a0e0", session: 77, targets: [.init(port: 2, generation: 4)]), #"{"board":"a0e0","op":"restore","session":77,"targets":[{"generation":4,"port":2}]}"#),
         (.dfu(board: "a0e0", port: 2), #"{"board":"a0e0","op":"dfu","port":2}"#),
         (.power(board: "a0e0", port: 1, on: false), #"{"board":"a0e0","on":false,"op":"power","port":1}"#),
-        (.brightness(percent: 30), #"{"op":"brightness","percent":30}"#),
+        (.brightness(board: "a0e0", percent: 30), #"{"board":"a0e0","op":"brightness","percent":30}"#),
+        (.rename(board: "a0e0", name: "Bench A"), #"{"board":"a0e0","name":"Bench A","op":"rename"}"#),
         (.importImage(path: "/tmp/a.ipsw"), #"{"op":"import","path":"\/tmp\/a.ipsw"}"#),
         (.remove(build: "26B131"), #"{"build":"26B131","op":"remove"}"#),
     ])

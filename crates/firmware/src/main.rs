@@ -12,13 +12,17 @@ mod stage;
 mod upstream;
 mod usb;
 
-use core::{cell::Cell, fmt::Write};
+use core::{
+    cell::{Cell, RefCell},
+    fmt::Write,
+};
 
 use embassy_executor::Spawner;
 use embassy_futures::join::{join_array, join4};
 use embassy_rp::{
     adc::{self, Adc, Channel},
     bind_interrupts, dma,
+    flash::{Blocking, Flash},
     gpio::{Input, Pull},
     i2c, peripherals, pio,
     pio_programs::ws2812::{PioWs2812, PioWs2812Program},
@@ -31,6 +35,10 @@ use embassy_usb::{Builder, Config};
 use iasis_protocol::{self as protocol, Info, PortFaults, Status, Supply};
 
 include!(concat!(env!("OUT_DIR"), "/config.rs"));
+
+const FLASH_BYTES: usize = 2 * 1024 * 1024;
+type SettingsStore =
+    iasis_firmware::settings::Store<Flash<'static, peripherals::FLASH, Blocking, FLASH_BYTES>>;
 
 bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => embassy_rp::usb::InterruptHandler<peripherals::USB>;
@@ -69,6 +77,9 @@ async fn main(_spawner: Spawner) {
     );
     let mut watchdog = Watchdog::new(p.WATCHDOG);
     watchdog.start(Duration::from_secs(2));
+    let mut settings = SettingsStore::open(Flash::new_blocking(p.FLASH)).expect("settings range");
+    let _ = settings.reclaim();
+    let settings = RefCell::new(settings);
     board::configure_failure_reset();
     Timer::after_micros(10).await;
     controls.release_expander();
@@ -122,7 +133,7 @@ async fn main(_spawner: Spawner) {
     let info = Info {
         serial,
         firmware_version: FIRMWARE_VERSION,
-        flash_bytes: 2 * 1024 * 1024,
+        flash_bytes: FLASH_BYTES as u32,
         capabilities: protocol::CAP_TELEMETRY
             | protocol::CAP_ROM_UPDATE
             | protocol::CAP_PORT_CONTROL
@@ -131,6 +142,7 @@ async fn main(_spawner: Spawner) {
             | protocol::CAP_RESTORE_ARM,
     };
     let initial = Status {
+        settings: settings.borrow().settings,
         reset_reason: handoff.reset_reason,
         watchdog_reason: handoff.watchdog_reason,
         retained_update: handoff.retained,
@@ -141,9 +153,10 @@ async fn main(_spawner: Spawner) {
     let status = Cell::new(initial);
     let update = Cell::new(false);
     let command = Cell::new(None);
+    let ports = ports::Ports::new();
+    let button_armed = Cell::new(false);
     let configured = Cell::new(false);
     let suspended = Cell::new(false);
-    let brightness = Cell::new(protocol::BRIGHTNESS_DEFAULT);
     let session = usb::Session::default();
     let mut management = usb::Management {
         info,
@@ -153,7 +166,9 @@ async fn main(_spawner: Spawner) {
         command: &command,
         configured: &configured,
         suspended: &suspended,
-        brightness: &brightness,
+        settings: &settings,
+        ports: &ports,
+        button_armed: &button_armed,
     };
 
     let mut config = Config::new(USB_VID, USB_PID);
@@ -196,7 +211,6 @@ async fn main(_spawner: Spawner) {
         controls,
         outputs,
     });
-    let ports = ports::Ports::new();
     let mut index = 0;
     let port_tasks = join_array(pd_interrupts.map(|int| {
         index += 1;
@@ -225,6 +239,7 @@ async fn main(_spawner: Spawner) {
         let mut last_led_frame = None;
         let mut oled = oled::Oled::new();
         let mut links_due = 0;
+        let mut reclaim_due = 0;
         loop {
             if update.get() {
                 // Give the control status stage time to complete before disconnecting.
@@ -375,11 +390,10 @@ async fn main(_spawner: Spawner) {
             next.uptime_ms = Instant::now().as_millis();
             oled.tick(&io, &next, &button, next.uptime_ms).await;
             next.i2c_root_fault |= io.lock().await.bus.faulted();
-            // A host report can arrive during the I²C work above. Apply it
-            // before selecting targets for a button action in this pass.
+            // Host reports can change the targets during the I²C work above.
             let now = Instant::now().as_millis();
             next.host = session.active(now);
-            ports.host(session.take_report(now), next.host.is_some(), now);
+            ports.host(None, next.host.is_some(), now);
             next.ports = ports.statuses();
             let pending = session.take_arm(now);
             if let Some(event) = button.sample(&next, pending, confirm.is_low(), now) {
@@ -411,12 +425,24 @@ async fn main(_spawner: Spawner) {
                     }
                 }
             }
-            next.brightness = brightness.get();
+            button_armed.set(button.armed().is_some());
+            if now >= reclaim_due
+                && !button_armed.get()
+                && command.get().is_none()
+                && !ports.settings_busy(now)
+                && ports.idle()
+                && let Ok(_bus) = io.try_lock()
+            {
+                let _ = settings.borrow_mut().reclaim();
+                reclaim_due = now + 1000;
+            }
+            next.settings = settings.borrow().settings;
+            next.settings_full = settings.borrow().full();
             status.set(next);
             if Instant::now().as_millis() >= panel_due {
                 let frame = iasis_firmware::panel::dim(
                     iasis_firmware::panel::indicators(&next, &button, now),
-                    next.brightness,
+                    next.settings.brightness,
                 );
                 if last_led_frame != Some(frame) {
                     let colors = frame.map(|[r, g, b]| smart_leds::RGB8 { r, g, b });

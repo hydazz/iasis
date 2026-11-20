@@ -4,13 +4,13 @@
 
 ## USB transport
 
-Messages use vendor control transfers on endpoint zero, addressed to interface 0. On macOS and Linux, clients can read identity and status and hold the host session without claiming the interface. Clients claim interface 0 before issuing a port command, changing the host power allowance or requesting a firmware update.
+Messages use vendor control transfers on endpoint zero, addressed to interface 0. On macOS and Linux, clients can read identity and status and hold the host session without claiming the interface. Clients claim interface 0 before issuing a port command, changing a board setting or host power allowance, or requesting a firmware update.
 
 | Field                    | Value                                                     |
 | ------------------------ | --------------------------------------------------------- |
 | Request type / recipient | Vendor / interface                                        |
 | `wIndex`                 | `0`                                                       |
-| `wValue`                 | Protocol version, `13`                                    |
+| `wValue`                 | Protocol version, `14`                                    |
 | Maximum payload          | 1344 bytes                                                |
 | Payload header           | ASCII `IASI`, then a little-endian `u16` protocol version |
 | Payload body             | Postcard-encoded message                                  |
@@ -23,7 +23,7 @@ Messages use vendor control transfers on endpoint zero, addressed to interface 0
 | `4`     | Host → device | `PortCommand`: serial, port, generation, request ID, action      |
 | `6`     | Host → device | `HostReport`: serial, session and the host's view of each port   |
 | `7`     | Host → device | `HostControlRequest`: serial and a restore arm or session end    |
-| `8`     | Host → device | `Lights`: serial and indicator brightness in percent             |
+| `8`     | Host → device | `SettingsRequest`: serial and a name or brightness change        |
 
 The decoder rejects unknown versions, invalid ports, incomplete messages and trailing bytes. Wire changes require a protocol version bump, independently of the Cargo package version.
 
@@ -55,7 +55,7 @@ Send a `PortCommand` with a nonzero request ID. USB acceptance queues the comman
 | Apple action unconfirmed  | Sent without GoodCRC; the target may still have acted                                       |
 | Bootloader accepted       | ROM reboot queued; use picotool to detect the updater                                       |
 
-`Lights` sets the indicator brightness from 10 to 100 percent, where 50 is the level the board starts at. Status reports it as `brightness`. The board keeps it until it restarts.
+`SettingsRequest` changes one field in `Status.settings`. A name holds up to 16 printable ASCII characters, with spaces allowed inside. An empty name clears it. Brightness ranges from 10 to 100 percent and defaults to 50. The board acknowledges a change after saving it to flash. `Status.settings_busy` means a target operation or an erase arm is in progress. Retry a change once it finishes. A full settings store rejects changes and sets `Status.settings_full`. Unplug the targets and retry once this flag clears.
 
 ## Host session and reports
 
