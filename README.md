@@ -66,7 +66,7 @@ Port lights outside the selection dim. While the button is held, only the ports 
 
 After a DFU the port pulses blue. It turns steady blue once a host sees the target in DFU, which needs the [host agent](#host-agent). The [light table](crates/firmware/README.md#controls-and-status) lists every colour.
 
-A white port light marks a device Iasis cannot identify; a hold passes it by. DFU leaves their data intact and works with Apple Configurator. `power <port> off` disables a port. `power <port> on` enables it and retries a fault. `brightness <percent>` dims or brightens the lights.
+A white port light marks a device Iasis cannot identify; a hold passes it by. DFU leaves their data intact and works with Apple Configurator. `power <port> off` disables a port. `power <port> on` enables it and retries a fault. `brightness <percent>` dims or brightens the lights; with the [agent](#host-agent) running it applies to every board and is set again whenever one starts.
 
 Native USB-C uses the host's advertised current. With a legacy A-to-C connection, set the remaining shared USB allowance, including Iasis and after subtracting other loads:
 
@@ -78,32 +78,50 @@ The [firmware power table](crates/firmware/README.md#port-power) lists the limit
 
 ### Host agent
 
-`iasisd` attends every connected board. It tells each board which USB mode its targets are in, so a port light turns steady blue when its target really is in DFU, however it got there. It needs no arguments:
+`iasisd` attends every connected board and needs no arguments:
 
 ```sh
 target/release/iasisd
 ```
 
-The status light is green and the OLED shows a USB symbol while a host is attached. One host holds a board at a time: `iasis restore` attaches for its own run, so stop `iasisd` before using it. The other `iasis` commands work alongside the agent.
+It does three things:
+
+- It tells each board which USB mode its targets are in, so a port light turns steady blue when its target really is in DFU, however it got there.
+- It keeps the [restore images](#images) and fetches the ones it lacks.
+- It runs the restores that a board's button or a client asks for.
+
+The status light is green and the OLED shows a USB symbol while a host is attached. One host holds a board at a time. The `iasis` commands work alongside the agent, and `iasis restore`, `iasis images` and `iasis brightness` go through it. Other clients use its [local socket](crates/iasis/README.md).
 
 To run it in the background for your login session, prefix the command with `systemd-run --user --unit=iasisd --` on Linux or `launchctl submit -l local.iasisd --` on macOS. For automatic startup at login, use absolute paths in a systemd user service's `ExecStart` or a user LaunchAgent's `ProgramArguments` in `~/Library/LaunchAgents/` with `RunAtLoad` enabled. On macOS the agent belongs to the login session, as Apple Configurator restores do.
 
-### Restore
+### Images
 
-Install [idevicerestore](https://github.com/libimobiledevice/idevicerestore) and its dependencies. For source builds, configure with `--without-limera1n`. Use the system `usbmuxd` service. macOS includes it, and Linux needs it installed and running.
-
-With a local IPSW:
+The agent keeps the newest release Apple signs for each model it restores. The first restore of a model fetches its image, and the agent then checks for a newer release every six hours and replaces the old one once the new one is in hand. Release listings come from [ipsw.me](https://ipsw.me) and the archives from Apple's servers, checked against their published SHA-256.
 
 ```sh
-target/release/iasis ipsw /path/to/UniversalMac.ipsw
-target/release/iasis --serial 0123456789abcdef restore /path/to/UniversalMac.ipsw --ports 1,2,3,4,5 --erase
+target/release/iasis images                       # what is kept, and any download
+target/release/iasis images keep iPad13,18        # fetch a model's image ahead of time
+target/release/iasis images add /path/to/UniversalMac.ipsw
+target/release/iasis images remove 26B131
 ```
 
-**`--erase` erases the selected targets.** Add `--button` to confirm the erase on the board. Omit `--ports` with `--button` to choose targets there too. Use `--host-ma 1200` to set a legacy host allowance for the batch.
+An image added from a file stays until it is removed. Where several images fit a target, the newest is used. Images live in the cache directory: `~/Library/Caches/iasis` on macOS and `$XDG_CACHE_HOME/iasis` on Linux. A Mac image is about 26 GB and an iPad image about 11 GB.
+
+While an image is being fetched for a target, its port pulses purple, the OLED labels it `IMG`, and `iasis` shows the percentage.
+
+### Restore
+
+Install [idevicerestore](https://github.com/libimobiledevice/idevicerestore) and its dependencies. For source builds, configure with `--without-limera1n`. Use the system `usbmuxd` service. macOS includes it, and Linux needs it installed and running. Pass `iasisd --program /path/to/idevicerestore` if it is not on the `PATH`.
+
+```sh
+target/release/iasis --serial 0123456789abcdef restore --ports 1,2,3,4,5 --erase
+```
+
+**`--erase` erases the selected targets.** With the agent running, the request goes to it and the command follows the restore to its end. Without the agent, the command hosts the board for its own run; there, `--button` confirms the erase on the board, and `--button` without `--ports` chooses the targets there too. Name an IPSW before the options to restore from that file instead of the newest release. Use `--host-ma 1200` to set a legacy host allowance for a run without the agent.
 
 Iasis runs one idevicerestore process per ordinary DFU target (`05ac:1227`) on macOS and Linux, selected by its unique ECID. For Apple Debug USB DFU (`05ac:1881`), use Iasis to put the Mac in DFU and Apple Configurator on the host Mac to restore it.
 
-In a terminal, each port has a progress row. Percentages apply to the current restore stage. Redirecting output records each change on its own line. Logs and working files go under `restores/`, or the directory passed to `--logs`. Allow space for an extracted OS image per worker. Iasis checks the local archive and matches it to the target's chip and board IDs. idevicerestore checks Apple signing.
+Percentages apply to the current restore stage. Logs and working files go under `restores/` in the cache directory, or the directory passed to `--logs`. Allow space for an extracted OS image per worker. Iasis matches each image to the target's chip and board IDs. idevicerestore checks Apple signing.
 
 When restoring new Macs with Configurator, keep the host session unlocked until Configurator confirms completion. A locked host can defer the target’s USB network interface and time out waiting for it to boot. Allow disk space for one expanded IPSW per target, even when one Configurator command restores the whole batch.
 
@@ -117,15 +135,9 @@ To restore the default behaviour, run `defaults delete com.apple.AMPDeviceDiscov
 
 #### Button restores
 
-Give the agent restore images to have it answer the board's Restore hold. Download the IPSWs beforehand and pass each file with `--ipsw`. A mixed batch can use several images. Each selected target must match exactly one.
+With the agent running and idevicerestore installed, the board's Restore hold needs nothing else. Tap to select targets, then hold until the status light turns purple and release. Preparation puts the targets into DFU and fetches any image the agent lacks. Once the erase is ready, the status light blinks purple: hold for three seconds to confirm, or tap to cancel. The agent keeps listening after cancellation and while workers run.
 
-```sh
-"$PWD/target/release/iasisd" \
-  --ipsw /path/to/UniversalMac.ipsw --ipsw /path/to/iPad.ipsw \
-  --program "$(command -v idevicerestore)" --logs "$HOME/restores"
-```
-
-Tap to select targets, then hold until the status light turns purple and release. The hold offers Restore only while a host with images is attached; a foreground `iasis restore --button` is one too. Preparation can put the targets into DFU. Once the erase is ready, hold for three seconds to confirm or tap to cancel. The agent keeps listening after cancellation and while workers run.
+An erase stays ready for 20 seconds. If a long download outlasts your wait, make the Restore hold again once the port is steady blue: the image is in the store by then.
 
 #### Example restore times
 
