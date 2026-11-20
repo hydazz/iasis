@@ -9,26 +9,12 @@ pub fn check_usbmuxd() -> std::io::Result<()> {
     mux::list().map(|_| ())
 }
 
+pub use iasis_protocol::AppleMode;
 use iasis_protocol::Port;
 use serde::Serialize;
 use thiserror::Error;
 
 use crate::topology::{Snapshot, UsbDevice};
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AppleMode {
-    Dfu,
-    PortDfu,
-    Recovery,
-    Wtf,
-    Kis,
-    KisDfu,
-    /// A usbmux-capable descriptor; QueryType has not identified the service.
-    Mux,
-    Restored,
-    Normal,
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

@@ -4,28 +4,30 @@
 
 ## USB transport
 
-Messages use vendor control transfers on endpoint zero, addressed to interface 0. On macOS and Linux, clients can read identity and status, manage the restore lease and send worker feedback without claiming the interface. Clients claim interface 0 before issuing a port command, changing the host power allowance or requesting a firmware update.
+Messages use vendor control transfers on endpoint zero, addressed to interface 0. On macOS and Linux, clients can read identity and status and hold the host session without claiming the interface. Clients claim interface 0 before issuing a port command, changing the host power allowance or requesting a firmware update.
 
 | Field                    | Value                                                     |
 | ------------------------ | --------------------------------------------------------- |
 | Request type / recipient | Vendor / interface                                        |
 | `wIndex`                 | `0`                                                       |
-| `wValue`                 | Protocol version, `10`                                    |
-| Maximum payload          | 1152 bytes                                                |
+| `wValue`                 | Protocol version, `11`                                    |
+| Maximum payload          | 1344 bytes                                                |
 | Payload header           | ASCII `IASI`, then a little-endian `u16` protocol version |
 | Payload body             | Postcard-encoded message                                  |
 
-| Request | Direction     | Message                                                            |
-| ------- | ------------- | ------------------------------------------------------------------ |
-| `1`     | Device → host | `Info`: board serial, firmware version, flash size, capabilities   |
-| `2`     | Device → host | `Status`: latest completed sample                                  |
-| `3`     | Host → device | `BootloaderRequest`: board serial                                  |
-| `4`     | Host → device | `PortCommand`: serial, port, generation, request ID, action        |
-| `5`     | Host → device | `HostBudget`: serial, legacy host allowance in mA                  |
-| `6`     | Host → device | `RestoreFeedback`: serial, port, generation, ECID, phase, progress |
-| `7`     | Host → device | `RestoreControlRequest`: serial and begin, keep-alive, arm or end  |
+| Request | Direction     | Message                                                          |
+| ------- | ------------- | ---------------------------------------------------------------- |
+| `1`     | Device → host | `Info`: board serial, firmware version, flash size, capabilities |
+| `2`     | Device → host | `Status`: latest completed sample                                |
+| `3`     | Host → device | `BootloaderRequest`: board serial                                |
+| `4`     | Host → device | `PortCommand`: serial, port, generation, request ID, action      |
+| `5`     | Host → device | `HostBudget`: serial, legacy host allowance in mA                |
+| `6`     | Host → device | `HostReport`: serial, session and the host's view of each port   |
+| `7`     | Host → device | `HostControlRequest`: serial and a restore arm or session end    |
 
 The decoder rejects unknown versions, invalid ports, incomplete messages and trailing bytes. Wire changes require a protocol version bump, independently of the Cargo package version.
+
+`Info` and `BootloaderRequest` keep one layout, and the board answers them whatever version `wValue` and the payload header carry. The `Info` header gives the version the firmware speaks, so a tool built for another version can still name the board and send it to its updater.
 
 ## Commands and status
 
@@ -55,12 +57,30 @@ Send a `PortCommand` with a nonzero request ID. USB acceptance queues the comman
 
 `HostBudget` is the remaining legacy USB allowance including Iasis. Zero clears it; values above 1600 mA are rejected. It applies only to Default-current connections; native USB-C Rp takes precedence.
 
-## Button events and restore feedback
+## Host session and reports
 
-Local DFU and reboot events carry the selected physical port mask and attachment generations. Holding the button to Restore sends a preparation request for the selected targets to the active host session. The host prepares the image and targets before issuing a restore arm.
+The board cannot tell a target in DFU from a running one. A host can, from the target's USB, and says so in a `HostReport`. One host at a time holds the board's session. The first report carrying a new nonzero session ID takes a free board; later reports with that ID renew a three-second lease. A report from another host is refused while the lease runs, and a session whose lease has lapsed cannot resume: its host starts a new one. USB reset, suspend and `End` release the session at once. `Status.host` names the session and whether its host can prepare a restore.
 
-A restore arm identifies the session, operation, target mask, attachment generations and deadline in board uptime. The host refreshes its three-second session lease. The arm expires within 20 seconds. A fresh three-second hold confirms the arm once. A tap cancels. USB reset, host-session loss and attachment changes invalidate pending confirmation. The host checks the confirmed identifiers, target ECIDs and current attachments before launching workers.
+Each report replaces the last. A port entry carries the attachment generation it describes; an entry for another generation is ignored, and a port without one has no host view. `observed` gives what is on the port's USB: `absent`, `other`, `ambiguous` (several devices, a hub, or one ECID on two connectors) or an Apple mode with its ECID when known. `kis` is Apple Debug USB whose mode nothing has established; `kis_dfu` is DFU confirmed over it; `mux` is a running system or restore service that has not been asked which. Status returns the view as `observed` on each port and drops it when the attachment changes or the session ends.
 
-Feedback must match the board serial and attachment generation, carry a nonzero ECID and use progress from 0–100 within the current restore stage. Detach clears it; five seconds without an update changes active feedback to `Unconfirmed`.
+`request` on a port is the last DFU or reboot the board sent, from the button or a `PortCommand`, with the uptime it went out. The target's acknowledgement does not establish the result, so the request stays until one of these:
+
+| Request | Cleared when                                                              |
+| ------- | ------------------------------------------------------------------------- |
+| DFU     | A host observes `dfu` or `kis_dfu`                                        |
+| DFU     | 15 seconds have passed and a host observes anything but `absent`          |
+| DFU     | No host sees the target and its attachment changes after those 15 seconds |
+| Reboot  | 15 seconds have passed                                                    |
+| Either  | The port faults, is disabled, or a restore starts on it                   |
+
+A DFU request older than 15 seconds is unverified: sent, and seen by no host.
+
+A port entry can also carry the host's restore job for that attachment: a nonzero ECID, a phase and progress from 0–100 within the current restore stage. Detach clears it; five seconds without a report that carries it changes an active job to `Unconfirmed`. A port with an active or unconfirmed job refuses DFU and reboot commands with `Busy`.
+
+## Button events and restore arms
+
+Local DFU and reboot events carry the selected physical port mask and attachment generations. The button offers Restore only while the session's host reports `restore_ready`. Holding to Restore sends a preparation request for the selected targets to that session. The host prepares the image and targets before issuing a restore arm.
+
+A restore arm identifies the session, operation, target mask, attachment generations and deadline in board uptime. Arm IDs rise within a session and each is issued once. The arm expires within 20 seconds. A fresh three-second hold confirms the arm once. A tap cancels. USB reset, host-session loss and attachment changes invalidate pending confirmation. The host checks the confirmed identifiers, target ECIDs and current attachments before launching workers.
 
 `RestoreReported` means idevicerestore reported success and exited zero. It is not a post-restore boot check.
