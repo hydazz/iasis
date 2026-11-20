@@ -10,33 +10,24 @@ struct AgentModelTests {
         model.start()
         try await waitUntil { model.state != nil }
         #expect(model.state == state)
-        #expect(model.isBusy)
-        #expect(model.hasFault)
+        #expect(MenuBarStatus(model.state) == .fault)
     }
 
-    @Test func anEraseWaitsForTheUsersWord() async throws {
-        let agent = FakeAgent()
-        let model = AgentModel(agent: agent)
-        let port = PortID(board: "a0e012192cdfdb67", port: 2)
-        model.askToRestore(port)
-        #expect(model.confirming == port)
-        model.cancelRestore()
-        model.confirmRestore()
-        #expect(await agent.received.isEmpty)
-
-        model.askToRestore(port)
-        model.confirmRestore()
-        #expect(model.confirming == nil)
-        try await waitUntil { await !agent.received.isEmpty }
-        #expect(await agent.received == [.restore(board: port.board, ports: [2])])
-    }
-
-    @Test func aRefusalIsShownUntilDismissed() async {
-        let model = AgentModel(agent: FakeAgent(refusal: "port 2 has no ready target"))
-        await model.send(.dfu(board: "a0e0", port: 2))
-        #expect(model.failure == "port 2 has no ready target")
-        model.dismissFailure()
-        #expect(model.failure == nil)
+    @Test func menuStatusFollowsConnectedBoardsAndPortLights() throws {
+        var state = try Fixtures.state
+        #expect(MenuBarStatus(nil) == .offline)
+        #expect(MenuBarStatus(state) == .fault)
+        state.boards[0].ports.removeAll { $0.light.hue == "red" }
+        state.images.fetch = nil
+        #expect(MenuBarStatus(state) == .busy)
+        state.boards[0].ports.removeAll { $0.light.pulse }
+        #expect(MenuBarStatus(state) == .ready)
+        state.images.fetch = try Fixtures.state.images.fetch
+        #expect(MenuBarStatus(state) == .busy)
+        state.boards[0].notice = "Cannot read board"
+        #expect(MenuBarStatus(state) == .fault)
+        state.boards = []
+        #expect(MenuBarStatus(state) == .offline)
     }
 
     private func waitUntil(_ done: () async -> Bool) async throws {

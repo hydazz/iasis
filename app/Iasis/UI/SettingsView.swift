@@ -19,26 +19,34 @@ struct SettingsView: View {
 
 private struct GeneralSettings: View {
     let model: AgentModel
-    @State private var brightness = 50.0
-    @State private var dragging = false
+    @State private var selection: String?
     @State private var revealsDevices = FinderReveal.isEnabled
 
     var body: some View {
         Form {
-            Section("Lights") {
-                Slider(value: $brightness, in: 10 ... 100, step: 5) {
-                    Text("Brightness")
-                } minimumValueLabel: {
-                    Image(systemName: "sun.min")
-                } maximumValueLabel: {
-                    Image(systemName: "sun.max")
-                } onEditingChanged: { editing in
-                    dragging = editing
-                    if !editing {
-                        model.perform(.brightness(percent: Int(brightness)))
+            Section("Boards") {
+                if let state = model.state, !state.boards.isEmpty {
+                    let selected = state.boards.first { $0.serial == selection } ?? state.boards[0]
+                    Picker("Board", selection: Binding(get: { selected.serial }, set: { selection = $0 })) {
+                        ForEach(state.boards) { board in
+                            Text(state.title(for: board)).tag(board.serial)
+                        }
                     }
+                    LabeledContent("Serial", value: selected.serial)
+                    if selected.ports.isEmpty {
+                        Text(selected.notice ?? "Board unavailable")
+                    } else {
+                        BoardSettings(board: selected, model: model)
+                            .id(selected.serial)
+                            .disabled(selected.settingsBusy)
+                        if selected.settingsBusy {
+                            Text("Settings are locked while the board is busy.")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } else {
+                    Text(model.state == nil ? "Agent Not Running" : "No Boards Connected")
                 }
-                .disabled(model.state == nil)
             }
             Section {
                 Toggle("Open Finder when a device connects", isOn: $revealsDevices)
@@ -47,15 +55,50 @@ private struct GeneralSettings: View {
             }
         }
         .formStyle(.grouped)
-        .onChange(of: model.state?.brightness, initial: true) { _, agent in
-            // The agent's level is the truth, except under the user's hand.
-            if let agent, !dragging {
-                brightness = Double(agent)
-            }
-        }
         .onChange(of: revealsDevices) { _, reveals in
             FinderReveal.set(reveals)
         }
+    }
+}
+
+private struct BoardSettings: View {
+    let board: AgentState.Board
+    let model: AgentModel
+    @State private var draft: String?
+    @State private var brightness: Double?
+
+    var body: some View {
+        LabeledContent("Name") {
+            TextField("Board name", text: Binding(get: { draft ?? board.name }, set: { draft = $0 }), prompt: Text("Iasis"))
+                .labelsHidden()
+                .onSubmit(saveName)
+                .help("Up to 16 printable ASCII characters. An empty name resets the board name.")
+            Button("Save", action: saveName)
+                .disabled(draft == nil || draft == board.name)
+        }
+        Slider(
+            value: Binding(get: { brightness ?? Double(board.brightness) }, set: { brightness = $0 }),
+            in: 10 ... 100,
+            step: 1
+        ) {
+            Text("Light brightness")
+        } onEditingChanged: { editing in
+            if !editing, let brightness {
+                model.perform(.brightness(board: board.serial, percent: Int(brightness)))
+                self.brightness = nil
+            }
+        }
+        .accessibilityValue("\(Int(brightness ?? Double(board.brightness))) percent")
+        .onChange(of: board.name) { _, name in
+            if draft == name {
+                draft = nil
+            }
+        }
+    }
+
+    private func saveName() {
+        guard let draft, draft != board.name else { return }
+        model.perform(.rename(board: board.serial, name: draft))
     }
 }
 

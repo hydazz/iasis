@@ -23,14 +23,12 @@ pub struct Session {
     deadline: Cell<u64>,
     last_arm: Cell<u32>,
     pending: Cell<Option<RestoreArm>>,
-    report: Cell<Option<HostReport>>,
 }
 
 impl Session {
     pub fn disconnect(&self) {
         self.deadline.set(0);
         self.pending.set(None);
-        self.report.set(None);
     }
 
     pub fn active(&self, now: u64) -> Option<HostSession> {
@@ -50,26 +48,23 @@ impl Session {
         self.pending.take().filter(|arm| now < arm.expires)
     }
 
-    /// The newest report not yet applied to the ports.
-    pub fn take_report(&self, now: u64) -> Option<HostReport> {
-        self.active(now)?;
-        self.report.take()
+    pub fn awaiting_button(&self, now: u64) -> bool {
+        self.active(now).is_some() && self.pending.get().is_some_and(|arm| now < arm.expires)
     }
 
     /// Take a report from the session's host, or from a new host while the
     /// board is free. A lapsed session cannot be resumed under its old identity.
-    pub fn report(&self, report: HostReport, now: u64) -> bool {
+    pub fn report(&self, session: HostSession, now: u64) -> bool {
         let active = self.active(now).map(|session| session.id);
-        let id = report.session.id;
+        let id = session.id;
         if active.is_none() && id != 0 && id != self.id.get() {
             self.id.set(id);
             self.last_arm.set(0);
         } else if active != Some(id) {
             return false;
         }
-        self.restore_ready.set(report.session.restore_ready);
+        self.restore_ready.set(session.restore_ready);
         self.deadline.set(now + HOST_SESSION_MS);
-        self.report.set(Some(report));
         true
     }
 
@@ -111,12 +106,10 @@ mod tests {
     fn one_host_holds_the_board_until_its_reports_stop() {
         let session = Session::default();
         let status = Status::default();
-        assert!(!session.report(report(0, false), 0));
-        assert!(session.report(report(1, false), 0));
-        assert!(!session.report(report(2, false), 1));
-        assert!(session.take_report(1).is_some());
-        assert!(session.take_report(1).is_none());
-        assert!(session.report(report(1, true), 2000));
+        assert!(!session.report(report(0, false).session, 0));
+        assert!(session.report(report(1, false).session, 0));
+        assert!(!session.report(report(2, false).session, 1));
+        assert!(session.report(report(1, true).session, 2000));
         assert_eq!(
             session.active(4999),
             Some(HostSession {
@@ -126,11 +119,10 @@ mod tests {
         );
         assert_eq!(session.active(5000), None);
         // The lapsed identity is refused; a new one takes the board.
-        assert!(!session.report(report(1, true), 5001));
-        assert!(session.report(report(2, false), 5001));
+        assert!(!session.report(report(1, true).session, 5001));
+        assert!(session.report(report(2, false).session, 5001));
         assert!(session.apply(HostControl::End(2), &status, 5002));
         assert_eq!(session.active(5003), None);
-        assert!(session.take_report(5003).is_none());
     }
 
     #[test]
@@ -174,11 +166,13 @@ mod tests {
             generations: [0, 5, 0, 0, 0],
             expires: 20_000,
         };
-        assert!(session.report(report(1, false), 0));
+        assert!(session.report(report(1, false).session, 0));
         assert!(!session.apply(HostControl::Arm(arm), &status, 10));
-        assert!(session.report(report(1, true), 10));
+        assert!(session.report(report(1, true).session, 10));
         assert!(session.apply(HostControl::Arm(arm), &status, 10));
+        assert!(session.awaiting_button(11));
         assert_eq!(session.take_arm(11), Some(arm));
+        assert!(!session.awaiting_button(11));
         // The same arm cannot be issued again; a later one can.
         assert!(!session.apply(HostControl::Arm(arm), &status, 12));
         arm.id = 2;
@@ -194,8 +188,9 @@ mod tests {
         status.ports[1].restore = None;
         assert!(session.apply(HostControl::Arm(arm), &status, 15));
         // Losing the host withdraws an arm nobody has taken.
+        assert!(!session.awaiting_button(3010));
         assert_eq!(session.take_arm(3010), None);
-        assert!(session.report(report(2, true), 3011));
+        assert!(session.report(report(2, true).session, 3011));
         assert!(!session.apply(HostControl::Arm(arm), &status, 3012));
         arm.session = 2;
         arm.id = 1;

@@ -52,6 +52,12 @@ pub enum Error {
     Command(CommandError),
     #[error("port command result was not observed before the deadline")]
     CommandTimeout,
+    #[error("{0}")]
+    InvalidSetting(&'static str),
+    #[error("board settings are locked while a port action or restore is in progress")]
+    SettingsBusy,
+    #[error("settings storage is full; unplug targets briefly, then retry")]
+    SettingsFull,
     #[error(
         "board firmware speaks protocol {board} and this tool protocol {}; update one to match the other",
         protocol::VERSION
@@ -169,16 +175,41 @@ impl Board {
         Ok(read(&self.connection, protocol::GET_STATUS)?.1)
     }
 
-    /// Set the indicator brightness in percent. The board keeps it until
-    /// it restarts.
-    pub fn brightness(&self, brightness: u8) -> Result<(), Error> {
-        self.write(
-            protocol::LIGHTS,
-            &protocol::Lights {
+    pub fn rename(&self, name: &str) -> Result<(), Error> {
+        let name = protocol::BoardName::new(name).map_err(Error::InvalidSetting)?;
+        self.setting(protocol::Setting::Name(name))
+    }
+
+    pub fn brightness(&self, percent: u8) -> Result<(), Error> {
+        if !(protocol::BRIGHTNESS_MIN..=protocol::BRIGHTNESS_MAX).contains(&percent) {
+            return Err(Error::InvalidSetting(
+                "brightness must be 10 to 100 percent",
+            ));
+        }
+        self.setting(protocol::Setting::Brightness(percent))
+    }
+
+    fn setting(&self, change: protocol::Setting) -> Result<(), Error> {
+        let result = self.write(
+            protocol::SETTINGS,
+            &protocol::SettingsRequest {
                 serial: self.info.serial,
-                brightness,
+                change,
             },
-        )
+        );
+        if matches!(
+            result,
+            Err(Error::Transfer(nusb::transfer::TransferError::Stall))
+        ) && let Ok(status) = self.status()
+        {
+            if status.settings_busy {
+                return Err(Error::SettingsBusy);
+            }
+            if status.settings_full {
+                return Err(Error::SettingsFull);
+            }
+        }
+        result
     }
 
     /// Take or renew the board's host session and replace the host's view

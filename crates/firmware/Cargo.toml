@@ -12,6 +12,9 @@ test = false
 bench = false
 
 [dependencies]
+crc32fast = { version = "1", default-features = false }
+embedded-storage = "0.3"
+postcard.workspace = true
 iasis-protocol.workspace = true
 iasis-pd.workspace = true
 embedded-graphics = "0.8"

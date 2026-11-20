@@ -534,6 +534,7 @@ mod tests {
             #[cfg(target_os = "macos")]
             macos_attachment: None,
             apple: Some(AppleDevice {
+                model: None,
                 mode,
                 identity: ecid.map_or(Identity::Missing, |ecid| Identity::Known {
                     ecid,

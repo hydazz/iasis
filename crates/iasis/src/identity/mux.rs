@@ -95,6 +95,7 @@ fn query(id: u32) -> io::Result<AppleDevice> {
     }
     let ecid = parse_identity_response(&response?, mode)?;
     Ok(AppleDevice {
+        model: None,
         mode,
         identity: Identity::Known { ecid, source },
     })

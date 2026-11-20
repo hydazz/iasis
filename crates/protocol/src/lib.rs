@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 13;
+pub const VERSION: u16 = 14;
 pub const MAX_PACKET: usize = 1344;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
@@ -12,7 +12,8 @@ pub const ENTER_BOOTLOADER: u8 = 3;
 pub const PORT_COMMAND: u8 = 4;
 pub const HOST_REPORT: u8 = 6;
 pub const HOST_CONTROL: u8 = 7;
-pub const LIGHTS: u8 = 8;
+pub const SETTINGS: u8 = 8;
+pub const BOARD_NAME_MAX: usize = 16;
 /// Indicator brightness in percent. The default is half of full.
 pub const BRIGHTNESS_DEFAULT: u8 = 50;
 pub const BRIGHTNESS_MIN: u8 = 10;
@@ -357,6 +358,19 @@ impl PortStatus {
         })
     }
 
+    /// A change to flash would interrupt an operation on this target.
+    pub fn settings_busy(&self, now: u64) -> bool {
+        self.fetch.is_some()
+            || self.restoring()
+            || self.pd_transition
+            || self.command_result == CommandResult::Pending
+            || self.request.is_some_and(|request| request.pending(now))
+            || (self.restore.is_none()
+                && self
+                    .observed
+                    .is_some_and(|seen| seen.usb == Usb::Apple(AppleMode::Restored)))
+    }
+
     pub fn latch_fault(&mut self, error: PortError, sample: FaultSample) {
         if self.fault_sample.is_none() {
             self.error = Some(error);
@@ -475,11 +489,85 @@ pub enum Supply {
     Brick,
 }
 
-/// Indicator brightness, kept until the board restarts.
+/// A display name that fits the board's OLED. Empty selects the factory name.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct BoardName([u8; BOARD_NAME_MAX]);
+
+impl BoardName {
+    pub fn new(name: &str) -> Result<Self, &'static str> {
+        if name.len() > BOARD_NAME_MAX
+            || name.starts_with(' ')
+            || name.ends_with(' ')
+            || !name.bytes().all(|b| (b' '..=b'~').contains(&b))
+        {
+            return Err(
+                "use up to 16 printable ASCII characters without leading or trailing spaces",
+            );
+        }
+        let mut bytes = [0; BOARD_NAME_MAX];
+        bytes[..name.len()].copy_from_slice(name.as_bytes());
+        Ok(Self(bytes))
+    }
+
+    pub fn as_str(&self) -> &str {
+        let end = self
+            .0
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(BOARD_NAME_MAX);
+        core::str::from_utf8(&self.0[..end]).unwrap()
+    }
+}
+
+impl Serialize for BoardName {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for BoardName {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Name;
+        impl serde::de::Visitor<'_> for Name {
+            type Value = BoardName;
+
+            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.write_str("a board display name")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<BoardName, E> {
+                BoardName::new(value).map_err(E::custom)
+            }
+        }
+        deserializer.deserialize_str(Name)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Lights {
-    pub serial: u64,
+pub struct Settings {
+    pub name: BoardName,
     pub brightness: u8,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            name: BoardName::default(),
+            brightness: BRIGHTNESS_DEFAULT,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum Setting {
+    Name(BoardName),
+    Brightness(u8),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SettingsRequest {
+    pub serial: u64,
+    pub change: Setting,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -653,8 +741,11 @@ pub struct Status {
     pub restore_decision: Option<RestoreDecision>,
     /// The host holding the board's session.
     pub host: Option<HostSession>,
-    /// Indicator brightness in percent.
-    pub brightness: u8,
+    pub settings: Settings,
+    /// No erased slots remain. Collection waits for idle target ports.
+    pub settings_full: bool,
+    /// A restore arm, port command or target operation is active.
+    pub settings_busy: bool,
 }
 
 impl Status {
@@ -761,6 +852,65 @@ pub fn decode_any<'a, T: Deserialize<'a>>(data: &'a [u8]) -> Result<(u16, T), De
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn target_work_protects_settings_until_it_settles() {
+        let mut port = PortStatus {
+            state: PortState::Contract,
+            contract_mv: 9000,
+            ..PortStatus::default()
+        };
+        assert!(!port.settings_busy(0));
+        port.fetch = Some(0);
+        assert!(port.settings_busy(0));
+        port.fetch = None;
+        for phase in [
+            RestorePhase::Preparing,
+            RestorePhase::Running,
+            RestorePhase::Unconfirmed,
+            RestorePhase::Reported,
+            RestorePhase::Failed,
+        ] {
+            port.restore = Some(RestoreStatus {
+                ecid: 1,
+                phase,
+                progress: 0,
+            });
+            assert_eq!(
+                port.settings_busy(0),
+                !matches!(phase, RestorePhase::Reported | RestorePhase::Failed)
+            );
+        }
+        port.restore = None;
+        port.command_result = CommandResult::Pending;
+        assert!(port.settings_busy(0));
+        port.command_result = CommandResult::Acknowledged;
+        port.request = Some(Request {
+            action: PortAction::DfuAppleSilicon,
+            at_ms: 5,
+        });
+        assert!(port.settings_busy(REQUEST_MS + 4));
+        assert!(!port.settings_busy(REQUEST_MS + 5));
+        port.pd_transition = true;
+        assert!(port.settings_busy(REQUEST_MS + 5));
+    }
+
+    #[test]
+    fn board_names_fit_the_screen_and_validate_on_the_wire() {
+        for text in ["", "A1708 #2", "abcdefghijklmnop"] {
+            let name = BoardName::new(text).unwrap();
+            let mut buf = [0; MAX_PACKET];
+            assert_eq!(
+                decode::<BoardName>(encode(&text, &mut buf).unwrap()),
+                Ok(name)
+            );
+            assert_eq!(name.as_str(), text);
+        }
+        for text in [" abc", "abc ", "abc\t1", "Desk😺", "abcdefghijklmnopq"] {
+            let mut buf = [0; MAX_PACKET];
+            assert!(decode::<BoardName>(encode(&text, &mut buf).unwrap()).is_err());
+        }
+    }
 
     #[test]
     fn physical_ports_reject_invalid_wire_values() {
@@ -904,7 +1054,12 @@ mod tests {
                 id: u32::MAX,
                 restore_ready: true,
             }),
-            brightness: u8::MAX,
+            settings: Settings {
+                name: BoardName::new("ABCDEFGHIJKLMNOP").unwrap(),
+                brightness: u8::MAX,
+            },
+            settings_full: true,
+            settings_busy: true,
         };
         let mut buffer = [0; MAX_PACKET];
         let packet = encode(&status, &mut buffer).unwrap();
@@ -974,7 +1129,7 @@ mod tests {
         assert_eq!(
             packet,
             &[
-                b'I', b'A', b'S', b'I', 13, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
+                b'I', b'A', b'S', b'I', 14, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
             ]
         );
         let length = packet.len();
