@@ -25,10 +25,10 @@ use nusb::{DeviceInfo, transfer::TransferError};
 
 use crate::{
     Board, Topology, dfu,
-    identity::AppleDevice,
+    identity::{AppleDevice, models::Models},
     restore::{Operation, Progress},
     topology::{self, Snapshot, UsbDevice},
-    view::{BoardView, DeviceName, LastSeen},
+    view::{BoardView, LastSeen},
 };
 
 /// Several reports fit inside the session lease.
@@ -163,7 +163,6 @@ enum Unsent {
 struct SeenDevice {
     generation: u32,
     ecid: u64,
-    name: DeviceName,
 }
 
 #[derive(Default)]
@@ -177,7 +176,7 @@ struct View {
 }
 
 impl View {
-    fn remember_devices(&mut self, status: &Status, snapshot: &Snapshot) {
+    fn remember_devices(&mut self, status: &Status, snapshot: &Snapshot, models: &Models) {
         for port in Port::ALL {
             let index = port.index();
             let slot = &status.ports[index];
@@ -203,10 +202,9 @@ impl View {
                 }
                 continue;
             }
-            let Some(ecid) = seen
-                .ecid
-                .filter(|_| matches!(seen.usb, Usb::Apple(mode) if mode != AppleMode::PortDfu))
-            else {
+            let Some(ecid) = seen.ecid.filter(|id| {
+                *id != 0 && matches!(seen.usb, Usb::Apple(mode) if mode != AppleMode::PortDfu)
+            }) else {
                 *previous = None;
                 continue;
             };
@@ -216,14 +214,11 @@ impl View {
             if slot.observed == Some(seen)
                 && let Some(device) = dfu::direct_device(snapshot, port)
             {
-                previous
-                    .get_or_insert_with(|| SeenDevice {
-                        generation: slot.generation,
-                        ecid,
-                        name: DeviceName::default(),
-                    })
-                    .name
-                    .read(device);
+                *previous = Some(SeenDevice {
+                    generation: slot.generation,
+                    ecid,
+                });
+                models.remember(ecid, device);
             }
         }
     }
@@ -232,17 +227,20 @@ impl View {
         board: &mut BoardView,
         snapshot: &Snapshot,
         store: &crate::images::Store,
+        models: &Models,
     ) {
         for (port, previous) in Port::ALL.into_iter().zip(&self.last_seen) {
             if let Some(previous) = previous {
                 let row = &mut board.ports[port.index()];
                 let ecid = format!("{:016x}", previous.ecid);
                 if row.ecid.as_ref() == Some(&ecid) {
-                    row.device = previous.name.display(store);
+                    if let Some(name) = models.name(previous.ecid, store) {
+                        row.device = Some(name);
+                    }
                 } else if snapshot.ports[port.index()].devices.is_empty() {
                     row.last_seen = Some(LastSeen {
                         ecid,
-                        device: previous.name.display(store),
+                        device: models.name(previous.ecid, store),
                     });
                 }
             }
@@ -298,6 +296,7 @@ struct Shared {
     board: Board,
     session: u32,
     jobs: Jobs,
+    models: Arc<Models>,
     fetching: Mutex<[Option<(u32, u8)>; PORT_COUNT]>,
     restore_ready: AtomicBool,
     alive: AtomicBool,
@@ -335,7 +334,7 @@ impl Shared {
         }
         view.uptime_ms = status.uptime_ms;
         view.seen = view.observer.sample(&status, &snapshot);
-        view.remember_devices(&status, &snapshot);
+        view.remember_devices(&status, &snapshot, &self.models);
         view.sample = Some((status, snapshot));
         Ok(())
     }
@@ -459,13 +458,14 @@ pub struct Link {
 impl Link {
     /// Take the board's host session. The board refuses while another host
     /// holds it.
-    pub fn open(device: &DeviceInfo, jobs: Jobs) -> Result<Self> {
+    pub(crate) fn open(device: &DeviceInfo, jobs: Jobs, models: Arc<Models>) -> Result<Self> {
         let board = Board::listen(device)?;
         let session = (RandomState::new().hash_one(board.info().serial) as u32).max(1);
         let shared = Arc::new(Shared {
             board,
             session,
             jobs,
+            models,
             fetching: Mutex::default(),
             restore_ready: AtomicBool::new(false),
             alive: AtomicBool::new(true),
@@ -581,7 +581,7 @@ impl Link {
         let (status, snapshot) = view.sample.as_ref()?;
         let mut board = crate::view::BoardView::new(self.board().info(), status);
         board.describe_devices(self.board().info().serial, status, snapshot, store, family);
-        view.describe_last_seen(&mut board, snapshot, store);
+        view.describe_last_seen(&mut board, snapshot, store, &self.shared.models);
         for (port, job) in board
             .ports
             .iter_mut()
@@ -713,11 +713,12 @@ mod tests {
             flash_bytes: 0,
             capabilities: 0,
         };
+        let models = Models::default();
         let sample = |view: &mut View, status: &Status, usb: &Snapshot| -> PortView {
-            view.remember_devices(status, usb);
+            view.remember_devices(status, usb, &models);
             let mut board = BoardView::new(&info, status);
             board.describe_devices(info.serial, status, usb, &store, Device::AppleSilicon);
-            view.describe_last_seen(&mut board, usb, &store);
+            view.describe_last_seen(&mut board, usb, &store, &models);
             board.ports.remove(0)
         };
         let mut view = View::default();
@@ -793,8 +794,82 @@ mod tests {
     }
 
     #[test]
+    fn a_model_follows_a_verified_ecid_across_boards_and_agent_restarts() {
+        use crate::{
+            batch::Device,
+            images::{Network, Store},
+        };
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("device-models.json");
+        fs::write(&path, b"{").unwrap();
+        fs::write(dir.path().join("index.json"), r#"{"images":[],"models":[],"devices":[{"identifier":"iPad13,18","name":"iPad (10th generation)","hardware":[]}]}"#).unwrap();
+        let store = Store::open(dir.path(), Network::default()).unwrap();
+
+        let [one, two, ..] = Port::ALL;
+        {
+            let models = Models::open(path.clone());
+            let mut view = View::default();
+            let mut status = attached([Some(7), None, None, None, None]);
+            let mut usb = snapshot();
+            let mut ipad = device(one, 0x05ac, 0x1227, Some(42));
+            ipad.apple.as_mut().unwrap().model = Some("iPad13,18".into());
+            usb.ports[0].devices.push(ipad);
+            status.ports[0].observed = Some(observe(&usb, one));
+            view.remember_devices(&status, &usb, &models);
+            let timestamp = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+            fs::File::open(&path)
+                .unwrap()
+                .set_modified(timestamp)
+                .unwrap();
+            view.remember_devices(&status, &usb, &models);
+            assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), timestamp);
+        }
+
+        let models = Models::open(path);
+        let mut fresh = View::default();
+        let mut usb = snapshot();
+        let mut status = attached([None, Some(31), None, None, None]);
+        let info = iasis_protocol::Info {
+            serial: 2,
+            firmware_version: [0, 1, 0],
+            flash_bytes: 0,
+            capabilities: 0,
+        };
+        let sample = |view: &mut View, usb: &Snapshot, status: &Status| {
+            view.remember_devices(status, usb, &models);
+            let mut board = BoardView::new(&info, status);
+            board.describe_devices(info.serial, status, usb, &store, Device::AppleSilicon);
+            view.describe_last_seen(&mut board, usb, &store, &models);
+            board.ports.remove(two.index())
+        };
+        let empty = sample(&mut fresh, &usb, &status);
+        assert!(empty.last_seen.is_none() && empty.device.is_none() && !empty.revive);
+
+        for (ecid, expected) in [
+            (Some(42), "iPad (10th generation)"),
+            (Some(99), "Recovery"),
+            (None, "Recovery"),
+        ] {
+            let mut target = device(two, 0x05ac, 0x1281, ecid);
+            target.product = Some("Recovery".into());
+            usb.ports[two.index()].devices = vec![target];
+            status.ports[two.index()].observed = Some(observe(&usb, two));
+            let row = sample(&mut fresh, &usb, &status);
+            assert_eq!(row.device.as_deref(), Some(expected));
+            assert_eq!(row.ecid, ecid.map(|id| format!("{id:016x}")));
+            if ecid.is_none() {
+                assert!(!row.revive);
+            }
+        }
+        store.close();
+    }
+
+    #[test]
     fn moved_or_ambiguous_devices_clear_a_remembered_identity() {
         let [one, two, ..] = Port::ALL;
+        let models = Models::default();
         let mut status = attached([Some(1), Some(2), None, None, None]);
         let mut usb = snapshot();
         let mut view = View::default();
@@ -802,7 +877,7 @@ mod tests {
             usb.ports[0].devices = vec![device(one, 0x05ac, 0x1227, Some(42))];
             usb.ports[1].devices.clear();
             status.ports[0].observed = Some(observe(&usb, one));
-            view.remember_devices(&status, &usb);
+            view.remember_devices(&status, &usb, &models);
             assert!(view.last_seen[0].is_some());
             usb.ports[1].devices = replacement;
             if usb.ports[1].devices.is_empty() {
@@ -812,7 +887,7 @@ mod tests {
             } else {
                 usb.ports[0].devices.clear();
             }
-            view.remember_devices(&status, &usb);
+            view.remember_devices(&status, &usb, &models);
             assert!(view.last_seen[0].is_none());
         }
     }
