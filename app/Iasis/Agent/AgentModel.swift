@@ -35,17 +35,22 @@ final class AgentModel {
     }
 
     func perform(_ request: AgentRequest) {
-        Task {
-            do {
-                try await agent.send(request)
-            } catch {
-                Log.agent.error("Request refused: \(error.localizedDescription)")
-                let alert = NSAlert()
-                alert.messageText = "Action Failed"
-                alert.informativeText = error.localizedDescription
-                NSApp.activate()
-                alert.runModal()
-            }
+        Task { await send(request) }
+    }
+
+    @discardableResult
+    func send(_ request: AgentRequest) async -> Bool {
+        do {
+            try await agent.send(request)
+            return true
+        } catch {
+            Log.agent.error("Request refused: \(error.localizedDescription)")
+            let alert = NSAlert()
+            alert.messageText = "Action Failed"
+            alert.informativeText = error.localizedDescription
+            NSApp.activate()
+            alert.runModal()
+            return false
         }
     }
 }
