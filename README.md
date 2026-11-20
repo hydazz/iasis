@@ -89,6 +89,14 @@ target/release/iasis --serial 0123456789abcdef restore /path/to/UniversalMac.ips
 
 Each target needs ordinary DFU (`05ac:1227`) with a unique ECID. Use Apple Configurator for a Mac identified in DFU over Apple Debug USB. Each target gets its own idevicerestore process, selected by ECID. In a terminal, each port has a progress row. Percentages apply to the current restore stage. Redirecting output records each change on its own line. Logs and working files go under `restores/`, or the directory passed to `--logs`. Allow space for an extracted OS image per worker. Iasis checks the local archive and matches it to the target's chip and board IDs. idevicerestore checks Apple signing.
 
+On macOS 27.3, run this once as the user running Finder to suppress automatic DFU windows. This undocumented preference also affects automatic reveals for other connected Apple devices.
+
+```sh
+defaults write com.apple.AMPDeviceDiscoveryAgent reveal-devices -bool false
+```
+
+To restore the default behaviour, run `defaults delete com.apple.AMPDeviceDiscoveryAgent reveal-devices`.
+
 #### Button restores
 
 To leave the board ready for repeated restores, run the optional listener in a terminal. Download the IPSWs beforehand and pass each file with `--ipsw`. A mixed batch can use several images. Each selected target must match exactly one.
