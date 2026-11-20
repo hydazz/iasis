@@ -14,6 +14,7 @@ pub struct Management<'a> {
     pub command: &'a Cell<Option<PortCommand>>,
     pub configured: &'a Cell<bool>,
     pub suspended: &'a Cell<bool>,
+    pub brightness: &'a Cell<u8>,
     pub session: &'a Session,
 }
 
@@ -131,6 +132,17 @@ impl Handler for Management<'_> {
                     OutResponse::Rejected
                 })
             }
+            protocol::LIGHTS => match protocol::decode::<protocol::Lights>(data) {
+                Ok(lights)
+                    if lights.serial == self.info.serial
+                        && (protocol::BRIGHTNESS_MIN..=protocol::BRIGHTNESS_MAX)
+                            .contains(&lights.brightness) =>
+                {
+                    self.brightness.set(lights.brightness);
+                    Some(OutResponse::Accepted)
+                }
+                _ => Some(OutResponse::Rejected),
+            },
             protocol::PORT_COMMAND if self.command.get().is_none() => {
                 match protocol::decode::<PortCommand>(data) {
                     Ok(command)

@@ -165,6 +165,18 @@ impl Board {
         Ok(read(&self.connection, protocol::GET_STATUS)?.1)
     }
 
+    /// Set the indicator brightness in percent. The board keeps it until
+    /// it restarts.
+    pub fn brightness(&self, brightness: u8) -> Result<(), Error> {
+        self.write(
+            protocol::LIGHTS,
+            &protocol::Lights {
+                serial: self.info.serial,
+                brightness,
+            },
+        )
+    }
+
     /// Take or renew the board's host session and replace the host's view
     /// of its targets. The board refuses a second host.
     pub fn host_report(&self, report: &protocol::HostReport) -> Result<(), Error> {
