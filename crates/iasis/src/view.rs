@@ -13,9 +13,10 @@ use crate::{
     batch::{Device, Ending},
     dfu::{self, Signal},
     host::{PortJob, observe},
+    identity::models::DeviceModel,
     images::Store,
-    restore::{Operation, Progress, dfu_hardware},
-    topology::{Snapshot, UsbDevice},
+    restore::{Operation, Progress},
+    topology::Snapshot,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -52,49 +53,6 @@ pub struct PortView {
 pub struct LastSeen {
     pub ecid: String,
     pub device: Option<String>,
-}
-
-/// A model identifier, DFU hardware IDs and the product string can name the
-/// same device at different points in its USB enumeration.
-#[derive(Default)]
-pub(crate) struct DeviceName {
-    identifier: Option<String>,
-    hardware: Option<(u32, u32)>,
-    product: Option<String>,
-}
-
-impl DeviceName {
-    pub(crate) fn read(&mut self, device: &UsbDevice) {
-        let identifier = device.apple.as_ref().and_then(|apple| apple.model.as_ref());
-        let hardware = device
-            .apple
-            .as_ref()
-            .and(device.serial_number.as_deref())
-            .and_then(|s| dfu_hardware(s).ok());
-        if identifier
-            .zip(self.identifier.as_ref())
-            .is_some_and(|(a, b)| a != b)
-            || hardware.zip(self.hardware).is_some_and(|(a, b)| a != b)
-        {
-            *self = Self::default();
-        }
-        if let Some(identifier) = identifier {
-            self.identifier = Some(identifier.clone());
-        }
-        if hardware.is_some() {
-            self.hardware = hardware;
-        }
-        if let Some(product) = &device.product {
-            self.product = Some(product.clone());
-        }
-    }
-
-    pub(crate) fn display(&self, store: &Store) -> Option<String> {
-        store
-            .device_name(self.identifier.as_deref(), self.hardware)
-            .or_else(|| self.identifier.clone())
-            .or_else(|| self.product.clone())
-    }
 }
 
 impl PortView {
@@ -242,9 +200,9 @@ impl BoardView {
                 if matches!(observed.usb, Usb::Apple(mode) if mode != AppleMode::PortDfu) {
                     row.ecid = observed.ecid.map(|id| format!("{id:016x}"));
                 }
-                let mut name = DeviceName::default();
-                name.read(device);
-                row.device = name.display(store);
+                row.device = DeviceModel::read(device)
+                    .name(store)
+                    .or_else(|| device.product.clone());
             }
         }
     }
