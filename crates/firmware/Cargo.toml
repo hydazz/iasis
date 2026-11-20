@@ -17,6 +17,7 @@ iasis-pd.workspace = true
 embedded-graphics = "0.8"
 heapless = "0.9"
 embassy-usb-driver = "0.2"
+tinybmp = "0.7"
 
 [target.'cfg(not(target_arch = "arm"))'.dev-dependencies]
 ssd1306 = "0.10"
