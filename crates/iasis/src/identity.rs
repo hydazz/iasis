@@ -1,7 +1,7 @@
 //! Apple identity and physical-slot selection across USB re-enumeration.
 
 #[cfg(target_os = "macos")]
-mod configurator;
+pub(crate) mod configurator;
 mod mux;
 
 /// Check the existing local daemon; no device connection or pairing is made.
@@ -222,8 +222,12 @@ fn matching_ports(snapshot: &Snapshot, ecid: u64) -> Vec<Port> {
 }
 
 pub(crate) fn query(snapshot: &mut Snapshot, mask: u8) {
+    query_mux(snapshot, mask);
     #[cfg(target_os = "macos")]
     configurator::query(snapshot, mask);
+}
+
+fn query_mux(snapshot: &mut Snapshot, mask: u8) {
     let candidates: Vec<_> = snapshot
         .ports
         .iter_mut()
