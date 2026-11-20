@@ -54,11 +54,7 @@ fn main() -> Result<()> {
     let mut last_error = String::new();
     loop {
         let result = (|| -> Result<()> {
-            let mut devices = discover(UsbIds::default())?.into_iter().filter(|d| {
-                d.serial_number()
-                    .and_then(|s| u64::from_str_radix(s, 16).ok())
-                    == Some(options.serial)
-            });
+            let mut devices = discover(UsbIds::default(), Some(options.serial))?.into_iter();
             let device = devices.next().context("waiting for board")?;
             anyhow::ensure!(devices.next().is_none(), "duplicate board serial");
             let board = Board::listen(&device)?;
