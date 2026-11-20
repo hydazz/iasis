@@ -50,13 +50,11 @@ Use the listed screw lengths to avoid reaching the lid's outer face.
 
 Use PLA, a 0.4 mm nozzle, 0.20 mm layers and no supports. For multicolour markings, import the lid and matching lettering STL as parts of one object, retain their positions and assign filaments. Omit the lettering STL for recessed text.
 
-1. Slide four M3 nuts into the inward-facing slots in the lid's outer mounting posts.
-2. Set the PCB on the tray's locating pegs and fit the button from inside the lid.
-3. Lower the lid onto the tray, engaging the end guides. Keep the nuts seated while handling the lid.
-4. Fit the four 12 mm screws from underneath. Tighten by hand until the seam closes; the screws fasten the shell without clamping the PCB.
-5. Stick four rubber feet near the corners of the flat underside, leaving the screw heads accessible.
+1. Lay the lid face down so it holds the loose parts. Place the button in its hole and slide the nuts into the inward-facing slots in the four outer posts. Fit the [OLED](#oled-assembly) if present.
+2. Place the PCB component-side down on the lid posts. Lower the tray so its pegs pass through the board into the lid sockets.
+3. Fasten the tray from underneath. Place the feet near the corners, clear of the screw recesses.
 
-To open, remove the four underside screws and lift the lid straight up. The empty case also closes without the PCB. BOOTSEL and RESET are under the lid. The dot marks port 1; [button gestures](../../README.md#use) are printed beside the button.
+Open the case lid-down to keep the button and nuts in place. BOOTSEL and RESET are under the lid.
 
 ### OLED assembly
 
@@ -72,14 +70,12 @@ Connect the Qwiic cable before closing. The display can stay attached when openi
 | Body                                | 55 × 40 × 5 mm                    |
 | Mounting allowance above module PCB | 3 mm                              |
 
-Check the cooler's spacers and thermal-pad contact before assembly. Taller spacers need a taller lid.
-
 Disconnect power before assembly or removal.
 
-1. Fit the cooler screws from below.
-2. Stick the RTC battery into the tray recess. Route its cable along the channel and pass the plug between the boards before joining them.
-3. Align the boards' rear edges and connector pins, join the boards and lower them onto the pegs. Keep the wires side by side in the board gap.
-4. Connect the battery to J104, tuck the cable clear of the lid and [enable charging](../boards/cm5/README.md#rtc-battery).
+1. Fit the cooler screws from below and check thermal-pad contact with the spacers in place.
+2. Stick the RTC battery in the tray recess. Route its cable along the channel and pass the plug between the boards before joining them.
+3. Align the boards' rear edges, mate the connector and seat the boards on the tray pegs. Lay the wires side by side in the board gap.
+4. Connect the battery to J104. See [RTC battery](../boards/cm5/README.md#rtc-battery) for charging settings.
 
 To remove the battery, unplug J104 and separate the boards before feeding the plug back through the gap.
 
