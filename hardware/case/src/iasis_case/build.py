@@ -4,7 +4,7 @@ build."""
 import argparse
 from pathlib import Path
 
-from build123d import Part, Rot
+from build123d import Compound, Part, Pos, Rot
 from build123d.topology.shape_core import Shape
 
 from . import board as kicad
@@ -22,6 +22,9 @@ def write(
     for name, c in covers.items():
         printing.export(f"{prefix}cover-{name}", c.part, print_dir, c.markings, rotation=Rot(X=180))
         printing.export(f"{prefix}button-{name}", c.button, print_dir, rotation=Rot(X=180))
+        if not prefix and c.display_mount is not None:
+            pins = Compound([Pos(x, y) * c.display_mount.pin for x in (-4, 4) for y in (-4, 4)])
+            printing.export("display-pins", pins, print_dir)
 
     extra: list[Shape] = [tray, *case.feet(lay), *(f.hardware for f in lay.fasteners)]
     if lay.battery is not None:
@@ -30,8 +33,8 @@ def write(
         extra += [c.part, c.markings, c.button]
         if c.display is not None:
             extra.append(c.display)
-        if c.display_mount is not None:
-            extra.extend(c.display_mount.screws)
+            assert c.display_mount is not None
+            extra.extend(c.display_mount.pins)
     step = output / f"iasis-{prefix}case.step"
     kicad.export_assembly(lay.board, extra, step, getattr(lay.board, "attach", None))
     return step
