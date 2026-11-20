@@ -42,7 +42,7 @@ pub struct PortView {
     pub enabled: bool,
     /// The phase of the restore job on the port.
     pub job: Option<RestorePhase>,
-    /// The worker's current stage and progress within it.
+    /// Image download or worker stage, with progress when available.
     pub stage: Option<Progress>,
     /// How the port's last restore ended, from the agent that ran it.
     pub result: Option<Ending>,
@@ -98,6 +98,14 @@ impl DeviceName {
 }
 
 impl PortView {
+    pub fn activity(&self) -> String {
+        match &self.stage {
+            Some(stage) if self.job.is_some() => format!("{}  {stage}", self.state),
+            Some(stage) => stage.to_string(),
+            None => self.state.clone(),
+        }
+    }
+
     pub(crate) fn describe_job(&mut self, job: &PortJob) {
         if self.generation != job.generation || !self.occupied || self.state == "fault" {
             return;
@@ -167,6 +175,7 @@ impl BoardView {
                 .map(|port| {
                     let state = &status.ports[port.index()];
                     let available = ready & (1 << port.index()) != 0;
+                    let (phase, stage) = port_state(state, status.uptime_ms);
                     PortView {
                         number: port.number(),
                         generation: state.generation,
@@ -179,7 +188,7 @@ impl BoardView {
                             _ => None,
                         }),
                         light: state.light(),
-                        state: port_state(state, status.uptime_ms),
+                        state: phase.into(),
                         usb: port_usb(state),
                         link: match state.link.filter(|_| state.occupied()) {
                             Some(Link::Usb2) => "USB 2",
@@ -194,7 +203,7 @@ impl BoardView {
                         restore: available && status.restore_session().is_some(),
                         enabled: state.enabled,
                         job: state.restore.map(|job| job.phase),
-                        stage: None,
+                        stage,
                         result: None,
                     }
                 })
@@ -279,14 +288,14 @@ impl BoardView {
         let mut text = format!("{id}  {}  {host}\n", self.supply);
         for port in &self.ports {
             let line = format!(
-                "  {}  {:<16}{:<34}{:<7}{}",
-                port.number, port.state, port.usb, port.link, port.contract
+                "  {}  {:<16} {:<34}{:<7}{}",
+                port.number,
+                port.activity(),
+                port.usb,
+                port.link,
+                port.contract
             );
             text.push_str(line.trim_end());
-            if let Some(stage) = &port.stage {
-                use std::fmt::Write;
-                write!(text, "  {stage}").unwrap();
-            }
             text.push('\n');
         }
         if let Some(notice) = &self.notice {
@@ -323,42 +332,44 @@ pub(crate) fn revivable(status: &Status, snapshot: &Snapshot, port: Port) -> Opt
 }
 
 /// What the board knows and has asked of the target.
-fn port_state(port: &PortStatus, uptime_ms: u64) -> String {
-    if port.error.is_some() || port.state == PortState::Fault {
-        return "fault".into();
-    }
-    if !port.occupied() {
-        return if port.enabled { "empty" } else { "off" }.into();
-    }
-    if let Some(job) = port.restore {
-        return job_state(job.phase, Operation::Restore).into();
-    }
-    if let Some(percent) = port.fetch {
-        return format!("image {percent}%");
-    }
-    if let Some(request) = port.request {
-        return match request.action {
+fn port_state(port: &PortStatus, uptime_ms: u64) -> (&'static str, Option<Progress>) {
+    let state = if port.error.is_some() || port.state == PortState::Fault {
+        "fault"
+    } else if !port.occupied() {
+        if port.enabled { "empty" } else { "off" }
+    } else if let Some(job) = port.restore {
+        job_state(job.phase, Operation::Restore)
+    } else if let Some(percent) = port.fetch {
+        return (
+            "downloading image",
+            Some(Progress {
+                name: "Downloading image".into(),
+                percent: Some(percent),
+            }),
+        );
+    } else if let Some(request) = port.request {
+        match request.action {
             PortAction::Reboot => "reboot sent",
             _ if request.pending(uptime_ms) => "DFU sent",
             _ => "DFU unverified",
         }
-        .into();
-    }
-    match port.state {
-        // The target has not yet said which actions its port offers.
-        PortState::Contract if port.debug_actions == DebugActions::Pending => "identifying",
-        PortState::Contract if port.wrong_port() => "wrong port",
-        PortState::Contract
-            if !port.offers(PortAction::DfuAppleSilicon) && !port.offers(PortAction::Reboot) =>
-        {
-            "charging"
+    } else {
+        match port.state {
+            PortState::Contract if port.debug_actions == DebugActions::Pending => "identifying",
+            PortState::Contract if port.wrong_port() => "wrong port",
+            PortState::Contract
+                if !port.offers(PortAction::DfuAppleSilicon)
+                    && !port.offers(PortAction::Reboot) =>
+            {
+                "charging"
+            }
+            PortState::Contract => "ready",
+            PortState::Ready if !port.pd_transition => "unknown device",
+            PortState::WaitingPower => "waiting for power",
+            _ => "attaching",
         }
-        PortState::Contract => "ready",
-        PortState::Ready if !port.pd_transition => "unknown device",
-        PortState::WaitingPower => "waiting for power",
-        _ => "attaching",
-    }
-    .into()
+    };
+    (state, None)
 }
 
 fn job_state(phase: RestorePhase, operation: Operation) -> &'static str {
@@ -412,6 +423,22 @@ fn port_contract(port: &PortStatus) -> String {
 mod stage_tests {
     use super::*;
     use iasis_protocol::RestoreStatus;
+
+    #[test]
+    fn image_progress_changes_within_one_port_state() {
+        let mut port = PortStatus {
+            state: PortState::Contract,
+            ..PortStatus::default()
+        };
+        for value in [0, 23, 100] {
+            port.fetch = Some(value);
+            let (state, stage) = port_state(&port, 0);
+            assert_eq!(state, "downloading image");
+            assert_eq!(stage.unwrap().percent, Some(value));
+        }
+        port.state = PortState::Fault;
+        assert_eq!(port_state(&port, 0), ("fault", None));
+    }
 
     #[test]
     fn a_finished_component_is_not_a_finished_restore() {

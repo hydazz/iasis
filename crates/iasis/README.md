@@ -68,7 +68,7 @@ Each port has:
 | `dfu`, `reboot`, `restore`, `revive` | The actions the target would take now                                                          |
 | `enabled`                            | The port is powered                                                                            |
 | `job`                                | The restore phase: `Preparing`, `Running`, `Reported`, `Unconfirmed`, `Failed`                 |
-| `stage`                              | Current worker stage with its `name` and optional `percent`, or null                           |
+| `stage`                              | Image download or worker stage with its `name` and optional `percent`, or null                 |
 | `result`                             | Last operation, phase, message, target ECID if known, and `log_directory` if a worker launched |
 
 The board drops a job when its target leaves, which a restored target does by restarting. `result` stays until the port takes another restore or revive request.
