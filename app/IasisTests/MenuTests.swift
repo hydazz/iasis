@@ -16,18 +16,21 @@ struct MenuTests {
         menu.update()
         let items = menu.items
         #expect(items.contains { $0.title == "Repair Bench" })
-        let mac = try #require(items.first { $0.title == "2. MacBook Air · DFU" })
+        let mac = try #require(items.first { $0.title == "Port 2 · MacBook Air · DFU" })
         #expect(mac.image != nil)
+        if #available(macOS 27, *) {
+            #expect(mac.preferredImageVisibility == .visible)
+        }
         let commands = try #require(mac.submenu)
         commands.update()
-        let restart = commands.indexOfItem(withTitle: "Restart Device")
+        let restart = commands.indexOfItem(withTitle: "Restart")
         try #require(restart >= 0)
         commands.performActionForItem(at: restart)
         for _ in 0 ..< 100 where await agent.received.isEmpty {
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(await agent.received == [.reboot(board: "a0e012192cdfdb67", port: 2)])
-        #expect(commands.items.contains { $0.title == "Erase and Restore…" })
+        #expect(commands.items.contains { $0.title == "Restore…" })
         #expect(!items.contains { $0.title.contains("Empty") })
     }
 
