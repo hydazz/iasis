@@ -92,17 +92,17 @@ def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
         r.fail(f"part tails reach {low - floor_top:.2f} mm from the floor")
     for i, h in enumerate(lay.holes):
         standoff = Pos(h.X, h.Y, floor_top) * Cylinder(
-            case.STANDOFF_D / 2, case.STANDOFF, align=case.BASE
+            case.STANDOFF_D / 2, lay.support_z - floor_top, align=case.BASE
         )
         _clear(r, f"standoff {i + 1}", standoff, parts)
     for i, f in enumerate(lay.fasteners, 1):
         support = tray & (
             Pos(f.x, f.y, floor_top)
-            * Cylinder(retention.HEAD_CLEAR / 2 + 1, case.STANDOFF, align=case.BASE)
+            * Cylinder(retention.HEAD_CLEAR / 2 + 1, lay.support_z - floor_top, align=case.BASE)
         )
         _clear(r, f"counterbore support {i}", support, parts)
 
-    movement = (case.HOLE_D - case.LOCATOR_D) / 2 + retention.FIT
+    movement = (case.HOLE_D - case.LOCATOR_D + case.LOCATOR_CLEARANCE) / 2
     if movement > case.CLEARANCE + 1e-6:
         r.fail(f"board/cover movement {movement:.2f} mm exceeds USB seating allowance")
     else:
@@ -272,21 +272,40 @@ def _case_retention(
         _clear(r, f"case hardware {i + 1}", f.hardware, parts)
         if _overlap(f.hardware, lay.board.body) > 1e-3:
             r.fail(f"case screw {i + 1} intersects PCB material")
-    # No PCB is part of this closing stop: the two printed shells meet directly.
     if _overlap(Pos(0, 0, -0.1) * c.part, tray) < 10:
-        r.fail("empty case lacks a substantial plastic-to-plastic closing stop")
+        r.fail("case lacks a substantial perimeter closing stop")
     else:
-        r.ok("empty case closes against the perimeter seam independently of the PCB")
+        r.ok("case closes against its perimeter seam")
     if any(_overlap(Pos(0, 0, dz / 4) * c.part, tray) > 1e-3 for dz in range(1, 17)):
         r.fail("unscrewed cover cannot lift straight off the tray")
     for h in lay.holes:
-        lower = Pos(h.X, h.Y, -0.1) * Cylinder(case.STANDOFF_D / 2, 0.1, align=case.BASE)
-        upper = Pos(h.X, h.Y, lay.seat + case.BOARD_HOLD_GAP) * Cylinder(
-            case.PILLAR_D / 2, 0.1, align=case.BASE
-        )
-        if _overlap(lower, tray) < 1 or _overlap(upper, c.part) < 1:
-            r.fail(f"PCB mounting hole at {h.X:.1f},{h.Y:.1f} lacks paired support faces")
-    r.ok(f"PCB capture allowance {case.BOARD_HOLD_GAP:.2f} mm above board thickness")
+        locator = lay.fastener_at(h) is None
+        top = lay.locator_face if locator else lay.seat
+        # Gauge the annulus that actually bears on the PCB, clear of screw bores and pegs.
+        ring = (Circle(3.0) - Circle(2.5)).face()
+        gauge = extrude(Pos(h.X, h.Y, lay.support_z) * ring, amount=top - lay.support_z)
+        if _overlap(gauge, tray) > 1e-3 or _overlap(gauge, c.part) > 1e-3:
+            r.fail(f"printed post intrudes into the PCB space at {h.X:.1f},{h.Y:.1f}")
+        if (
+            min(_overlap(Pos(0, 0, -0.1) * gauge, tray), _overlap(Pos(0, 0, 0.1) * gauge, c.part))
+            < 0.4
+        ):
+            r.fail(f"PCB mounting hole at {h.X:.1f},{h.Y:.1f} lacks a bearing face")
+        if locator:
+            tip_space = Pos(h.X, h.Y, top + case.LOCATOR_INSERT) * Cylinder(
+                case.LOCATOR_D / 2, case.LOCATOR_END_GAP - 0.01, align=case.BASE
+            )
+            if _overlap(tip_space, c.part) > 1e-3:
+                r.fail(f"locating peg at {h.X:.1f},{h.Y:.1f} lacks clearance beyond its tip")
+    for dx, dy in ((-0.12, 0), (0.12, 0), (0, -0.12), (0, 0.12)):
+        if _overlap(Pos(dx, dy, 0) * c.part, tray) < 0.01:
+            r.fail(f"case halves are not located against movement {dx},{dy} mm")
+    if case.LOCATOR_INSERT - case.LOCATOR_TAPER < 1:
+        r.fail("case locating pegs have less than 1 mm straight socket engagement")
+    r.ok(
+        f"PCB capture {case.PCB_CAPTURE:.2f} mm at screws, "
+        f"{case.LOCATOR_RELIEF:.2f} mm extra at locating pegs"
+    )
 
 
 def _display_retention(r: Report, c: case.Cover, parts: Candidates) -> None:
