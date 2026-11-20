@@ -2,7 +2,8 @@
 //!
 //! A tap moves the selection through All and each occupied port. Holding steps
 //! through the actions the selected targets take; releasing sends the one
-//! reached, and holding past the last sends nothing.
+//! reached, and holding past the last sends nothing. Ten seconds of holding
+//! starts the Easter egg, which the next press ends.
 
 use heapless::Vec;
 use iasis_protocol::{
@@ -17,6 +18,7 @@ const HOLD_MS: u64 = 500;
 const STEP_MS: u64 = 1500;
 const CONFIRM_MS: u64 = 3000;
 const VACANT_MS: u64 = 30_000;
+const EGG_MS: u64 = 10_000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Event {
@@ -42,6 +44,8 @@ pub struct Button {
     next_id: u32,
     notice: Option<(&'static str, u64)>,
     completed: [Option<u64>; 5],
+    /// When the Easter egg started.
+    egg: Option<u64>,
 }
 
 impl Button {
@@ -92,6 +96,11 @@ impl Button {
 
     pub fn completed(&self, port: Port, now: u64) -> Option<u64> {
         self.completed[port.index()].filter(|&start| now.saturating_sub(start) < 1800)
+    }
+
+    /// How long the Easter egg has played, in milliseconds.
+    pub fn egg(&self, now: u64) -> Option<u64> {
+        self.egg.map(|since| now.saturating_sub(since))
     }
 
     fn selected_mask(&self) -> u8 {
@@ -220,11 +229,26 @@ impl Button {
             self.tell("Erase confirmed", now);
             return Some(Event::Decision(RestoreDecision::Confirmed(arm)));
         }
+        // An erase to confirm or a board fault keeps the screen and lights.
+        if self.armed.is_some() || status.i2c_root_fault || status.aggregate_power_fault {
+            self.egg = None;
+        } else if self.pressed
+            && !self.consumed
+            && held_until.saturating_sub(self.pressed_since) >= EGG_MS
+        {
+            // A hold that outlasts every action starts the Easter egg and is
+            // spent, so its release does nothing.
+            self.consumed = true;
+            self.notice = None;
+            self.egg = Some(now);
+        }
         if down != self.pressed && now.saturating_sub(self.raw_since) >= DEBOUNCE_MS {
             self.pressed = down;
             if down {
                 self.pressed_since = self.raw_since;
                 self.notice = None;
+                // A press that ends the Easter egg does nothing else.
+                self.consumed |= self.egg.take().is_some();
             } else if !self.consumed {
                 return self.release(status, self.raw_since - self.pressed_since, now);
             }
@@ -638,5 +662,86 @@ mod tests {
             assert_eq!(r.button.armed(), None);
             assert_eq!(r.selected(), None);
         }
+    }
+
+    #[test]
+    fn a_ten_second_hold_starts_the_easter_egg_and_its_release_does_nothing() {
+        // With targets a hold reaches, and with none.
+        for occupied in [0b00011, 0] {
+            let mut r = Rig::new(occupied);
+            r.press();
+            assert_eq!(r.sample(true, EGG_MS - DEBOUNCE_MS - 1), None);
+            assert_eq!(r.button.egg(r.now), None);
+            assert_eq!(r.sample(true, 1), None);
+            assert_eq!(r.button.egg(r.now), Some(0));
+            assert_eq!(r.button.held(r.now), None);
+            assert_eq!(r.sample(true, 250), None);
+            assert_eq!(r.button.egg(r.now), Some(250));
+            assert_eq!(r.release(), None);
+            assert_eq!(r.button.notice(r.now), None);
+            assert_eq!(r.selected(), None);
+            assert_eq!(r.sample(false, 5000), None);
+            assert!(r.button.egg(r.now).is_some());
+        }
+    }
+
+    #[test]
+    fn the_next_press_ends_the_easter_egg_and_does_nothing_else() {
+        let mut r = Rig::new(0b00011);
+        // A tap would move the selection, a hold would send DFU, and a long
+        // one would start the Easter egg again.
+        for hold in [0, HOLD_MS, EGG_MS] {
+            r.press();
+            r.sample(true, EGG_MS);
+            r.release();
+            assert_eq!(r.sample(true, 10), None);
+            assert!(r.button.egg(r.now).is_some());
+            assert_eq!(r.sample(true, DEBOUNCE_MS), None);
+            assert_eq!(r.button.egg(r.now), None);
+            assert_eq!(r.sample(true, hold), None);
+            assert_eq!(r.button.held(r.now), None);
+            assert_eq!(r.button.egg(r.now), None);
+            assert_eq!(r.release(), None);
+            assert_eq!(r.selected(), None);
+            assert_eq!(r.button.notice(r.now), None);
+        }
+        assert_eq!(r.tap(), None);
+        assert_eq!(r.selected(), Some(1));
+        assert!(action(Gesture::Dfu, 0b00001, None)(r.hold(0)));
+    }
+
+    #[test]
+    fn an_erase_to_confirm_or_a_board_fault_ends_the_easter_egg_and_keeps_it_away() {
+        let mut r = Rig::new(0b11111);
+        let arm = r.prepare();
+        r.press();
+        r.sample(true, EGG_MS);
+        r.release();
+        assert!(r.button.egg(r.now).is_some());
+        r.pending = Some(arm);
+        assert_eq!(r.sample(false, 10), None);
+        assert_eq!(r.button.egg(r.now), None);
+        assert_eq!(r.button.armed(), Some(arm));
+        // Holding on after the erase is confirmed starts nothing.
+        r.press();
+        assert_eq!(
+            r.sample(true, CONFIRM_MS),
+            Some(Event::Decision(RestoreDecision::Confirmed(arm)))
+        );
+        assert_eq!(r.sample(true, EGG_MS), None);
+        assert_eq!(r.button.egg(r.now), None);
+        assert_eq!(r.release(), None);
+
+        r.press();
+        r.sample(true, EGG_MS);
+        r.release();
+        assert!(r.button.egg(r.now).is_some());
+        r.status.aggregate_power_fault = true;
+        assert_eq!(r.sample(false, 10), None);
+        assert_eq!(r.button.egg(r.now), None);
+        r.press();
+        assert_eq!(r.sample(true, EGG_MS), None);
+        assert_eq!(r.button.egg(r.now), None);
+        assert_eq!(r.release(), None);
     }
 }
