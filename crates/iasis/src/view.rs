@@ -9,11 +9,22 @@ use iasis_protocol::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::batch::Ending;
+use crate::{
+    batch::{Device, Ending},
+    dfu::{self, Signal},
+    host::observe,
+    images::Store,
+    restore::dfu_hardware,
+    topology::Snapshot,
+};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PortView {
     pub number: u8,
+    pub generation: u32,
+    pub occupied: bool,
+    pub device: Option<String>,
+    pub mode: Option<AppleMode>,
     pub light: Light,
     /// What the board knows and has asked of the target.
     pub state: String,
@@ -35,12 +46,15 @@ pub struct PortView {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BoardView {
     pub serial: String,
+    pub name: String,
+    pub session: Option<u32>,
     pub firmware: String,
     pub supply: String,
     /// A host holds the board, and whether it takes restore requests.
     pub host: bool,
     pub restores: bool,
     pub brightness: u8,
+    pub settings_busy: bool,
     pub ports: Vec<PortView>,
     /// Why the board cannot be read, or why its last restore request came
     /// to nothing.
@@ -53,6 +67,8 @@ impl BoardView {
         let ready = status.ready_mask();
         Self {
             serial: format!("{:016x}", info.serial),
+            name: status.settings.name.as_str().to_owned(),
+            session: status.host.map(|host| host.id),
             firmware: format!("{major}.{minor}.{patch}"),
             supply: match status.supply {
                 Supply::Brick => format!(
@@ -67,13 +83,21 @@ impl BoardView {
             },
             host: status.host.is_some(),
             restores: status.restore_session().is_some(),
-            brightness: status.brightness,
+            brightness: status.settings.brightness,
+            settings_busy: status.settings_busy,
             ports: Port::ALL
                 .map(|port| {
                     let state = &status.ports[port.index()];
                     let available = ready & (1 << port.index()) != 0;
                     PortView {
                         number: port.number(),
+                        generation: state.generation,
+                        occupied: state.occupied(),
+                        device: None,
+                        mode: state.observed.and_then(|seen| match seen.usb {
+                            Usb::Apple(mode) => Some(mode),
+                            _ => None,
+                        }),
                         light: state.light(),
                         state: port_state(state, status.uptime_ms),
                         usb: port_usb(state),
@@ -97,15 +121,57 @@ impl BoardView {
         }
     }
 
+    pub(crate) fn describe_devices(
+        &mut self,
+        serial: u64,
+        status: &Status,
+        snapshot: &Snapshot,
+        store: &Store,
+        family: Device,
+    ) {
+        for (port, row) in Port::ALL.into_iter().zip(&mut self.ports) {
+            let assessment = dfu::assess(serial, port, status, snapshot, family.dfu_action(), None);
+            row.dfu = assessment.signal == Signal::Available;
+            row.restore &= match assessment.signal {
+                Signal::Available | Signal::PortDfu => true,
+                Signal::AlreadyDfu => {
+                    assessment.usb_mode == Some(AppleMode::Dfu) && assessment.ecid.is_some()
+                }
+                _ => false,
+            };
+            if row.occupied
+                && status.ports[port.index()].observed == Some(observe(snapshot, port))
+                && let Some(device) = dfu::direct_device(snapshot, port)
+            {
+                let model = device
+                    .apple
+                    .as_ref()
+                    .and_then(|apple| apple.model.as_deref());
+                let hardware = device
+                    .apple
+                    .as_ref()
+                    .and(device.serial_number.as_deref())
+                    .and_then(|serial| dfu_hardware(serial).ok());
+                row.device = store
+                    .device_name(model, hardware)
+                    .or_else(|| model.map(str::to_owned))
+                    .or_else(|| device.product.clone());
+            }
+        }
+    }
+
     /// A board that is attached and cannot be read.
     pub fn unreadable(serial: String, notice: String) -> Self {
         Self {
             serial,
+            name: String::new(),
+            session: None,
             firmware: String::new(),
             supply: String::new(),
             host: false,
             restores: false,
             brightness: 0,
+            settings_busy: false,
             ports: Vec::new(),
             notice: Some(notice),
         }
@@ -125,7 +191,12 @@ impl BoardView {
             (true, false) => "host attached",
             _ => "no host: start iasisd to see USB modes",
         };
-        let mut text = format!("{}  {}  {host}\n", self.serial, self.supply);
+        let id = if self.name.is_empty() {
+            self.serial.clone()
+        } else {
+            format!("{}  {}", self.name, self.serial)
+        };
+        let mut text = format!("{id}  {}  {host}\n", self.supply);
         for port in &self.ports {
             let line = format!(
                 "  {}  {:<16}{:<34}{:<7}{}",

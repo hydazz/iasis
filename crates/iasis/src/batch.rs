@@ -66,6 +66,7 @@ pub enum Images<'a> {
 /// Targets a client asked the board's host to restore: each port with the
 /// attachment that was on it when the client asked.
 pub struct Submission {
+    pub session: u32,
     pub targets: Vec<(Port, u32)>,
     pub at: Instant,
 }
@@ -498,7 +499,9 @@ fn selection(
         if let Some(request) = requests.and_then(|requests| requests.lock().unwrap().take()) {
             // The request is for the targets the client saw, now.
             ensure!(
-                request.at.elapsed() < Duration::from_secs(5)
+                status.restore_session() == Some(request.session)
+                    && request.session == link.session()
+                    && request.at.elapsed() < Duration::from_secs(5)
                     && request.targets.iter().all(|(port, generation)| {
                         status.ready_mask() & (1 << port.index()) != 0
                             && status.ports[port.index()].generation == *generation

@@ -14,9 +14,11 @@ struct IasisApp: App {
         MenuBarExtra {
             MenuView(model: model)
         } label: {
-            MenuBarLabel(model: model)
+            let status = MenuBarStatus(model.state)
+            Image(nsImage: status.image)
+                .accessibilityLabel(status.rawValue)
         }
-        .menuBarExtraStyle(.window)
+        .menuBarExtraStyle(.menu)
 
         Settings {
             SettingsView(model: model)
