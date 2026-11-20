@@ -49,7 +49,7 @@ impl Oled {
             }
             if self.address.is_some() {
                 let next = display::view(status, button, now);
-                self.due = now + display::FRAME_MS;
+                self.due = next.due;
                 self.pending_pages = next.changed_pages(self.frame.as_ref());
                 self.frame = Some(next);
             }
