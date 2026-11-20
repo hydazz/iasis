@@ -186,6 +186,12 @@ impl PortStatus {
         }
     }
 
+    /// The target answers Apple debug on a port without DFU USB, as a Mac
+    /// does on every port but its DFU port.
+    pub fn wrong_port(&self) -> bool {
+        matches!(self.debug_actions, DebugActions::Listed(list) if !list.contains(&DFU_USB))
+    }
+
     pub fn latch_fault(&mut self, error: PortError, sample: FaultSample) {
         if self.fault_sample.is_none() {
             self.error = Some(error);
