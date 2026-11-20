@@ -118,10 +118,13 @@ fn main() -> Result<()> {
     {
         bail!("this command requires --serial; use `iasis list` to select the board");
     }
-    let devices = iasis::discover(UsbIds {
-        vendor: cli.vid,
-        product: cli.pid,
-    })?;
+    let devices = iasis::discover(
+        UsbIds {
+            vendor: cli.vid,
+            product: cli.pid,
+        },
+        cli.serial,
+    )?;
     let mut boards = Vec::new();
     for device in devices {
         let board = match cli.command {
@@ -137,12 +140,12 @@ fn main() -> Result<()> {
                 device.port_chain()
             )
         })?;
-        if cli
-            .serial
-            .is_none_or(|serial| serial == board.info().serial)
-        {
-            boards.push(board);
-        }
+        anyhow::ensure!(
+            cli.serial
+                .is_none_or(|serial| serial == board.info().serial),
+            "board serial changed"
+        );
+        boards.push(board);
     }
     if matches!(cli.command, Command::List) {
         if boards.is_empty() {

@@ -72,13 +72,16 @@ pub struct Topology {
     pub port_chain: Vec<u8>,
 }
 
-pub fn discover(ids: UsbIds) -> Result<Vec<DeviceInfo>, Error> {
+pub fn discover(ids: UsbIds, serial: Option<u64>) -> Result<Vec<DeviceInfo>, Error> {
     Ok(nusb::list_devices()
         .wait()?
         .filter(|device| {
             device.vendor_id() == ids.vendor
                 && device.product_id() == ids.product
                 && device.product_string() == Some("Iasis")
+                && serial.is_none_or(|serial| {
+                    device.serial_number().and_then(|s| parse_serial(s).ok()) == Some(serial)
+                })
         })
         .collect())
 }
