@@ -4,7 +4,7 @@ use embassy_usb::{
     Handler,
     control::{InResponse, OutResponse, Recipient, Request, RequestType},
 };
-pub use iasis_firmware::restore_session::RestoreSession;
+pub use iasis_firmware::host_session::Session;
 use iasis_protocol::{self as protocol, BootloaderRequest, Info, PortCommand, Status};
 
 pub struct Management<'a> {
@@ -14,8 +14,7 @@ pub struct Management<'a> {
     pub command: &'a Cell<Option<PortCommand>>,
     pub configured: &'a Cell<bool>,
     pub suspended: &'a Cell<bool>,
-    pub feedback: &'a Cell<[Option<protocol::RestoreFeedback>; protocol::PORT_COUNT]>,
-    pub restore_session: &'a RestoreSession,
+    pub session: &'a Session,
 }
 
 fn matches(request: &Request) -> bool {
@@ -27,12 +26,12 @@ fn matches(request: &Request) -> bool {
 impl Handler for Management<'_> {
     fn enabled(&mut self, enabled: bool) {
         if !enabled {
-            self.restore_session.disconnect();
+            self.session.disconnect();
         }
     }
 
     fn reset(&mut self) {
-        self.restore_session.disconnect();
+        self.session.disconnect();
         self.configured.set(false);
         self.suspended.set(false);
     }
@@ -40,14 +39,14 @@ impl Handler for Management<'_> {
     fn configured(&mut self, configured: bool) {
         self.configured.set(configured);
         if !configured {
-            self.restore_session.disconnect();
+            self.session.disconnect();
         }
     }
 
     fn suspended(&mut self, suspended: bool) {
         self.suspended.set(suspended);
         if suspended {
-            self.restore_session.disconnect();
+            self.session.disconnect();
         }
     }
 
@@ -59,15 +58,15 @@ impl Handler for Management<'_> {
         if !matches(&request) {
             return None;
         }
-        if request.value != protocol::VERSION {
-            return Some(InResponse::Rejected);
-        }
         let result = match request.request {
+            // A tool of any protocol version can name the board.
             protocol::GET_INFO => protocol::encode(&self.info, buffer),
+            _ if request.value != protocol::VERSION => return Some(InResponse::Rejected),
             protocol::GET_STATUS => {
                 let mut status = self.status.get();
                 let now = embassy_time::Instant::now().as_millis();
-                let session = self.restore_session.active(now);
+                status.host = self.session.active(now);
+                let session = status.host.map(|host| host.id);
                 status.restore_decision = status.restore_decision.filter(|decision| {
                     let (protocol::RestoreDecision::Confirmed(arm)
                     | protocol::RestoreDecision::Cancelled(arm)) = decision;
@@ -87,15 +86,40 @@ impl Handler for Management<'_> {
         if !matches(&request) {
             return None;
         }
-        if request.value != protocol::VERSION || self.update.get() {
+        if self.update.get() {
             return Some(OutResponse::Rejected);
         }
         match request.request {
-            protocol::RESTORE_CONTROL if self.configured.get() && !self.suspended.get() => {
+            // A tool of any protocol version can update the board.
+            protocol::ENTER_BOOTLOADER if self.command.get().is_none() => {
+                match protocol::decode_any::<BootloaderRequest>(data) {
+                    Ok((_, command)) if command.serial == self.info.serial => {
+                        self.session.disconnect();
+                        self.update.set(true);
+                        Some(OutResponse::Accepted)
+                    }
+                    _ => Some(OutResponse::Rejected),
+                }
+            }
+            _ if request.value != protocol::VERSION => Some(OutResponse::Rejected),
+            protocol::HOST_REPORT if self.configured.get() && !self.suspended.get() => {
+                let accepted = protocol::decode::<protocol::HostReport>(data).is_ok_and(|report| {
+                    report.serial == self.info.serial
+                        && self
+                            .session
+                            .report(report, embassy_time::Instant::now().as_millis())
+                });
+                Some(if accepted {
+                    OutResponse::Accepted
+                } else {
+                    OutResponse::Rejected
+                })
+            }
+            protocol::HOST_CONTROL if self.configured.get() && !self.suspended.get() => {
                 let accepted =
-                    protocol::decode::<protocol::RestoreControlRequest>(data).is_ok_and(|req| {
+                    protocol::decode::<protocol::HostControlRequest>(data).is_ok_and(|req| {
                         req.serial == self.info.serial
-                            && self.restore_session.apply(
+                            && self.session.apply(
                                 req.control,
                                 &self.status.get(),
                                 embassy_time::Instant::now().as_millis(),
@@ -106,33 +130,6 @@ impl Handler for Management<'_> {
                 } else {
                     OutResponse::Rejected
                 })
-            }
-            protocol::RESTORE_FEEDBACK => {
-                match protocol::decode::<protocol::RestoreFeedback>(data) {
-                    Ok(feedback)
-                        if feedback.serial == self.info.serial
-                            && feedback.generation
-                                == self.status.get().ports[feedback.port.index()].generation
-                            && feedback.status.ecid != 0
-                            && feedback.status.progress <= 100 =>
-                    {
-                        let mut pending = self.feedback.get();
-                        pending[feedback.port.index()] = Some(feedback);
-                        self.feedback.set(pending);
-                        Some(OutResponse::Accepted)
-                    }
-                    _ => Some(OutResponse::Rejected),
-                }
-            }
-            protocol::ENTER_BOOTLOADER if self.command.get().is_none() => {
-                match protocol::decode::<BootloaderRequest>(data) {
-                    Ok(command) if command.serial == self.info.serial => {
-                        self.restore_session.disconnect();
-                        self.update.set(true);
-                        Some(OutResponse::Accepted)
-                    }
-                    _ => Some(OutResponse::Rejected),
-                }
             }
             protocol::PORT_COMMAND if self.command.get().is_none() => {
                 match protocol::decode::<PortCommand>(data) {

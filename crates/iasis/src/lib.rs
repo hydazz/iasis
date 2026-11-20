@@ -2,6 +2,7 @@
 
 pub mod batch;
 pub mod dfu;
+pub mod host;
 pub mod identity;
 pub mod progress;
 pub mod restore;
@@ -47,6 +48,11 @@ pub enum Error {
     Command(CommandError),
     #[error("port command result was not observed before the deadline")]
     CommandTimeout,
+    #[error(
+        "board firmware speaks protocol {board} and this tool protocol {}; update one to match the other",
+        protocol::VERSION
+    )]
+    Firmware { board: u16 },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -88,6 +94,8 @@ pub fn discover(ids: UsbIds, serial: Option<u64>) -> Result<Vec<DeviceInfo>, Err
 pub struct Board {
     connection: Connection,
     info: Info,
+    /// The protocol version the firmware speaks.
+    protocol: u16,
     topology: Topology,
 }
 
@@ -114,16 +122,17 @@ impl Board {
         Self::from_connection(device, Connection::Observer(device.open().wait()?))
     }
 
-    /// Read status, manage the restore lease and send feedback alongside direct clients.
+    /// Read status and hold the host session alongside direct clients.
     pub fn listen(device: &DeviceInfo) -> Result<Self, Error> {
         Self::from_connection(device, Connection::Listener(device.open().wait()?))
     }
 
     fn from_connection(device: &DeviceInfo, connection: Connection) -> Result<Self, Error> {
-        let info = read(&connection, protocol::GET_INFO)?;
+        let (protocol, info) = read(&connection, protocol::GET_INFO)?;
         Ok(Self {
             connection,
             info,
+            protocol,
             topology: Topology {
                 bus: device.bus_id().to_owned(),
                 port_chain: device.port_chain().to_vec(),
@@ -139,31 +148,33 @@ impl Board {
         &self.topology
     }
 
+    /// The board answers this tool's protocol. A board that does not can
+    /// still be named and sent to its updater.
+    pub fn current(&self) -> Result<(), Error> {
+        if self.protocol == protocol::VERSION {
+            Ok(())
+        } else {
+            Err(Error::Firmware {
+                board: self.protocol,
+            })
+        }
+    }
+
     pub fn status(&self) -> Result<Status, Error> {
-        read(&self.connection, protocol::GET_STATUS)
+        self.current()?;
+        Ok(read(&self.connection, protocol::GET_STATUS)?.1)
     }
 
-    pub fn restore_feedback(
-        &self,
-        port: Port,
-        generation: u32,
-        status: protocol::RestoreStatus,
-    ) -> Result<(), Error> {
-        self.write(
-            protocol::RESTORE_FEEDBACK,
-            &protocol::RestoreFeedback {
-                serial: self.info.serial,
-                port,
-                generation,
-                status,
-            },
-        )
+    /// Take or renew the board's host session and replace the host's view
+    /// of its targets. The board refuses a second host.
+    pub fn host_report(&self, report: &protocol::HostReport) -> Result<(), Error> {
+        self.write(protocol::HOST_REPORT, report)
     }
 
-    pub fn restore_control(&self, control: protocol::RestoreControl) -> Result<(), Error> {
+    pub fn host_control(&self, control: protocol::HostControl) -> Result<(), Error> {
         self.write(
-            protocol::RESTORE_CONTROL,
-            &protocol::RestoreControlRequest {
+            protocol::HOST_CONTROL,
+            &protocol::HostControlRequest {
                 serial: self.info.serial,
                 control,
             },
@@ -243,6 +254,9 @@ impl Board {
     }
 
     fn write(&self, request: u8, value: &impl Serialize) -> Result<(), Error> {
+        if request != protocol::ENTER_BOOTLOADER {
+            self.current()?;
+        }
         let mut buffer = [0; protocol::MAX_PACKET];
         let data = protocol::encode(value, &mut buffer).map_err(|_| Error::Encode)?;
         let transfer = ControlOut {
@@ -256,7 +270,7 @@ impl Board {
         match &self.connection {
             Connection::Control(interface) => interface.control_out(transfer, TIMEOUT).wait()?,
             Connection::Listener(device) => match request {
-                protocol::RESTORE_CONTROL | protocol::RESTORE_FEEDBACK => {
+                protocol::HOST_REPORT | protocol::HOST_CONTROL => {
                     device.control_out(transfer, TIMEOUT).wait()?
                 }
                 _ => return Err(Error::ExclusiveControlRequired),
@@ -267,7 +281,8 @@ impl Board {
     }
 }
 
-fn read<T: DeserializeOwned>(connection: &Connection, request: u8) -> Result<T, Error> {
+/// Read a frame with the protocol version its sender speaks.
+fn read<T: DeserializeOwned>(connection: &Connection, request: u8) -> Result<(u16, T), Error> {
     let request = ControlIn {
         control_type: ControlType::Vendor,
         recipient: Recipient::Interface,
@@ -282,7 +297,7 @@ fn read<T: DeserializeOwned>(connection: &Connection, request: u8) -> Result<T, 
             device.control_in(request, TIMEOUT).wait()?
         }
     };
-    protocol::decode(&data).map_err(Error::Protocol)
+    protocol::decode_any(&data).map_err(Error::Protocol)
 }
 
 pub fn parse_port(value: &str) -> Result<Port, String> {
