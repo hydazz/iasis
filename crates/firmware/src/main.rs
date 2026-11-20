@@ -172,7 +172,7 @@ async fn main(_spawner: Spawner) {
     let mut msos = [0; 64];
     let mut control = [0; protocol::MAX_PACKET];
     let mut builder = Builder::new(
-        Driver::new(p.USB, Irqs),
+        usb::Attentive(Driver::new(p.USB, Irqs)),
         config,
         &mut configuration,
         &mut bos,

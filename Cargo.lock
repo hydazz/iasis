@@ -1035,6 +1035,7 @@ dependencies = [
  "embassy-sync",
  "embassy-time",
  "embassy-usb",
+ "embassy-usb-driver",
  "embedded-graphics",
  "heapless",
  "iasis-pd",
