@@ -28,6 +28,7 @@ use crate::{
     identity::AppleDevice,
     restore::{Operation, Progress},
     topology::{self, Snapshot, UsbDevice},
+    view::{BoardView, DeviceName, LastSeen},
 };
 
 /// Several reports fit inside the session lease.
@@ -159,13 +160,94 @@ enum Unsent {
     Unreachable(anyhow::Error),
 }
 
+struct SeenDevice {
+    generation: u32,
+    ecid: u64,
+    name: DeviceName,
+}
+
 #[derive(Default)]
 struct View {
+    last_seen: [Option<SeenDevice>; PORT_COUNT],
     observer: Observer,
     seen: Seen,
     /// Board uptime at the last sample. A smaller reading is a restart.
     uptime_ms: u64,
     sample: Option<(Status, Snapshot)>,
+}
+
+impl View {
+    fn remember_devices(&mut self, status: &Status, snapshot: &Snapshot) {
+        for port in Port::ALL {
+            let index = port.index();
+            let slot = &status.ports[index];
+            let previous = &mut self.last_seen[index];
+            if slot.orientation.is_none() || !slot.occupied() {
+                *previous = None;
+                continue;
+            }
+            if previous
+                .as_ref()
+                .is_some_and(|p| p.generation != slot.generation)
+            {
+                *previous = None;
+            }
+            let seen = observe(snapshot, port);
+            if seen.usb == Usb::Absent {
+                // A cable can stay attached after the device moves to another port.
+                if previous
+                    .as_ref()
+                    .is_some_and(|p| appears_elsewhere(snapshot, port, p.ecid))
+                {
+                    *previous = None;
+                }
+                continue;
+            }
+            let Some(ecid) = seen
+                .ecid
+                .filter(|_| matches!(seen.usb, Usb::Apple(mode) if mode != AppleMode::PortDfu))
+            else {
+                *previous = None;
+                continue;
+            };
+            if previous.as_ref().is_some_and(|p| p.ecid != ecid) {
+                *previous = None;
+            }
+            if slot.observed == Some(seen)
+                && let Some(device) = dfu::direct_device(snapshot, port)
+            {
+                previous
+                    .get_or_insert_with(|| SeenDevice {
+                        generation: slot.generation,
+                        ecid,
+                        name: DeviceName::default(),
+                    })
+                    .name
+                    .read(device);
+            }
+        }
+    }
+    fn describe_last_seen(
+        &self,
+        board: &mut BoardView,
+        snapshot: &Snapshot,
+        store: &crate::images::Store,
+    ) {
+        for (port, previous) in Port::ALL.into_iter().zip(&self.last_seen) {
+            if let Some(previous) = previous {
+                let row = &mut board.ports[port.index()];
+                let ecid = format!("{:016x}", previous.ecid);
+                if row.ecid.as_ref() == Some(&ecid) {
+                    row.device = previous.name.display(store);
+                } else if snapshot.ports[port.index()].devices.is_empty() {
+                    row.last_seen = Some(LastSeen {
+                        ecid,
+                        device: previous.name.display(store),
+                    });
+                }
+            }
+        }
+    }
 }
 
 fn finished(job: &RestoreStatus) -> bool {
@@ -253,6 +335,7 @@ impl Shared {
         }
         view.uptime_ms = status.uptime_ms;
         view.seen = view.observer.sample(&status, &snapshot);
+        view.remember_devices(&status, &snapshot);
         view.sample = Some((status, snapshot));
         Ok(())
     }
@@ -498,6 +581,7 @@ impl Link {
         let (status, snapshot) = view.sample.as_ref()?;
         let mut board = crate::view::BoardView::new(self.board().info(), status);
         board.describe_devices(self.board().info().serial, status, snapshot, store, family);
+        view.describe_last_seen(&mut board, snapshot, store);
         for (port, job) in board
             .ports
             .iter_mut()
@@ -612,6 +696,125 @@ mod tests {
             }
         }
         status
+    }
+
+    #[test]
+    fn a_cable_can_outlive_the_device_it_last_identified() {
+        use crate::{
+            batch::Device,
+            images::{Network, Store},
+            view::PortView,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path(), Network::default()).unwrap();
+        let info = iasis_protocol::Info {
+            serial: 1,
+            firmware_version: [0, 1, 0],
+            flash_bytes: 0,
+            capabilities: 0,
+        };
+        let sample = |view: &mut View, status: &Status, usb: &Snapshot| -> PortView {
+            view.remember_devices(status, usb);
+            let mut board = BoardView::new(&info, status);
+            board.describe_devices(info.serial, status, usb, &store, Device::AppleSilicon);
+            view.describe_last_seen(&mut board, usb, &store);
+            board.ports.remove(0)
+        };
+        let mut view = View::default();
+        let mut status = attached([Some(5), Some(7), None, None, None]);
+        let mut usb = snapshot();
+        let one = Port::ALL[0];
+        let ipad = |ecid, model: &str| {
+            let mut device = device(one, 0x05ac, 0x12ab, None);
+            let apple = device.apple.as_mut().unwrap();
+            apple.identity = Identity::Known {
+                ecid,
+                source: IdentitySource::Configurator,
+            };
+            apple.model = Some(model.into());
+            device
+        };
+        assert!(sample(&mut view, &status, &usb).last_seen.is_none());
+        usb.ports[0].devices.push(ipad(42, "iPad13,18"));
+        status.ports[0].observed = Some(observe(&usb, one));
+        let row = sample(&mut view, &status, &usb);
+        assert_eq!(row.device.as_deref(), Some("iPad13,18"));
+        assert_eq!(row.ecid.as_deref(), Some("000000000000002a"));
+        assert!(row.last_seen.is_none() && !row.revive);
+
+        // A USB disappearance can precede the board's next report.
+        usb.ports[0].devices.clear();
+        let missing = sample(&mut view, &status, &usb);
+        assert!(missing.ecid.is_none() && missing.mode.is_none() && missing.device.is_none());
+        assert_eq!(
+            missing.last_seen,
+            Some(LastSeen {
+                ecid: "000000000000002a".into(),
+                device: Some("iPad13,18".into())
+            })
+        );
+        assert!(!missing.revive);
+
+        let mut same = device(one, 0x05ac, 0x1227, Some(42));
+        same.product = Some("Apple Mobile Device (DFU Mode)".into());
+        usb.ports[0].devices.push(same);
+        status.ports[0].observed = Some(observe(&usb, one));
+        let returned = sample(&mut view, &status, &usb);
+        assert_eq!(returned.ecid.as_deref(), Some("000000000000002a"));
+        assert_eq!(returned.device.as_deref(), Some("iPad13,18"));
+        assert!(returned.last_seen.is_none());
+
+        // Replacing the device at the Lightning end can keep the CC generation.
+        usb.ports[0].devices = vec![ipad(99, "iPhone16,1")];
+        let unsettled = sample(&mut view, &status, &usb);
+        assert!(
+            unsettled.device.is_none() && unsettled.ecid.is_none() && unsettled.last_seen.is_none()
+        );
+        status.ports[0].observed = Some(observe(&usb, one));
+        assert_eq!(
+            sample(&mut view, &status, &usb).device.as_deref(),
+            Some("iPhone16,1")
+        );
+        usb.ports[0].devices.clear();
+        assert_eq!(
+            sample(&mut view, &status, &usb).last_seen.unwrap().ecid,
+            "0000000000000063"
+        );
+
+        // A fresh host session and a fresh CC attachment each start empty.
+        assert!(
+            sample(&mut View::default(), &status, &usb)
+                .last_seen
+                .is_none()
+        );
+        status.ports[0].generation += 1;
+        assert!(sample(&mut view, &status, &usb).last_seen.is_none());
+        store.close();
+    }
+
+    #[test]
+    fn moved_or_ambiguous_devices_clear_a_remembered_identity() {
+        let [one, two, ..] = Port::ALL;
+        let mut status = attached([Some(1), Some(2), None, None, None]);
+        let mut usb = snapshot();
+        let mut view = View::default();
+        for replacement in [vec![device(two, 0x05ac, 0x1227, Some(42))], vec![]] {
+            usb.ports[0].devices = vec![device(one, 0x05ac, 0x1227, Some(42))];
+            usb.ports[1].devices.clear();
+            status.ports[0].observed = Some(observe(&usb, one));
+            view.remember_devices(&status, &usb);
+            assert!(view.last_seen[0].is_some());
+            usb.ports[1].devices = replacement;
+            if usb.ports[1].devices.is_empty() {
+                usb.ports[0]
+                    .devices
+                    .push(device(one, 0x05ac, 0x1227, Some(99)));
+            } else {
+                usb.ports[0].devices.clear();
+            }
+            view.remember_devices(&status, &usb);
+            assert!(view.last_seen[0].is_none());
+        }
     }
 
     #[test]
