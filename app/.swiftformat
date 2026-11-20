@@ -1,0 +1,6 @@
+--swiftversion 6.0
+--indent 4
+--allman false
+--commas always
+--wraparguments before-first
+--wrapcollections before-first
