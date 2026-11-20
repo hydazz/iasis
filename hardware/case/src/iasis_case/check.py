@@ -178,7 +178,10 @@ def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
                 c.display,
                 [("button", c.button, c.button.bounding_box())],
             )
-            _display_retention(r, c, parts)
+            _display_retention(r, c)
+            assert c.display_mount is not None
+            for i, pin in enumerate(c.display_mount.pins, 1):
+                _clear(r, f"display pin {i}", pin, parts)
         _case_retention(r, lay, c, tray, parts)
         _paths(r, lay, c.part, tray)
         if (overlap := _overlap(c.part, tray)) > 1e-3:
@@ -308,41 +311,28 @@ def _case_retention(
     )
 
 
-def _display_retention(r: Report, c: case.Cover, parts: Candidates) -> None:
+def _display_retention(r: Report, c: case.Cover) -> None:
     mount, module = c.display_mount, c.display
     assert mount is not None and module is not None
-    if len(mount.centres) != 4:
-        r.fail("display needs four corner mounts")
+    if len(mount.posts) != 4 or len(mount.pins) != 4:
+        r.fail("display needs four supported pin joints")
     if _overlap(module, c.part) > 1e-3:
-        r.fail("OLED overlaps its cover")
-    engagement = mount.tip - mount.face
-    if engagement < 2:
-        r.fail("display screws have less than 2 mm engagement in the posts")
-    for i, ((x, y), screw, head) in enumerate(
-        zip(mount.centres, mount.screws, mount.heads, strict=True), 1
-    ):
-        _clear(r, f"display screw {i}", screw, parts)
-        if _overlap(screw, module) > 1e-3 or _overlap(head, c.part) > 1e-3:
-            r.fail(f"display screw {i} overlaps the OLED or cover outside its thread")
-        if _overlap(Pos(0, 0, 0.1) * head, module) < 0.8:
-            r.fail(f"display screw {i} head does not retain the PCB corner")
-        # Full material around the screw, including the part entering the roof.
-        wall = Pos(x, y, mount.face) * (
-            Cylinder(mount.post_d / 2, engagement, align=case.BASE)
-            - Cylinder(mount.screw_d / 2, engagement, align=case.BASE)
-        )
-        if (wall - c.part).volume > 1e-3:
-            r.fail(f"display post {i} lacks solid material around the thread")
-        cap = Pos(x, y, mount.tip + 0.2) * Cylinder(1.25, 0.8, align=case.BASE)
-        if (cap - c.part).volume > 1e-3:
-            r.fail(f"display screw {i} leaves less than 0.8 mm over its blind hole")
-        driver = Pos(x, y, mount.rear - mount.head_h - 20) * Cylinder(1.6, 20, align=case.BASE)
-        if _overlap(driver, c.part) > 1e-3 or _overlap(driver, module) > 1e-3:
-            r.fail(f"display screw {i} has obstructed driver access")
-    if any(_overlap(Pos(0, 0, -d / 4) * module, c.part) > 1e-3 for d in range(1, 17)):
-        r.fail("unscrewed OLED cannot lift straight off its supports")
-    else:
-        r.ok(f"OLED screws engage {engagement:.2f} mm in supported corner posts; straight removal")
+        r.fail("OLED overlaps its seats")
+    for i, (post, pin) in enumerate(zip(mount.posts, mount.pins, strict=True), 1):
+        if _overlap(Pos(0, 0, 0.1) * module, post) < 0.6:
+            r.fail(f"display corner {i} lacks a substantial PCB seating face")
+        if _overlap(pin, module) > 1e-3 or _overlap(pin, c.part) > 1e-3:
+            r.fail(f"display pin {i} intersects the OLED or its socket")
+        contact = (Pos(0, 0, -0.1) * module) & pin
+        if contact is None or contact.volume < 0.6:
+            r.fail(f"display pin {i} does not capture the PCB against falling out")
+        elif ((Pos(0, 0, -1.0) * contact) - pin).volume > 1e-3:
+            r.fail(f"display pin {i} lacks 1 mm of material behind its bearing face")
+        if any(_overlap(Pos(0, 0, -d / 2) * pin, c.part) > 1e-3 for d in range(1, 10)):
+            r.fail(f"display pin {i} cannot insert straight into its socket")
+    if any(_overlap(Pos(0, 0, -d / 2) * module, c.part) > 1e-3 for d in range(1, 10)):
+        r.fail("OLED cannot lift straight off its seats with the pins removed")
+    r.ok("OLED has flat seating and pin-head capture; pin grip requires a physical fit test")
 
 
 def _overlap(a: Shape, b: Shape) -> float:
