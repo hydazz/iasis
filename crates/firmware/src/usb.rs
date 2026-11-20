@@ -15,6 +15,7 @@ pub struct Management<'a> {
     pub configured: &'a Cell<bool>,
     pub suspended: &'a Cell<bool>,
     pub host_budget: &'a Cell<u16>,
+    pub brightness: &'a Cell<u8>,
     pub session: &'a Session,
 }
 
@@ -137,6 +138,17 @@ impl Handler for Management<'_> {
             protocol::HOST_BUDGET => match protocol::decode::<protocol::HostBudget>(data) {
                 Ok(budget) if budget.serial == self.info.serial && budget.milliamps <= 1600 => {
                     self.host_budget.set(budget.milliamps);
+                    Some(OutResponse::Accepted)
+                }
+                _ => Some(OutResponse::Rejected),
+            },
+            protocol::LIGHTS => match protocol::decode::<protocol::Lights>(data) {
+                Ok(lights)
+                    if lights.serial == self.info.serial
+                        && (protocol::BRIGHTNESS_MIN..=protocol::BRIGHTNESS_MAX)
+                            .contains(&lights.brightness) =>
+                {
+                    self.brightness.set(lights.brightness);
                     Some(OutResponse::Accepted)
                 }
                 _ => Some(OutResponse::Rejected),

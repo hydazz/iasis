@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 11;
+pub const VERSION: u16 = 12;
 pub const MAX_PACKET: usize = 1344;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
@@ -13,6 +13,11 @@ pub const PORT_COMMAND: u8 = 4;
 pub const HOST_BUDGET: u8 = 5;
 pub const HOST_REPORT: u8 = 6;
 pub const HOST_CONTROL: u8 = 7;
+pub const LIGHTS: u8 = 8;
+/// Indicator brightness in percent. The default is half of full.
+pub const BRIGHTNESS_DEFAULT: u8 = 50;
+pub const BRIGHTNESS_MIN: u8 = 10;
+pub const BRIGHTNESS_MAX: u8 = 100;
 pub const RESTORE_ARM_MS: u64 = 20_000;
 /// A host session ends this long after its last report.
 pub const HOST_SESSION_MS: u64 = 3000;
@@ -386,6 +391,13 @@ pub enum Supply {
     Brick,
 }
 
+/// Indicator brightness, kept until the board restarts.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Lights {
+    pub serial: u64,
+    pub brightness: u8,
+}
+
 /// Remaining upstream allowance, including Iasis itself. Zero clears the hint.
 /// Applies only to Default-current legacy connections, never over native Rp.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -565,6 +577,8 @@ pub struct Status {
     pub restore_decision: Option<RestoreDecision>,
     /// The host holding the board's session.
     pub host: Option<HostSession>,
+    /// Indicator brightness in percent.
+    pub brightness: u8,
 }
 
 impl Status {
@@ -813,6 +827,7 @@ mod tests {
                 id: u32::MAX,
                 restore_ready: true,
             }),
+            brightness: u8::MAX,
         };
         let mut buffer = [0; MAX_PACKET];
         let packet = encode(&status, &mut buffer).unwrap();
@@ -882,7 +897,7 @@ mod tests {
         assert_eq!(
             packet,
             &[
-                b'I', b'A', b'S', b'I', 11, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
+                b'I', b'A', b'S', b'I', 12, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
             ]
         );
         let length = packet.len();

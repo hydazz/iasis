@@ -1,13 +1,14 @@
 //! The six indicator lights.
 //!
-//! Hue is what a port holds, motion is how sure the board is, and brightness
-//! is the selection. Blue is DFU on every light: the status light while a
-//! release would send it, a port pulsing once it is sent, and steady once a
-//! host sees the target's DFU. Only a host can make it steady.
+//! Hue is what a port holds, a pulse is work under way or a result awaited,
+//! and brightness is the selection. Blue is DFU on every light: the status
+//! light while a release would send it, a port pulsing once it is sent, and
+//! steady once a host sees the target's DFU. Only a host can make it steady.
 
 use crate::button::Button;
 use iasis_protocol::{
-    AppleMode, Gesture, Port, PortAction, PortState, PortStatus, RestorePhase, Status, Usb,
+    AppleMode, BRIGHTNESS_MAX, BRIGHTNESS_MIN, Gesture, Port, PortAction, PortState, PortStatus,
+    RestorePhase, Status, Usb,
 };
 
 const OFF: [u8; 3] = [0; 3];
@@ -19,8 +20,8 @@ const AMBER: [u8; 3] = [24, 10, 0];
 const PURPLE: [u8; 3] = [24, 0, 24];
 const PULSE_MS: u64 = 1200;
 
-/// A port's colour and whether it is steady. A pulse marks something asked
-/// for or lost track of, not something seen.
+/// A port's colour and whether it is steady. A pulse marks a port that is
+/// busy; a steady colour will hold until someone acts.
 fn port(port: &PortStatus) -> ([u8; 3], bool) {
     if port.error.is_some() || port.state == PortState::Fault {
         return (RED, true);
@@ -30,11 +31,9 @@ fn port(port: &PortStatus) -> ([u8; 3], bool) {
     }
     if let Some(job) = port.restore {
         return match job.phase {
-            RestorePhase::Preparing | RestorePhase::Unconfirmed => (PURPLE, false),
-            RestorePhase::Running => {
-                let level = 10 + job.progress.min(100) / 8;
-                ([level, 0, level + 2], true)
-            }
+            RestorePhase::Preparing | RestorePhase::Running => (PURPLE, false),
+            // Nobody is driving it and nobody knows how it ended.
+            RestorePhase::Unconfirmed => (PURPLE, true),
             RestorePhase::Reported => (GREEN, true),
             RestorePhase::Failed => (RED, true),
         };
@@ -44,7 +43,7 @@ fn port(port: &PortStatus) -> ([u8; 3], bool) {
             AppleMode::Dfu | AppleMode::KisDfu | AppleMode::Recovery | AppleMode::Wtf,
         )) => return (BLUE, true),
         // A restore some other tool is running.
-        Some(Usb::Apple(AppleMode::Restored)) => return (PURPLE, true),
+        Some(Usb::Apple(AppleMode::Restored)) => return (PURPLE, false),
         _ => {}
     }
     match port.request.map(|request| request.action) {
@@ -66,6 +65,26 @@ fn pulse(color: [u8; 3], now: u64) -> [u8; 3] {
     let rise = phase.min(PULSE_MS - phase);
     let scale = 64 + rise * 192 / (PULSE_MS / 2);
     color.map(|value| (u64::from(value) * scale).div_ceil(256) as u8)
+}
+
+/// The most a light may draw: the sum of its three channels.
+const PIXEL_LIMIT: u16 = 85;
+
+/// Scale a frame to a brightness in percent, where the default leaves it
+/// unchanged. A lit channel stays lit, and no light passes its limit.
+pub fn dim(frame: [[u8; 3]; 6], brightness: u8) -> [[u8; 3]; 6] {
+    let percent = u16::from(brightness.clamp(BRIGHTNESS_MIN, BRIGHTNESS_MAX));
+    frame.map(|pixel| {
+        let scaled = pixel.map(|value| (u16::from(value) * percent).div_ceil(50));
+        let sum: u16 = scaled.iter().sum();
+        scaled.map(|value| {
+            if sum > PIXEL_LIMIT {
+                (value * PIXEL_LIMIT / sum) as u8
+            } else {
+                value as u8
+            }
+        })
+    })
 }
 
 /// RGB values in chain order: status, port 5 through port 1. The status light
@@ -121,7 +140,8 @@ pub fn indicators(status: &Status, control: &Button, now: u64) -> [[u8; 3]; 6] {
 mod tests {
     use super::*;
     use iasis_protocol::{
-        DebugActions, HostSession, Observed, PortError, Request, RestoreArm, RestoreStatus,
+        BRIGHTNESS_DEFAULT, DebugActions, HostSession, Observed, PortError, Request, RestoreArm,
+        RestoreStatus,
     };
 
     fn ready() -> Status {
@@ -339,20 +359,25 @@ mod tests {
             status.ports[0].restore = Some(job);
             indicators(&status, &button, now)[5]
         };
-        assert_eq!(look(job, 600), PURPLE);
-        assert_eq!(look(job, 0), [6, 0, 6]);
+        // Work under way pulses, whatever its progress.
+        for phase in [RestorePhase::Preparing, RestorePhase::Running] {
+            job.phase = phase;
+            for progress in [0, 100] {
+                job.progress = progress;
+                assert_eq!(look(job, 600), PURPLE);
+                assert_eq!(look(job, 0), [6, 0, 6]);
+            }
+        }
+        // A restore whose end nobody saw holds still.
         job.phase = RestorePhase::Unconfirmed;
-        assert_eq!(look(job, 0), [6, 0, 6]);
-        job.phase = RestorePhase::Running;
-        assert_eq!(look(job, 0), [10, 0, 12]);
-        assert_eq!(look(job, 300), [10, 0, 12]);
-        job.progress = 100;
-        assert_eq!(look(job, 0), [22, 0, 24]);
+        assert_eq!(look(job, 0), PURPLE);
+        assert_eq!(look(job, 600), PURPLE);
         job.phase = RestorePhase::Failed;
         assert_eq!(look(job, 0), RED);
         // Another tool's restore, seen by the host.
         status.ports[1].observed = seen(AppleMode::Restored);
-        assert_eq!(steady(&status)[4], PURPLE);
+        assert_eq!(steady(&status)[4], [6, 0, 6]);
+        assert_eq!(indicators(&status, &Button::default(), 600)[4], PURPLE);
 
         job.phase = RestorePhase::Reported;
         status.ports[0].restore = Some(job);
@@ -361,6 +386,33 @@ mod tests {
         assert_eq!(indicators(&status, &button, 1200)[5], GREEN);
         assert_eq!(indicators(&status, &button, 1400)[5], [0, 32, 0]);
         assert_eq!(indicators(&status, &button, 2800)[5], GREEN);
+    }
+
+    #[test]
+    fn brightness_scales_every_light_within_its_limit() {
+        let frame = [RED, GREEN, WHITE, BLUE, [1, 0, 0], OFF];
+        assert_eq!(dim(frame, BRIGHTNESS_DEFAULT), frame);
+        // Out of range is the nearest end of the range.
+        assert_eq!(dim(frame, 0), dim(frame, BRIGHTNESS_MIN));
+        assert_eq!(dim(frame, 255), dim(frame, BRIGHTNESS_MAX));
+        assert_eq!(
+            dim(frame, BRIGHTNESS_MIN),
+            [[7, 0, 0], [0, 3, 0], [2, 2, 2], [0, 2, 5], [1, 0, 0], OFF]
+        );
+        assert_eq!(
+            dim(frame, BRIGHTNESS_MAX)[..4],
+            [[64, 0, 0], [0, 24, 0], [16, 16, 16], [0, 16, 48]]
+        );
+        // The brightest frame is held to the limit without changing its hue.
+        assert_eq!(dim([[24, 0, 24]; 6], BRIGHTNESS_MAX), [[42, 0, 42]; 6]);
+        for brightness in 0..=255 {
+            for pixel in dim(
+                [[32, 32, 32], [0, 32, 0], PURPLE, RED, WHITE, OFF],
+                brightness,
+            ) {
+                assert!(pixel.into_iter().map(u16::from).sum::<u16>() <= PIXEL_LIMIT);
+            }
+        }
     }
 
     #[test]

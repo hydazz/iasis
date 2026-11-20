@@ -10,7 +10,7 @@ Messages use vendor control transfers on endpoint zero, addressed to interface 0
 | ------------------------ | --------------------------------------------------------- |
 | Request type / recipient | Vendor / interface                                        |
 | `wIndex`                 | `0`                                                       |
-| `wValue`                 | Protocol version, `11`                                    |
+| `wValue`                 | Protocol version, `12`                                    |
 | Maximum payload          | 1344 bytes                                                |
 | Payload header           | ASCII `IASI`, then a little-endian `u16` protocol version |
 | Payload body             | Postcard-encoded message                                  |
@@ -24,6 +24,7 @@ Messages use vendor control transfers on endpoint zero, addressed to interface 0
 | `5`     | Host → device | `HostBudget`: serial, legacy host allowance in mA                |
 | `6`     | Host → device | `HostReport`: serial, session and the host's view of each port   |
 | `7`     | Host → device | `HostControlRequest`: serial and a restore arm or session end    |
+| `8`     | Host → device | `Lights`: serial and indicator brightness in percent             |
 
 The decoder rejects unknown versions, invalid ports, incomplete messages and trailing bytes. Wire changes require a protocol version bump, independently of the Cargo package version.
 
@@ -54,6 +55,8 @@ Send a `PortCommand` with a nonzero request ID. USB acceptance queues the comman
 | Apple action acknowledged | PD transport acknowledged the message; inspect USB enumeration for DFU                      |
 | Apple action unconfirmed  | Sent without GoodCRC; the target may still have acted                                       |
 | Bootloader accepted       | ROM reboot queued; use picotool to detect the updater                                       |
+
+`Lights` sets the indicator brightness from 10 to 100 percent, where 50 is the level the board starts at. Status reports it as `brightness`. The board keeps it until it restarts.
 
 `HostBudget` is the remaining legacy USB allowance including Iasis. Zero clears it; values above 1600 mA are rejected. It applies only to Default-current connections; native USB-C Rp takes precedence.
 
