@@ -1,0 +1,5 @@
+project: Iasis.xcodeproj
+schemes:
+  - Iasis
+retain_codable_properties: true
+retain_swift_ui_previews: true
