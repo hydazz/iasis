@@ -5102,7 +5102,7 @@
 		(layer "F.Cu")
 		(uuid "0788a3ff-b704-470e-aaf9-f48128e1ad37")
 		(at 130.25 151.05)
-		(descr "OPSCO SK6812SIDE-A side-emitting addressable RGB LED, 4.0x1.6x2.0mm, land pattern from OSK-SPC-SK6812SIDEI-A-S rev A/1")
+		(descr "OPSCO SK6812SIDE-A side-emitting addressable RGB LED, 4.0x1.6x2.0mm, SK6812SIDE-A-012 rev B/2; body centre +0.6mm toward emitting edge")
 		(property "Reference" "D1174"
 			(at -4.933565 -1 0)
 			(layer "F.SilkS")
@@ -5221,7 +5221,7 @@
 		)
 		(fp_rect
 			(start -2.55 -0.85)
-			(end 2.55 0.85)
+			(end 2.55 1.65)
 			(stroke
 				(width 0.05)
 				(type solid)
@@ -5232,7 +5232,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -2 -0.4) (xy -1.6 -0.8) (xy 2 -0.8) (xy 2 0.8) (xy -2 0.8)
+				(xy -2 0.2) (xy -1.6 -0.2) (xy 2 -0.2) (xy 2 1.4) (xy -2 1.4)
 			)
 			(stroke
 				(width 0.1)
@@ -5310,7 +5310,7 @@
 		(embedded_fonts no)
 		(model "${KIPRJMOD}/../../shared/Iasis.3dshapes/OPSCO_SK6812SIDE-A.step"
 			(offset
-				(xyz 0 0 1.02)
+				(xyz 0 -0.6 1.02)
 			)
 			(scale
 				(xyz 1 1 1)
@@ -30033,7 +30033,7 @@
 		(layer "F.Cu")
 		(uuid "259e75f5-b955-4880-a948-09112b38454a")
 		(at 82.25 151.05)
-		(descr "OPSCO SK6812SIDE-A side-emitting addressable RGB LED, 4.0x1.6x2.0mm, land pattern from OSK-SPC-SK6812SIDEI-A-S rev A/1")
+		(descr "OPSCO SK6812SIDE-A side-emitting addressable RGB LED, 4.0x1.6x2.0mm, SK6812SIDE-A-012 rev B/2; body centre +0.6mm toward emitting edge")
 		(property "Reference" "D1172"
 			(at -4.910476 -1 0)
 			(layer "F.SilkS")
@@ -30152,7 +30152,7 @@
 		)
 		(fp_rect
 			(start -2.55 -0.85)
-			(end 2.55 0.85)
+			(end 2.55 1.65)
 			(stroke
 				(width 0.05)
 				(type solid)
@@ -30163,7 +30163,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -2 -0.4) (xy -1.6 -0.8) (xy 2 -0.8) (xy 2 0.8) (xy -2 0.8)
+				(xy -2 0.2) (xy -1.6 -0.2) (xy 2 -0.2) (xy 2 1.4) (xy -2 1.4)
 			)
 			(stroke
 				(width 0.1)
@@ -30241,7 +30241,7 @@
 		(embedded_fonts no)
 		(model "${KIPRJMOD}/../../shared/Iasis.3dshapes/OPSCO_SK6812SIDE-A.step"
 			(offset
-				(xyz 0 0 1.02)
+				(xyz 0 -0.6 1.02)
 			)
 			(scale
 				(xyz 1 1 1)
@@ -81708,7 +81708,7 @@
 		(layer "F.Cu")
 		(uuid "6ae2e3c1-ab36-4fa9-84ff-a79f3b55c3e5")
 		(at 179.25 151.025)
-		(descr "OPSCO SK6812SIDE-A side-emitting addressable RGB LED, 4.0x1.6x2.0mm, land pattern from OSK-SPC-SK6812SIDEI-A-S rev A/1")
+		(descr "OPSCO SK6812SIDE-A side-emitting addressable RGB LED, 4.0x1.6x2.0mm, SK6812SIDE-A-012 rev B/2; body centre +0.6mm toward emitting edge")
 		(property "Reference" "D1170"
 			(at 5.225 -0.575 0)
 			(layer "F.SilkS")
@@ -81828,7 +81828,7 @@
 		)
 		(fp_rect
 			(start -2.55 -0.85)
-			(end 2.55 0.85)
+			(end 2.55 1.65)
 			(stroke
 				(width 0.05)
 				(type solid)
@@ -81839,7 +81839,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -2 -0.4) (xy -1.6 -0.8) (xy 2 -0.8) (xy 2 0.8) (xy -2 0.8)
+				(xy -2 0.2) (xy -1.6 -0.2) (xy 2 -0.2) (xy 2 1.4) (xy -2 1.4)
 			)
 			(stroke
 				(width 0.1)
@@ -81917,7 +81917,7 @@
 		(embedded_fonts no)
 		(model "${KIPRJMOD}/../../shared/Iasis.3dshapes/OPSCO_SK6812SIDE-A.step"
 			(offset
-				(xyz 0 0 1.02)
+				(xyz 0 -0.6 1.02)
 			)
 			(scale
 				(xyz 1 1 1)
@@ -137710,7 +137710,7 @@
 		(layer "F.Cu")
 		(uuid "bef947f8-64bd-4cb4-b456-11aa6eef6404")
 		(at 154.25 151.05)
-		(descr "OPSCO SK6812SIDE-A side-emitting addressable RGB LED, 4.0x1.6x2.0mm, land pattern from OSK-SPC-SK6812SIDEI-A-S rev A/1")
+		(descr "OPSCO SK6812SIDE-A side-emitting addressable RGB LED, 4.0x1.6x2.0mm, SK6812SIDE-A-012 rev B/2; body centre +0.6mm toward emitting edge")
 		(property "Reference" "D1175"
 			(at -4.910476 -1 0)
 			(layer "F.SilkS")
@@ -137829,7 +137829,7 @@
 		)
 		(fp_rect
 			(start -2.55 -0.85)
-			(end 2.55 0.85)
+			(end 2.55 1.65)
 			(stroke
 				(width 0.05)
 				(type solid)
@@ -137840,7 +137840,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -2 -0.4) (xy -1.6 -0.8) (xy 2 -0.8) (xy 2 0.8) (xy -2 0.8)
+				(xy -2 0.2) (xy -1.6 -0.2) (xy 2 -0.2) (xy 2 1.4) (xy -2 1.4)
 			)
 			(stroke
 				(width 0.1)
@@ -137918,7 +137918,7 @@
 		(embedded_fonts no)
 		(model "${KIPRJMOD}/../../shared/Iasis.3dshapes/OPSCO_SK6812SIDE-A.step"
 			(offset
-				(xyz 0 0 1.02)
+				(xyz 0 -0.6 1.02)
 			)
 			(scale
 				(xyz 1 1 1)
@@ -179720,7 +179720,7 @@
 		(layer "F.Cu")
 		(uuid "f6b69b68-0d62-4b9e-ae87-4421560c02a4")
 		(at 106.25 151.05)
-		(descr "OPSCO SK6812SIDE-A side-emitting addressable RGB LED, 4.0x1.6x2.0mm, land pattern from OSK-SPC-SK6812SIDEI-A-S rev A/1")
+		(descr "OPSCO SK6812SIDE-A side-emitting addressable RGB LED, 4.0x1.6x2.0mm, SK6812SIDE-A-012 rev B/2; body centre +0.6mm toward emitting edge")
 		(property "Reference" "D1173"
 			(at -4.910476 -1 0)
 			(layer "F.SilkS")
@@ -179839,7 +179839,7 @@
 		)
 		(fp_rect
 			(start -2.55 -0.85)
-			(end 2.55 0.85)
+			(end 2.55 1.65)
 			(stroke
 				(width 0.05)
 				(type solid)
@@ -179850,7 +179850,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -2 -0.4) (xy -1.6 -0.8) (xy 2 -0.8) (xy 2 0.8) (xy -2 0.8)
+				(xy -2 0.2) (xy -1.6 -0.2) (xy 2 -0.2) (xy 2 1.4) (xy -2 1.4)
 			)
 			(stroke
 				(width 0.1)
@@ -179928,7 +179928,7 @@
 		(embedded_fonts no)
 		(model "${KIPRJMOD}/../../shared/Iasis.3dshapes/OPSCO_SK6812SIDE-A.step"
 			(offset
-				(xyz 0 0 1.02)
+				(xyz 0 -0.6 1.02)
 			)
 			(scale
 				(xyz 1 1 1)
@@ -180979,7 +180979,7 @@
 		(layer "F.Cu")
 		(uuid "f862a1ce-6820-4c6d-8d86-fbb446b5936b")
 		(at 58.25 151.05)
-		(descr "OPSCO SK6812SIDE-A side-emitting addressable RGB LED, 4.0x1.6x2.0mm, land pattern from OSK-SPC-SK6812SIDEI-A-S rev A/1")
+		(descr "OPSCO SK6812SIDE-A side-emitting addressable RGB LED, 4.0x1.6x2.0mm, SK6812SIDE-A-012 rev B/2; body centre +0.6mm toward emitting edge")
 		(property "Reference" "D1171"
 			(at -3.25 -1.52 0)
 			(layer "F.SilkS")
@@ -181099,7 +181099,7 @@
 		)
 		(fp_rect
 			(start -2.55 -0.85)
-			(end 2.55 0.85)
+			(end 2.55 1.65)
 			(stroke
 				(width 0.05)
 				(type solid)
@@ -181110,7 +181110,7 @@
 		)
 		(fp_poly
 			(pts
-				(xy -2 -0.4) (xy -1.6 -0.8) (xy 2 -0.8) (xy 2 0.8) (xy -2 0.8)
+				(xy -2 0.2) (xy -1.6 -0.2) (xy 2 -0.2) (xy 2 1.4) (xy -2 1.4)
 			)
 			(stroke
 				(width 0.1)
@@ -181188,7 +181188,7 @@
 		(embedded_fonts no)
 		(model "${KIPRJMOD}/../../shared/Iasis.3dshapes/OPSCO_SK6812SIDE-A.step"
 			(offset
-				(xyz 0 0 1.02)
+				(xyz 0 -0.6 1.02)
 			)
 			(scale
 				(xyz 1 1 1)
