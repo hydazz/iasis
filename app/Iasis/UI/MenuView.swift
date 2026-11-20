@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MenuView: View {
     let model: AgentModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         if let state = model.state {
@@ -31,6 +32,10 @@ struct MenuView: View {
             Text("Agent Not Running")
         }
         Divider()
+        Button("About Iasis") {
+            NSApp.activate()
+            openWindow(id: AboutView.windowID)
+        }
         SettingsLink()
             .keyboardShortcut(",")
         Button("Quit Iasis") { NSApp.terminate(nil) }
