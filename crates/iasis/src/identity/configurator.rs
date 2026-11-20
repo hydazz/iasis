@@ -1,4 +1,4 @@
-//! Apple Configurator evidence for a Debug USB enumeration on macOS.
+//! Apple Configurator identity for a current macOS USB enumeration.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -140,7 +140,7 @@ fn run(command: &mut Command, deadline: Instant) -> Option<Reply> {
 }
 
 fn confirm(
-    targets: &[MacAttachment],
+    targets: &[(MacAttachment, AppleMode)],
     present: &impl Fn(MacAttachment) -> bool,
     mut execute: impl FnMut(&[String]) -> Option<Reply>,
 ) -> HashMap<MacAttachment, (u64, String)> {
@@ -153,9 +153,16 @@ fn confirm(
     }
     let selected: Vec<_> = targets
         .iter()
-        .filter_map(|key| {
+        .filter_map(|&(key, mode)| {
             let row = list.at(key.location_id)?;
-            present(*key).then_some((*key, row))
+            if !present(key) || !model_identifier(&row.model) {
+                return None;
+            }
+            if mode == AppleMode::Mux {
+                confirmed.insert(key, (row.ecid, row.model.clone()));
+                return None;
+            }
+            Some((key, row))
         })
         .collect();
     if selected.is_empty() {
@@ -194,13 +201,6 @@ fn confirm(
             && row.restorable == Some(true)
             && row.ecid == expected.ecid
             && row.model == expected.model
-            && row.model.split_once(',').is_some_and(|(family, revision)| {
-                family.starts_with(|c: char| c.is_ascii_alphabetic())
-                    && family.ends_with(|c: char| c.is_ascii_digit())
-                    && family.bytes().all(|b| b.is_ascii_alphanumeric())
-                    && !revision.is_empty()
-                    && revision.bytes().all(|b| b.is_ascii_digit())
-            })
         {
             confirmed.insert(key, (row.ecid, row.model.clone()));
         }
@@ -208,10 +208,20 @@ fn confirm(
     confirmed
 }
 
+fn model_identifier(model: &str) -> bool {
+    model.split_once(',').is_some_and(|(family, revision)| {
+        family.starts_with(|c: char| c.is_ascii_alphabetic())
+            && family.ends_with(|c: char| c.is_ascii_digit())
+            && family.bytes().all(|b| b.is_ascii_alphanumeric())
+            && !revision.is_empty()
+            && revision.bytes().all(|b| b.is_ascii_digit())
+    })
+}
+
 type Cache = HashMap<MacAttachment, (Instant, Option<(u64, String)>)>;
 static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(Mutex::default);
 
-pub(super) fn query(snapshot: &mut Snapshot, mask: u8) {
+pub(crate) fn query(snapshot: &mut Snapshot, mask: u8) {
     let Ok(mut cache) = CACHE.lock() else { return };
     enrich(snapshot, mask, &mut cache, MacAttachment::present, |args| {
         let bundle = Path::new("/Applications/Apple Configurator.app/Contents/MacOS/cfgutil");
@@ -238,6 +248,8 @@ fn enrich(
 ) {
     let mut candidates = Vec::new();
     let mut counts = HashMap::new();
+    let direct =
+        iasis_protocol::Port::ALL.map(|p| crate::dfu::direct_device(snapshot, p).is_some());
     for entry in &mut snapshot.ports {
         for device in &entry.devices {
             if let Some(key) = device.macos_attachment {
@@ -249,19 +261,32 @@ fn enrich(
         }
         for device in &mut entry.devices {
             if let Some(apple) = &mut device.apple
-                && apple.mode == AppleMode::KisDfu
+                && matches!(
+                    apple.identity,
+                    Identity::Known {
+                        source: IdentitySource::Configurator,
+                        ..
+                    }
+                )
             {
-                apple.mode = AppleMode::Kis;
+                if apple.mode == AppleMode::KisDfu {
+                    apple.mode = AppleMode::Kis;
+                }
                 apple.identity = Identity::Missing;
                 apple.model = None;
             }
         }
         let mut apple = entry.devices.iter_mut().filter(|d| d.apple.is_some());
         let Some(device) = apple.next() else { continue };
-        if apple.next().is_some() || (device.vendor_id, device.product_id) != (0x05ac, 0x1881) {
+        if apple.next().is_some() {
             continue;
         }
         let apple = device.apple.as_mut().unwrap();
+        if !(apple.mode == AppleMode::Kis
+            || apple.mode == AppleMode::Mux && direct[entry.port.index()] && apple.ecid().is_none())
+        {
+            continue;
+        }
         if let Some(key) = device.macos_attachment
             && key.location_id != 0
             && key.registry_entry_id != 0
@@ -277,12 +302,12 @@ fn enrich(
     cache.retain(|_, (expires, _)| *expires > now);
     let missing: Vec<_> = candidates
         .iter()
-        .map(|(k, _)| *k)
-        .filter(|k| !cache.contains_key(k))
+        .filter(|(key, _)| !cache.contains_key(key))
+        .map(|(key, apple)| (*key, apple.mode))
         .collect();
     if !missing.is_empty() {
         let hits = confirm(&missing, &present, execute);
-        for key in missing {
+        for (key, _) in missing {
             let hit = hits.get(&key).cloned();
             let expires = Instant::now() + Duration::from_secs(if hit.is_some() { 5 } else { 2 });
             cache.insert(key, (expires, hit));
@@ -292,7 +317,9 @@ fn enrich(
         if let Some((_, Some((id, model)))) = cache.get(&key)
             && present(key)
         {
-            apple.mode = AppleMode::KisDfu;
+            if apple.mode == AppleMode::Kis {
+                apple.mode = AppleMode::KisDfu;
+            }
             apple.model = Some(model.clone());
             apple.identity = Identity::Known {
                 ecid: *id,
@@ -471,7 +498,12 @@ mod tests {
             let mut bad = get.clone();
             bad["Output"]["0x11"][field] = value;
             assert!(
-                confirm(&[KEY], &|_| true, transport(list.clone(), bad)).is_empty(),
+                confirm(
+                    &[(KEY, AppleMode::Kis)],
+                    &|_| true,
+                    transport(list.clone(), bad)
+                )
+                .is_empty(),
                 "{field}"
             );
         }
@@ -485,28 +517,98 @@ mod tests {
             let mut bad = get.clone();
             bad["Output"]["0x11"].as_object_mut().unwrap().remove(field);
             assert!(
-                confirm(&[KEY], &|_| true, transport(list.clone(), bad)).is_empty(),
+                confirm(
+                    &[(KEY, AppleMode::Kis)],
+                    &|_| true,
+                    transport(list.clone(), bad)
+                )
+                .is_empty(),
                 "{field}"
             );
         }
         let mut bad = get.clone();
         bad["Output"]["Errors"]["0x11"] = json!({"reason":"busy"});
-        assert!(confirm(&[KEY], &|_| true, transport(list.clone(), bad)).is_empty());
+        assert!(
+            confirm(
+                &[(KEY, AppleMode::Kis)],
+                &|_| true,
+                transport(list.clone(), bad)
+            )
+            .is_empty()
+        );
         let mut bad = get.clone();
         bad["Type"] = json!("Error");
-        assert!(confirm(&[KEY], &|_| true, transport(list.clone(), bad)).is_empty());
+        assert!(
+            confirm(
+                &[(KEY, AppleMode::Kis)],
+                &|_| true,
+                transport(list.clone(), bad)
+            )
+            .is_empty()
+        );
         let mut bad = list.clone();
         bad["Output"]["0x22"]["locationID"] = json!(KEY.location_id);
-        assert!(confirm(&[KEY], &|_| true, transport(bad, get.clone())).is_empty());
+        assert!(
+            confirm(
+                &[(KEY, AppleMode::Kis)],
+                &|_| true,
+                transport(bad, get.clone())
+            )
+            .is_empty()
+        );
         let mut bad = get.clone();
         bad["Devices"] = json!(["0x11", "0x11"]);
-        assert!(confirm(&[KEY], &|_| true, transport(list.clone(), bad)).is_empty());
         assert!(
-            confirm(&[KEY], &|_| false, |args| {
+            confirm(
+                &[(KEY, AppleMode::Kis)],
+                &|_| true,
+                transport(list.clone(), bad)
+            )
+            .is_empty()
+        );
+        assert!(
+            confirm(&[(KEY, AppleMode::Kis)], &|_| false, |args| {
                 assert_eq!(args, ["list"]);
                 serde_json::from_value(list.clone()).ok()
             })
             .is_empty()
+        );
+    }
+
+    #[test]
+    fn list_identifies_a_direct_mux_enumeration_without_opening_a_device_service() {
+        let mut snapshot = snapshot();
+        let mut ipad = device(0x12ac, None);
+        ipad.macos_attachment = Some(KEY);
+        snapshot.ports[0].devices.push(ipad);
+        let (list, _) = responses();
+        let mut cache = Cache::new();
+        let read = |args: &[String]| {
+            assert_eq!(args, ["list"]);
+            serde_json::from_value(list.clone()).ok()
+        };
+        enrich(&mut snapshot, 1, &mut cache, |_| true, read);
+        let apple = snapshot.ports[0].devices[0].apple.as_ref().unwrap();
+        assert_eq!(apple.mode, AppleMode::Mux);
+        assert_eq!(apple.ecid(), Some(0x11));
+        enrich(
+            &mut snapshot,
+            1,
+            &mut cache,
+            |_| false,
+            |_| panic!("cached"),
+        );
+        assert_eq!(
+            snapshot.ports[0].devices[0].apple.as_ref().unwrap().ecid(),
+            None
+        );
+        snapshot.ports[0].devices[0].topology.port_chain.push(1);
+        enrich(
+            &mut snapshot,
+            1,
+            &mut Cache::new(),
+            |_| true,
+            |_| panic!("downstream of another device"),
         );
     }
 
