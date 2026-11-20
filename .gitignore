@@ -27,5 +27,9 @@ fp-info-cache
 # Generated hardware files
 /build/
 
+# Xcode
+/app/build/
+xcuserdata/
+
 # Rust
 /target/
