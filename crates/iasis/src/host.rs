@@ -132,12 +132,12 @@ impl From<&UsbDevice> for Enumeration {
 
 type Identified = [Option<(Enumeration, AppleDevice)>; PORT_COUNT];
 
-fn debug_usb(snapshot: &Snapshot, port: Port) -> Option<&UsbDevice> {
+fn unidentified_usb(snapshot: &Snapshot, port: Port) -> Option<&UsbDevice> {
     dfu::direct_device(snapshot, port).filter(|device| {
-        device
-            .apple
-            .as_ref()
-            .is_some_and(|apple| apple.mode == AppleMode::Kis)
+        device.apple.as_ref().is_some_and(|apple| {
+            apple.mode == AppleMode::Kis
+                || (cfg!(target_os = "macos") && apple.mode == AppleMode::Mux)
+        })
     })
 }
 
@@ -298,9 +298,8 @@ impl Shared {
         }
     }
 
-    /// Ask Configurator about targets on Apple Debug USB. An enumeration it
-    /// has placed in DFU is not asked again: the target leaves DFU by
-    /// enumerating anew, and one unanswered query must not withdraw the mode.
+    /// Configurator lists identities without opening the target's usbmux service.
+    /// A confirmed identity belongs to this USB enumeration.
     fn identify(&self) -> Result<()> {
         let status = self.board.status()?;
         let mut snapshot = topology::discover(self.board.topology())?;
@@ -309,10 +308,10 @@ impl Shared {
         let mut mask = 0;
         for port in Port::ALL {
             let index = port.index();
-            let enumeration = debug_usb(&snapshot, port).map(Enumeration::from);
+            let enumeration = unidentified_usb(&snapshot, port).map(Enumeration::from);
             let settled = matches!(
                 (&known[index], &enumeration),
-                (Some((seen, apple)), Some(now)) if seen == now && apple.mode == AppleMode::KisDfu
+                (Some((seen, apple)), Some(now)) if seen == now && apple.ecid().is_some()
             );
             // A restore owns its target's USB.
             if enumeration.is_some() && !settled && !status.ports[index].restoring() {
@@ -321,6 +320,9 @@ impl Shared {
             asked[index] = enumeration;
         }
         if mask != 0 {
+            #[cfg(target_os = "macos")]
+            crate::identity::configurator::query(&mut snapshot, mask);
+            #[cfg(not(target_os = "macos"))]
             snapshot.query_port_identities(mask);
         }
         let mut identified = self.identified.lock().unwrap();
