@@ -1,4 +1,4 @@
-"""Screw joints, seam guides and OLED mounting posts, in assembled coordinates."""
+"""Screw joints, locating pegs and OLED mounts, in assembled coordinates."""
 
 from dataclasses import dataclass
 from functools import cached_property
@@ -12,7 +12,6 @@ from build123d import (
     Cylinder,
     Part,
     Plane,
-    Polygon,
     Pos,
     Rectangle,
     RegularPolygon,
@@ -21,7 +20,6 @@ from build123d import (
     loft,
 )
 
-FIT = 0.10
 SCREW_D, SCREW_CLEAR = 3.0, 3.4
 HEAD_D, HEAD_H = 6.0, 2.6
 HEAD_RECESS = HEAD_H + 0.2
@@ -30,10 +28,6 @@ NUT_AF, NUT_H = 5.5, 2.4
 NUT_CLEARANCE, NUT_PLAY = 0.1, 0.2
 BOSS_D = 9.2
 BASE = (Align.CENTER, Align.CENTER, Align.MIN)
-
-
-def section(points: list[tuple[float, float]], y: float, width: float) -> Part:
-    return extrude(Pos(0, y + width / 2, 0) * (Plane.XZ * Polygon(*points, align=None)), width)
 
 
 @dataclass(frozen=True)
@@ -125,37 +119,6 @@ class Fastener:
     @property
     def driver(self) -> Part:
         return Pos(self.x, self.y, self.bearing - HEAD_H - 30) * Cylinder(3, 30, align=BASE)
-
-
-def guides(edge: float, split: float) -> list[Part]:
-    parts = []
-    for y in (-36, 36):
-        guide = section(
-            [
-                (edge - 0.8, split + 1.6),
-                (edge - 1, split + 1.6),
-                (edge - 2.4, split + 0.2),
-                (edge - 2.4, split - 0.8),
-                (edge - 2, split - 1.2),
-                (edge - 1.2, split - 1.2),
-                (edge - 1.2, split + 0.2),
-                (edge - 0.8, split + 0.6),
-            ],
-            y,
-            6,
-        )
-        parts += [guide, guide.mirror(Plane.YZ)]
-    return parts
-
-
-def guide_pockets(edge: float, split: float) -> list[Part]:
-    parts = []
-    for y in (-36, 36):
-        cut = Pos(edge - 1.8, y, split - 1.2 - FIT) * Box(
-            1.2 + 2 * FIT, 6 + 2 * FIT, 1.2 + 2 * FIT, align=BASE
-        )
-        parts += [cut, cut.mirror(Plane.YZ)]
-    return parts
 
 
 @dataclass(frozen=True)
