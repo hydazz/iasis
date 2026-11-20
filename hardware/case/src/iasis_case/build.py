@@ -19,18 +19,18 @@ def write(
     """Print STLs named with prefix, and the assembly STEP; returns the STEP's path."""
     print_dir = output / "print"
     printing.export(f"{prefix}tray", tray, print_dir)
+    printing.export(f"{prefix}button", lay.button, print_dir, rotation=Rot(X=180))
     for name, c in covers.items():
         printing.export(f"{prefix}cover-{name}", c.part, print_dir, c.markings, rotation=Rot(X=180))
-        printing.export(f"{prefix}button-{name}", c.button, print_dir, rotation=Rot(X=180))
         if not prefix and c.display_mount is not None:
             pins = Compound([Pos(x, y) * c.display_mount.pin for x in (-4, 4) for y in (-4, 4)])
             printing.export("display-pins", pins, print_dir)
 
-    extra: list[Shape] = [tray, *case.feet(lay), *(f.hardware for f in lay.fasteners)]
+    extra: list[Shape] = [tray, lay.button, *case.feet(lay), *(f.hardware for f in lay.fasteners)]
     if lay.battery is not None:
         extra += [lay.battery.pack, lay.battery.lead, lay.battery.plug]
     for c in covers.values():
-        extra += [c.part, c.markings, c.button]
+        extra += [c.part, c.markings]
         if c.display is not None:
             extra.append(c.display)
             assert c.display_mount is not None
@@ -48,6 +48,9 @@ def main() -> None:
     output.mkdir(parents=True, exist_ok=True)
     for obsolete in ("tpu-foot.stl", "display-retainer.stl", "cm5-display-retainer.stl"):
         (output / "print" / obsolete).unlink(missing_ok=True)
+    for prefix in ("", "cm5-"):
+        for name in case.COVERS:
+            (output / "print" / f"{prefix}button-{name}.stl").unlink(missing_ok=True)
     steps = [
         write("", *case.assemble(), output),
         write("cm5-", *case.assemble_cm5(), output),
