@@ -775,10 +775,7 @@ fn follow_work(
         let mut ended = Vec::new();
         for (number, shown) in ports.iter().zip(&mut shown) {
             let port = &view.ports[usize::from(*number) - 1];
-            let line = match &port.stage {
-                Some(stage) => format!("{}  {stage}  {}", port.state, port.usb),
-                None => format!("{}  {}", port.state, port.usb),
-            };
+            let line = format!("{}  {}", port.activity(), port.usb);
             if *shown != line {
                 println!("Port {number}  {}", line.trim_end());
                 *shown = line;

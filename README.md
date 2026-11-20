@@ -108,6 +108,10 @@ An image added from a file stays until it is removed. Where several images fit a
 
 While an image is being fetched for a target, its port pulses purple, the OLED labels it `IMG`, and `iasis` shows the percentage.
 
+### Revive
+
+With Apple Configurator installed on macOS and the agent running, use `iasis --board "Bench A" revive 2` to attempt a data-preserving repair of a device in DFU or Recovery. The command follows the operation and reports its result.
+
 ### Restore
 
 Install [idevicerestore](https://github.com/libimobiledevice/idevicerestore) and its dependencies. For source builds, configure with `--without-limera1n`. Use the system `usbmuxd` service. macOS includes it, and Linux needs it installed and running. Pass `iasisd --program /path/to/idevicerestore` if it is not on the `PATH`.
