@@ -144,6 +144,7 @@ async fn main(_spawner: Spawner) {
     let configured = Cell::new(false);
     let suspended = Cell::new(false);
     let host_budget = Cell::new(0u16);
+    let brightness = Cell::new(protocol::BRIGHTNESS_DEFAULT);
     let session = usb::Session::default();
     let mut management = usb::Management {
         info,
@@ -154,6 +155,7 @@ async fn main(_spawner: Spawner) {
         configured: &configured,
         suspended: &suspended,
         host_budget: &host_budget,
+        brightness: &brightness,
     };
 
     let mut config = Config::new(USB_VID, USB_PID);
@@ -409,9 +411,13 @@ async fn main(_spawner: Spawner) {
                     }
                 }
             }
+            next.brightness = brightness.get();
             status.set(next);
             if Instant::now().as_millis() >= panel_due {
-                let frame = iasis_firmware::panel::indicators(&next, &button, now);
+                let frame = iasis_firmware::panel::dim(
+                    iasis_firmware::panel::indicators(&next, &button, now),
+                    next.brightness,
+                );
                 if last_led_frame != Some(frame) {
                     let colors = frame.map(|[r, g, b]| smart_leds::RGB8 { r, g, b });
                     leds.write(&colors).await;
