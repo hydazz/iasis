@@ -43,7 +43,7 @@ def show(lay: Layout, tray: Shape, covers: dict[str, Cover]) -> None:
         group = {
             "Body": _coloured(cover.part, "#d6d8dc"),
             "Markings": _coloured(cover.markings, "#23262a"),
-            "Button": _coloured(cover.button, "#d6d8dc"),
+            "Button": _coloured(lay.button, "#d6d8dc"),
             "Fasteners": _coloured(Compound([f.hardware for f in cover.fasteners]), "#9a9a9a"),
         }
         if cover.display is not None:
