@@ -34,7 +34,7 @@ def main() -> None:
             *[(foot, (53, 59, 57), False) for foot in case.feet(lay)],
             (c.part, BODY, True),
             (c.markings, TEXT, False),
-            (c.button, BODY, True),
+            (lay.button, BODY, True),
             (visible, (100, 106, 112), False),
         ]
         print(f"{name}: rendering ({monotonic() - start:.1f}s building geometry)", flush=True)

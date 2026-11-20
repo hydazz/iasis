@@ -57,7 +57,7 @@ CLEARANCE = 0.3  # board edge to inner wall
 PORT_FIT = 0.30  # each side of the metal shell
 PORT_ERROR = 0.15  # additional axial print and connector-placement allowance
 SHOULDER_GAP = 0.05  # minimum fully seated plug shoulder to exterior wall
-HEADROOM = 1.2  # tallest part or envelope to the cover's inner top
+HEADROOM = 1.2  # tallest model or envelope to the cover's inner top
 MIN_GAP = 0.3  # smallest gap between the case and a part
 
 # Form
@@ -113,10 +113,13 @@ PIN_D = 1.6
 LIGHTS = ("D1170", "D1171", "D1172", "D1173", "D1174", "D1175")  # status, targets
 WINDOW = (3.0, 1.6)
 BUTTON = "SW1171"
-BUTTON_D, BUTTON_FIT = 10.0, 0.25  # radial fit in the cover
+BUTTON_D, BUTTON_FIT = 10.0, 0.10  # radial fit in the cover
+BUTTON_BORE_R = BUTTON_D / 2 + BUTTON_FIT
+BUTTON_GUIDE_D = 14.0
 BUTTON_FLANGE_D = 13.0
-BUTTON_FLANGE_H = (BUTTON_FLANGE_D - BUTTON_D) / 2  # printable 45 degree shoulder
-BUTTON_ROOF_GAP, BUTTON_PROUD, BUTTON_PIN = 0.2, 0.2, 4.0
+BUTTON_FLANGE_H = 1.2
+BUTTON_ROOF_GAP, BUTTON_PROUD = 0.1, 0.2
+BUTTON_ACTUATOR_D = 4.0  # switch region allowed to move under the cap
 BUTTON_TRAVEL = 0.6  # case clearance envelope, not the switch's permitted stroke
 
 
@@ -221,7 +224,6 @@ class Layout:
     split: float
     ports: dict[str, tuple[str, str]] = field(default_factory=lambda: dict(PORTS))
     battery: Battery | None = None
-    _roofs: dict[Display | None, float] = field(default_factory=dict, init=False, repr=False)
 
     @property
     def y_front(self) -> float:
@@ -273,30 +275,30 @@ class Layout:
     def locator_face(self) -> float:
         return self.seat + LOCATOR_RELIEF
 
-    def top_inside(self, display: Display | None = None) -> float:
-        if display in self._roofs:
-            return self._roofs[display]
+    @cached_property
+    def top_inside(self) -> float:
+        """Both lids share the roof height required by the board and OLED."""
         top = self.parts_top + HEADROOM
-        if display:
-            # Only components beneath the module determine its required height.
-            w, h, thickness = display.pcb
-            boxes = [self.board.box(ref, exact=False) for ref in self.board.parts]
-            local_top = max(
-                [self.seat]
-                + [
-                    b.max.Z
-                    for b in boxes
-                    if b.min.X < self.display_x + w / 2 + MIN_GAP
-                    and b.max.X > self.display_x - w / 2 - MIN_GAP
-                    and b.min.Y < h / 2 + MIN_GAP
-                    and b.max.Y > -h / 2 - MIN_GAP
-                ]
-            )
-            top = max(
-                top, local_top + MIN_GAP + display.back + thickness + display.glass[4] + GLASS_GAP
-            )
-        self._roofs[display] = math.ceil(top * 2) / 2
-        return self._roofs[display]
+        # Only components beneath the module determine its required height.
+        w, h, thickness = OLED.pcb
+        boxes = [self.board.box(ref, exact=False) for ref in self.board.parts]
+        local_top = max(
+            [self.seat]
+            + [
+                b.max.Z
+                for b in boxes
+                if b.min.X < self.display_x + w / 2 + MIN_GAP
+                and b.max.X > self.display_x - w / 2 - MIN_GAP
+                and b.min.Y < h / 2 + MIN_GAP
+                and b.max.Y > -h / 2 - MIN_GAP
+            ]
+        )
+        top = max(top, local_top + MIN_GAP + OLED.back + thickness + OLED.glass[4] + GLASS_GAP)
+        return math.ceil(top * 2) / 2
+
+    @cached_property
+    def button(self) -> Part:
+        return _button(self)
 
 
 @dataclass
@@ -305,7 +307,6 @@ class Cover:
     intrusions: dict[str, Part]  # solids that reach into the cavity, for the fit check
     display: Part | None  # the module's envelope
     markings: Compound
-    button: Part
     fasteners: tuple[Fastener, ...]
     display_mount: DisplayMount | None
 
@@ -474,7 +475,7 @@ def tray(lay: Layout) -> Part:
 
 
 def cover(lay: Layout, name: str, display: Display | None) -> Cover:
-    top_in = lay.top_inside(display)
+    top_in = lay.top_inside
     top_out = top_in + TOP
     z0 = lay.split
 
@@ -519,6 +520,17 @@ def cover(lay: Layout, name: str, display: Display | None) -> Cover:
             )
             pillar &= edge
         intrusions[f"pillar {i + 1}"] = cast(Part, pillar)
+    switch = lay.board.box(BUTTON)
+    sw = switch.center()
+    guide_bottom = switch.max.Z + BUTTON_FLANGE_H + BUTTON_ROOF_GAP
+    button_bore = Pos(sw.X, sw.Y, guide_bottom - 0.1) * Cylinder(
+        BUTTON_BORE_R, top_out - guide_bottom + 1, align=BASE
+    )
+    guide = Pos(sw.X, sw.Y, guide_bottom) * Cylinder(
+        BUTTON_GUIDE_D / 2, top_in - guide_bottom + 0.5, align=BASE
+    )
+    intrusions["button guide"] = cast(Part, guide - button_bore)
+    cuts.append(button_bore)
     shell += Compound(list(intrusions.values()))
 
     cuts += [_wall_cut(o) for o in lay.openings]
@@ -526,10 +538,6 @@ def cover(lay: Layout, name: str, display: Display | None) -> Cover:
     cuts += _top_slots(lay, top_in - 1, TOP + 2, display)
     cuts += _side_intakes(lay)
     cuts += _control_grooves(lay, top_out, display)
-    sw = lay.board.box(BUTTON).center()
-    cuts.append(
-        Pos(sw.X, sw.Y, top_in - 1) * Cylinder(BUTTON_D / 2 + BUTTON_FIT, TOP + 2, align=BASE)
-    )
 
     display_part = None
     display_mount = None
@@ -550,7 +558,6 @@ def cover(lay: Layout, name: str, display: Display | None) -> Cover:
         intrusions=intrusions,
         display=display_part,
         markings=markings,
-        button=_button(lay, name, top_in, top_out),
         fasteners=lay.fasteners,
         display_mount=display_mount,
     )
@@ -662,23 +669,19 @@ def _markings(lay: Layout, top: float) -> Compound:
     return marks
 
 
-def _button(lay: Layout, name: str, top_in: float, top_out: float) -> Part:
-    """Separate cap inserted from inside; the flange retains it and the switch returns it."""
+def _button(lay: Layout) -> Part:
+    """The flat underside of the retaining flange rests on the switch actuator."""
     sb = lay.board.box(BUTTON)
     sw = sb.center()
-    flange_top = top_in - BUTTON_ROOF_GAP
-    flange_bottom = flange_top - BUTTON_FLANGE_H
-    pin_bottom = sb.max.Z
+    flange_bottom = sb.max.Z
+    flange_top = flange_bottom + BUTTON_FLANGE_H
     cap = Pos(sw.X, sw.Y, flange_top) * Cylinder(
-        BUTTON_D / 2, top_out + BUTTON_PROUD - flange_top, align=BASE
+        BUTTON_D / 2, lay.top_inside + TOP + BUTTON_PROUD - flange_top, align=BASE
     )
-    cap += Pos(sw.X, sw.Y, flange_bottom) * Cone(
-        BUTTON_FLANGE_D / 2, BUTTON_D / 2, BUTTON_FLANGE_H, align=BASE
+    cap += Pos(sw.X, sw.Y, flange_bottom) * Cylinder(
+        BUTTON_FLANGE_D / 2, BUTTON_FLANGE_H, align=BASE
     )
-    cap += Pos(sw.X, sw.Y, pin_bottom) * Cylinder(
-        BUTTON_PIN / 2, flange_bottom - pin_bottom + 0.1, align=BASE
-    )
-    cap.label = f"button {name}"
+    cap.label = "button"
     return cast(Part, cap)
 
 
@@ -730,7 +733,7 @@ def _top_slots(lay: Layout, z: float, depth: float, display: Display | None) -> 
     avoid += [p.bounding_box() for p in _roof_openings(lay)]
     bb = lay.board.box(BUTTON)
     avoid.append(
-        (Pos(bb.center().X, bb.center().Y) * Circle(BUTTON_FLANGE_D / 2 + MIN_GAP)).bounding_box()
+        (Pos(bb.center().X, bb.center().Y) * Circle(BUTTON_GUIDE_D / 2 + MIN_GAP)).bounding_box()
     )
     if display:
         avoid.append(_display_keepout(lay, display).bounding_box())
