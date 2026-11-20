@@ -136,7 +136,7 @@ pub fn run(device: &nusb::DeviceInfo, board: &Board, options: Options) -> Result
     crate::identity::check_usbmuxd().context("system usbmuxd is unavailable")?;
     // Take the board before the long image check, which another host's
     // session would make pointless.
-    let link = Link::open(device, Jobs::default())?;
+    let link = Link::open(device, Jobs::default(), Arc::default())?;
     let given = match &options.ipsw {
         Some(path) => {
             let ipsw = progress::check_ipsw(path)?;
