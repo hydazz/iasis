@@ -7,6 +7,8 @@ import OSLog
 final class AgentModel {
     /// The agent's latest state, or nil while no agent answers.
     private(set) var state: AgentState?
+    private(set) var menu: DeviceMenuState?
+    private(set) var menuBarStatus = MenuBarStatus.offline
     private let agent: any AgentService
     private var watching: Task<Void, Never>?
 
@@ -23,14 +25,26 @@ final class AgentModel {
             while !Task.isCancelled {
                 do {
                     for try await state in agent.states() {
-                        self.state = state
+                        publish(state)
                     }
                 } catch {
                     Log.agent.debug("Agent unavailable: \(error.localizedDescription)")
                 }
-                state = nil
+                publish(nil)
                 try? await Task.sleep(for: .seconds(2))
             }
+        }
+    }
+
+    private func publish(_ update: AgentState?) {
+        state = update
+        let content = update.map(DeviceMenuState.init)
+        if content != menu {
+            menu = content
+        }
+        let status = MenuBarStatus(update)
+        if status != menuBarStatus {
+            menuBarStatus = status
         }
     }
 
