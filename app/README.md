@@ -2,7 +2,7 @@
 
 The menu bar cable dims when disconnected. A ring over its tail shows activity, and a red exclamation mark means a board or port needs attention.
 
-The Iasis menu shows connected devices under their board names. Open a device’s submenu for DFU, restart, restore and port power. A disabled port stays in the menu so you can turn it back on. Erase and Restore asks for confirmation before sending the request to the agent.
+The Iasis menu shows connected devices under their board names. Open a device’s submenu for DFU, restart, restore and port power. A disabled port stays in the menu so you can turn it back on. Restore asks for confirmation before sending the request to the agent.
 
 In Settings, select a board to rename it or adjust its lights. The board keeps both settings when moved to another Mac. The Images tab manages restore images. The Finder preference applies to all connected Apple devices.
 
