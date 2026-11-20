@@ -4,6 +4,8 @@ The menu bar cable dims when disconnected. A ring over its tail shows activity, 
 
 The Iasis menu shows connected devices under their board names. Open a device’s submenu for DFU, restart, restore and port power. A disabled port stays in the menu so you can turn it back on. Restore asks for confirmation before sending the request to the agent.
 
+About Iasis shows what the port and status lights mean.
+
 In Settings, select a board to rename it or adjust its lights. The board keeps both settings when moved to another Mac. The Images tab manages restore images. The Finder preference applies to all connected Apple devices.
 
 The app includes `iasisd` and `iasis` and communicates over the [agent socket](../crates/iasis/README.md).
