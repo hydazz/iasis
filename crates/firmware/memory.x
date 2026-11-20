@@ -1,6 +1,7 @@
 MEMORY
 {
-  FLASH : ORIGIN = 0x10000000, LENGTH = 2048K
+  /* The last two 4 KiB sectors hold board settings. */
+  FLASH : ORIGIN = 0x10000000, LENGTH = 2040K
   RAM   : ORIGIN = 0x20000000, LENGTH = 512K
 }
 
