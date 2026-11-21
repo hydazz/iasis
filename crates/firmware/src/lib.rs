@@ -3,6 +3,7 @@
 pub mod button;
 pub mod display;
 pub mod egg;
+pub mod host_input;
 pub mod host_session;
 pub mod hub;
 pub mod panel;

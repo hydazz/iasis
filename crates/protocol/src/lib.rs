@@ -222,9 +222,7 @@ impl Request {
     }
 }
 
-/// A target's USB link, as the hub reports its downstream port. `Down` is a
-/// target that only draws power: nothing has linked, which a cable without
-/// data lines and a device that has not enumerated both look like.
+/// The USB link reported by the downstream hub port.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Link {
     Down,
@@ -340,10 +338,10 @@ impl PortStatus {
             }
     }
 
-    /// The target holds a Power Delivery contract. Every supported target
-    /// negotiates one; a device that stays silent cannot take an action.
-    pub fn identified(&self) -> bool {
-        self.state == PortState::Contract
+    /// The hub has a live USB link or the host sees a device on this attachment.
+    pub fn usb_connected(&self) -> bool {
+        matches!(self.link, Some(Link::Usb2 | Link::Usb3))
+            || self.observed.is_some_and(|seen| seen.usb != Usb::Absent)
     }
 
     /// The target's port lists the Apple debug action this command performs.
@@ -821,14 +819,14 @@ impl Status {
         mask & self.ready_mask()
     }
 
-    /// Identified targets eligible for a local action or a prepared erase.
+    /// Ports with a stable PD contract eligible for a local action or a prepared erase.
     pub fn ready_mask(&self) -> u8 {
         if self.i2c_root_fault || self.aggregate_power_fault {
             return 0;
         }
         let mut mask = 0;
         for (i, port) in self.ports.iter().enumerate() {
-            if port.identified()
+            if port.state == PortState::Contract
                 && !port.pd_transition
                 && port.error.is_none()
                 && port.command_result != CommandResult::Pending

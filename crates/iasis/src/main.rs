@@ -686,17 +686,18 @@ fn restore_through(agent: &mut Client, serial: u64, options: &batch::Options) ->
         .find(|b| b.serial == board)
         .context("the board is not connected")?;
     let session = view.session.context("the board is not attended")?;
-    let ports: Vec<u8> = options.ports.iter().map(|p| p.number()).collect();
-    let targets = ports
+    let targets = options
+        .ports
         .iter()
-        .map(|number| {
+        .map(|&physical| {
+            let number = physical.number();
             let port = view
                 .ports
                 .iter()
-                .find(|p| p.number == *number && p.restore)
+                .find(|p| p.number == number && p.restore)
                 .with_context(|| format!("port {number} cannot be restored"))?;
             Ok(Target {
-                port: Port::try_from(*number).map_err(anyhow::Error::msg)?,
+                port: physical,
                 generation: port.generation,
                 ecid: port
                     .ecid
@@ -723,7 +724,7 @@ fn restore_through(agent: &mut Client, serial: u64, options: &batch::Options) ->
             targets,
         }],
     })?;
-    follow_work(agent, &board, &ports, None)
+    follow_work(agent, &board, &options.ports)
 }
 
 fn revive_through(agent: &mut Client, serial: u64, port: Port) -> Result<()> {
@@ -749,73 +750,65 @@ fn revive_through(agent: &mut Client, serial: u64, port: Port) -> Result<()> {
         session,
         port: port.number(),
         generation: selected.generation,
-        ecid: ecid.clone(),
+        ecid,
     })?;
-    follow_work(agent, &board, &[port.number()], Some(&ecid))
+    follow_work(agent, &board, &[port])
 }
 
-fn follow_work(
-    agent: &mut Client,
-    board: &str,
-    ports: &[u8],
-    revive_ecid: Option<&str>,
-) -> Result<()> {
+fn follow_work(agent: &mut Client, board: &str, ports: &[Port]) -> Result<()> {
     let mut shown = vec![String::new(); ports.len()];
     let mut reply = agent.ask(&Request::Watch)?;
     loop {
         let Reply::State(state) = reply else {
-            bail!("the agent stopped reporting");
+            bail!("the agent stopped reporting before the outcome was confirmed");
         };
-        let view = state
-            .boards
-            .iter()
-            .find(|view| view.serial == board)
-            .context("the board has gone")?;
-        if view.ports.is_empty() {
-            bail!(view.notice.clone().unwrap_or_default());
-        }
-        let mut ended = Vec::new();
-        for (number, shown) in ports.iter().zip(&mut shown) {
-            let port = &view.ports[usize::from(*number) - 1];
-            let line = format!("{}  {}", port.activity(), port.usb);
-            if *shown != line {
-                println!("Port {number}  {}", line.trim_end());
-                *shown = line;
-            }
-            ended.push(port.result.as_ref().filter(|ending| match revive_ecid {
-                Some(ecid) => {
-                    ending.operation == iasis::restore::Operation::Revive
-                        && ending.ecid.as_deref() == Some(ecid)
+        ensure!(
+            state.submitted.len() == ports.len(),
+            "the agent did not report an outcome for the submitted operations"
+        );
+        let view = state.boards.iter().find(|view| view.serial == board);
+        for ((port, shown), result) in ports.iter().zip(&mut shown).zip(&state.submitted) {
+            if result.is_none()
+                && let Some(row) = view.and_then(|view| view.ports.get(port.index()))
+            {
+                let line = format!("{}  {}", row.activity(), row.usb);
+                if *shown != line {
+                    println!("Port {}  {}", port.number(), line.trim_end());
+                    *shown = line;
                 }
-                None => ending.operation == iasis::restore::Operation::Restore,
-            }));
+            }
         }
-        if ended.iter().all(Option::is_some) {
-            for (number, ending) in ports.iter().zip(ended.iter().flatten()) {
-                println!("Port {number}  {}", ending.message);
+        if state.submitted.iter().all(Option::is_some) {
+            let mut success = true;
+            for (port, ending) in ports.iter().zip(state.submitted.iter().flatten()) {
+                println!("Port {}  {}", port.number(), ending.message);
                 if let Some(directory) = &ending.log_directory {
                     println!("  Logs: {}", directory.display());
                 }
+                success &= ending.phase == RestorePhase::Reported;
             }
             ensure!(
-                ended
-                    .iter()
-                    .flatten()
-                    .all(|ending| ending.phase == RestorePhase::Reported),
+                success,
                 "one or more selected operations failed or remain unconfirmed"
             );
             return Ok(());
         }
-        reply = agent.receive()?;
+        reply = agent
+            .receive()
+            .context("agent stopped reporting before the outcome was confirmed")?;
     }
 }
 
 fn print_status(status: &Status) {
+    let host_limiter = match status.host_limit_ma {
+        0 => "off".into(),
+        ma => format!("{ma} mA (upper trip threshold)"),
+    };
     println!(
-        "supply {:?}  host allowance {} mA  aggregate limit {} mA  isolated I²C branches {:02x}  recoveries {}  button {:?}",
+        "supply {:?}  upstream host allowance {} mA  shared host-port limiter {}  isolated I²C branches {:02x}  recoveries {}  button {:?}",
         status.supply,
         status.host_allowance_ma,
-        status.host_limit_ma,
+        host_limiter,
         status.i2c_isolated,
         status.i2c_recoveries,
         status.button

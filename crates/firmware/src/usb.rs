@@ -170,7 +170,7 @@ fn matches(request: &Request) -> bool {
 impl Handler for Management<'_> {
     fn enabled(&mut self, enabled: bool) {
         if !enabled {
-            self.session.disconnect();
+            self.reset();
         }
     }
 
