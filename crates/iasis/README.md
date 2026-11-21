@@ -50,7 +50,7 @@ printf '{"op":"state"}\n' | nc -U "$HOME/Library/Application Support/iasis/agent
 | `images`          | The image store                            |
 | `restore_problem` | Why the agent cannot run restores, or null |
 
-Each board has its `serial`, `name` (empty for an unnamed board), `session` ID, `firmware` version, a `supply` description, `host` and `restores` (a host holds the board, and it takes restore requests), `brightness`, `settings_busy`, its `ports` and a `notice`: why the board cannot be read, or why its last restore request came to nothing.
+Each board has its `serial`, `name` (empty for an unnamed board), `session` ID, `firmware` version, a `supply` description, the `pool` of a power supply (`budget_mw` for the targets and the `allocated_mw` their contracts take, or null on host power alone), `host` and `restores` (a host holds the board, and it takes restore requests), `brightness`, `settings_busy`, its `ports` and a `notice`: why the board cannot be read, or why its last restore request came to nothing.
 
 Each port has:
 
@@ -64,6 +64,8 @@ Each port has:
 | `state`                              | What the board knows and has asked of the target, as text                                      |
 | `usb`                                | What the agent sees on the port's USB, as text                                                 |
 | `link`, `contract`                   | USB link and power contract, as text                                                           |
+| `contract_mw`, `short`               | The contract's power, and whether the target took the board's largest offer and would use more |
+| `fault`                              | Why the port faulted, in the words the board's display uses, or null                           |
 | `dfu`, `reboot`, `restore`, `revive` | The actions the target would take now                                                          |
 | `enabled`                            | The port is powered                                                                            |
 | `job`                                | The restore phase: `Preparing`, `Running`, `Reported`, `Unconfirmed`, `Failed`                 |
