@@ -36,6 +36,13 @@ pub struct PortView {
     pub usb: String,
     pub link: String,
     pub contract: String,
+    /// The contract's power, in milliwatts.
+    pub contract_mw: Option<u32>,
+    /// On a power supply, the target took the largest offer the board could
+    /// make and would use more.
+    pub short: bool,
+    /// Why the port faulted, in the board's words.
+    pub fault: Option<String>,
     /// The actions the target would take now.
     pub dfu: bool,
     pub reboot: bool,
@@ -89,6 +96,9 @@ pub struct BoardView {
     pub session: Option<u32>,
     pub firmware: String,
     pub supply: String,
+    /// What a power supply gives the targets and what their contracts take
+    /// of it. A board on its host's power alone has none.
+    pub pool: Option<Pool>,
     /// A host holds the board, and whether it takes restore requests.
     pub host: bool,
     pub restores: bool,
@@ -98,6 +108,12 @@ pub struct BoardView {
     /// Why the board cannot be read, or why its last restore request came
     /// to nothing.
     pub notice: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pool {
+    pub budget_mw: u32,
+    pub allocated_mw: u32,
 }
 
 impl BoardView {
@@ -120,6 +136,10 @@ impl BoardView {
                 }
                 Supply::Off => "targets off".into(),
             },
+            pool: (status.supply == Supply::Brick).then(|| Pool {
+                budget_mw: status.charging_budget_mw,
+                allocated_mw: status.ports.iter().filter_map(contract_mw).sum(),
+            }),
             host: status.host.is_some(),
             restores: status.restore_session().is_some(),
             brightness: status.settings.brightness,
@@ -149,6 +169,13 @@ impl BoardView {
                         }
                         .into(),
                         contract: port_contract(state),
+                        contract_mw: contract_mw(state),
+                        short: state.supply == Supply::Brick
+                            && contract_mw(state).is_some()
+                            && state.pd_request.is_some_and(|request| {
+                                iasis_pd::limited_by_offers(&state.pd_source_pdos, request)
+                            }),
+                        fault: state.error.map(|error| error.text().to_owned()),
                         dfu: available && state.offers(PortAction::DfuAppleSilicon),
                         reboot: available && state.offers(PortAction::Reboot),
                         revive: false,
@@ -217,6 +244,7 @@ impl BoardView {
             session: None,
             firmware: String::new(),
             supply: String::new(),
+            pool: None,
             host: false,
             restores: false,
             brightness: 0,
@@ -369,6 +397,11 @@ pub fn port_usb(port: &PortStatus) -> String {
         Some(ecid) => format!("{mode} {ecid:016x}"),
         None => mode.into(),
     }
+}
+
+fn contract_mw(port: &PortStatus) -> Option<u32> {
+    (port.contract_mv != 0 && port.occupied())
+        .then(|| u32::from(port.contract_mv) * u32::from(port.contract_ma) / 1000)
 }
 
 fn port_contract(port: &PortStatus) -> String {
