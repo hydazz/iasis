@@ -72,7 +72,7 @@ struct Device: Identifiable, Equatable {
             return Activity(stage.percent.map { "\(stage.name) \($0)%" } ?? stage.name, .working(fraction))
         }
         switch port.state {
-        case "fault": return Activity("Fault", .failed)
+        case "fault": return Activity(port.fault ?? "Fault", .failed)
         case "preparing": return Activity("Preparing", .working(nil))
         case "restoring": return Activity("Restoring", .working(nil))
         case "reviving": return Activity("Reviving", .working(nil))
@@ -100,6 +100,11 @@ struct Device: Identifiable, Equatable {
         case "recovery": return Activity("Recovery", .none)
         default: return port.state == "charging" ? Activity("Charging only", .none) : .idle
         }
+    }
+
+    /// The contract's power in whole watts, as the board's display gives it.
+    var watts: String? {
+        port.contractMw.map { "\(($0 + 500) / 1000) W" }
     }
 
     var restoreTarget: RestoreTarget {
@@ -167,7 +172,8 @@ struct DeviceActions: Equatable {
     var power: [AgentRequest] = []
     /// The ports are on, so the power action turns them off.
     var powered = true
-    /// A Mac in DFU over Apple Debug USB, which Apple Configurator restores.
+    /// A Mac in DFU over Apple Debug USB on a host without Apple Configurator,
+    /// which is what restores it.
     var needsConfigurator = false
 
     init() {}
