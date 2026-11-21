@@ -712,6 +712,12 @@ fn configurator_message(text: &str, status: &mut RestoreStatus) -> bool {
                 .find(|value| !value.is_empty())
                 .unwrap_or("Revive failed");
             status.message = match (message["Domain"].as_str(), message["Code"].as_i64()) {
+                // Revive keeps the data volume; an interrupted erase leaves none.
+                (Some("AMRestoreErrorDomain"), Some(75))
+                    if description.contains("Missing data volume") =>
+                {
+                    "The device has no data to keep. Restore it instead.".into()
+                }
                 (Some(domain), Some(code)) => format!("{description} ({domain} {code})"),
                 _ => description.to_owned(),
             };
