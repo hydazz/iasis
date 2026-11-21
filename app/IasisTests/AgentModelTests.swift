@@ -10,7 +10,8 @@ struct AgentModelTests {
         model.start()
         try await waitUntil { model.state != nil }
         #expect(model.state == state)
-        #expect(MenuBarStatus(model.state) == .fault)
+        try await waitUntil { model.menu.boards != nil }
+        #expect(model.menu == StatusMenuState(state))
     }
 
     @Test func menuStatusFollowsConnectedBoardsAndPortLights() throws {

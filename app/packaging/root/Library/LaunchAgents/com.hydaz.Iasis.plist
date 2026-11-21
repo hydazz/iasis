@@ -15,6 +15,7 @@
 	<key>ProgramArguments</key>
 	<array>
 		<string>/Applications/Iasis.app/Contents/MacOS/Iasis</string>
+		<string>--background</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
