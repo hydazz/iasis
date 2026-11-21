@@ -7,10 +7,12 @@ import OSLog
 final class AgentModel {
     /// The agent's latest state, or nil while no agent answers.
     private(set) var state: AgentState?
-    private(set) var menu: DeviceMenuState?
-    private(set) var menuBarStatus = MenuBarStatus.offline
+    /// What the menu bar shows. A menu keeps the content it opened with, so
+    /// this changes only while no menu is open.
+    private(set) var menu = StatusMenuState(nil)
     private let agent: any AgentService
     private var watching: Task<Void, Never>?
+    private var menuIsCurrent = true
 
     init(agent: any AgentService) {
         self.agent = agent
@@ -38,18 +40,29 @@ final class AgentModel {
 
     private func publish(_ update: AgentState?) {
         state = update
-        let content = update.map(DeviceMenuState.init)
-        if content != menu {
-            menu = content
-        }
-        let status = MenuBarStatus(update)
-        if status != menuBarStatus {
-            menuBarStatus = status
+        guard menuIsCurrent else { return }
+        menuIsCurrent = false
+        // Menu tracking runs the main loop in its own mode, so this waits
+        // for an open menu to close.
+        RunLoop.main.perform(inModes: [.default]) {
+            MainActor.assumeIsolated { self.refreshMenu() }
         }
     }
 
-    func perform(_ request: AgentRequest) {
-        Task { await send(request) }
+    private func refreshMenu() {
+        menuIsCurrent = true
+        let current = StatusMenuState(state)
+        if current != menu {
+            menu = current
+        }
+    }
+
+    func perform(_ requests: [AgentRequest]) {
+        Task {
+            for request in requests {
+                guard await send(request) else { return }
+            }
+        }
     }
 
     @discardableResult
@@ -60,7 +73,7 @@ final class AgentModel {
         } catch {
             Log.agent.error("Request refused: \(error.localizedDescription)")
             let alert = NSAlert()
-            alert.messageText = "Action Failed"
+            alert.messageText = "The Action Could Not Be Completed"
             alert.informativeText = error.localizedDescription
             NSApp.activate()
             alert.runModal()

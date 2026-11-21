@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct IasisApp: App {
+    @NSApplicationDelegateAdaptor private var delegate: AppDelegate
     @State private var model: AgentModel
 
     init() {
@@ -12,23 +13,27 @@ struct IasisApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuView(model: model)
+            StatusMenu(model: model)
         } label: {
-            let status = model.menuBarStatus
-            Image(nsImage: status.image)
-                .accessibilityLabel(status.rawValue)
+            MenuBarLabel(status: model.menu.status, delegate: delegate)
         }
         .menuBarExtraStyle(.menu)
 
-        Window("Devices", id: DevicesView.windowID) {
+        Window("Iasis", id: DevicesView.windowID) {
             DevicesView(model: model)
         }
-        .defaultSize(width: 720, height: 420)
-        .defaultLaunchBehavior(.suppressed)
+        .defaultSize(width: 540, height: 440)
+        .defaultLaunchBehavior(AppDelegate.launchedInBackground ? .suppressed : .presented)
         .restorationBehavior(.disabled)
+        .commands {
+            FileCommands(model: model)
+            InspectorCommands()
+            DeviceCommands()
+            HelpCommands()
+        }
 
-        Window("About Iasis", id: AboutView.windowID) {
-            AboutView()
+        Window("Indicator Lights", id: IndicatorLightsView.windowID) {
+            IndicatorLightsView()
         }
         .windowResizability(.contentSize)
         .defaultLaunchBehavior(.suppressed)
@@ -37,5 +42,17 @@ struct IasisApp: App {
         Settings {
             SettingsView(model: model)
         }
+    }
+}
+
+private struct MenuBarLabel: View {
+    let status: MenuBarStatus
+    let delegate: AppDelegate
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Image(nsImage: status.image)
+            .accessibilityLabel(status.rawValue)
+            .onAppear { delegate.openWindow = openWindow }
     }
 }
