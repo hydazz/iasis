@@ -19,7 +19,7 @@ A client writes requests and reads replies as JSON, one to a line. A request is 
 | ------------ | ------------------------------------------------ | -------------------------------------------------------------- |
 | `state`      |                                                  | Reply with the state once                                      |
 | `watch`      |                                                  | Reply with the state now and again each time it changes        |
-| `restore`    | `board`, `session`, `targets`                    | Erase and restore the confirmed attachments                    |
+| `restore`    | `boards`                                         | Erase and restore the confirmed attachments on those boards    |
 | `revive`     | `board`, `session`, `port`, `generation`, `ecid` | Repair one device in DFU or recovery with Apple Configurator   |
 | `dfu`        | `board`, `port`                                  | Send DFU                                                       |
 | `reboot`     | `board`, `port`                                  | Send a reboot                                                  |
@@ -34,7 +34,7 @@ A client writes requests and reads replies as JSON, one to a line. A request is 
 
 `board` is the serial as sixteen hexadecimal digits, and ports are numbered 1 to 5. A reply is `"ok"`, `{"error": "…"}` or `{"state": {…}}`. After `watch` the connection carries only states.
 
-**A `restore` request erases its targets with no further confirmation.** A client asks its user first. Copy the board’s `session` and each selected port’s `generation` from the state the operator reviewed. Each entry in `targets` includes `port`, `generation` and the live `ecid` if the device was identified. An unidentified target is selected by its physical attachment. A changed session, attachment or selected ECID requires a fresh confirmation.
+**A `restore` request erases its targets with no further confirmation.** A client asks its user first. Each entry in `boards` names a `board`, its `session` and its `targets`, copied from the state the operator reviewed. Each target has its `port`, `generation` and, when the device is on USB, its `ecid`. A target that is not on USB is selected by its physical attachment. The agent checks every board before it asks any: a changed session, attachment or ECID refuses the whole request, and the client confirms again.
 
 On macOS, `iasis --board "Bench A" revive 2` revives the device on port 2 through Apple Configurator in `/Applications`. Select Revive after the host sees the device in DFU or Recovery. Configurator obtains the software and attempts to preserve user data. A socket client copies the ECID as sixteen hexadecimal digits together with the physical attachment and session.
 
