@@ -113,7 +113,7 @@ private struct BoardSettings: View {
 
     private func saveName() {
         guard let draft, draft != board.name else { return }
-        model.perform(.rename(board: board.serial, name: draft))
+        model.perform([.rename(board: board.serial, name: draft)])
     }
 }
 
@@ -129,7 +129,7 @@ private struct ImageSettings: View {
                     ForEach(images.models) { kept in
                         LabeledContent {
                             Button("Stop Keeping", systemImage: "minus.circle") {
-                                model.perform(.forget(model: kept.identifier))
+                                model.perform([.forget(model: kept.identifier)])
                             }
                             .labelStyle(.iconOnly)
                             .buttonStyle(.borderless)
@@ -150,7 +150,7 @@ private struct ImageSettings: View {
                     ForEach(images.images) { image in
                         LabeledContent {
                             Button("Remove", systemImage: "trash") {
-                                model.perform(.remove(build: image.buildVersion))
+                                model.perform([.remove(build: image.buildVersion)])
                             }
                             .labelStyle(.iconOnly)
                             .buttonStyle(.borderless)
@@ -165,7 +165,7 @@ private struct ImageSettings: View {
                         }
                         Spacer()
                         Button("Check for Updates") {
-                            model.perform(.refresh)
+                            model.perform([.refresh])
                         }
                     }
                 }
@@ -179,13 +179,13 @@ private struct ImageSettings: View {
             allowedContentTypes: [UTType(filenameExtension: "ipsw") ?? .data]
         ) { chosen in
             if case let .success(file) = chosen {
-                model.perform(.importImage(path: file.path(percentEncoded: false)))
+                model.perform([.importImage(path: file.path(percentEncoded: false))])
             }
         }
     }
 
     private func keep() {
-        model.perform(.keep(model: identifier))
+        model.perform([.keep(model: identifier)])
         identifier = ""
     }
 
