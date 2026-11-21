@@ -31,7 +31,7 @@ struct DeviceActionButtons: View {
         .keyboardShortcut(shortcuts ? KeyboardShortcut("r") : nil)
         .disabled(actions.restore == nil)
         if actions.needsConfigurator {
-            Text("Apple Configurator restores this Mac")
+            Text("Restoring This Mac Needs Apple Configurator")
         }
     }
 }

@@ -6,7 +6,7 @@ Iasis lives in the menu bar and shows what is on every port of every connected b
 
 The cable dims when no board is connected. A ring over its tail shows work under way, and a red mark means a board or port needs attention.
 
-The menu lists each board's devices by port number, with what each is doing. A device's submenu has Enter DFU, Restart, Revive, Restore and the port's power. The menu shows the state it opened with; open it again for the latest. Open Iasis shows the window.
+The menu lists each board's devices by port number, with what each is doing. A device's submenu has Enter DFU, Restart, Revive, Restore and the port's power. An open menu follows each device as its state changes. A device that arrives, leaves or is identified under another name appears when the menu is next opened. Open Iasis shows the window.
 
 ## Window
 
@@ -21,7 +21,9 @@ Select rows and use the toolbar, the Device menu or a row's context menu:
 | Revive     | One device in DFU or Recovery. Apple Configurator reinstalls the system and keeps the data |
 | Restore    | Every selected device, on any number of boards. Asks first, then erases them               |
 
-Restore is unavailable while any selected device cannot be restored. A Mac in DFU over Apple Debug USB is restored with Apple Configurator.
+Restore is unavailable while any selected device cannot be restored. A Mac whose DFU is on Apple Debug USB needs Apple Configurator on this Mac.
+
+A board on a power supply shows, beside its name, the power its devices have agreed out of what the supply has for them. A bolt with a warning marks a device that took the largest offer the board could make and would use more: with several devices sharing a supply, one with a flat battery may get too little to start.
 
 Double-click a row, or show the inspector, for the device's model and ECID, its USB mode, link and power contract, and the last operation with its log folder. The bar under the list reports an image download, or why restores are unavailable.
 
@@ -57,4 +59,4 @@ Set `TEST_RUNNER_IASIS_LIVE_AGENT=1` when running the tests to check the connect
 | `/Library/LaunchAgents/com.hydaz.Iasis.plist`       | Starts the app in the menu bar at login         |
 | `/usr/local/bin/iasis`                              | A link to the `iasis` command inside the app    |
 
-The installer starts both for the user at the console; other users get them at their next login. Restores need [idevicerestore](../README.md#restore), which the agent looks for in Homebrew's and the system's directories.
+The installer starts both for the user at the console; other users get them at their next login. Restores need Apple Configurator or [idevicerestore](../README.md#restore), which the agent looks for in Homebrew's and the system's directories.

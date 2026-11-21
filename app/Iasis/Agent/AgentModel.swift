@@ -7,8 +7,8 @@ import OSLog
 final class AgentModel {
     /// The agent's latest state, or nil while no agent answers.
     private(set) var state: AgentState?
-    /// What the menu bar shows. A menu keeps the content it opened with, so
-    /// this changes only while no menu is open.
+    /// What the menu bar shows. An open menu shows each change of state at
+    /// once and keeps the items it opened with.
     private(set) var menu = StatusMenuState(nil)
     private let agent: any AgentService
     private var watching: Task<Void, Never>?
@@ -40,10 +40,17 @@ final class AgentModel {
 
     private func publish(_ update: AgentState?) {
         state = update
+        let next = StatusMenuState(update)
+        if next.titles == menu.titles {
+            if next != menu {
+                menu = next
+            }
+            return
+        }
+        // New titles mean new items. Menu tracking runs the main loop in its
+        // own mode, so this waits for an open menu to close.
         guard menuIsCurrent else { return }
         menuIsCurrent = false
-        // Menu tracking runs the main loop in its own mode, so this waits
-        // for an open menu to close.
         RunLoop.main.perform(inModes: [.default]) {
             MainActor.assumeIsolated { self.refreshMenu() }
         }
