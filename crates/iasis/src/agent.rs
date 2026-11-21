@@ -216,11 +216,10 @@ fn restore_targets(status: &iasis_protocol::Status, selected: &[Target]) -> Resu
             "the device on port {number} changed"
         );
         ensure!(
-            target.ecid.is_none_or(|id| status.ports[port.index()]
-                .observed
-                .and_then(|seen| seen.ecid)
-                == Some(id)),
-            "the device identity on port {number} changed"
+            target
+                .ecid
+                .is_none_or(|id| status.ports[port.index()].ecid == Some(id)),
+            "the device on port {number} is not the one selected"
         );
         targets.push(*target);
     }
@@ -728,21 +727,18 @@ mod tests {
     use iasis_protocol::{PortState, Status};
 
     #[test]
-    fn restore_rejects_an_ecid_swap_in_the_same_physical_attachment() {
+    fn restore_rejects_a_target_that_is_not_the_selected_device() {
         let mut status = Status::default();
         status.ports[0].state = PortState::Contract;
         status.ports[0].generation = 7;
-        status.ports[0].observed = Some(iasis_protocol::Observed {
-            usb: iasis_protocol::Usb::Apple(iasis_protocol::AppleMode::Normal),
-            ecid: Some(42),
-        });
+        status.ports[0].ecid = Some(42);
         let wire = r#"{"port":1,"generation":7,"ecid":"000000000000002a"}"#;
         let selected: Target = serde_json::from_str(wire).unwrap();
         assert_eq!(serde_json::to_string(&selected).unwrap(), wire);
         assert!(restore_targets(&status, &[selected]).is_ok());
-        status.ports[0].observed.as_mut().unwrap().ecid = Some(43);
+        status.ports[0].ecid = Some(43);
         assert!(restore_targets(&status, &[selected]).is_err());
-        status.ports[0].observed = None;
+        status.ports[0].ecid = None;
         assert!(restore_targets(&status, &[selected]).is_err());
         assert!(
             restore_targets(
