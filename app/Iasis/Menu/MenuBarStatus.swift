@@ -40,7 +40,7 @@ enum MenuBarStatus: String, CaseIterable {
                 hints: nil
             )
             guard self == .busy || self == .fault else { return true }
-            let badge = CGRect(x: 10, y: 6.5, width: 8.5, height: 8.5)
+            let badge = CGRect(x: 10.5, y: 6.5, width: 8.5, height: 8.5)
             context.setBlendMode(.clear)
             context.fillEllipse(in: badge.insetBy(dx: -1, dy: -1))
             context.setBlendMode(.normal)
