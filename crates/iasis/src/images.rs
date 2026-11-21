@@ -18,7 +18,7 @@ use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::restore::PreparedIpsw;
+use crate::{identity::models::DeviceModel, restore::PreparedIpsw};
 
 const CATALOG: &str = "https://api.ipsw.me/v4";
 /// The hosts Apple serves restore images from.
@@ -781,6 +781,30 @@ impl Store {
             .transpose()?
             .and_then(|devices| known(&devices))
             .with_context(|| format!("no known model has CPID:{chip:04X} BDID:{board:02X}"))
+    }
+
+    /// The chip and board a model's images are filed under: its own, or the
+    /// catalog's for the product type Configurator reads.
+    pub(crate) fn hardware_for(&self, model: &DeviceModel) -> Result<(u32, u32)> {
+        if let Some(hardware) = model.hardware() {
+            return Ok(hardware);
+        }
+        let identifier = model
+            .identifier()
+            .context("the target's model is not known")?;
+        let known = |devices: &[Device]| {
+            devices
+                .iter()
+                .find(|device| device.identifier == identifier)
+                .and_then(|device| device.hardware.first().copied())
+        };
+        let saved = known(&self.0.lock().saved.devices);
+        match saved {
+            Some(hardware) => Ok(hardware),
+            None => {
+                known(&self.0.devices()?).with_context(|| format!("no known model is {identifier}"))
+            }
+        }
     }
 
     pub fn image_for(&self, chip: u32, board: u32) -> Option<PreparedIpsw> {
