@@ -22,8 +22,13 @@ struct DeviceRowView: View {
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
                 .lineLimit(1)
-            ActivityMark(mark: activity.mark)
-                .frame(width: 16)
+            // Each mark has its own place, taken or not.
+            Color.clear
+                .frame(width: 16, height: 16)
+                .overlay { PowerMark(device: device) }
+            Color.clear
+                .frame(width: 16, height: 16)
+                .overlay { ActivityMark(mark: activity.mark) }
         }
         .accessibilityElement(children: .combine)
     }
@@ -41,6 +46,21 @@ struct PortBadge: View {
             .foregroundStyle(light.style)
             .symbolEffect(.pulse, options: .repeating, isActive: light.pulse)
             .accessibilityLabel("Port \(number)")
+    }
+}
+
+/// Shown when a power supply cannot give the target what it asks for.
+struct PowerMark: View {
+    let device: Device
+
+    var body: some View {
+        if device.port.short, let watts = device.watts {
+            Image(systemName: "bolt.trianglebadge.exclamationmark.fill")
+                .symbolRenderingMode(.multicolor)
+                .foregroundStyle(.yellow)
+                .help("Getting \(watts), less than it asks for")
+                .accessibilityLabel("Low power, \(watts)")
+        }
     }
 }
 
