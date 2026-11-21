@@ -95,7 +95,7 @@ struct MenuTests {
         #expect(menu.status == .fault)
         #expect(menu.boards?.first?.devices.map(\.device.port.number) == [2, 3, 4, 5])
         #expect(menu.download == "27.2.1, 43%")
-        #expect(menu.titles == ["Repair Bench", "MacBook Air", "Configurator", "iPad", "Unidentified Device", "Unidentified Device", "Download"])
+        #expect(menu.titles == ["Repair Bench", "MacBook Air", "Configurator", "iPad", "USB Device", "Attached Device", "Download"])
         state.boards[0].ports[2].state = "downloading image"
         #expect(StatusMenuState(state).download == nil)
         #expect(StatusMenuState(nil).boards == nil)
