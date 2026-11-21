@@ -1,114 +1,129 @@
+use core::cell::Cell;
+
 use embassy_time::{Instant, Timer};
-use iasis_protocol::{Orientation, PortError, Status};
+use iasis_firmware::host_input::{ACTIVITY, Advertisement, ConnectedCc, VBUS_OK};
+use iasis_protocol::{Orientation, PortError};
 
-use crate::{bus::Bus, outputs::Outputs, phy};
+use crate::{
+    bus::{Bus, SharedIo},
+    outputs::Outputs,
+    phy,
+};
 
-#[derive(Default)]
-pub struct Upstream {
-    initialized: bool,
-    candidate: Option<Orientation>,
-    since: u64,
-    applied: Option<Orientation>,
-    level: u8,
-    candidate_level: u8,
-    valid_until: u64,
+#[derive(Clone, Copy, Default)]
+pub struct Reading {
+    pub advertisement: Advertisement,
+    pub cc: Option<[u8; 2]>,
+    pub orientation: Option<Orientation>,
+    pub error: Option<PortError>,
 }
 
-impl Upstream {
-    pub async fn sample(&mut self, bus: &mut Bus, outputs: &mut Outputs, status: &mut Status) {
-        status.upstream_cc = None;
-        status.upstream_orientation = None;
-        status.upstream_error = self.observe(bus, outputs, status).await.err();
-        if status.upstream_error.is_some() {
-            self.candidate = None;
-            self.level = 0;
-        }
-    }
+#[derive(Default)]
+struct Monitor {
+    initialized: bool,
+    pin: Option<Orientation>,
+    routed: Option<Orientation>,
+    cc: ConnectedCc,
+}
 
-    pub fn cc_level(&self) -> u8 {
-        if Instant::now().as_millis() < self.valid_until {
-            self.level
-        } else {
-            0
-        }
-    }
+async fn select_cc(bus: &mut Bus, line: u8) -> Result<(), PortError> {
+    // SWITCHES0 keeps both Rd and selects the comparators. SWITCHES1 connects
+    // BMC I/O to the same pin for ACTIVITY, with automatic GoodCRC disabled.
+    bus.write(0x22, &[0x02, 3 | (line << 2), 0x20 | line])
+        .await?;
+    Timer::after_micros(300).await;
+    Ok(())
+}
 
-    pub fn allowance_deadline(&self) -> u64 {
-        if self.cc_level() > 0 {
-            self.valid_until
-        } else {
-            0
-        }
-    }
-
-    async fn observe(
-        &mut self,
-        bus: &mut Bus,
-        outputs: &mut Outputs,
-        status: &mut Status,
-    ) -> Result<(), PortError> {
+impl Monitor {
+    async fn sample(&mut self, bus: &mut Bus, outputs: &mut Outputs) -> Result<Reading, PortError> {
         bus.select(Some(5)).await?;
         if !self.initialized {
-            // Keep both internal Rd terminations throughout measurement. There
-            // are no external Rd resistors on the protected CC nets.
             phy::write(bus, 0x08, 0).await?;
             phy::write(bus, 0x0b, 0x0f).await?;
-            phy::write(bus, 0x03, 0x20).await?; // Sink/UFP, no PD negotiation.
             self.initialized = true;
         }
-        let mut cc = [0; 2];
-        let mut active = false;
-        for (index, level) in cc.iter_mut().enumerate() {
-            phy::write(bus, 0x02, 3 | (4 << index)).await?;
-            Timer::after_micros(300).await;
-            let sample = bus.register(0x22, 0x40).await?;
-            active |= sample & 0x40 != 0;
-            *level = sample & 3;
-        }
-        phy::write(bus, 0x02, 3).await?;
-        // BC_LVL is not valid during BMC signalling (FUSB302B table 37).
-        if active {
-            // Keep the previous observation only until its existing deadline.
-            // BMC traffic cannot refresh the allowance or its debounce timer.
-            return Ok(());
-        }
-        status.upstream_cc = Some(cc);
-        let orientation = match cc {
-            [1..=3, 0] => Some(Orientation::Cc1),
-            [0, 1..=3] => Some(Orientation::Cc2),
-            [0, 0] => None,
-            _ => return Err(PortError::Protocol),
-        };
-        let level = match orientation {
-            Some(Orientation::Cc1) => cc[0],
-            Some(Orientation::Cc2) => cc[1],
-            None => 0,
-        };
-        let now = Instant::now().as_millis();
-        // Withdraw a reduced allowance immediately; only increases debounce.
-        if level < self.level || orientation != self.applied {
-            self.level = 0;
-        }
-        self.valid_until = now + 50;
-        if orientation != self.candidate || level != self.candidate_level {
-            self.candidate = orientation;
-            self.candidate_level = level;
-            self.since = now;
-        }
-        if let Some(orientation) = orientation
-            && now - self.since >= 100
-        {
-            if self.applied != Some(orientation) {
-                outputs
-                    .upstream_orientation(bus, orientation == Orientation::Cc1)
-                    .await?;
-                self.applied = Some(orientation);
+        let pin = match self.pin {
+            Some(pin) => pin,
+            None => {
+                let mut cc = [0; 2];
+                for (i, level) in cc.iter_mut().enumerate() {
+                    select_cc(bus, 1 << i).await?;
+                    let sample = bus.register(0x22, 0x40).await?;
+                    if sample & (VBUS_OK | ACTIVITY) != VBUS_OK {
+                        return Ok(Reading::default());
+                    }
+                    *level = sample & 3;
+                }
+                let pin = match cc {
+                    [1..=3, 0] => Orientation::Cc1,
+                    [0, 1..=3] => Orientation::Cc2,
+                    [0, 0] => {
+                        return Ok(Reading {
+                            cc: Some(cc),
+                            ..Reading::default()
+                        });
+                    }
+                    _ => return Err(PortError::Protocol),
+                };
+                if pin == Orientation::Cc1 {
+                    select_cc(bus, 1).await?;
+                }
+                // Start observing changes on this pin from this attachment.
+                bus.register(0x22, 0x42).await?;
+                self.pin = Some(pin);
+                pin
             }
-            status.upstream_orientation = Some(orientation);
-            self.level = level;
+        };
+        // INT_N has only a pull-up on Rev A. STATUS0 and the read-clear
+        // INTERRUPT cover both the present level and a VBUS loss between polls.
+        let now = Instant::now().as_millis();
+        let mut bytes = [0; 3];
+        bus.read(0x22, 0x40, &mut bytes).await?;
+        let [status, _, interrupt] = bytes;
+        if !self.cc.observe(now, status, interrupt) {
+            self.pin = None;
+            self.cc = ConnectedCc::default();
+            return Ok(Reading::default());
         }
-        // Leave the routing pin at its last value while detached or uncertain.
-        // Neither HUB_RUN nor the shift-register clock/latch is touched here.
-        Ok(())
+        let mut levels = [0; 2];
+        levels[usize::from(pin == Orientation::Cc2)] = status & 3;
+        let attached = self.cc.advertisement.attached(now);
+        if attached && self.routed != Some(pin) {
+            outputs
+                .upstream_orientation(bus, pin == Orientation::Cc1)
+                .await?;
+            self.routed = Some(pin);
+        }
+        Ok(Reading {
+            advertisement: self.cc.advertisement,
+            orientation: attached.then_some(pin),
+            cc: (status & ACTIVITY == 0).then_some(levels),
+            error: None,
+        })
+    }
+}
+
+pub async fn run(io: &SharedIo, latest: &Cell<Reading>) {
+    let mut monitor = Monitor::default();
+    loop {
+        let result = {
+            let mut guard = io.lock().await;
+            let board = &mut *guard;
+            match &mut board.outputs {
+                Ok(outputs) => monitor.sample(&mut board.bus, outputs).await,
+                Err(error) => Err(*error),
+            }
+        };
+        let reading = result.unwrap_or_else(|error| {
+            monitor = Monitor::default();
+            Reading {
+                error: Some(error),
+                ..Reading::default()
+            }
+        });
+        let retry = monitor.pin.is_some() && (reading.cc.is_none() || monitor.cc.resampling());
+        latest.set(reading);
+        Timer::after_millis(if retry { 1 } else { 5 }).await;
     }
 }

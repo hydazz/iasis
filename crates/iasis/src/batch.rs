@@ -1,7 +1,7 @@
 use std::{
     collections::HashSet,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     thread,
     time::{Duration, Instant},
 };
@@ -85,30 +85,35 @@ pub struct Ending {
     pub message: String,
 }
 
-/// A port stays reserved across USB re-enumeration until its worker reports.
-#[derive(Default)]
-pub enum PortWork {
-    #[default]
-    Idle,
-    Active,
-    Finished(Ending),
-}
+/// The port and its submitting client share this operation's result across USB sessions.
+pub type PortWork = Arc<OnceLock<Ending>>;
+pub type Endings = Arc<Mutex<[Option<PortWork>; protocol::PORT_COUNT]>>;
 
-pub type Endings = Arc<Mutex<[PortWork; protocol::PORT_COUNT]>>;
-
-pub(crate) fn reserve(endings: &Endings, selected: &[Target]) -> Result<()> {
+pub(crate) fn reserve(endings: &Endings, selected: &[Target]) -> Result<Vec<PortWork>> {
     let mut slots = endings.lock().unwrap();
     for Target { port, .. } in selected {
         ensure!(
-            !matches!(slots[port.index()], PortWork::Active),
+            slots[port.index()]
+                .as_ref()
+                .is_none_or(|work| work.get().is_some()),
             "port {} already has an active operation",
             port.number()
         );
     }
-    for Target { port, .. } in selected {
-        slots[port.index()] = PortWork::Active;
+    Ok(selected
+        .iter()
+        .map(|target| {
+            let work = PortWork::default();
+            slots[target.port.index()] = Some(work.clone());
+            work
+        })
+        .collect())
+}
+
+fn finish(endings: &Endings, port: Port, ending: Ending) {
+    if let Some(work) = &endings.lock().unwrap()[port.index()] {
+        let _ = work.set(ending);
     }
-    Ok(())
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -242,15 +247,18 @@ pub fn listen(
     let running = match request {
         Ok(running) => running,
         Err(error) => {
-            let mut slots = endings.lock().unwrap();
             for target in selected {
-                slots[target.port.index()] = PortWork::Finished(Ending {
-                    operation: Operation::Restore,
-                    ecid: target.ecid.map(|id| format!("{id:016x}")),
-                    log_directory: None,
-                    phase: RestorePhase::Failed,
-                    message: format!("{error:#}"),
-                });
+                finish(
+                    endings,
+                    target.port,
+                    Ending {
+                        operation: Operation::Restore,
+                        ecid: target.ecid.map(|id| format!("{id:016x}")),
+                        log_directory: None,
+                        phase: RestorePhase::Failed,
+                        message: format!("{error:#}"),
+                    },
+                );
             }
             eprintln!("Restore request: {error:#}");
             return Ok(Some(format!("{error:#}")));
@@ -273,7 +281,7 @@ pub(crate) fn revive(
     generation: u32,
     ecid: u64,
     endings: &Endings,
-) -> Result<()> {
+) -> Result<Vec<PortWork>> {
     let board = link.board();
     let mut snapshot = topology::discover(board.topology())?;
     crate::identity::query(&mut snapshot, 1 << port.index());
@@ -291,7 +299,7 @@ pub(crate) fn revive(
         "Revive needs the selected device in verified DFU or recovery"
     );
     let target = TargetTracker::pin(board.info().serial, &snapshot, port)?;
-    reserve(
+    let work = reserve(
         endings,
         &[Target {
             port,
@@ -300,7 +308,7 @@ pub(crate) fn revive(
         }],
     )?;
     let workers = engine.start_revive(ecid).inspect_err(|_| {
-        endings.lock().unwrap()[port.index()] = PortWork::Idle;
+        endings.lock().unwrap()[port.index()] = None;
     })?;
     link.job(
         port,
@@ -327,7 +335,7 @@ pub(crate) fn revive(
             eprintln!("Revive: {error:#}");
         }
     });
-    Ok(())
+    Ok(work)
 }
 
 /// The DFU a verified target is in, when the host restores that mode, and
@@ -548,13 +556,17 @@ fn monitor(link: &Link, running: Running, endings: &Endings) -> Result<()> {
             if job.state.is_terminal() {
                 failed |= job.state != RestoreState::RestoreReported;
                 active.remove(&target.port);
-                endings.lock().unwrap()[target.port.index()] = PortWork::Finished(Ending {
-                    operation: job.operation,
-                    log_directory: Some(job.directory.clone()),
-                    ecid: Some(format!("{:016x}", job.ecid)),
-                    phase,
-                    message: job.message.clone(),
-                });
+                finish(
+                    endings,
+                    target.port,
+                    Ending {
+                        operation: job.operation,
+                        log_directory: Some(job.directory.clone()),
+                        ecid: Some(format!("{:016x}", job.ecid)),
+                        phase,
+                        message: job.message.clone(),
+                    },
+                );
             }
         }
         if active.is_empty() {
@@ -986,22 +998,28 @@ mod tests {
             port: Port::ALL[1],
             ..a
         };
-        reserve(&slots, &[a]).unwrap();
+        let first = reserve(&slots, &[a]).unwrap();
         let replacement = Target {
             generation: 10,
             ecid: Some(18),
             ..a
         };
         assert!(reserve(&slots, &[b, replacement]).is_err());
-        assert!(matches!(slots.lock().unwrap()[1], PortWork::Idle));
-        slots.lock().unwrap()[0] = PortWork::Finished(Ending {
-            operation: Operation::Revive,
-            ecid: Some("0000000000000011".into()),
-            phase: RestorePhase::Failed,
-            message: "Device disconnected".into(),
-            log_directory: None,
-        });
-        reserve(&slots, &[replacement]).unwrap();
+        assert!(slots.lock().unwrap()[1].is_none());
+        finish(
+            &slots,
+            a.port,
+            Ending {
+                operation: Operation::Revive,
+                ecid: Some("0000000000000011".into()),
+                phase: RestorePhase::Failed,
+                message: "Device disconnected".into(),
+                log_directory: None,
+            },
+        );
+        let second = reserve(&slots, &[a]).unwrap();
+        assert!(second[0].get().is_none());
+        assert_eq!(first[0].get().unwrap().message, "Device disconnected");
     }
 
     #[test]

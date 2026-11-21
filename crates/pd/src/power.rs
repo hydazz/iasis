@@ -83,10 +83,7 @@ pub fn presence_limit(
 }
 
 /// Target current available from the upstream CC advertisement.
-pub fn host_allowance(cc_level: u8, configured: bool) -> u16 {
-    if !configured {
-        return 0;
-    }
+pub fn host_allowance(cc_level: u8) -> u16 {
     match cc_level {
         3 => 3000,
         2 => 1500,
@@ -695,10 +692,10 @@ mod tests {
                 assert!(tier.upper_ma + 800 <= allowance);
             }
         }
-        assert_eq!(host_allowance(1, true), 0);
-        assert_eq!(host_allowance(2, true), 1500);
-        assert_eq!(host_allowance(3, false), 0);
-        assert_eq!(host_allowance(0, true), 0);
+        assert_eq!(host_allowance(1), 0);
+        assert_eq!(host_allowance(2), 1500);
+        assert_eq!(host_allowance(3), 3000);
+        assert_eq!(host_allowance(0), 0);
         assert!(safe_presence(Some(adc(4500))));
         assert!(!safe_presence(Some(adc(4300))));
         assert!(!safe_presence(None));
