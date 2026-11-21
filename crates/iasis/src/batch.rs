@@ -761,14 +761,19 @@ fn enter_dfu(
             failed = true;
             continue;
         }
+        // The board holds the identity of the attachment, on USB or not.
         ensure!(
-            ecid.is_none_or(|id| assessment.ecid == Some(id)),
-            "could not verify the selected ECID on port {} before DFU entry",
+            ecid.is_none_or(|id| status.ports[port.index()].ecid == Some(id)),
+            "the device on port {} is not the one selected",
             port.number()
         );
         match (assessment.signal, assessment.usb_mode) {
             (Signal::AlreadyDfu, Some(AppleMode::Dfu)) => {
                 match TargetTracker::pin(board.info().serial, &snapshot, port) {
+                    Ok(target) if ecid.is_some_and(|id| id != target.ecid) => {
+                        eprintln!("port {}: another device is in DFU", port.number());
+                        failed = true;
+                    }
                     Ok(target) => targets.push((target, generation)),
                     Err(error) => {
                         eprintln!("port {}: {error}", port.number());
@@ -864,7 +869,16 @@ fn enter_dfu(
                 && assessment.outcome != Some(Outcome::IdentityUnverified)
                 && let Ok(target) = TargetTracker::pin(board.info().serial, &snapshot, *port)
             {
-                targets.push((target, *generation));
+                let chosen = selected.iter().find(|chosen| chosen.port == *port);
+                if chosen
+                    .and_then(|chosen| chosen.ecid)
+                    .is_some_and(|id| id != target.ecid)
+                {
+                    eprintln!("port {}: another device entered DFU", port.number());
+                    failed = true;
+                } else {
+                    targets.push((target, *generation));
+                }
                 return false;
             }
             true
