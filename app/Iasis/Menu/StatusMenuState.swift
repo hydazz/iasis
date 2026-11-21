@@ -19,6 +19,8 @@ struct DeviceMenuState: Equatable {
         let restart: AgentRequest?
         let revive: AgentRequest?
         let restore: RestoreConfirmation?
+        let powerOn: Bool
+        let power: AgentRequest
     }
 
     let boards: [Board]
@@ -38,7 +40,9 @@ struct DeviceMenuState: Equatable {
                     dfu: port.dfu ? .dfu(board: board.serial, port: port.number) : nil,
                     restart: port.reboot ? .reboot(board: board.serial, port: port.number) : nil,
                     revive: port.reviveRequest(on: board),
-                    restore: state.restoreProblem == nil ? RestoreConfirmation(board: board, title: title, ports: [port]) : nil
+                    restore: state.restoreProblem == nil ? RestoreConfirmation(board: board, title: title, ports: [port]) : nil,
+                    powerOn: port.enabled,
+                    power: .power(board: board.serial, port: port.number, on: !port.enabled)
                 )
             })
         }
