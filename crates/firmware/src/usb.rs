@@ -171,7 +171,7 @@ fn matches(request: &Request) -> bool {
 impl Handler for Management<'_> {
     fn enabled(&mut self, enabled: bool) {
         if !enabled {
-            self.session.disconnect();
+            self.reset();
         }
     }
 
@@ -286,13 +286,15 @@ impl Handler for Management<'_> {
                     OutResponse::Rejected
                 })
             }
-            protocol::HOST_BUDGET => match protocol::decode::<protocol::HostBudget>(data) {
-                Ok(budget) if budget.serial == self.info.serial && budget.milliamps <= 1600 => {
-                    self.host_budget.set(budget.milliamps);
-                    Some(OutResponse::Accepted)
+            protocol::HOST_BUDGET if self.configured.get() && !self.suspended.get() => {
+                match protocol::decode::<protocol::HostBudget>(data) {
+                    Ok(budget) if budget.serial == self.info.serial && budget.milliamps <= 1600 => {
+                        self.host_budget.set(budget.milliamps);
+                        Some(OutResponse::Accepted)
+                    }
+                    _ => Some(OutResponse::Rejected),
                 }
-                _ => Some(OutResponse::Rejected),
-            },
+            }
             protocol::SETTINGS => match protocol::decode::<protocol::SettingsRequest>(data) {
                 Ok(request)
                     if request.serial == self.info.serial
