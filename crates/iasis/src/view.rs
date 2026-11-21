@@ -13,7 +13,7 @@ use crate::{
     batch::{Device, Ending},
     dfu::{self, Signal},
     host::{PortJob, observe},
-    identity::models::DeviceModel,
+    identity::models::{DeviceModel, Models},
     images::Store,
     restore::{Operation, Progress},
     topology::Snapshot,
@@ -25,8 +25,9 @@ pub struct PortView {
     pub generation: u32,
     pub occupied: bool,
     pub device: Option<String>,
+    /// The target's ECID, kept by the board for as long as the attachment
+    /// lasts.
     pub ecid: Option<String>,
-    pub last_seen: Option<LastSeen>,
     pub mode: Option<AppleMode>,
     pub light: Light,
     /// What the board knows and has asked of the target.
@@ -47,12 +48,6 @@ pub struct PortView {
     pub stage: Option<Progress>,
     /// How the port's last restore ended, from the agent that ran it.
     pub result: Option<Ending>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LastSeen {
-    pub ecid: String,
-    pub device: Option<String>,
 }
 
 impl PortView {
@@ -139,8 +134,7 @@ impl BoardView {
                         generation: state.generation,
                         occupied: state.occupied(),
                         device: None,
-                        ecid: None,
-                        last_seen: None,
+                        ecid: state.ecid.map(|id| format!("{id:016x}")),
                         mode: state.observed.and_then(|seen| match seen.usb {
                             Usb::Apple(mode) => Some(mode),
                             _ => None,
@@ -176,6 +170,7 @@ impl BoardView {
         status: &Status,
         snapshot: &Snapshot,
         store: &Store,
+        models: &Models,
         family: Device,
     ) {
         for (port, row) in Port::ALL.into_iter().zip(&mut self.ports) {
@@ -190,20 +185,26 @@ impl BoardView {
                 }
                 _ => false,
             };
-            let observed = observe(snapshot, port);
-            if !row.occupied || status.ports[port.index()].observed != Some(observed) {
-                row.mode = None;
-                row.usb.clear();
+            let slot = &status.ports[port.index()];
+            if !row.occupied {
                 continue;
             }
-            if let Some(device) = dfu::direct_device(snapshot, port) {
-                if matches!(observed.usb, Usb::Apple(mode) if mode != AppleMode::PortDfu) {
-                    row.ecid = observed.ecid.map(|id| format!("{id:016x}"));
-                }
-                row.device = DeviceModel::read(device)
-                    .name(store)
-                    .or_else(|| device.product.clone());
+            // The board and the USB tree are read at different moments.
+            let agreed = slot.observed == Some(observe(snapshot, port));
+            if !agreed {
+                row.mode = None;
+                row.usb.clear();
             }
+            let live = dfu::direct_device(snapshot, port).filter(|_| agreed);
+            row.device = slot
+                .ecid
+                .and_then(|ecid| models.name(ecid, store))
+                .or_else(|| {
+                    let device = live?;
+                    DeviceModel::read(device)
+                        .name(store)
+                        .or_else(|| device.product.clone())
+                });
         }
     }
 
@@ -363,7 +364,7 @@ pub fn port_usb(port: &PortStatus) -> String {
             AppleMode::Mux => "system",
         },
     };
-    match seen.ecid {
+    match port.ecid {
         Some(ecid) => format!("{mode} {ecid:016x}"),
         None => mode.into(),
     }

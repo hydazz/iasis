@@ -100,6 +100,8 @@ struct Shared {
     /// The host's view and its image fetch, with the attachment they
     /// describe.
     observed: Cell<Option<(u32, Observed, Option<u8>)>>,
+    /// The target's ECID with the attachment it was read on.
+    identity: Cell<Option<(u32, u64)>>,
     tracker: Cell<Tracker>,
     wake: Signal<NoopRawMutex, ()>,
 }
@@ -109,6 +111,13 @@ impl Shared {
         let mut status = self.status.get();
         change(&mut status);
         self.status.set(status);
+    }
+
+    fn identity(&self, generation: u32) -> Option<u64> {
+        self.identity
+            .get()
+            .filter(|(attachment, _)| *attachment == generation)
+            .map(|(_, ecid)| ecid)
     }
 
     fn snapshot(&self) -> PortStatus {
@@ -122,6 +131,7 @@ impl Shared {
             faults: self.pins.get(),
             link: self.link.get(),
             observed: view.map(|(_, observed, _)| observed),
+            ecid: self.identity(status.generation),
             fetch: view.and_then(|(_, _, fetch)| fetch),
             request: self.tracker.get().request(),
             ..status
@@ -231,6 +241,24 @@ impl Ports {
                         entry.fetch.map(|percent| percent.min(100)),
                     )
                 }));
+                if let Some(entry) = entry {
+                    let known = port.identity(status.generation);
+                    let ecid = entry.observed.identity(known);
+                    port.identity
+                        .set(ecid.map(|ecid| (status.generation, ecid)));
+                    // A target is on one connector. A cable that holds its
+                    // own attachment keeps the port occupied after its
+                    // device has moved.
+                    if let Some(ecid) = ecid.filter(|_| ecid != known) {
+                        for other in &self.ports {
+                            if !core::ptr::eq(other, port)
+                                && other.identity.get().is_some_and(|(_, held)| held == ecid)
+                            {
+                                other.identity.set(None);
+                            }
+                        }
+                    }
+                }
                 if let Some(job) = entry.and_then(|entry| entry.restore)
                     && status.state != PortState::Fault
                     && job.ecid != 0

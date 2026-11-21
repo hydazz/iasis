@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 14;
+pub const VERSION: u16 = 15;
 pub const MAX_PACKET: usize = 1344;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
@@ -139,6 +139,10 @@ pub struct PortStatus {
     pub link: Option<Link>,
     /// What the host finds on this attachment's USB, while a host reports.
     pub observed: Option<Observed>,
+    /// The target's ECID, once a host has read it on this attachment. The
+    /// board keeps it until the attachment ends, through a target that stops
+    /// answering on USB and a host that goes away.
+    pub ecid: Option<u64>,
     /// The last DFU or reboot sent to the target, until its effect is known.
     pub request: Option<Request>,
     /// Percent of the restore image the host has fetched for this target,
@@ -188,6 +192,18 @@ impl Observed {
     /// The target's DFU is on this port's USB.
     pub fn dfu(&self) -> bool {
         matches!(self.usb, Usb::Apple(AppleMode::Dfu | AppleMode::KisDfu))
+    }
+
+    /// The ECID of the attachment's target after this view of it, given the
+    /// one known before. A target keeps its identity while it is silent or
+    /// between modes; another device on the connector ends it. Port DFU
+    /// carries the port controller's ECID, not the target's.
+    pub fn identity(&self, known: Option<u64>) -> Option<u64> {
+        match (self.usb, self.ecid) {
+            (Usb::Other | Usb::Ambiguous, _) => None,
+            (Usb::Apple(mode), Some(ecid)) if mode != AppleMode::PortDfu && ecid != 0 => Some(ecid),
+            _ => known,
+        }
     }
 }
 
@@ -1019,6 +1035,7 @@ mod tests {
                     usb: Usb::Apple(AppleMode::KisDfu),
                     ecid: Some(u64::MAX),
                 }),
+                ecid: Some(u64::MAX),
                 request: Some(Request {
                     action: PortAction::Reboot,
                     at_ms: u64::MAX,
@@ -1135,10 +1152,11 @@ mod tests {
         };
         let mut buffer = [0; MAX_PACKET];
         let packet = encode(&info, &mut buffer).unwrap();
+        let [low, high] = VERSION.to_le_bytes();
         assert_eq!(
             packet,
             &[
-                b'I', b'A', b'S', b'I', 14, 0, 1, 0, 1, 0, 128, 128, 128, 1, 3
+                b'I', b'A', b'S', b'I', low, high, 1, 0, 1, 0, 128, 128, 128, 1, 3
             ]
         );
         let length = packet.len();

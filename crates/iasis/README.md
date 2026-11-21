@@ -57,9 +57,8 @@ Each port has:
 | Field                                | Meaning                                                                                        |
 | ------------------------------------ | ---------------------------------------------------------------------------------------------- |
 | `generation`, `occupied`             | Current attachment generation and whether the port is occupied                                 |
-| `ecid`                               | Verified Apple device ECID as sixteen hexadecimal digits, or null                              |
-| `last_seen`                          | Previously observed `device` and `ecid` while USB is absent on the same attachment, or null    |
-| `device`, `mode`                     | Known USB device name and Apple mode, each nullable                                            |
+| `ecid`                               | The target's ECID as sixteen hexadecimal digits, once read on this attachment, or null         |
+| `device`, `mode`                     | The target's model name, and its Apple mode while it is on USB, each nullable                  |
 | `number`                             | 1 to 5                                                                                         |
 | `light`                              | What the port's light shows: `hue`, `pulse` and `dim`                                          |
 | `state`                              | What the board knows and has asked of the target, as text                                      |
@@ -71,7 +70,7 @@ Each port has:
 | `stage`                              | Image download or worker stage with its `name` and optional `percent`, or null                 |
 | `result`                             | Last operation, phase, message, target ECID if known, and `log_directory` if a worker launched |
 
-The agent caches model identifiers and chip/board IDs by verified ECID in `device-models.json` in its cache directory. It can recognize the same device on another board or after a restart when USB exposes its ECID again.
+The board keeps a target's `ecid` for as long as its attachment lasts, so a Mac that has started up and left USB is still the device on its port, for this agent and the next. A device moved to another connector is identified again there. The agent notes the model of each ECID it identifies in `device-models.json` in its cache directory, one entry per device, so a mode that gives the ECID alone still names the device.
 
 The board drops a job when its target leaves, which a restored target does by restarting. `result` stays until the port takes another restore or revive request.
 
