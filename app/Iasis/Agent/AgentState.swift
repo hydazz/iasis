@@ -20,6 +20,8 @@ nonisolated struct AgentState: Decodable, Equatable {
         var serial: String
         var name: String
         var session: UInt32?
+        var firmware: String
+        var supply: String
         var brightness: Int
         var settingsBusy: Bool
         var ports: [Port]
@@ -33,10 +35,6 @@ nonisolated struct AgentState: Decodable, Equatable {
 
         var displayName: String {
             name.isEmpty ? "Iasis" : name
-        }
-
-        var visiblePorts: [Port] {
-            ports.filter { $0.occupied || !$0.enabled }
         }
     }
 
@@ -56,18 +54,12 @@ nonisolated struct AgentState: Decodable, Equatable {
         var restore: Bool
         var revive: Bool
         var enabled: Bool
-        var lastSeen: LastSeen?
         var stage: Stage?
         var result: Ending?
 
         var id: Int {
             number
         }
-    }
-
-    struct LastSeen: Decodable, Equatable {
-        var device: String?
-        var ecid: String
     }
 
     struct Stage: Decodable, Equatable {
@@ -157,73 +149,4 @@ nonisolated struct AgentState: Decodable, Equatable {
             bytes > 0 ? Double(done) / Double(bytes) : 0
         }
     }
-}
-
-extension AgentState.Port {
-    var target: RestoreTarget {
-        RestoreTarget(port: number, generation: generation, ecid: ecid)
-    }
-
-    var shortName: String? {
-        device?.components(separatedBy: " (").first
-    }
-
-    var inDFU: Bool {
-        mode == "dfu" || mode == "kis_dfu"
-    }
-
-    var menuTitle: String {
-        let status: String? = switch state {
-        case "ready" where inDFU, "charging" where inDFU: "DFU"
-        case "ready" where mode == "recovery": "Recovery"
-        case "ready" where shortName != nil: nil
-        default: state.prefix(1).uppercased() + state.dropFirst()
-        }
-        let label = shortName.map { "Port \(number) · \($0)" } ?? "Port \(number)"
-        return status.map { "\(label) · \($0)" } ?? label
-    }
-
-    var symbol: String {
-        let name = (device ?? "").lowercased()
-        if name.hasPrefix("ipad") {
-            return "ipad"
-        }
-        if name.hasPrefix("iphone") {
-            return "iphone"
-        }
-        if name.hasPrefix("macbook") {
-            return "laptopcomputer"
-        }
-        if name.hasPrefix("mac mini") {
-            return "macmini"
-        }
-        if name.hasPrefix("mac studio") {
-            return "macstudio"
-        }
-        if name.hasPrefix("mac pro") {
-            return "macpro.gen3"
-        }
-        if name.hasPrefix("imac") {
-            return "desktopcomputer"
-        }
-        if name.hasPrefix("mac") {
-            return "macwindow"
-        }
-        if name.hasPrefix("homepod mini") {
-            return "homepodmini"
-        }
-        if name.hasPrefix("homepod") || name.hasPrefix("audioaccessory") {
-            return "homepod"
-        }
-        if name.hasPrefix("apple tv") || name.hasPrefix("appletv") {
-            return "appletv"
-        }
-        return "cable.connector"
-    }
-}
-
-nonisolated struct RestoreTarget: Encodable, Equatable {
-    let port: Int
-    let generation: UInt32
-    var ecid: String?
 }
