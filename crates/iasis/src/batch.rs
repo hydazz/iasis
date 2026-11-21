@@ -12,11 +12,10 @@ use crate::{
     dfu::{self, Attempt, Outcome, Signal},
     home::Home,
     host::{Jobs, Link, PortJob},
-    identity::{AppleMode, Observation, TargetTracker},
+    identity::{AppleMode, Observation, TargetTracker, models::DeviceModel},
     images::{Lease, Network, Store},
     restore::{
-        Operation, PreparedIpsw, RestoreBatch, RestoreEngine, RestoreState, dfu_hardware,
-        image_for_dfu,
+        Operation, PreparedIpsw, RestoreBatch, RestoreEngine, RestoreState, image_for_model,
     },
     topology,
 };
@@ -47,8 +46,10 @@ pub struct Options {
     pub erase: bool,
     #[arg(long, value_enum, default_value = "apple-silicon")]
     pub device: Device,
-    #[arg(long, default_value = "idevicerestore")]
-    pub program: PathBuf,
+    /// Restore with this idevicerestore instead of the host's engine, which
+    /// is Apple Configurator where it is installed
+    #[arg(long)]
+    pub idevicerestore: Option<PathBuf>,
     /// Worker logs and scratch directories; the cache directory by default
     #[arg(long)]
     pub logs: Option<PathBuf>,
@@ -131,9 +132,8 @@ pub fn run(device: &nusb::DeviceInfo, board: &Board, options: Options) -> Result
     ensure!(options.erase, "restore requires --erase");
     let home = Home::locate()?;
     let logs = options.logs.unwrap_or_else(|| home.cache.join("restores"));
-    let engine = RestoreEngine::new(&options.program, logs);
-    engine.check_program()?;
-    crate::identity::check_usbmuxd().context("system usbmuxd is unavailable")?;
+    let engine = RestoreEngine::for_host(options.idevicerestore, logs);
+    engine.check()?;
     // Take the board before the long image check, which another host's
     // session would make pointless.
     let link = Link::open(device, Jobs::default(), Arc::default())?;
@@ -169,7 +169,7 @@ pub fn run(device: &nusb::DeviceInfo, board: &Board, options: Options) -> Result
             );
         }
         let selected = selection(&link, &options.ports, None)?.0;
-        let targets = prepare_selected(board, &link, &selected, action, &images)?;
+        let targets = prepare_selected(board, &link, &engine, &selected, action, &images)?;
         link.restore_ready(false)?;
         (targets, false)
     } else {
@@ -188,10 +188,10 @@ pub fn run(device: &nusb::DeviceInfo, board: &Board, options: Options) -> Result
             thread::sleep(Duration::from_millis(50));
         };
         let selected = select_ports(&options.ports, &status)?;
-        let (targets, failed) = enter_dfu(board, &selected, action)?;
-        (resolve(&link, &targets, &images)?, failed)
+        let (targets, failed) = enter_dfu(board, &link, &engine, &selected, action)?;
+        (resolve(&link, &engine, &targets, &images)?, failed)
     };
-    let running = start(board, &engine, &images, targets, failed, options.button)?;
+    let running = start(&link, &engine, &images, targets, failed, options.button)?;
     monitor(&link, running, &Endings::default())
 }
 
@@ -228,16 +228,16 @@ pub fn listen(
             "board serial changed"
         );
         let targets = if button {
-            prepare_selected(&control, link, &selected, action, images)?
+            prepare_selected(&control, link, engine, &selected, action, images)?
         } else {
-            let (targets, failed) = enter_dfu(&control, &selected, action)?;
+            let (targets, failed) = enter_dfu(&control, link, engine, &selected, action)?;
             ensure!(
                 !failed && targets.len() == selected.len(),
                 "not all selected targets reached verified DFU; no restore started"
             );
-            resolve(link, &targets, images)?
+            resolve(link, engine, &targets, images)?
         };
-        start(&control, engine, images, targets, false, true)
+        start(link, engine, images, targets, false, true)
     })();
     let running = match request {
         Ok(running) => running,
@@ -330,26 +330,42 @@ pub(crate) fn revive(
     Ok(())
 }
 
-/// Choose each target's image by the chip and board in its DFU descriptor.
-/// The store fetches an image it lacks, which the target's port shows.
-fn resolve(link: &Link, targets: &VerifiedTargets, images: &Images) -> Result<ChosenTargets> {
-    let board = link.board();
-    let snapshot = topology::discover(board.topology())?;
-    let mut hardware = Vec::new();
+/// The DFU a verified target is in, when the host restores that mode, and
+/// its model.
+fn in_dfu(
+    board: &Board,
+    engine: &RestoreEngine,
+    target: &TargetTracker,
+    snapshot: &topology::Snapshot,
+) -> Option<(AppleMode, DeviceModel)> {
+    let device = dfu::direct_device(snapshot, target.port)?;
+    match target.observe(board.info().serial, snapshot) {
+        Observation::Present { mode } if engine.restores(mode) => {
+            Some((mode, DeviceModel::read(device)))
+        }
+        _ => None,
+    }
+}
+
+/// Choose each target's image by its model: the chip and board in a DFU
+/// descriptor, or the product type Configurator reads. The store fetches an
+/// image it lacks, which the target's port shows.
+fn resolve(
+    link: &Link,
+    engine: &RestoreEngine,
+    targets: &VerifiedTargets,
+    images: &Images,
+) -> Result<ChosenTargets> {
+    let (_, snapshot) = link.observe()?;
+    let mut models = Vec::new();
     for (target, _) in targets {
-        ensure!(
-            ordinary_dfu(board, target, &snapshot),
-            "port {} lost its DFU identity",
-            target.port.number()
-        );
-        let serial = dfu::direct_device(&snapshot, target.port)
-            .and_then(|device| device.serial_number.as_deref())
-            .context("DFU descriptor has no serial")?;
-        hardware.push(serial.to_owned());
+        let (_, model) = in_dfu(link.board(), engine, target, &snapshot)
+            .with_context(|| format!("port {} lost its DFU identity", target.port.number()))?;
+        models.push(model);
     }
     if let Images::Store(store) = images {
-        for ((target, generation), serial) in targets.iter().zip(&hardware) {
-            let (chip, id) = dfu_hardware(serial)?;
+        for ((target, generation), model) in targets.iter().zip(&models) {
+            let (chip, id) = store.hardware_for(model)?;
             if store.image_for(chip, id).is_none() {
                 link.fetching(target.port, *generation, Some(0));
             }
@@ -357,12 +373,12 @@ fn resolve(link: &Link, targets: &VerifiedTargets, images: &Images) -> Result<Ch
     }
     let chosen = targets
         .iter()
-        .zip(&hardware)
-        .map(|((target, generation), serial)| {
+        .zip(&models)
+        .map(|((target, generation), model)| {
             let image = match images {
-                Images::Given(images) => image_for_dfu(images, serial)?.clone(),
+                Images::Given(images) => image_for_model(images, model)?.clone(),
                 Images::Store(store) => {
-                    let (chip, id) = dfu_hardware(serial)?;
+                    let (chip, id) = store.hardware_for(model)?;
                     let mut announced = false;
                     store.obtain(chip, id, |fetch| {
                         ensure!(link.alive(), link.failure());
@@ -401,7 +417,7 @@ fn resolve(link: &Link, targets: &VerifiedTargets, images: &Images) -> Result<Ch
 }
 
 fn start(
-    board: &Board,
+    link: &Link,
     engine: &RestoreEngine,
     images: &Images,
     mut targets: ChosenTargets,
@@ -410,29 +426,29 @@ fn start(
 ) -> Result<Running> {
     // Waiting for another port may outlive the earlier selection. Revalidate
     // every physical slot immediately before launching destructive workers.
-    let status = board.status()?;
-    let snapshot = topology::discover(board.topology())?;
+    let (status, snapshot) = link.observe()?;
+    let mut modes = Vec::new();
     targets.retain(|(target, generation, image)| {
-        let erases = dfu::direct_device(&snapshot, target.port)
-            .and_then(|device| device.serial_number.as_deref())
-            .and_then(|serial| dfu_hardware(serial).ok())
-            .is_some_and(|(chip, id)| image.erases(chip, id));
-        let valid = erases
-            && status.ports[target.port.index()].generation == *generation
-            && matches!(
-                status.ports[target.port.index()].state,
-                PortState::Ready | PortState::Contract
-            )
-            && (!require_all || status.ready_mask() & (1 << target.port.index()) != 0)
-            && ordinary_dfu(board, target, &snapshot);
-        if !valid {
+        let mode = in_dfu(link.board(), engine, target, &snapshot)
+            .filter(|(_, model)| image.restores(model))
+            .map(|(mode, _)| mode)
+            .filter(|_| {
+                status.ports[target.port.index()].generation == *generation
+                    && matches!(
+                        status.ports[target.port.index()].state,
+                        PortState::Ready | PortState::Contract
+                    )
+                    && (!require_all || status.ready_mask() & (1 << target.port.index()) != 0)
+            });
+        if mode.is_none() {
             eprintln!(
                 "port {}: target changed before restore launch",
                 target.port.number()
             );
             failed = true;
         }
-        valid
+        modes.extend(mode);
+        mode.is_some()
     });
     ensure!(
         !require_all || !failed,
@@ -444,11 +460,15 @@ fn start(
     );
     let inputs: Vec<_> = targets
         .iter()
-        .map(|(target, _, image)| (image, target.ecid))
+        .zip(modes)
+        .map(|((target, _, image), mode)| (image, target.ecid, mode))
         .collect();
     // The store keeps each image for as long as a worker reads it.
     let leases = match images {
-        Images::Store(store) => inputs.iter().map(|(image, _)| store.hold(image)).collect(),
+        Images::Store(store) => inputs
+            .iter()
+            .map(|(image, _, _)| store.hold(image))
+            .collect(),
         Images::Given(_) => Vec::new(),
     };
     let workers = engine.start_selected(&inputs)?;
@@ -628,10 +648,15 @@ fn selection(
                 let selected = Port::ALL
                     .into_iter()
                     .filter(|p| event.ports & (1 << p.index()) != 0)
-                    .map(|port| Target {
-                        port,
-                        generation: event.generations[port.index()],
-                        ecid: None,
+                    .map(|port| {
+                        let generation = event.generations[port.index()];
+                        let held = &status.ports[port.index()];
+                        Target {
+                            port,
+                            generation,
+                            // The device the board holds on that attachment.
+                            ecid: held.ecid.filter(|_| held.generation == generation),
+                        }
                     })
                     .collect();
                 return Ok((selected, true));
@@ -645,6 +670,7 @@ fn selection(
 fn prepare_selected(
     board: &Board,
     link: &Link,
+    engine: &RestoreEngine,
     selected: &[Target],
     action: PortAction,
     images: &Images,
@@ -668,13 +694,17 @@ fn prepare_selected(
         draft.matches_targets(&status),
         "selected targets changed, are busy or are unavailable"
     );
-    let (targets, failed) = enter_dfu(board, selected, action)?;
+    let (targets, failed) = enter_dfu(board, link, engine, selected, action)?;
     ensure!(
         !failed && targets.len() == selected.len(),
         "not all selected targets reached verified DFU; no erase armed"
     );
     // Fetching an image can take long enough for a target to leave.
-    let targets = resolve(link, &targets, images)?;
+    let targets = resolve(link, engine, &targets, images)?;
+    // The arm names each attachment as it is now, in DFU.
+    for (target, generation, _) in &targets {
+        draft.generations[target.port.index()] = *generation;
+    }
     let status = board.status()?;
     ensure!(
         draft.matches_targets(&status),
@@ -711,14 +741,6 @@ fn prepare_selected(
     Ok(targets)
 }
 
-fn ordinary_dfu(board: &Board, target: &TargetTracker, snapshot: &topology::Snapshot) -> bool {
-    dfu::direct_device(snapshot, target.port).is_some()
-        && target.observe(board.info().serial, snapshot)
-            == (Observation::Present {
-                mode: AppleMode::Dfu,
-            })
-}
-
 fn confirmed(arm: RestoreArm, status: &Status) -> Result<bool> {
     ensure!(status.uptime_ms < arm.expires, "erase arm expired");
     ensure!(
@@ -732,8 +754,29 @@ fn confirmed(arm: RestoreArm, status: &Status) -> Result<bool> {
     }
 }
 
+/// Why the host's engine cannot take a target in DFU.
+fn unsupported(engine: &RestoreEngine, assessment: &dfu::Assessment) -> String {
+    let debug = matches!(
+        assessment.usb_mode,
+        Some(AppleMode::Kis | AppleMode::KisDfu)
+    );
+    if debug && !engine.restores(AppleMode::KisDfu) {
+        format!(
+            "{} Its DFU is on Apple Debug USB, which {} cannot restore. Install Apple Configurator.",
+            assessment.describe(),
+            engine.name()
+        )
+    } else {
+        assessment.describe()
+    }
+}
+
+/// Bring each selected target to a DFU the host's engine restores, with its
+/// ECID verified there.
 fn enter_dfu(
     board: &Board,
+    link: &Link,
+    engine: &RestoreEngine,
     selected: &[Target],
     action: PortAction,
 ) -> Result<(VerifiedTargets, bool)> {
@@ -746,11 +789,10 @@ fn enter_dfu(
         ecid,
     } in selected
     {
-        let mut snapshot = topology::discover(board.topology())?;
-        if board.status()?.ready_mask() & (1 << port.index()) != 0 {
+        let (status, mut snapshot) = link.observe()?;
+        if status.ready_mask() & (1 << port.index()) != 0 {
             snapshot.query_port_identity(port);
         }
-        let status = board.status()?;
         let assessment = dfu::assess(board.info().serial, port, &status, &snapshot, action, None);
         if generation != assessment.generation || status.ready_mask() & (1 << port.index()) == 0 {
             eprintln!(
@@ -768,7 +810,7 @@ fn enter_dfu(
             port.number()
         );
         match (assessment.signal, assessment.usb_mode) {
-            (Signal::AlreadyDfu, Some(AppleMode::Dfu)) => {
+            (Signal::AlreadyDfu, Some(mode)) if engine.restores(mode) => {
                 match TargetTracker::pin(board.info().serial, &snapshot, port) {
                     Ok(target) if ecid.is_some_and(|id| id != target.ecid) => {
                         eprintln!("port {}: another device is in DFU", port.number());
@@ -787,11 +829,15 @@ fn enter_dfu(
                 continue;
             }
             (Signal::Available, _) => {}
+            // The restore service with no job on the board is what a run
+            // that ended left behind. A confirmed erase takes it from there.
+            (Signal::Restoring, Some(AppleMode::Restored))
+                if !dfu::job_in_progress(&status.ports[port.index()]) => {}
             _ => {
                 eprintln!(
-                    "port {}: {} Restore requires an ordinary DFU identity.",
+                    "port {}: {}",
                     port.number(),
-                    assessment.describe()
+                    unsupported(engine, &assessment)
                 );
                 failed = true;
                 continue;
@@ -820,10 +866,17 @@ fn enter_dfu(
     }
     let deadline = Instant::now() + Duration::from_secs(30);
     while !pending.is_empty() && Instant::now() < deadline {
-        let status = board.status()?;
-        let snapshot = topology::discover(board.topology())?;
+        let (status, snapshot) = link.observe()?;
         pending.retain(|(port, generation, previous)| {
-            if status.ports[port.index()].generation != *generation {
+            // A target can re-attach as it enters DFU. Its ECID, read again
+            // in DFU, is what ties it to the selection; one selected by its
+            // attachment alone has nothing else to be known by.
+            let pinned = selected
+                .iter()
+                .find(|chosen| chosen.port == *port)
+                .and_then(|chosen| chosen.ecid);
+            let current = status.ports[port.index()].generation;
+            if current != *generation && pinned.is_none() {
                 eprintln!(
                     "port {}: attachment changed during DFU entry",
                     port.number()
@@ -839,45 +892,47 @@ fn enter_dfu(
                 action,
                 previous.as_ref(),
             );
-            if matches!(
-                assessment.signal,
-                Signal::MultipleTransports
-                    | Signal::Ambiguous
-                    | Signal::DifferentDevice
-                    | Signal::Fault
-                    | Signal::Restoring
-            ) || matches!(assessment.usb_mode, Some(AppleMode::KisDfu))
+            // Apple Debug USB reaches DFU only through an engine that reads it.
+            let debug = matches!(
+                assessment.usb_mode,
+                Some(AppleMode::Kis | AppleMode::KisDfu)
+            ) && !engine.restores(AppleMode::KisDfu);
+            if debug
+                || matches!(
+                    assessment.signal,
+                    Signal::MultipleTransports
+                        | Signal::Ambiguous
+                        | Signal::DifferentDevice
+                        | Signal::Fault
+                )
+                || (assessment.signal == Signal::Restoring
+                    && dfu::job_in_progress(&status.ports[port.index()]))
                 || matches!(
                     assessment.outcome,
                     Some(
-                        Outcome::IdentityChanged
-                            | Outcome::AttachmentChanged
-                            | Outcome::BoardRestarted
-                            | Outcome::TargetUnclear
+                        Outcome::IdentityChanged | Outcome::BoardRestarted | Outcome::TargetUnclear
                     )
                 )
             {
                 eprintln!(
-                    "port {}: {} Restore requires an ordinary DFU identity.",
+                    "port {}: {}",
                     port.number(),
-                    assessment.describe()
+                    unsupported(engine, &assessment)
                 );
                 failed = true;
                 return false;
             }
-            if assessment.usb_mode == Some(AppleMode::Dfu)
+            if assessment
+                .usb_mode
+                .is_some_and(|mode| engine.restores(mode))
                 && assessment.outcome != Some(Outcome::IdentityUnverified)
                 && let Ok(target) = TargetTracker::pin(board.info().serial, &snapshot, *port)
             {
-                let chosen = selected.iter().find(|chosen| chosen.port == *port);
-                if chosen
-                    .and_then(|chosen| chosen.ecid)
-                    .is_some_and(|id| id != target.ecid)
-                {
+                if pinned.is_some_and(|id| id != target.ecid) {
                     eprintln!("port {}: another device entered DFU", port.number());
                     failed = true;
                 } else {
-                    targets.push((target, *generation));
+                    targets.push((target, current));
                 }
                 return false;
             }
@@ -899,9 +954,7 @@ fn enter_dfu(
             ensure!(
                 targets
                     .iter()
-                    .any(|(target, generation)| target.port == selected.port
-                        && target.ecid == expected
-                        && *generation == selected.generation),
+                    .any(|(target, _)| target.port == selected.port && target.ecid == expected),
                 "port {} did not reach DFU with the selected ECID; no restore started",
                 selected.port.number()
             );

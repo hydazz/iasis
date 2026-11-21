@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{images::Store, restore::dfu_hardware, topology::UsbDevice};
 
-#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct DeviceModel {
     identifier: Option<String>,
     hardware: Option<(u32, u32)>,
@@ -29,6 +29,24 @@ impl DeviceModel {
                 .as_deref()
                 .and_then(|s| dfu_hardware(s).ok()),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn of(identifier: Option<&str>, hardware: Option<(u32, u32)>) -> Self {
+        Self {
+            identifier: identifier.map(str::to_owned),
+            hardware,
+        }
+    }
+
+    /// The product type, such as `Mac17,3`, where the target's mode gives it.
+    pub(crate) fn identifier(&self) -> Option<&str> {
+        self.identifier.as_deref()
+    }
+
+    /// The chip and board IDs, where the target's mode gives them.
+    pub(crate) fn hardware(&self) -> Option<(u32, u32)> {
+        self.hardware
     }
 
     pub(crate) fn name(&self, store: &Store) -> Option<String> {
@@ -52,6 +70,16 @@ impl DeviceModel {
             self.hardware = self.hardware.or(known.hardware);
         }
         self
+    }
+}
+
+impl std::fmt::Display for DeviceModel {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (&self.identifier, self.hardware) {
+            (Some(identifier), _) => formatter.write_str(identifier),
+            (None, Some((chip, board))) => write!(formatter, "CPID:{chip:04X} BDID:{board:02X}"),
+            (None, None) => formatter.write_str("an unidentified model"),
+        }
     }
 }
 
