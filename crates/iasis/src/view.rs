@@ -201,9 +201,10 @@ impl BoardView {
                 .and_then(|ecid| models.name(ecid, store))
                 .or_else(|| {
                     let device = live?;
+                    // An Apple target's product string names its mode.
                     DeviceModel::read(device)
                         .name(store)
-                        .or_else(|| device.product.clone())
+                        .or_else(|| device.product.clone().filter(|_| device.apple.is_none()))
                 });
         }
     }

@@ -687,6 +687,15 @@ mod tests {
         let unknown = sample(&mut status, &usb, &models);
         assert!(unknown.device.is_none() && unknown.ecid.is_none());
 
+        // An Apple target's product string names its mode, not the device.
+        for (vendor, name) in [(0x05ac, None), (0x045e, Some("Controller"))] {
+            let mut other = device(one, vendor, 0x12ab, None);
+            other.product = Some("Controller".into());
+            usb.ports[0].devices = vec![other];
+            assert_eq!(sample(&mut status, &usb, &models).device.as_deref(), name);
+        }
+        usb.ports[0].devices.clear();
+
         usb.ports[0].devices.push(apple(42, "iPad13,18"));
         let row = sample(&mut status, &usb, &models);
         assert_eq!(row.device.as_deref(), Some("iPad (10th generation)"));
