@@ -36,8 +36,8 @@ use crate::{
 pub struct Options {
     /// Attend one board instead of every board.
     pub serial: Option<u64>,
-    /// The idevicerestore executable.
-    pub program: PathBuf,
+    /// Restore with this idevicerestore instead of the host's engine.
+    pub idevicerestore: Option<PathBuf>,
     /// Worker logs and scratch directories; the cache directory by default.
     pub logs: Option<PathBuf>,
     pub family: batch::Device,
@@ -268,7 +268,7 @@ impl Agent {
         Ok(Arc::new(Self {
             store: Store::open(home.cache.join("images"), Network::default())?,
             models: Arc::new(Models::open(home.cache.join("device-models.json"))),
-            engine: RestoreEngine::new(&options.program, logs),
+            engine: RestoreEngine::for_host(options.idevicerestore.clone(), logs),
             family: options.family,
             restore_problem: Mutex::new(None),
             boards: Mutex::default(),
@@ -287,7 +287,7 @@ impl Agent {
                     let notice = board.notice.lock().unwrap().clone();
                     match link
                         .as_ref()
-                        .and_then(|link| link.board_view(&self.store, self.family))
+                        .and_then(|link| link.board_view(&self.store, &self.engine, self.family))
                     {
                         Some(mut view) => {
                             let endings = board.endings.lock().unwrap();
@@ -447,8 +447,8 @@ impl Agent {
         *board.notice.lock().unwrap() = None;
         let result = (|| -> Result<()> {
             loop {
-                // Showing the targets' modes needs nothing; restores need a
-                // worker and usbmuxd.
+                // Showing the targets' modes needs nothing; restores need
+                // the host's engine.
                 let problem = self.restore_problem.lock().unwrap().clone();
                 if let Some(problem) = problem {
                     ensure!(link.alive(), link.failure());
@@ -492,19 +492,12 @@ impl Agent {
             };
             if checked.is_none_or(|at| at.elapsed() >= interval) {
                 checked = Some(Instant::now());
-                let problem = self
-                    .engine
-                    .check_program()
-                    .and_then(|()| {
-                        crate::identity::check_usbmuxd().context("usbmuxd is unavailable")
-                    })
-                    .err()
-                    .map(|error| format!("{error:#}"));
+                let problem = self.engine.check().err().map(|error| format!("{error:#}"));
                 let mut current = self.restore_problem.lock().unwrap();
                 if *current != problem {
                     match &problem {
                         Some(problem) => eprintln!("Restores unavailable: {problem}"),
-                        None => println!("Restores available"),
+                        None => println!("Restores available through {}", self.engine.name()),
                     }
                     *current = problem;
                 }

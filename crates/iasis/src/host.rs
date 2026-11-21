@@ -239,23 +239,29 @@ struct Shared {
 }
 
 impl Shared {
-    /// Read the board and the USB tree into the view the next report carries.
-    fn sample(&self) -> Result<()> {
+    /// Read the board and the USB tree, with what Configurator has said of
+    /// each enumeration still on its connector.
+    fn observe(&self) -> Result<(Status, Snapshot)> {
         let status = self.board.status()?;
         let mut snapshot = topology::discover(self.board.topology())?;
-        {
-            let identified = self.identified.lock().unwrap();
-            for port in Port::ALL {
-                let Some((enumeration, apple)) = &identified[port.index()] else {
-                    continue;
-                };
-                if let [device] = snapshot.ports[port.index()].devices.as_mut_slice()
-                    && Enumeration::from(&*device) == *enumeration
-                {
-                    device.apple = Some(apple.clone());
-                }
+        let identified = self.identified.lock().unwrap();
+        for port in Port::ALL {
+            let Some((enumeration, apple)) = &identified[port.index()] else {
+                continue;
+            };
+            if let [device] = snapshot.ports[port.index()].devices.as_mut_slice()
+                && Enumeration::from(&*device) == *enumeration
+            {
+                device.apple = Some(apple.clone());
             }
         }
+        drop(identified);
+        Ok((status, snapshot))
+    }
+
+    /// Read the board and the USB tree into the view the next report carries.
+    fn sample(&self) -> Result<()> {
+        let (status, snapshot) = self.observe()?;
         let mut view = self.view.lock().unwrap();
         let restarted = status.uptime_ms < view.uptime_ms;
         settle(&mut self.jobs.lock().unwrap(), &status, restarted);
@@ -506,6 +512,7 @@ impl Link {
     pub(crate) fn board_view(
         &self,
         store: &crate::images::Store,
+        engine: &crate::restore::RestoreEngine,
         family: crate::batch::Device,
     ) -> Option<crate::view::BoardView> {
         let view = self.shared.view.lock().unwrap();
@@ -515,9 +522,12 @@ impl Link {
             self.board().info().serial,
             status,
             snapshot,
-            store,
-            &self.shared.models,
-            family,
+            &crate::view::Host {
+                store,
+                models: &self.shared.models,
+                engine,
+                family,
+            },
         );
         for (port, job) in board
             .ports
@@ -529,6 +539,12 @@ impl Link {
             }
         }
         Some(board)
+    }
+
+    /// The board and its targets, read now. A target on Apple Debug USB has
+    /// the mode and identity Configurator gave for its enumeration.
+    pub(crate) fn observe(&self) -> Result<(Status, Snapshot)> {
+        self.shared.observe()
     }
 
     /// The board's status at the last sample.
@@ -654,6 +670,7 @@ mod tests {
         };
         let path = dir.path().join("device-models.json");
         let models = Models::open(path.clone());
+        let engine = crate::restore::RestoreEngine::for_host(Some("unused".into()), dir.path());
         let one = Port::ALL[0];
         // The board echoes each report and keeps the ECID it carried.
         let sample = |status: &mut Status, usb: &Snapshot, models: &Models| -> PortView {
@@ -666,9 +683,12 @@ mod tests {
                 info.serial,
                 status,
                 usb,
-                &store,
-                models,
-                Device::AppleSilicon,
+                &crate::view::Host {
+                    store: &store,
+                    models,
+                    engine: &engine,
+                    family: Device::AppleSilicon,
+                },
             );
             board.ports.remove(0)
         };
