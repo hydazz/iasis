@@ -118,7 +118,14 @@ With Apple Configurator installed on macOS and the agent running, use `iasis --b
 
 ### Restore
 
-Install [idevicerestore](https://github.com/libimobiledevice/idevicerestore) and its dependencies. For source builds, configure with `--without-limera1n`. Use the system `usbmuxd` service. macOS includes it, and Linux needs it installed and running. Pass `iasisd --program /path/to/idevicerestore` if it is not on the `PATH`.
+The host restores each target with the first of its restore programs that takes the target's DFU:
+
+| Program            | Hosts                                       | Restores                                                                                 |
+| ------------------ | ------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| idevicerestore     | macOS and Linux                             | Targets in ordinary DFU (`05ac:1227`)                                                    |
+| Apple Configurator | macOS, with Configurator in `/Applications` | Targets in DFU over ordinary USB or Apple Debug USB (`05ac:1881`), as M4 and M5 Macs use |
+
+A host with one of them restores what that one takes. Install [idevicerestore](https://github.com/libimobiledevice/idevicerestore) and its dependencies; for source builds, configure with `--without-limera1n`. It uses the system `usbmuxd` service, which macOS includes and Linux needs installed and running. Pass `--idevicerestore /path/to/idevicerestore` to `iasisd` or `iasis restore` if it is not on the `PATH`.
 
 ```sh
 target/release/iasis --serial 0123456789abcdef restore --ports 1,2,3,4,5 --erase
@@ -126,9 +133,9 @@ target/release/iasis --serial 0123456789abcdef restore --ports 1,2,3,4,5 --erase
 
 **`--erase` erases the selected targets.** With the agent running, the request goes to it and the command follows the restore to its end. Without the agent, the command hosts the board for its own run; there, `--button` confirms the erase on the board, and `--button` without `--ports` chooses the targets there too. Name an IPSW before the options to restore from that file instead of the newest release. Use `--host-ma 1200` to set a legacy host allowance for a run without the agent.
 
-Iasis runs one idevicerestore process per ordinary DFU target (`05ac:1227`) on macOS and Linux, selected by its unique ECID. For Apple Debug USB DFU (`05ac:1881`), use Iasis to put the Mac in DFU and Apple Configurator on the host Mac to restore it.
+Iasis runs one process per target, selected by its unique ECID, and a batch can mix both programs. Without Apple Configurator, use Iasis to put a Mac with Apple Debug USB DFU into DFU and restore it from a Mac that has Configurator.
 
-Percentages apply to the current restore stage. Logs and working files go under `restores/` in the cache directory, or the directory passed to `--logs`. Allow space for an extracted OS image per worker. Iasis matches each image to the target's chip and board IDs. idevicerestore checks Apple signing.
+Percentages apply to the current restore stage. Logs and working files go under `restores/` in the cache directory, or the directory passed to `--logs`. Allow space for an extracted OS image per worker. Iasis matches each image to the target's chip and board IDs, or to its product type where Apple Debug USB gives no IDs. The restore program checks Apple signing.
 
 When restoring new Macs with Configurator, keep the host session unlocked until Configurator confirms completion. A locked host can defer the target’s USB network interface and time out waiting for it to boot. Allow disk space for one expanded IPSW per target, even when one Configurator command restores the whole batch.
 
@@ -142,7 +149,7 @@ To restore the default behaviour, run `defaults delete com.apple.AMPDeviceDiscov
 
 #### Button restores
 
-With the agent running and idevicerestore installed, the board's Restore hold needs nothing else. Tap to select targets, then hold until the status light turns purple and release. Preparation puts the targets into DFU and fetches any image the agent lacks. Once the erase is ready, the status light blinks purple: hold for three seconds to confirm, or tap to cancel. The agent keeps listening after cancellation and while workers run.
+With the agent running and a restore program installed, the board's Restore hold needs nothing else. Tap to select targets, then hold until the status light turns purple and release. Preparation puts the targets into DFU and fetches any image the agent lacks. Once the erase is ready, the status light blinks purple: hold for three seconds to confirm, or tap to cancel. The agent keeps listening after cancellation and while workers run.
 
 An erase stays ready for 20 seconds. If a long download outlasts your wait, make the Restore hold again once the port is steady blue: the image is in the store by then.
 
