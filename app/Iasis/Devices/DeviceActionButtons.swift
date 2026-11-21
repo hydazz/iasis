@@ -31,12 +31,15 @@ struct DeviceActionButtons: View {
         .keyboardShortcut(shortcuts ? KeyboardShortcut("r") : nil)
         .disabled(actions.restore == nil)
         if actions.needsConfigurator {
-            Text("Apple Configurator restores this Mac")
+            Text("Restoring This Mac Needs Apple Configurator")
         }
         Divider()
-        Button(actions.powered ? "Turn Port Off" : "Turn Port On", systemImage: DeviceSymbol.power) {
+        // A title that stays put lets an open menu keep its item.
+        Toggle("Port Power", systemImage: DeviceSymbol.power, isOn: Binding {
+            actions.powered
+        } set: { _ in
             perform(actions.power)
-        }
+        })
         .disabled(actions.power.isEmpty)
     }
 }
