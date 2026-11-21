@@ -166,11 +166,62 @@ pub fn fixed_contract(objects: &[u32; 4], rdo: u32) -> Result<Contract, RequestE
     })
 }
 
+/// Whether a fixed request takes all its offer gives or says the sink needs
+/// more. A request limited by the offer cannot show how little would do.
+pub fn wants_more(pdo: u32, rdo: u32) -> bool {
+    let request = FixedVariableSupply(rdo);
+    request.capability_mismatch()
+        || request.raw_max_operating_current() >= FixedSupply(pdo).raw_max_current()
+}
+
+/// Whether the offers, and not the sink, set a contract's power: the sink
+/// wants more and chose the largest offer there was. A sink that passes over
+/// a larger offer has made its own choice.
+pub fn limited_by_offers(objects: &[u32; 4], rdo: u32) -> bool {
+    let power = |raw: u32| {
+        let offer = FixedSupply(raw);
+        u32::from(offer.raw_voltage()) * u32::from(offer.raw_max_current())
+    };
+    let chosen = usize::from(FixedVariableSupply(rdo).object_position())
+        .checked_sub(1)
+        .and_then(|i| objects.get(i))
+        .copied()
+        .filter(|&raw| raw != 0);
+    chosen.is_some_and(|chosen| {
+        wants_more(chosen, rdo) && objects.iter().all(|&raw| power(raw) <= power(chosen))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const MISMATCH: u32 = 1 << 26;
+
+    #[test]
+    fn the_offers_limit_a_sink_that_takes_the_largest_and_wants_more() {
+        let shared = fixed_offers(13_588, 20_000, None);
+        let alone = fixed_offers(67_940, 20_000, None);
+        let top = |offers: &[u32; 4]| offers.iter().rposition(|&raw| raw != 0).unwrap() as u32 + 1;
+        let full = |offers: &[u32; 4], position: u32| {
+            let amps = FixedSupply(offers[position as usize - 1]).raw_max_current() as u32 * 10;
+            request(position, amps, amps)
+        };
+        // Five targets share the pool: each takes all of a small offer.
+        assert!(limited_by_offers(&shared, full(&shared, top(&shared))));
+        // A sink content with part of its offer is not limited.
+        assert!(!limited_by_offers(&alone, request(top(&alone), 1000, 1500)));
+        // Nor is one that takes 5 V and passes over the larger rails, even
+        // when it says it needs more.
+        assert!(!limited_by_offers(
+            &alone,
+            request(1, 3000, 3000) | MISMATCH
+        ));
+        // One that takes all the largest offer gives would use more.
+        assert!(limited_by_offers(&alone, full(&alone, top(&alone))));
+        assert!(!limited_by_offers(&alone, request(7, 1000, 1000)));
+        assert!(!limited_by_offers(&[0; 4], request(1, 0, 0)));
+    }
 
     fn request(position: u32, operating_ma: u32, maximum_ma: u32) -> u32 {
         (position << 28) | ((operating_ma / 10) << 10) | (maximum_ma / 10)

@@ -170,12 +170,11 @@ pub struct SinkDemand {
 
 impl SinkDemand {
     pub fn accept(&mut self, pdo: u32, rdo: u32) {
-        let maximum_ma = (rdo & 0x3ff) * 10;
-        let offered_ma = (pdo & 0x3ff) * 10;
-        if rdo & (1 << 26) != 0 || maximum_ma >= offered_ma {
+        if crate::wants_more(pdo, rdo) {
             self.wants_more = true;
             return;
         }
+        let maximum_ma = (rdo & 0x3ff) * 10;
         let millivolts = ((pdo >> 10) & 0x3ff) * 50;
         let requested_mw = millivolts * maximum_ma / 1000;
         if self

@@ -13,5 +13,5 @@ mod source;
 
 pub use source::{
     Contract, RequestError, capabilities, fixed_contract, fixed_offers, host_offers,
-    nominal_limit_ma, voltage_window,
+    limited_by_offers, nominal_limit_ma, voltage_window, wants_more,
 };
