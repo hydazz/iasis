@@ -1,14 +1,34 @@
 # Iasis for macOS
 
-The menu bar cable dims when disconnected. A ring over its tail shows activity, and a red exclamation mark means a board or port needs attention.
+Iasis lives in the menu bar and shows what is on every port of every connected board. Opening its window puts it in the Dock with menus of its own; closing the window returns it to the menu bar.
 
-The Iasis menu shows connected devices under their board names. Open a device’s submenu for DFU, restart, recovery actions and port power. A disabled port stays in the menu so you can turn it back on. Restore asks for confirmation before sending the request to the agent.
+## Menu bar
 
-Open Devices to follow an operation’s current stage or select several devices on the same board to restore together. Double-click a row for the device’s identity, connection details and the last operation’s log. If USB disappears while a port stays electrically attached, Get Info can show the last device seen there.
+The cable dims when no board is connected. A ring over its tail shows work under way, and a red mark means a board or port needs attention.
 
-Revive uses Apple Configurator to repair one identified device in DFU or Recovery and attempts to preserve its data. Restore erases the selected devices. About Iasis explains the port and status lights.
+The menu lists each board's devices by port number, with what each is doing. A device's submenu has Enter DFU, Restart, Revive, Restore and the port's power. The menu shows the state it opened with; open it again for the latest. Open Iasis shows the window.
 
-In Settings, select a board to rename it or adjust its lights. The board keeps both settings when moved to another Mac. The Images tab manages restore images. The Finder preference applies to all connected Apple devices.
+## Window
+
+Each port is one row: its number in the colour of its light on the board, pulsing while the light pulses, then the device and what the port is doing. A finished restore or revive stays on the row until the device leaves. A device keeps its name for as long as it stays plugged in, including a Mac that has started up and left USB.
+
+Select rows and use the toolbar, the Device menu or a row's context menu:
+
+| Action     | Applies to                                                                                 |
+| ---------- | ------------------------------------------------------------------------------------------ |
+| Enter DFU  | Each selected device that can be signalled                                                 |
+| Restart    | Each selected device that can be signalled                                                 |
+| Revive     | One device in DFU or Recovery. Apple Configurator reinstalls the system and keeps the data |
+| Restore    | Every selected device, on any number of boards. Asks first, then erases them               |
+| Port power | The selected ports, including a port that is off                                           |
+
+Restore is unavailable while any selected device cannot be restored. A Mac in DFU over Apple Debug USB is restored with Apple Configurator.
+
+Double-click a row, or show the inspector, for the device's model and ECID, its USB mode, link and power contract, and the last operation with its log folder. The bar under the list reports an image download, or why restores are unavailable.
+
+## Settings and Help
+
+In Settings, select a board to rename it or adjust its lights; the board keeps both when moved to another Mac. The Images tab manages restore images, and File ▸ Add Restore Image adds one from an IPSW. The Finder preference applies to all connected Apple devices. Help ▸ Indicator Lights explains the port and status lights.
 
 The app includes `iasisd` and `iasis` and communicates over the [agent socket](../crates/iasis/README.md).
 
@@ -35,7 +55,7 @@ Set `TEST_RUNNER_IASIS_LIVE_AGENT=1` when running the tests to check the connect
 | --------------------------------------------------- | ----------------------------------------------- |
 | `/Applications/Iasis.app`                           | The app, with `iasisd` and `iasis` in `Helpers` |
 | `/Library/LaunchAgents/com.hydaz.Iasis.agent.plist` | Starts `iasisd` at login and keeps it running   |
-| `/Library/LaunchAgents/com.hydaz.Iasis.plist`       | Starts the menu bar app at login                |
+| `/Library/LaunchAgents/com.hydaz.Iasis.plist`       | Starts the app in the menu bar at login         |
 | `/usr/local/bin/iasis`                              | A link to the `iasis` command inside the app    |
 
 The installer starts both for the user at the console; other users get them at their next login. Restores need [idevicerestore](../README.md#restore), which the agent looks for in Homebrew's and the system's directories.

@@ -1,53 +1,53 @@
 import Foundation
 
-/// Only information presented in the menu participates in menu tracking.
-struct DeviceMenuState: Equatable {
+/// The menu bar item's icon and menu content.
+struct StatusMenuState: Equatable {
     struct Board: Equatable, Identifiable {
         let id: String
         let title: String
         let notice: String?
-        let ports: [Port]
+        let devices: [Entry]
     }
 
-    struct Port: Equatable, Identifiable {
-        let id: Int
-        let title: String
-        let symbol: String
-        let detail: String?
-        let configuratorRestore: Bool
-        let dfu: AgentRequest?
-        let restart: AgentRequest?
-        let revive: AgentRequest?
-        let restore: RestoreConfirmation?
-        let powerOn: Bool
-        let power: AgentRequest
+    /// A device and what its submenu offers.
+    struct Entry: Equatable, Identifiable {
+        let device: Device
+        let actions: DeviceActions
+
+        var id: Device.ID {
+            device.id
+        }
     }
 
-    let boards: [Board]
+    /// Nil while no agent answers.
+    let boards: [Board]?
     let restoreProblem: String?
-    let backgroundDownload: String?
+    /// An image download that no port is waiting for.
+    let download: String?
+    let status: MenuBarStatus
 
-    init(_ state: AgentState) {
-        boards = state.boards.map { board in
-            let title = state.title(for: board)
-            return Board(id: board.serial, title: title, notice: board.notice, ports: board.visiblePorts.map { port in
-                Port(
-                    id: port.number,
-                    title: port.menuTitle,
-                    symbol: port.symbol,
-                    detail: port.device != port.shortName ? port.device : nil,
-                    configuratorRestore: port.mode == "kis_dfu" && !port.restore,
-                    dfu: port.dfu ? .dfu(board: board.serial, port: port.number) : nil,
-                    restart: port.reboot ? .reboot(board: board.serial, port: port.number) : nil,
-                    revive: port.reviveRequest(on: board),
-                    restore: state.restoreProblem == nil ? RestoreConfirmation(board: board, title: title, ports: [port]) : nil,
-                    powerOn: port.enabled,
-                    power: .power(board: board.serial, port: port.number, on: !port.enabled)
-                )
-            })
+    init(_ state: AgentState?) {
+        status = MenuBarStatus(state)
+        guard let state else {
+            boards = nil
+            restoreProblem = nil
+            download = nil
+            return
+        }
+        boards = state.boardDevices.map { group in
+            Board(
+                id: group.id,
+                title: group.title,
+                notice: group.board.notice,
+                devices: group.devices.filter(\.isSelectable).map {
+                    Entry(device: $0, actions: DeviceActions([$0], restoreProblem: state.restoreProblem))
+                }
+            )
         }
         restoreProblem = state.restoreProblem
-        let fetchingForPort = state.boards.contains { $0.ports.contains { $0.state == "downloading image" } }
-        backgroundDownload = fetchingForPort ? nil : state.images.fetch?.version
+        let waitedFor = state.devices.contains { $0.port.state == "downloading image" }
+        download = waitedFor ? nil : state.images.fetch.map {
+            "Downloading \($0.version) (\($0.fraction.formatted(.percent.precision(.fractionLength(0)))))"
+        }
     }
 }

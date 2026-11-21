@@ -9,10 +9,10 @@ struct AgentMessagesTests {
         #expect(board.serial == "a0e012192cdfdb67")
         #expect(board.ports.map(\.number) == [1, 2, 3, 4, 5])
         #expect(board.name == "Repair Bench")
-        #expect(board.visiblePorts.map(\.number) == [2, 3, 4, 5])
-        #expect(board.ports[1].menuTitle == "Port 2 · MacBook Air · DFU")
-        #expect(board.ports[1].symbol == "laptopcomputer")
-        #expect(board.ports[2].menuTitle == "Port 3 · iPad · Restoring")
+        #expect(board.firmware == "0.1.0")
+        #expect(board.supply == "power supply 20 V, 67 W for targets")
+        #expect(board.ports[1].ecid == "001a79d10e6bc01c")
+        #expect(board.ports[2].stage == .init(name: "Sending filesystem", percent: 43))
         #expect(board.ports[3].result?.phase == .reported)
         #expect(state.images.images.first?.buildVersion == "26B131")
         #expect(state.images.models.first?.latest?.build == "24B156")
@@ -40,7 +40,10 @@ struct AgentMessagesTests {
 
     @Test(arguments: [
         (AgentRequest.watch, #"{"op":"watch"}"#),
-        (.restore(board: "a0e0", session: 77, targets: [.init(port: 2, generation: 4)]), #"{"board":"a0e0","op":"restore","session":77,"targets":[{"generation":4,"port":2}]}"#),
+        (
+            .restore(boards: [.init(board: "a0e0", session: 77, targets: [.init(port: 2, generation: 4), .init(port: 3, generation: 1, ecid: "0014692221e0801e")])]),
+            #"{"boards":[{"board":"a0e0","session":77,"targets":[{"generation":4,"port":2},{"ecid":"0014692221e0801e","generation":1,"port":3}]}],"op":"restore"}"#
+        ),
         (.revive(board: "a0e0", session: 77, port: 2, generation: 4, ecid: "0014692221e0801e"), #"{"board":"a0e0","ecid":"0014692221e0801e","generation":4,"op":"revive","port":2,"session":77}"#),
         (.dfu(board: "a0e0", port: 2), #"{"board":"a0e0","op":"dfu","port":2}"#),
         (.power(board: "a0e0", port: 1, on: false), #"{"board":"a0e0","on":false,"op":"power","port":1}"#),

@@ -1,120 +1,192 @@
 import SwiftUI
 
+/// The main window: every port of every board, in a list.
 struct DevicesView: View {
     static let windowID = "devices"
 
     let model: AgentModel
-    @State private var selection = Set<DeviceRow.ID>()
-    @State private var showsInspector = false
-    @State private var pendingRestore: RestoreConfirmation?
+    @State private var browser: DeviceBrowser
+
+    init(model: AgentModel) {
+        self.model = model
+        _browser = State(initialValue: DeviceBrowser(model: model))
+    }
 
     var body: some View {
+        @Bindable var browser = browser
         let state = model.state
-        let boards = state?.boards ?? []
-        let selected = DeviceSelection(selection, state: state)
+        let boards = state?.boardDevices ?? []
 
-        Table(of: DeviceRow.self, selection: $selection) {
-            TableColumn("Device") { row in
-                Label(row.port.shortName ?? row.name, systemImage: row.port.symbol)
-            }
-            TableColumn("Port") { row in Text(row.port.number.formatted()) }
-                .width(min: 36, ideal: 50, max: 75)
-            TableColumn("Status") { row in
-                Text(row.status).monospacedDigit()
-            }
-        } rows: {
-            ForEach(boards) { board in
-                Section(state?.title(for: board) ?? board.displayName) {
-                    ForEach(board.devices) { row in TableRow(row) }
+        List(selection: $browser.selection) {
+            ForEach(boards) { group in
+                Section {
+                    if let notice = group.board.notice {
+                        Label(notice, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.secondary)
+                            .selectionDisabled()
+                    }
+                    ForEach(group.devices) { device in
+                        DeviceRowView(device: device)
+                            .selectionDisabled(!device.isSelectable)
+                    }
+                } header: {
+                    BoardHeader(group: group)
                 }
             }
         }
+        .contextMenu(forSelectionType: Device.ID.self) { ids in
+            if !browser.devices(in: ids).isEmpty {
+                DeviceActionButtons(actions: browser.actions(for: ids)) { requests in
+                    model.perform(requests)
+                } restore: { confirmation in
+                    browser.confirming = confirmation
+                }
+                Divider()
+                Button("Get Info", systemImage: "info.circle") {
+                    browser.selection = ids
+                    browser.showsInspector = true
+                }
+            }
+        } primaryAction: { ids in
+            browser.selection = ids
+            browser.showsInspector = true
+        }
         .overlay {
-            if boards.allSatisfy(\.devices.isEmpty) {
-                ContentUnavailableView(state == nil ? "Agent Not Running" : "No Devices Connected", systemImage: "cable.connector")
+            if state == nil {
+                ContentUnavailableView(
+                    "Agent Not Running",
+                    systemImage: "bolt.slash",
+                    description: Text("Iasis starts its agent at login.")
+                )
+            } else if boards.isEmpty {
+                ContentUnavailableView(
+                    "No Boards Connected",
+                    systemImage: "cable.connector.slash",
+                    description: Text("Connect an Iasis board to this Mac.")
+                )
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                if let problem = state?.restoreProblem {
-                    Text(problem)
-                }
-                ForEach(boards) { board in
-                    if let notice = board.notice, let state {
-                        Text("\(state.title(for: board)) · \(notice)")
+            if let state {
+                AgentStatusBar(state: state)
+            }
+        }
+        .toolbar {
+            let actions = browser.actions
+            ToolbarItemGroup {
+                Button("Enter DFU", systemImage: DeviceSymbol.dfu) { model.perform(actions.dfu) }
+                    .disabled(actions.dfu.isEmpty)
+                    .help("Put the selected devices in DFU")
+                Button("Restart", systemImage: DeviceSymbol.restart) { model.perform(actions.restart) }
+                    .disabled(actions.restart.isEmpty)
+                    .help("Restart the selected devices")
+            }
+            ToolbarSpacer(.fixed)
+            ToolbarItemGroup {
+                Button("Revive", systemImage: DeviceSymbol.revive) {
+                    if let revive = actions.revive {
+                        model.perform([revive])
                     }
                 }
+                .disabled(actions.revive == nil)
+                .help("Reinstall the system on the selected device and keep its data")
+                Button("Restore…", systemImage: DeviceSymbol.restore) { browser.confirming = actions.restore }
+                    .disabled(actions.restore == nil)
+                    .help("Erase the selected devices and reinstall their system")
             }
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal)
+            ToolbarSpacer(.fixed)
+            ToolbarItem {
+                Button("Inspector", systemImage: "sidebar.trailing") { browser.showsInspector.toggle() }
+                    .help("Show or hide device information")
+            }
         }
-        .contextMenu(forSelectionType: DeviceRow.ID.self) { ids in
-            let targets = DeviceSelection(ids, state: model.state)
-            if !targets.rows.isEmpty {
-                actionButtons(targets)
-                Divider()
-                Button("Get Info") { inspect(ids) }
-            }
-        } primaryAction: { ids in inspect(ids) }
-        .toolbar {
-            Menu("Actions", systemImage: "ellipsis.circle") {
-                actionButtons(selected)
-            }
-            .labelStyle(.titleAndIcon)
-            .disabled(selected.rows.isEmpty)
-            Button("Get Info", systemImage: "info.circle") {
-                showsInspector.toggle()
-            }
-            .help("Show or hide device information")
+        .inspector(isPresented: $browser.showsInspector) {
+            DeviceInspector(devices: browser.selected)
+                .inspectorColumnWidth(min: 240, ideal: 280, max: 400)
         }
-        .inspector(isPresented: $showsInspector) {
-            DeviceInspector(selection: selected, state: state)
-                .inspectorColumnWidth(min: 240, ideal: 295, max: 420)
-        }
-        .alert(pendingRestore?.title ?? "Restore", isPresented: Binding(get: { pendingRestore != nil }, set: {
-            if !$0 {
-                pendingRestore = nil
-            }
-        }), presenting: pendingRestore) { prompt in
+        .alert(
+            browser.confirming?.title ?? "",
+            isPresented: Binding { browser.confirming != nil } set: { shown in
+                if !shown {
+                    browser.confirming = nil
+                }
+            },
+            presenting: browser.confirming
+        ) { confirmation in
+            Button("Restore", role: .destructive) { model.perform([confirmation.request]) }
             Button("Cancel", role: .cancel) {}
-                .keyboardShortcut(.defaultAction)
-            Button("Restore", role: .destructive) { model.perform(prompt.request) }
-        } message: { prompt in
-            Text(prompt.message)
+        } message: { confirmation in
+            Text(confirmation.message)
         }
-        .frame(minWidth: 480, minHeight: 270)
+        .focusedSceneValue(\.deviceBrowser, browser)
+        .frame(minWidth: 400, minHeight: 260)
+    }
+}
+
+/// A board's name, with how it is powered.
+private struct BoardHeader: View {
+    let group: BoardDevices
+
+    var body: some View {
+        HStack {
+            Text(group.title)
+            Spacer()
+            if !group.board.supply.isEmpty {
+                Label(supply, systemImage: symbol)
+                    .labelStyle(.titleAndIcon)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .help("Firmware \(group.board.firmware), serial \(group.board.serial)")
+            }
+        }
     }
 
-    @ViewBuilder
-    private func actionButtons(_ targets: DeviceSelection) -> some View {
-        let row = targets.single
-        Button("Enter DFU") {
-            if let row {
-                model.perform(.dfu(board: row.board.serial, port: row.port.number))
-            }
-        }
-        .disabled(row?.port.dfu != true)
-        Button("Restart") {
-            if let row {
-                model.perform(.reboot(board: row.board.serial, port: row.port.number))
-            }
-        }
-        .disabled(row?.port.reboot != true)
-        Divider()
-        let revive = row.flatMap { $0.port.reviveRequest(on: $0.board) }
-        Button("Revive") {
-            if let revive {
-                model.perform(revive)
-            }
-        }
-        .disabled(revive == nil)
-        Button("Restore…") { pendingRestore = targets.restore }
-            .disabled(targets.restore == nil)
+    private var supply: String {
+        group.board.supply.prefix(1).uppercased() + group.board.supply.dropFirst()
     }
 
-    private func inspect(_ ids: Set<DeviceRow.ID>) {
-        selection = ids
-        showsInspector = true
+    private var symbol: String {
+        if group.board.supply.hasPrefix("power supply") {
+            "powerplug"
+        } else if group.board.supply.hasPrefix("host") {
+            "cable.connector"
+        } else {
+            "bolt.slash"
+        }
+    }
+}
+
+/// What the agent is doing or lacks, when there is something to say.
+private struct AgentStatusBar: View {
+    let state: AgentState
+
+    var body: some View {
+        if let problem = state.restoreProblem {
+            bar {
+                Label(problem, systemImage: "exclamationmark.triangle")
+            }
+        } else if let fetch = state.images.fetch {
+            bar {
+                Label("Downloading \(fetch.version)", systemImage: "arrow.down.circle")
+                ProgressView(value: fetch.fraction)
+                    .frame(maxWidth: 160)
+                Text(fetch.fraction.formatted(.percent.precision(.fractionLength(0))))
+                    .monospacedDigit()
+            }
+        }
+    }
+
+    private func bar(@ViewBuilder content: () -> some View) -> some View {
+        HStack(spacing: 8) {
+            content()
+            Spacer(minLength: 0)
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
     }
 }

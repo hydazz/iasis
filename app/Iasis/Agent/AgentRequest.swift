@@ -4,7 +4,7 @@ import Foundation
 nonisolated enum AgentRequest: Encodable, Equatable {
     case watch
     /// Erases the targets. The user has confirmed.
-    case restore(board: String, session: UInt32, targets: [RestoreTarget])
+    case restore(boards: [RestoreSelection])
     case revive(board: String, session: UInt32, port: Int, generation: UInt32, ecid: String)
     case dfu(board: String, port: Int)
     case reboot(board: String, port: Int)
@@ -18,7 +18,7 @@ nonisolated enum AgentRequest: Encodable, Equatable {
     case refresh
 
     private enum CodingKeys: String, CodingKey {
-        case op, board, port, session, targets, generation, ecid, name, on, percent, model, path, build
+        case op, board, boards, port, session, generation, ecid, name, on, percent, model, path, build
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -26,11 +26,9 @@ nonisolated enum AgentRequest: Encodable, Equatable {
         switch self {
         case .watch:
             try fields.encode("watch", forKey: .op)
-        case let .restore(board, session, targets):
+        case let .restore(boards):
             try fields.encode("restore", forKey: .op)
-            try fields.encode(board, forKey: .board)
-            try fields.encode(session, forKey: .session)
-            try fields.encode(targets, forKey: .targets)
+            try fields.encode(boards, forKey: .boards)
         case let .revive(board, session, port, generation, ecid):
             try fields.encode("revive", forKey: .op)
             try fields.encode(board, forKey: .board)
@@ -101,9 +99,16 @@ nonisolated enum AgentReply: Decodable, Equatable {
     }
 }
 
-extension AgentState.Port {
-    func reviveRequest(on board: AgentState.Board) -> AgentRequest? {
-        guard revive, let session = board.session, let ecid else { return nil }
-        return .revive(board: board.serial, session: session, port: number, generation: generation, ecid: ecid)
-    }
+/// The targets selected on one board, in the session the user saw.
+nonisolated struct RestoreSelection: Encodable, Equatable {
+    let board: String
+    let session: UInt32
+    var targets: [RestoreTarget]
+}
+
+/// One attachment, and the device on it when it is identified.
+nonisolated struct RestoreTarget: Encodable, Equatable {
+    let port: Int
+    let generation: UInt32
+    var ecid: String?
 }
