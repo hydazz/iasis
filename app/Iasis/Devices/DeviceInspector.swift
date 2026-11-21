@@ -30,7 +30,11 @@ struct DeviceInspector: View {
                     if device.port.occupied {
                         LabeledContent("Mode", value: device.port.modeTitle)
                         LabeledContent("USB", value: device.port.link.isEmpty ? "No link" : device.port.link)
-                        LabeledContent("Power", value: device.port.contract.isEmpty ? "No contract" : device.port.contract)
+                        LabeledContent("Power", value: power(of: device))
+                        if device.port.short {
+                            Text("The power supply is giving this device less than it asks for. A device with a flat battery may not start.")
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
                 if let result = device.result {
@@ -51,6 +55,13 @@ struct DeviceInspector: View {
         } else {
             ContentUnavailableView("\(devices.count) Devices Selected", systemImage: "rectangle.stack")
         }
+    }
+
+    private func power(of device: Device) -> String {
+        guard !device.port.contract.isEmpty, let watts = device.watts else {
+            return "No contract"
+        }
+        return "\(device.port.contract) (\(watts))"
     }
 
     private func status(of device: Device) -> String {

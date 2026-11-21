@@ -26,7 +26,8 @@ struct StatusMenu: View {
             }
             if let download = state.download {
                 Divider()
-                Text(download)
+                Text("Downloading Image")
+                    .badge(Text(download))
             }
             if let problem = state.restoreProblem {
                 Divider()
@@ -65,10 +66,7 @@ private struct DeviceMenu: View {
                 }
             }
         } label: {
-            Label(
-                device.port.occupied ? device.shortName : "Port \(device.port.number) Off",
-                systemImage: "\(device.port.number).circle"
-            )
+            Label(entry.title, systemImage: "\(device.port.number).circle")
         }
         .badge(device.activity.text.isEmpty ? nil : Text(device.activity.text))
     }

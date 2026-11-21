@@ -21,7 +21,8 @@ nonisolated struct AgentState: Decodable, Equatable {
         var name: String
         var session: UInt32?
         var firmware: String
-        var supply: String
+        /// The power supply's pool for the targets, when there is a supply.
+        var pool: Pool?
         var brightness: Int
         var settingsBusy: Bool
         var ports: [Port]
@@ -47,6 +48,13 @@ nonisolated struct AgentState: Decodable, Equatable {
         var ecid: String?
         var link: String
         var contract: String
+        /// The contract's power, in milliwatts.
+        var contractMw: Int?
+        /// The target took the largest offer its board could make and would
+        /// use more.
+        var short: Bool
+        /// Why the port faulted, in the board's words.
+        var fault: String?
         var state: String
         var light: Light
         var dfu: Bool
@@ -60,6 +68,11 @@ nonisolated struct AgentState: Decodable, Equatable {
         var id: Int {
             number
         }
+    }
+
+    struct Pool: Decodable, Equatable {
+        var budgetMw: Int
+        var allocatedMw: Int
     }
 
     struct Stage: Decodable, Equatable {
