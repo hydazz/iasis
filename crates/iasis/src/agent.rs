@@ -90,6 +90,14 @@ mod optional_ecid {
     }
 }
 
+/// The targets selected on one board, in the session the client saw.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Selection {
+    pub board: String,
+    pub session: u32,
+    pub targets: Vec<Target>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum Request {
@@ -97,12 +105,10 @@ pub enum Request {
     State,
     /// Reply with the state now and again whenever it changes.
     Watch,
-    /// Erase and restore the targets on these ports. The client has asked
-    /// its user to confirm.
+    /// Erase and restore the selected targets, on any number of boards. The
+    /// client has asked its user to confirm.
     Restore {
-        board: String,
-        session: u32,
-        targets: Vec<Target>,
+        boards: Vec<Selection>,
     },
     /// Repair one identified device in DFU or recovery and preserve its data.
     Revive {
@@ -222,6 +228,37 @@ fn restore_targets(status: &iasis_protocol::Status, selected: &[Target]) -> Resu
     Ok(targets)
 }
 
+/// Leave a checked request for the board's attendant and wait for it to
+/// take it.
+fn submit(board: &Attendance, session: u32, targets: Vec<Target>) -> Result<()> {
+    let (accepted, receipt) = std::sync::mpsc::sync_channel(0);
+    let ports: Vec<Port> = targets.iter().map(|target| target.port).collect();
+    {
+        let mut slot = board.requests.lock().unwrap();
+        ensure!(slot.is_none(), "the board is preparing another restore");
+        batch::reserve(&board.endings, &targets)?;
+        *board.notice.lock().unwrap() = None;
+        *slot = Some(Submission {
+            session,
+            targets,
+            accepted,
+        });
+    }
+    // A busy attendant cannot launch a timed-out request. The rendezvous
+    // succeeds only while this client is still waiting for acceptance.
+    let result = receipt.recv_timeout(Duration::from_secs(2));
+    drop(receipt);
+    if !matches!(result, Ok(Ok(()))) {
+        let mut slots = board.endings.lock().unwrap();
+        for port in ports {
+            slots[port.index()] = PortWork::Idle;
+        }
+    }
+    result
+        .context("the board did not accept the restore request")?
+        .map_err(anyhow::Error::msg)
+}
+
 impl Agent {
     pub fn new(options: &Options) -> Result<Arc<Self>> {
         let home = Home::locate()?;
@@ -312,50 +349,41 @@ impl Agent {
         Ok(())
     }
 
-    /// Hand a client's restore request to the board's attendant.
-    fn restore(&self, serial: &str, session: u32, selected: &[Target]) -> Result<()> {
+    /// Hand a client's restore request to each board's attendant. Every
+    /// selection is checked before any board is asked, so a stale one
+    /// starts nothing.
+    fn restore(&self, selections: &[Selection]) -> Result<()> {
         if let Some(problem) = self.restore_problem.lock().unwrap().clone() {
             bail!(problem);
         }
-        let (board, link) = self.board(serial)?;
-        let status = link.status().context("the board has not been read yet")?;
-        ensure!(session == link.session(), "the board has reconnected");
-        let targets = restore_targets(&status, selected)?;
-        let (accepted, receipt) = std::sync::mpsc::sync_channel(0);
-        {
-            let mut slot = board.requests.lock().unwrap();
-            ensure!(slot.is_none(), "the board is preparing another restore");
-            batch::reserve(&board.endings, &targets)?;
-            *board.notice.lock().unwrap() = None;
-            *slot = Some(Submission {
-                session,
-                targets,
-                accepted,
-            });
+        ensure!(!selections.is_empty(), "no ports selected");
+        let mut checked = Vec::new();
+        for selection in selections {
+            let (board, link) = self.board(&selection.board)?;
+            ensure!(
+                !checked
+                    .iter()
+                    .any(|(other, _, _): &(Arc<Attendance>, _, _)| Arc::ptr_eq(other, &board)),
+                "a board is named twice"
+            );
+            let status = link.status().context("the board has not been read yet")?;
+            ensure!(
+                selection.session == link.session(),
+                "the board has reconnected"
+            );
+            let targets = restore_targets(&status, &selection.targets)?;
+            checked.push((board, selection.session, targets));
         }
-        // A busy attendant cannot launch a timed-out request. The rendezvous
-        // succeeds only while this client is still waiting for acceptance.
-        let result = receipt.recv_timeout(Duration::from_secs(2));
-        drop(receipt);
-        if !matches!(result, Ok(Ok(()))) {
-            let mut slots = board.endings.lock().unwrap();
-            for target in selected {
-                slots[target.port.index()] = PortWork::Idle;
-            }
+        for (board, session, targets) in checked {
+            submit(&board, session, targets)?;
         }
-        result
-            .context("the board did not accept the restore request")?
-            .map_err(anyhow::Error::msg)
+        Ok(())
     }
 
     pub fn handle(&self, request: Request) -> Reply {
         let result = match request {
             Request::State | Request::Watch => return Reply::State(Box::new(self.state())),
-            Request::Restore {
-                board,
-                session,
-                targets,
-            } => self.restore(&board, session, &targets),
+            Request::Restore { boards } => self.restore(&boards),
             Request::Revive {
                 board,
                 session,
