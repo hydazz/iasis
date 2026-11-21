@@ -29,7 +29,9 @@ struct DeviceTests {
         #expect(activity(state, 1) == .idle)
         #expect(activity(state, 2) == Activity("DFU", .none))
         #expect(activity(state, 3) == Activity("Sending filesystem 43%", .working(0.43)))
-        #expect(activity(state, 5) == Activity("Fault", .failed))
+        #expect(activity(state, 5) == Activity("Protection tripped", .failed))
+        #expect(state.devices[2].watts == "15 W")
+        #expect(state.devices[0].watts == nil)
 
         // A result describes the device it was for, while that device stays.
         #expect(activity(state, 4) == .idle)
