@@ -11,7 +11,7 @@ use anyhow::{Context, Result, bail, ensure};
 use clap::{Parser, Subcommand, ValueEnum};
 use iasis::{
     Board, UsbIds,
-    agent::{Client, Reply, Request, State, Target},
+    agent::{Client, Reply, Request, Selection, State, Target},
     dfu::{self, Attempt, Outcome, Signal},
     home::Home,
     identity::AppleMode,
@@ -729,9 +729,11 @@ fn restore_through(agent: &mut Client, serial: u64, options: &batch::Options) ->
         }
     }
     agent.request(&Request::Restore {
-        board: board.clone(),
-        session,
-        targets,
+        boards: vec![Selection {
+            board: board.clone(),
+            session,
+            targets,
+        }],
     })?;
     follow_work(agent, &board, &ports, None)
 }
