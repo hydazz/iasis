@@ -279,28 +279,9 @@ pub fn label(port: &PortStatus) -> &'static str {
     }
 }
 
-fn error_text(error: PortError) -> &'static str {
-    match error {
-        PortError::I2c { .. } => "I2C error",
-        PortError::Isolated { .. } => "I2C isolated",
-        PortError::HostAllowanceExpired => "Host budget expired",
-        PortError::Adc => "ADC unavailable",
-        PortError::HostLimiter => "Host limiter tripped",
-        PortError::PortProtection { .. } => "Protection tripped",
-        PortError::ConverterStatus { .. } => "Converter fault",
-        PortError::ConverterMode { .. } => "Converter mode",
-        PortError::ConverterCurrentLimitDisabled { .. } => "Current limit off",
-        PortError::StageReadback { .. } => "Converter readback",
-        PortError::Voltage => "VBUS out of range",
-        PortError::DischargeTimeout => "Discharge timeout",
-        PortError::Protocol => "PD protocol error",
-        PortError::PdTimeout => "PD timed out",
-    }
-}
-
 fn details(status: &Status, port: &PortStatus) -> [String<32>; 2] {
     if let Some(error) = port.error {
-        let mut lines = pair(error_text(error), "");
+        let mut lines = pair(error.text(), "");
         match error {
             PortError::PortProtection {
                 pins: f,
@@ -370,7 +351,7 @@ fn details(status: &Status, port: &PortStatus) -> [String<32>; 2] {
     if port.state == PortState::WaitingPower {
         let mut lines = pair("Waiting for power", "");
         if let Some(error) = status.upstream_error {
-            lines[1].push_str(error_text(error)).unwrap();
+            lines[1].push_str(error.text()).unwrap();
         } else if status.supply == Supply::Brick {
             lines[1].push_str("Brick budget full").unwrap();
         } else {
@@ -488,7 +469,7 @@ fn supply(status: &Status) -> String<32> {
         )
         .unwrap();
     } else if let Some(error) = status.upstream_error {
-        line.push_str(error_text(error)).unwrap();
+        line.push_str(error.text()).unwrap();
     } else if status.host_limit_ma > 0 {
         write!(
             line,
