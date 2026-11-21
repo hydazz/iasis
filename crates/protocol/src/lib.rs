@@ -646,6 +646,28 @@ pub enum PortError {
     PdTimeout,
 }
 
+impl PortError {
+    /// The fault in the board's words, as its display gives it.
+    pub fn text(&self) -> &'static str {
+        match self {
+            Self::I2c { .. } => "I2C error",
+            Self::Isolated { .. } => "I2C isolated",
+            Self::HostAllowanceExpired => "Host budget expired",
+            Self::Adc => "ADC unavailable",
+            Self::HostLimiter => "Host limiter tripped",
+            Self::PortProtection { .. } => "Protection tripped",
+            Self::ConverterStatus { .. } => "Converter fault",
+            Self::ConverterMode { .. } => "Converter mode",
+            Self::ConverterCurrentLimitDisabled { .. } => "Current limit off",
+            Self::StageReadback { .. } => "Converter readback",
+            Self::Voltage => "VBUS out of range",
+            Self::DischargeTimeout => "Discharge timeout",
+            Self::Protocol => "PD protocol error",
+            Self::PdTimeout => "PD timed out",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum I2cOperation {
     Read { register: u8 },
