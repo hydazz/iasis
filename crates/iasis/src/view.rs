@@ -15,7 +15,7 @@ use crate::{
     host::{PortJob, observe},
     identity::models::{DeviceModel, Models},
     images::Store,
-    restore::{Operation, Progress},
+    restore::{Operation, Progress, RestoreEngine},
     topology::Snapshot,
 };
 
@@ -87,6 +87,16 @@ impl PortView {
             self.revive = false;
         }
     }
+}
+
+/// What the host brings to a board's targets: their names, and the engine
+/// that says which of them it restores.
+#[derive(Clone, Copy)]
+pub(crate) struct Host<'a> {
+    pub store: &'a Store,
+    pub models: &'a Models,
+    pub engine: &'a RestoreEngine,
+    pub family: Device,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -196,19 +206,28 @@ impl BoardView {
         serial: u64,
         status: &Status,
         snapshot: &Snapshot,
-        store: &Store,
-        models: &Models,
-        family: Device,
+        host: &Host,
     ) {
+        let Host {
+            store,
+            models,
+            engine,
+            family,
+        } = *host;
         for (port, row) in Port::ALL.into_iter().zip(&mut self.ports) {
             let assessment = dfu::assess(serial, port, status, snapshot, family.dfu_action(), None);
             row.revive = crate::restore::configurator().is_some()
                 && revivable(status, snapshot, port).is_some();
             row.dfu = assessment.signal == Signal::Available;
+            // A target not yet in DFU is asked to enter it. One already
+            // there needs a mode the host's engine restores.
             row.restore &= match assessment.signal {
                 Signal::Available | Signal::PortDfu => true,
                 Signal::AlreadyDfu => {
-                    assessment.usb_mode == Some(AppleMode::Dfu) && assessment.ecid.is_some()
+                    assessment
+                        .usb_mode
+                        .is_some_and(|mode| engine.restores(mode))
+                        && assessment.ecid.is_some()
                 }
                 _ => false,
             };
