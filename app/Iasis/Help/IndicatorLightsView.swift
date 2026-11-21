@@ -1,7 +1,8 @@
 import SwiftUI
 
-struct AboutView: View {
-    static let windowID = "about"
+/// What the board's lights mean, port by port and for the status light.
+struct IndicatorLightsView: View {
+    static let windowID = "lights"
     @State private var panel = Panel.ports
 
     private enum Panel: String, CaseIterable {
@@ -11,18 +12,6 @@ struct AboutView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 12) {
-                Image(nsImage: NSApp.applicationIconImage)
-                    .resizable()
-                    .frame(width: 56, height: 56)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Iasis").font(.title.bold())
-                    if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
-                        Text("Version \(version)").foregroundStyle(.secondary)
-                    }
-                }
-            }
             Picker("Indicator", selection: $panel) {
                 ForEach(Panel.allCases, id: \.self) { Text($0.rawValue) }
             }
@@ -60,7 +49,7 @@ struct AboutView: View {
             Spacer(minLength: 0)
         }
         .padding(22)
-        .frame(width: 450, height: 440, alignment: .topLeading)
+        .frame(width: 450, height: 380, alignment: .topLeading)
     }
 
     private func light(_ color: Color?, _ label: LocalizedStringKey, _ meaning: LocalizedStringKey, _ pattern: LightSample.Pattern = .steady) -> some View {
