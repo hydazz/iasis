@@ -265,15 +265,15 @@ pub fn label(port: &PortStatus) -> &'static str {
         PortState::Debouncing => "CC",
         PortState::Starting => "STRT",
         PortState::Contract if port.wrong_port() => "PORT",
-        // Charging only: the target lists neither DFU nor reboot.
         PortState::Contract
-            if !port.offers(PortAction::DfuAppleSilicon) && !port.offers(PortAction::Reboot) =>
+            if port.offers(PortAction::DfuAppleSilicon) || port.offers(PortAction::Reboot) =>
         {
-            "CHG"
+            "RDY"
         }
-        PortState::Contract => "RDY",
         PortState::Ready if port.pd_transition => "STRT",
-        PortState::Ready => "?",
+        PortState::Ready | PortState::Contract if port.usb_connected() => "USB",
+        PortState::Contract => "PD",
+        PortState::Ready => "ATCH",
         PortState::Discharging => "DISC",
         PortState::Fault => "ERR",
     }
@@ -445,10 +445,6 @@ fn readings(port: &PortStatus) -> [String<32>; 2] {
         lines[1].push_str(" (").unwrap();
         watts(&mut lines[1], contract_mw(port));
         lines[1].push(')').unwrap();
-    } else if port.state == PortState::Ready && !port.pd_transition {
-        lines[1].push_str("Unknown device").unwrap();
-    } else if port.supply == Supply::HostPresence {
-        lines[1].push_str("Host power").unwrap();
     }
     lines
 }
@@ -470,15 +466,8 @@ fn supply(status: &Status) -> String<32> {
         .unwrap();
     } else if let Some(error) = status.upstream_error {
         line.push_str(error.text()).unwrap();
-    } else if status.host_limit_ma > 0 {
-        write!(
-            line,
-            "Host {}mA, ports {}mA",
-            status.host_allowance_ma, status.host_limit_ma
-        )
-        .unwrap();
-    } else {
-        write!(line, "Host {}mA, ports off", status.host_allowance_ma).unwrap();
+    } else if status.supply == Supply::Off {
+        line.push_str("Port power off").unwrap();
     }
     line
 }
@@ -785,12 +774,33 @@ mod tests {
             supply: Supply::HostPresence,
             ..contract(5000, 0)
         };
-        assert_eq!(view(&status, &button, 0).lines, pair("", "Host power"));
+        assert_eq!(view(&status, &button, 0).lines, pair("", ""));
+    }
+
+    #[test]
+    fn non_pd_ports_show_attachment_or_usb_without_offering_an_action() {
+        use iasis_protocol::Observed;
+        let mut status = Status::default();
         status.ports[0] = PortStatus {
             state: PortState::Ready,
-            ..contract(0, 0)
+            enabled: true,
+            vbus_adc: Some(520),
+            supply: Supply::HostPresence,
+            ..PortStatus::default()
         };
-        assert_eq!(view(&status, &button, 0).lines[1], "Unknown device");
+        for (link, usb, column, reading) in [
+            (None, None, "ATCH", "VBUS 5.03V"),
+            (Some(Link::Down), Some(Usb::Absent), "ATCH", "VBUS 5.03V"),
+            (Some(Link::Usb2), None, "USB", "VBUS 5.03V USB2"),
+            (None, Some(Usb::Other), "USB", "VBUS 5.03V"),
+        ] {
+            status.ports[0].link = link;
+            status.ports[0].observed = usb.map(|usb| Observed { usb, ecid: None });
+            let view = view(&status, &selecting(0), 0);
+            assert_eq!(view.columns[0].0, column);
+            assert_eq!(view.lines, pair(reading, ""));
+            assert_eq!(status.ready_mask(), 0);
+        }
     }
 
     #[test]
@@ -913,8 +923,8 @@ mod tests {
         let view = view(&status, &button, 0);
         assert_eq!((view.ports, view.targets), (0b1111, 0b0001));
         assert_eq!(label(&status.ports[0]), "RDY");
-        assert_eq!(label(&status.ports[1]), "?");
-        assert_eq!(label(&status.ports[3]), "CHG");
+        assert_eq!(label(&status.ports[1]), "ATCH");
+        assert_eq!(label(&status.ports[3]), "PD");
         let mut frame = Frame([[false; 128]; 64]);
         draw(&mut frame, &view).unwrap();
         // The box spans x..x+23 on rows 14..24; column x+2 clears the digit.
@@ -1001,12 +1011,12 @@ mod tests {
         };
         let host = view(&host, &button, 0);
         assert_eq!(host.cells, ["", "", "", "", ""]);
-        assert_eq!(host.lines[1], "Host 1500mA, ports 550mA");
+        assert_eq!(host.lines[1], "");
         let limited = Status {
             host_allowance_ma: 900,
             ..Status::default()
         };
-        assert_eq!(view(&limited, &button, 0).lines[1], "Host 900mA, ports off");
+        assert_eq!(view(&limited, &button, 0).lines[1], "Port power off");
     }
 
     #[test]

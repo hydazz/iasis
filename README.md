@@ -1,6 +1,6 @@
 # iasis
 
-Iasis is a five-port USB-C hub for putting Apple Silicon and T2 Macs into DFU mode without the keyboard sequence. A Mac or Linux host runs the restores; Iasis handles the connections, port power and DFU signalling.
+Iasis is a five-port USB-C hub for restoring Apple devices. It can put Apple Silicon and T2 Macs into DFU mode without the keyboard sequence. A Mac or Linux host runs the restores. The same ports connect ordinary USB peripherals.
 
 The hardware is a prototype.
 
@@ -8,7 +8,7 @@ The hardware is a prototype.
 
 | Build | Power and connections                                                                        |
 | ----- | -------------------------------------------------------------------------------------------- |
-| Hub   | Host USB power for the hub, controls and restores from charged targets                       |
+| Hub   | Host USB powers the hub and its ports for restores of charged targets                        |
 | HubPD | Adds a USB-C power input and per-port charging supplies; works as Hub without a power supply |
 
 The optional [CM5 carrier](hardware/boards/cm5/README.md) plugs into HubPD and houses a Compute Module 5, NVMe storage and Ethernet. Both builds fit the [printed case](hardware/case/README.md), with plain or OLED lids.
@@ -67,7 +67,7 @@ Port lights outside the selection dim. While the button is held, only the ports 
 
 After a DFU the port pulses blue. It turns steady blue once a host sees the target in DFU, which needs the [host agent](#host-agent). The [light table](crates/firmware/README.md#controls-and-status) lists every colour.
 
-A white port light marks a device Iasis cannot identify; a hold passes it by. DFU leaves their data intact and works with Apple Configurator. `power <port> off` disables a port. `power <port> on` enables it and retries a fault. The selected board stores its name and light brightness in flash.
+A steady white port light marks a powered device without a PD contract. It can use USB normally. DFU leaves target data intact and works with Apple Configurator. `power <port> off` disables a port. `power <port> on` enables it and retries a fault. The selected board stores its name and light brightness in flash.
 
 Native USB-C uses the host's advertised current. With a legacy A-to-C connection, set the remaining shared USB allowance, including Iasis and after subtracting other loads:
 

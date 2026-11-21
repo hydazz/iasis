@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Board, UsbIds,
-    batch::{self, Endings, Images, PortWork, Requests, Submission},
+    batch::{self, Ending, Endings, Images, PortWork, Requests, Submission},
     discover,
     home::Home,
     host::{Jobs, Link},
@@ -47,6 +47,9 @@ pub struct Options {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct State {
     pub boards: Vec<BoardView>,
+    /// A submitting connection's watch receives its worker results in target order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub submitted: Vec<Option<Ending>>,
     pub images: Snapshot,
     /// Why the agent cannot run restores, when it cannot.
     pub restore_problem: Option<String>,
@@ -229,20 +232,21 @@ fn restore_targets(status: &iasis_protocol::Status, selected: &[Target]) -> Resu
 
 /// Leave a checked request for the board's attendant and wait for it to
 /// take it.
-fn submit(board: &Attendance, session: u32, targets: Vec<Target>) -> Result<()> {
+fn submit(board: &Attendance, session: u32, targets: Vec<Target>) -> Result<Vec<PortWork>> {
     let (accepted, receipt) = std::sync::mpsc::sync_channel(0);
     let ports: Vec<Port> = targets.iter().map(|target| target.port).collect();
-    {
+    let work = {
         let mut slot = board.requests.lock().unwrap();
         ensure!(slot.is_none(), "the board is preparing another restore");
-        batch::reserve(&board.endings, &targets)?;
+        let work = batch::reserve(&board.endings, &targets)?;
         *board.notice.lock().unwrap() = None;
         *slot = Some(Submission {
             session,
             targets,
             accepted,
         });
-    }
+        work
+    };
     // A busy attendant cannot launch a timed-out request. The rendezvous
     // succeeds only while this client is still waiting for acceptance.
     let result = receipt.recv_timeout(Duration::from_secs(2));
@@ -250,12 +254,13 @@ fn submit(board: &Attendance, session: u32, targets: Vec<Target>) -> Result<()> 
     if !matches!(result, Ok(Ok(()))) {
         let mut slots = board.endings.lock().unwrap();
         for port in ports {
-            slots[port.index()] = PortWork::Idle;
+            slots[port.index()] = None;
         }
     }
     result
         .context("the board did not accept the restore request")?
-        .map_err(anyhow::Error::msg)
+        .map_err(anyhow::Error::msg)?;
+    Ok(work)
 }
 
 impl Agent {
@@ -292,16 +297,14 @@ impl Agent {
                         Some(mut view) => {
                             let endings = board.endings.lock().unwrap();
                             for (port, ending) in view.ports.iter_mut().zip(endings.iter()) {
-                                match ending {
-                                    PortWork::Idle => {}
-                                    PortWork::Active => {
+                                if let Some(work) = ending {
+                                    if let Some(result) = work.get() {
+                                        port.result = Some(result.clone());
+                                    } else {
                                         port.restore = false;
                                         port.revive = false;
                                         port.reboot = false;
                                         port.dfu = false;
-                                    }
-                                    PortWork::Finished(result) => {
-                                        port.result = Some(result.clone())
                                     }
                                 }
                             }
@@ -315,6 +318,7 @@ impl Agent {
                     }
                 })
                 .collect(),
+            submitted: Vec::new(),
             images: self.store.snapshot(),
             restore_problem: self.restore_problem.lock().unwrap().clone(),
         }
@@ -351,7 +355,7 @@ impl Agent {
     /// Hand a client's restore request to each board's attendant. Every
     /// selection is checked before any board is asked, so a stale one
     /// starts nothing.
-    fn restore(&self, selections: &[Selection]) -> Result<()> {
+    fn restore(&self, selections: &[Selection]) -> Result<Vec<PortWork>> {
         if let Some(problem) = self.restore_problem.lock().unwrap().clone() {
             bail!(problem);
         }
@@ -373,16 +377,19 @@ impl Agent {
             let targets = restore_targets(&status, &selection.targets)?;
             checked.push((board, selection.session, targets));
         }
+        let mut work = Vec::new();
         for (board, session, targets) in checked {
-            submit(&board, session, targets)?;
+            work.extend(submit(&board, session, targets)?);
         }
-        Ok(())
+        Ok(work)
     }
 
-    pub fn handle(&self, request: Request) -> Reply {
+    fn handle(&self, request: Request, submitted: &mut Vec<PortWork>) -> Reply {
         let result = match request {
-            Request::State | Request::Watch => return Reply::State(Box::new(self.state())),
-            Request::Restore { boards } => self.restore(&boards),
+            Request::State | Request::Watch => {
+                return Reply::State(Box::new(self.state()));
+            }
+            Request::Restore { boards } => self.restore(&boards).map(|work| *submitted = work),
             Request::Revive {
                 board,
                 session,
@@ -404,6 +411,7 @@ impl Agent {
                     ecid,
                     &attendance.endings,
                 )
+                .map(|work| *submitted = work)
             })(),
             Request::Dfu { board, port } => self.command(&board, port, self.family.dfu_action()),
             Request::Reboot { board, port } => self.command(&board, port, PortAction::Reboot),
@@ -604,6 +612,7 @@ mod socket {
 
     fn converse(agent: &Agent, mut stream: UnixStream) -> Result<()> {
         let reader = BufReader::new(stream.try_clone()?);
+        let mut submitted = Vec::new();
         for line in reader.lines() {
             let line = line?;
             let request = match serde_json::from_str::<Request>(&line) {
@@ -617,22 +626,35 @@ mod socket {
                 }
             };
             if !matches!(request, Request::Watch) {
-                send(&mut stream, &agent.handle(request))?;
+                send(&mut stream, &agent.handle(request, &mut submitted))?;
                 continue;
             }
-            // The rest of the connection is the state, each time it changes.
-            let mut last = Vec::new();
-            loop {
-                let state = serde_json::to_vec(&Reply::State(Box::new(agent.state())))?;
-                if state != last {
-                    stream.write_all(&state)?;
-                    stream.write_all(b"\n")?;
-                    last = state;
-                }
-                thread::sleep(Duration::from_millis(250));
-            }
+            return watch(&mut stream, &submitted, || agent.state());
         }
         Ok(())
+    }
+
+    fn watch(
+        stream: &mut UnixStream,
+        submitted: &[PortWork],
+        mut snapshot: impl FnMut() -> State,
+    ) -> Result<()> {
+        let mut last = Vec::new();
+        loop {
+            let mut state = snapshot();
+            state.submitted = submitted.iter().map(|work| work.get().cloned()).collect();
+            let finished = !submitted.is_empty() && state.submitted.iter().all(Option::is_some);
+            let frame = serde_json::to_vec(&Reply::State(Box::new(state)))?;
+            if frame != last {
+                stream.write_all(&frame)?;
+                stream.write_all(b"\n")?;
+                last = frame;
+            }
+            if finished {
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(250));
+        }
     }
 
     /// A connection to the running agent.
@@ -681,6 +703,74 @@ mod socket {
                 _ => Ok(()),
             }
         }
+    }
+
+    #[test]
+    fn watch_delivers_the_submitted_result_after_the_board_disappears() {
+        use crate::restore::Operation;
+        use iasis_protocol::RestorePhase;
+        let (mut server, reader) = UnixStream::pair().unwrap();
+        let slots = Endings::default();
+        let selection = [Target {
+            port: Port::ALL[0],
+            generation: 7,
+            ecid: None,
+        }];
+        let submitted = batch::reserve(&slots, &selection).unwrap();
+        let result = Ending {
+            operation: Operation::Restore,
+            ecid: Some("000000000000002a".into()),
+            phase: RestorePhase::Failed,
+            message: "Restore worker lost the device".into(),
+            log_directory: None,
+        };
+        let mut frame = 0;
+        watch(&mut server, &submitted, || {
+            let mut state = State::default();
+            frame += 1;
+            match frame {
+                1 => state.boards.push(BoardView::unreadable(
+                    "0000000000000001".into(),
+                    "connecting".into(),
+                )),
+                2 => {}
+                3 => {
+                    slots.lock().unwrap()[0]
+                        .as_ref()
+                        .unwrap()
+                        .set(result.clone())
+                        .unwrap();
+                    // A later job can finish before the client reads its first result.
+                    let next = batch::reserve(&slots, &selection).unwrap();
+                    next[0]
+                        .set(Ending {
+                            phase: RestorePhase::Reported,
+                            ..result.clone()
+                        })
+                        .unwrap();
+                }
+                _ => panic!("watch continued past the terminal result"),
+            }
+            state
+        })
+        .unwrap();
+        drop(server);
+        let mut client = Client {
+            reader: BufReader::new(reader),
+        };
+        let mut receive = || match client.receive().unwrap() {
+            Reply::State(state) => state,
+            _ => panic!("expected a watch frame"),
+        };
+        let present = receive();
+        assert_eq!(present.boards.len(), 1);
+        assert_eq!(present.submitted, [None]);
+        let absent = receive();
+        assert!(absent.boards.is_empty());
+        assert_eq!(absent.submitted, [None]);
+        let finished = receive();
+        assert!(finished.boards.is_empty());
+        assert_eq!(finished.submitted, [Some(result)]);
     }
 }
 

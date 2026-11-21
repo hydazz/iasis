@@ -115,8 +115,8 @@ pub fn offers_still_available(advertised: &[u32; 4], available: &[u32; 4]) -> bo
             .all(|(&old, &new)| old == 0 || (old >> 10 == new >> 10 && old <= new))
 }
 
-/// Host power carries USB data and Apple signalling. Zero current asks the
-/// target not to charge from it.
+/// A 5 V contract permits Apple PD signalling on the host supply.
+/// Offering zero current asks a battery-powered target to forgo charging.
 pub fn host_offers() -> [u32; 4] {
     [
         fixed(5000, 0).with_usb_communications_capable(true).0,
