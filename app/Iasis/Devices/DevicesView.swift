@@ -123,36 +123,29 @@ struct DevicesView: View {
     }
 }
 
-/// A board's name, with how it is powered.
+/// A board's name and, when it has a power supply, what the targets take of
+/// the supply's pool.
 private struct BoardHeader: View {
     let group: BoardDevices
 
     var body: some View {
         HStack {
             Text(group.title)
+                .help("Firmware \(group.board.firmware), serial \(group.board.serial)")
             Spacer()
-            if !group.board.supply.isEmpty {
-                Label(supply, systemImage: symbol)
+            if let pool = group.board.pool {
+                Label("\(watts(pool.allocatedMw)) / \(watts(pool.budgetMw)) W", systemImage: "bolt.fill")
                     .labelStyle(.titleAndIcon)
                     .font(.caption)
+                    .monospacedDigit()
                     .foregroundStyle(.secondary)
-                    .help("Firmware \(group.board.firmware), serial \(group.board.serial)")
+                    .help("Power the devices have agreed, of what the power supply has for them")
             }
         }
     }
 
-    private var supply: String {
-        group.board.supply.prefix(1).uppercased() + group.board.supply.dropFirst()
-    }
-
-    private var symbol: String {
-        if group.board.supply.hasPrefix("power supply") {
-            "powerplug"
-        } else if group.board.supply.hasPrefix("host") {
-            "cable.connector"
-        } else {
-            "bolt.slash"
-        }
+    private func watts(_ milliwatts: Int) -> Int {
+        (milliwatts + 500) / 1000
     }
 }
 
