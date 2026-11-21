@@ -317,7 +317,8 @@ pub fn configurator() -> Option<&'static Path> {
 }
 
 /// One engine owns the active ECID set. Clone this engine to submit batches
-/// from multiple callers without starting the same target twice.
+/// from multiple callers without starting the same target twice. A batch is
+/// one board's targets; batches for several boards run side by side.
 #[derive(Clone)]
 pub struct RestoreEngine {
     program: PathBuf,
@@ -403,10 +404,6 @@ impl RestoreEngine {
         fs::create_dir_all(&self.logs_root).context("creating restore log directory")?;
         let logs_root = self.logs_root.canonicalize()?;
         let mut active = self.active.lock().unwrap();
-        ensure!(
-            active.len() + targets.len() <= MAX_RESTORES,
-            "five restores are already reserved"
-        );
         ensure!(
             selected.is_disjoint(&active),
             "a selected ECID already has an active restore"
@@ -1087,7 +1084,7 @@ printf 'Status: Restore Finished\n'
         let engine = RestoreEngine::new(program, temp.path().join("logs"));
         let first = engine.start_erase(&ipsw, &[1]).unwrap();
         assert!(engine.start_erase(&ipsw, &[1]).is_err());
-        assert!(engine.start_erase(&ipsw, &[2, 3, 4, 5, 6]).is_err());
+        assert!(engine.start_erase(&ipsw, &[2, 3, 4, 5, 6, 7]).is_err());
         let rest = engine.start_erase(&ipsw, &[2, 3, 4, 5]).unwrap();
         let statuses: Vec<_> = finish(&first).into_iter().chain(finish(&rest)).collect();
         let mut directories = HashSet::new();
