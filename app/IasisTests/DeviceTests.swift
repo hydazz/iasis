@@ -7,7 +7,7 @@ struct DeviceTests {
         var state = try Fixtures.state
         let devices = state.devices
         #expect(devices.map(\.port.number) == [1, 2, 3, 4, 5])
-        #expect(devices.map(\.name) == ["Empty", "MacBook Air (13-inch, M5)", "iPad", "Unidentified Device", "Unidentified Device"])
+        #expect(devices.map(\.name) == ["Empty", "MacBook Air (13-inch, M5)", "iPad", "USB Device", "Attached Device"])
         #expect(devices.map(\.isSelectable) == [false, true, true, true, true])
         #expect(devices[1].symbol == "laptopcomputer")
         #expect(devices[0].symbol == nil)
@@ -21,6 +21,18 @@ struct DeviceTests {
         state.boards[0].ports[0].enabled = false
         #expect(state.devices[0].name == "Off")
         #expect(state.devices[0].isSelectable)
+    }
+
+    @Test func aPeripheralWithNoAppleModeIsAnOrdinaryDevice() throws {
+        var state = try Fixtures.state
+        state.boards[0].ports[0].occupied = true
+        state.boards[0].ports[0].state = "attached"
+        #expect(state.devices[0].name == "Attached Device")
+        state.boards[0].ports[0].state = "connected"
+        #expect(state.devices[0].name == "USB Device")
+        state.boards[0].ports[0].device = "USB JTAG/serial debug unit"
+        #expect(state.devices[0].name == "USB JTAG/serial debug unit")
+        #expect(state.devices[0].activity == .idle)
     }
 
     @Test func aPortSaysWhatItIsDoingInWordsAndOneMark() throws {
@@ -64,7 +76,7 @@ struct DeviceTests {
         let confirmation = try #require(actions.restore)
         #expect(confirmation.title == "Restore 4 Devices?")
         #expect(confirmation.message.contains("Repair Bench, Port 2: MacBook Air (13-inch, M5)"))
-        #expect(confirmation.message.contains("Cart, Port 4: Unidentified Device"))
+        #expect(confirmation.message.contains("Cart, Port 4: USB Device"))
         let targets = [
             RestoreTarget(port: 2, generation: 2, ecid: "001a79d10e6bc01c"),
             RestoreTarget(port: 4, generation: 4),

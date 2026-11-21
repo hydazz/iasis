@@ -34,6 +34,8 @@ A client writes requests and reads replies as JSON, one to a line. A request is 
 
 `board` is the serial as sixteen hexadecimal digits, and ports are numbered 1 to 5. A reply is `"ok"`, `{"error": "…"}` or `{"state": {…}}`. After `watch` the connection carries only states.
 
+To follow a restore or revive, issue `watch` on the connection that received its acceptance. The state's `submitted` array holds one result per target in request order. Each entry is null until the agent has an outcome, including when the board has disappeared from USB. The stream closes after delivering every result.
+
 **A `restore` request erases its targets with no further confirmation.** A client asks its user first. Each entry in `boards` names a `board`, its `session` and its `targets`, copied from the state the operator reviewed. Each target has its `port`, `generation` and the port's `ecid` when it has one. An unidentified target is selected by its physical attachment. The agent checks every board before it asks any: a changed session, attachment or ECID refuses the whole request, and the client confirms again.
 
 On macOS, `iasis --board "Bench A" revive 2` revives the device on port 2 through Apple Configurator in `/Applications`. Select Revive after the host sees the device in DFU or Recovery. Configurator obtains the software and attempts to preserve user data. A socket client copies the ECID as sixteen hexadecimal digits together with the physical attachment and session.
@@ -54,23 +56,23 @@ Each board has its `serial`, `name` (empty for an unnamed board), `session` ID, 
 
 Each port has:
 
-| Field                                | Meaning                                                                                        |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| `generation`, `occupied`             | Current attachment generation and whether the port is occupied                                 |
-| `ecid`                               | The target's ECID as sixteen hexadecimal digits, once read on this attachment, or null         |
-| `device`, `mode`                     | The target's model name, and its Apple mode while it is on USB, each nullable                  |
-| `number`                             | 1 to 5                                                                                         |
-| `light`                              | What the port's light shows: `hue`, `pulse` and `dim`                                          |
-| `state`                              | What the board knows and has asked of the target, as text                                      |
-| `usb`                                | What the agent sees on the port's USB, as text                                                 |
-| `link`, `contract`                   | USB link and power contract, as text                                                           |
-| `contract_mw`, `short`               | The contract's power, and whether the target took the board's largest offer and would use more |
-| `fault`                              | Why the port faulted, in the words the board's display uses, or null                           |
-| `dfu`, `reboot`, `restore`, `revive` | The actions the target would take now                                                          |
-| `enabled`                            | The port is powered                                                                            |
-| `job`                                | The restore phase: `Preparing`, `Running`, `Reported`, `Unconfirmed`, `Failed`                 |
-| `stage`                              | Image download or worker stage with its `name` and optional `percent`, or null                 |
-| `result`                             | Last operation, phase, message, target ECID if known, and `log_directory` if a worker launched |
+| Field                                | Meaning                                                                                         |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `generation`, `occupied`             | Current attachment generation and whether the port is occupied                                  |
+| `ecid`                               | The target's ECID as sixteen hexadecimal digits, once read on this attachment, or null          |
+| `device`, `mode`                     | Model or USB product name, and Apple mode if known, each nullable                               |
+| `number`                             | 1 to 5                                                                                          |
+| `light`                              | What the port's light shows: `hue`, `pulse` and `dim`                                           |
+| `state`                              | What the board knows and has asked of the target, as text                                       |
+| `usb`                                | What the agent sees on the port's USB, as text                                                  |
+| `link`, `contract`                   | USB link and power contract, as text                                                            |
+| `contract_mw`, `short`               | Contract power and whether the target reported a Capability Mismatch on its highest-power offer |
+| `fault`                              | Why the port faulted, in the words the board's display uses, or null                            |
+| `dfu`, `reboot`, `restore`, `revive` | The actions the target would take now                                                           |
+| `enabled`                            | The port is powered                                                                             |
+| `job`                                | The restore phase: `Preparing`, `Running`, `Reported`, `Unconfirmed`, `Failed`                  |
+| `stage`                              | Image download or worker stage with its `name` and optional `percent`, or null                  |
+| `result`                             | Last operation, phase, message, target ECID if known, and `log_directory` if a worker launched  |
 
 The board keeps a target's `ecid` for as long as its attachment lasts, so a Mac that has started up and left USB is still the device on its port, for this agent and the next. A device moved to another connector is identified again there. The agent notes the model of each ECID it identifies in `device-models.json` in its cache directory, one entry per device, so a mode that gives the ECID alone still names the device.
 

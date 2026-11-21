@@ -24,7 +24,7 @@ pub enum Signal {
     Fault,
     Busy,
     Settling,
-    Unidentified,
+    NoPdContract,
     NoDebug,
     NotOffered,
     MultipleTransports,
@@ -45,12 +45,10 @@ impl Signal {
             Self::WaitingPower => {
                 "Target power unavailable. Check the supply and available port budget."
             }
-            Self::Fault => "Port or supply fault. Check the power, cable and controller status.",
+            Self::Fault => "Port or supply fault. See board status.",
             Self::Busy => "A port command is pending.",
             Self::Settling => "Waiting for a stable powered attachment.",
-            Self::Unidentified => {
-                "The device has not negotiated Power Delivery. Check the cable; an unsupported device stays this way."
-            }
+            Self::NoPdContract => "Attached without a PD contract. DFU signalling requires PD.",
             Self::NoDebug => {
                 "The target does not answer Apple debug, so Iasis cannot signal it. Enter DFU on the device itself."
             }
@@ -63,7 +61,7 @@ impl Signal {
             Self::Ambiguous => {
                 "Multiple USB devices, a hub or conflicting identities prevent target selection."
             }
-            Self::DifferentDevice => "The enumerated USB device is not a recognized Apple target.",
+            Self::DifferentDevice => "USB device connected. Apple DFU signalling is unavailable.",
         }
     }
 }
@@ -182,9 +180,9 @@ impl Assessment {
         match (self.signal, self.outcome) {
             (Signal::AlreadyDfu, _)
             | (Signal::Available | Signal::DebugTransport | Signal::PortDfu, Some(_)) => {}
-            (Signal::Fault, _) if let Some(error) = self.port_error => parts.push(format!(
-                "Port fault ({error:?}). Check the supply and cable."
-            )),
+            (Signal::Fault, _) if let Some(error) = self.port_error => {
+                parts.push(format!("Port fault ({error:?})."));
+            }
             _ => parts.push(self.signal.description().into()),
         }
         if let Some(outcome) = self.outcome {
@@ -373,16 +371,16 @@ pub fn assess(
         }
     {
         Signal::Settling
-    } else if !p.identified() {
-        Signal::Unidentified
+    } else if single.is_some() && apple.is_none() {
+        Signal::DifferentDevice
+    } else if p.state != PortState::Contract {
+        Signal::NoPdContract
     } else if p.debug_actions == DebugActions::Pending {
         Signal::Settling
     } else if p.debug_actions == DebugActions::Silent {
         Signal::NoDebug
     } else if !p.offers(action) {
         Signal::NotOffered
-    } else if single.is_some() && apple.is_none() {
-        Signal::DifferentDevice
     } else {
         Signal::Available
     };
@@ -739,6 +737,21 @@ mod tests {
         st.ports[0].error = Some(PortError::HostLimiter);
         assert_eq!(report(&st, &s, None).signal, Signal::Fault);
         assert!(report(&st, &s, None).transport_result.is_none());
+    }
+
+    #[test]
+    fn a_non_pd_peripheral_can_enumerate_without_becoming_a_dfu_target() {
+        let mut st = status();
+        st.ports[0].state = PortState::Ready;
+        st.ports[0].debug_actions = DebugActions::Pending;
+        let mut s = snapshot();
+        assert_eq!(report(&st, &s, None).signal, Signal::NoPdContract);
+
+        let mut device = apple(AppleMode::Normal, 0x1001, None);
+        device.vendor_id = 0x303a;
+        device.apple = None;
+        s.ports[0].devices.push(device);
+        assert_eq!(report(&st, &s, None).signal, Signal::DifferentDevice);
     }
 
     #[test]

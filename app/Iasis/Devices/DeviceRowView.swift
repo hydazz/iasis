@@ -49,7 +49,7 @@ struct PortBadge: View {
     }
 }
 
-/// Shown when a power supply cannot give the target what it asks for.
+/// The target reported a shortfall on the port’s highest-power offer.
 struct PowerMark: View {
     let device: Device
 
@@ -58,8 +58,8 @@ struct PowerMark: View {
             Image(systemName: "bolt.trianglebadge.exclamationmark.fill")
                 .symbolRenderingMode(.multicolor)
                 .foregroundStyle(.yellow)
-                .help("Getting \(watts), less than it asks for")
-                .accessibilityLabel("Low power, \(watts)")
+                .help("PD contract of \(watts). The device reports insufficient power.")
+                .accessibilityLabel("Power contract limited to \(watts)")
         }
     }
 }

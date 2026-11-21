@@ -1,3 +1,5 @@
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use embassy_rp::{
     Peri,
     gpio::{AnyPin, Pin},
@@ -6,6 +8,7 @@ use embassy_rp::{
 use embassy_time::{Duration, Instant};
 
 const PASSWORD: u32 = 0x5afe_0000;
+static HOST_ALLOWED: AtomicBool = AtomicBool::new(false);
 const HANDOFF: u32 = 0x4941_5302;
 const TARGET_ENABLES: [usize; 10] = [3, 39, 38, 37, 34, 35, 29, 31, 26, 27];
 const RETAINED_PINS: [usize; 3] = [22, 30, 32];
@@ -96,7 +99,10 @@ impl Controls {
 
     pub fn host(&mut self, index: usize, enabled: bool) {
         output(TARGET_ENABLES[index * 2], false);
-        output(TARGET_ENABLES[index * 2 + 1], enabled);
+        output(
+            TARGET_ENABLES[index * 2 + 1],
+            enabled && HOST_ALLOWED.load(Ordering::Relaxed),
+        );
     }
 
     pub fn target(&mut self, index: usize, supply: iasis_protocol::Supply) {
@@ -202,8 +208,12 @@ pub fn configure_failure_reset() {
         .write_value(pac::psm::regs::Wdsel(u32::MAX));
 }
 
-/// This can only withdraw host requests; it never changes a pin's owner/mux.
-pub fn host_requests_off() {
+/// Block port tasks from reasserting a request while an I²C operation is pending.
+pub fn allow_host_requests(allowed: bool) -> bool {
+    let previous = HOST_ALLOWED.swap(allowed, Ordering::Relaxed);
+    if allowed || !previous {
+        return previous;
+    }
     pac::SIO
         .gpio_out(0)
         .value_clr()
@@ -212,6 +222,7 @@ pub fn host_requests_off() {
         .gpio_out(1)
         .value_clr()
         .write_value((1 << 3) | (1 << 5) | (1 << 7));
+    previous
 }
 
 pub fn panic_reset() -> ! {

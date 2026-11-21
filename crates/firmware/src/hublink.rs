@@ -53,9 +53,14 @@ async fn configure(bus: &mut Bus, outputs: &mut Outputs) -> Result<(), PortError
     bus.select(Some(CHANNEL)).await?;
     outputs.hub_run(bus, true).await?;
     Timer::after(LISTEN).await;
-    let mut flags = [0];
-    read(bus, hub::RUNTIME_FLAGS, &mut flags).await?;
-    write(bus, hub::RUNTIME_FLAGS, flags[0] | hub::BYPASS_MCU_SUSPEND).await?;
+    for (register, mask) in [
+        (hub::USB2_NON_REMOVABLE, hub::MANAGEMENT_PORT),
+        (hub::RUNTIME_FLAGS, hub::BYPASS_MCU_SUSPEND),
+    ] {
+        let mut flags = [0];
+        read(bus, register, &mut flags).await?;
+        write(bus, register, flags[0] | mask).await?;
+    }
     bus.write(hub::ADDRESS, &hub::ATTACH).await
 }
 

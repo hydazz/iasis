@@ -28,8 +28,12 @@ struct Device: Identifiable, Equatable {
             "Off"
         } else if !port.occupied {
             "Empty"
+        } else if let name = port.device {
+            name
+        } else if !port.link.isEmpty || port.mode != nil || port.state == "connected" {
+            "USB Device"
         } else {
-            port.device ?? "Unidentified Device"
+            "Attached Device"
         }
     }
 
@@ -56,7 +60,7 @@ struct Device: Identifiable, Equatable {
             ("apple tv", "appletv"),
             ("appletv", "appletv"),
         ]
-        return kinds.first { name.hasPrefix($0.0) }?.1 ?? "questionmark.square.dashed"
+        return kinds.first { name.hasPrefix($0.0) }?.1 ?? "cable.connector"
     }
 
     /// The last operation, while its device is still the one on the port.
@@ -79,7 +83,7 @@ struct Device: Identifiable, Equatable {
         case "downloading image": return Activity("Downloading image", .working(nil))
         case "DFU sent": return Activity("Entering DFU", .working(nil))
         case "reboot sent": return Activity("Restarting", .working(nil))
-        case "identifying": return Activity("Identifying", .working(nil))
+        case "checking actions": return Activity("Checking actions", .working(nil))
         case "attaching": return Activity("Connecting", .working(nil))
         case "DFU unverified": return Activity("DFU not confirmed", .uncertain)
         case "wrong port": return Activity("Not a DFU port", .caution)
@@ -98,7 +102,7 @@ struct Device: Identifiable, Equatable {
         switch port.mode {
         case "dfu", "kis_dfu": return Activity("DFU", .none)
         case "recovery": return Activity("Recovery", .none)
-        default: return port.state == "charging" ? Activity("Charging only", .none) : .idle
+        default: return .idle
         }
     }
 
