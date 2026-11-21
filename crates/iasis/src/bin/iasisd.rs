@@ -16,9 +16,10 @@ struct Arguments {
     /// Attend one board instead of every board
     #[arg(long, value_parser = parse_serial)]
     serial: Option<u64>,
-    /// idevicerestore executable
-    #[arg(long, default_value = "idevicerestore")]
-    program: PathBuf,
+    /// Restore with this idevicerestore instead of the host's engine, which
+    /// is Apple Configurator where it is installed
+    #[arg(long)]
+    idevicerestore: Option<PathBuf>,
     /// Per-device worker logs and scratch directories; the cache directory
     /// by default
     #[arg(long)]
@@ -31,7 +32,7 @@ fn main() -> Result<()> {
     let arguments = Arguments::parse();
     let options = Options {
         serial: arguments.serial,
-        program: arguments.program,
+        idevicerestore: arguments.idevicerestore,
         logs: arguments.logs,
         family: arguments.device,
     };
