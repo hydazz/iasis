@@ -18,7 +18,7 @@ use core::{
 };
 
 use embassy_executor::Spawner;
-use embassy_futures::join::{join_array, join4};
+use embassy_futures::join::{join_array, join5};
 use embassy_rp::{
     adc::{self, Adc, Channel},
     bind_interrupts, dma,
@@ -32,6 +32,7 @@ use embassy_rp::{
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Instant, Timer};
 use embassy_usb::{Builder, Config};
+use iasis_pd::power::{HostLimit, host_limit};
 use iasis_protocol::{self as protocol, Info, PortFaults, Status, Supply};
 
 include!(concat!(env!("OUT_DIR"), "/config.rs"));
@@ -182,6 +183,7 @@ async fn main(_spawner: Spawner) {
     config.device_protocol = 0;
     config.composite_with_iads = false;
     config.self_powered = true;
+    config.max_power = 0;
     let mut configuration = [0; 128];
     let mut bos = [0; 64];
     let mut msos = [0; 64];
@@ -219,23 +221,37 @@ async fn main(_spawner: Spawner) {
         ports.run(&io, index - 1, int)
     }));
 
-    let host_deadline = Cell::new(0u64);
-    let host_tripped = Cell::new(false);
+    let upstream = Cell::new(upstream::Reading::default());
+    let programmed = Cell::new(None::<HostLimit>);
+    let legacy_ma = || {
+        if configured.get() && !suspended.get() {
+            host_budget.get()
+        } else {
+            0
+        }
+    };
     let guard = async {
+        let mut deadline = 0;
         loop {
-            let deadline = host_deadline.get();
-            if deadline != 0 && Instant::now().as_millis() >= deadline {
-                board::host_requests_off();
-                host_tripped.set(true);
+            let now = Instant::now().as_millis();
+            if let Some(tier) = programmed.get() {
+                if !upstream
+                    .get()
+                    .advertisement
+                    .check_limit(now, legacy_ma(), tier, &mut deadline)
+                    && board::allow_host_requests(false)
+                {
+                    ports.host_fault(protocol::PortError::HostAllowanceExpired);
+                }
+            } else {
+                deadline = 0;
             }
-            Timer::after_millis(5).await;
+            Timer::after_millis(2).await;
         }
     };
     let sample = async {
         let mut sequence = 0u32;
         let mut metadata_due = 0;
-        let mut upstream_due = 0;
-        let mut upstream = upstream::Upstream::default();
         let mut button = iasis_firmware::button::Button::default();
         let mut panel_due = 0;
         let mut last_led_frame = None;
@@ -276,15 +292,6 @@ async fn main(_spawner: Spawner) {
 
             let mut guard = io.lock().await;
             let board = &mut *guard;
-            if Instant::now().as_millis() >= upstream_due {
-                if let Ok(outputs) = &mut board.outputs {
-                    upstream.sample(&mut board.bus, outputs, &mut next).await;
-                }
-                upstream_due = Instant::now().as_millis() + 10;
-                if host_deadline.get() != 0 {
-                    host_deadline.set(upstream.allowance_deadline().max(1));
-                }
-            }
             if Instant::now().as_millis() >= metadata_due {
                 board.bus.sample(&mut next).await;
                 metadata_due = Instant::now().as_millis() + 50;
@@ -299,11 +306,16 @@ async fn main(_spawner: Spawner) {
                 next.ch224_status,
                 next.bus_voltage_adc,
             );
-            next.host_allowance_ma = iasis_pd::power::host_allowance(
-                upstream.cc_level(),
-                configured.get() && !suspended.get(),
-                host_budget.get(),
-            );
+            let physical = upstream.get();
+            next.upstream_cc = physical.cc;
+            next.upstream_orientation = physical.orientation;
+            next.upstream_error = physical.error;
+            let allowance = || {
+                physical
+                    .advertisement
+                    .allowance(Instant::now().as_millis(), legacy_ma())
+            };
+            next.host_allowance_ma = allowance();
             let side_power = board.controls.side_power_enabled();
             let qualified_mv = board.bus.brick_voltage_mv(&next);
             let host_tier = iasis_pd::power::presence_limit(
@@ -350,6 +362,18 @@ async fn main(_spawner: Spawner) {
                     board.controls.charge(index, false);
                 }
             }
+            // During a latch write either the old or the new tier can be live.
+            if let Some(new) = host_tier {
+                if programmed
+                    .get()
+                    .is_none_or(|old| old.upper_ma < new.upper_ma)
+                {
+                    programmed.set(Some(new));
+                }
+            } else {
+                board::allow_host_requests(false);
+                programmed.set(None);
+            }
             if let Ok(outputs) = &mut board.outputs
                 && outputs
                     .power_policy(&mut board.bus, &mut board.controls, next.supply, host_tier)
@@ -358,6 +382,16 @@ async fn main(_spawner: Spawner) {
             {
                 next.supply = Supply::Off;
             }
+            let host_tier = host_tier.filter(|tier| {
+                next.supply == Supply::HostPresence
+                    && host_limit(allowance())
+                        .is_some_and(|allowed| tier.upper_ma <= allowed.upper_ma)
+            });
+            if next.supply == Supply::HostPresence && host_tier.is_none() {
+                next.supply = Supply::Off;
+            }
+            programmed.set(host_tier);
+            board::allow_host_requests(host_tier.is_some());
             next.i2c_root_fault |= board.bus.faulted();
             next.side_power_enabled = side_power;
             next.shift_outputs_enabled = board.controls.shift_outputs_enabled();
@@ -369,11 +403,6 @@ async fn main(_spawner: Spawner) {
                 Supply::Brick => brick_ports,
             };
             next.host_limit_ma = host_tier.map_or(0, |tier| tier.upper_ma);
-            host_deadline.set(if host_tier.is_some() {
-                upstream.allowance_deadline().max(1)
-            } else {
-                0
-            });
             let demands = ports.demands();
             let budgets = match next.supply {
                 Supply::Brick => iasis_pd::power::allocate(next.charging_budget_mw, demands),
@@ -381,9 +410,6 @@ async fn main(_spawner: Spawner) {
                 Supply::Off => [0; protocol::PORT_COUNT],
             };
             ports.grant(next.supply, budgets, qualified_mv.unwrap_or(0) as u16);
-            if host_tripped.replace(false) {
-                ports.host_fault(protocol::PortError::HostAllowanceExpired);
-            }
             if host_limiter_fault {
                 ports.host_fault(protocol::PortError::HostLimiter);
             }
@@ -457,7 +483,14 @@ async fn main(_spawner: Spawner) {
             Timer::after_millis(2).await;
         }
     };
-    join4(usb.run(), sample, guard, port_tasks).await;
+    join5(
+        guard,
+        upstream::run(&io, &upstream),
+        usb.run(),
+        sample,
+        port_tasks,
+    )
+    .await;
 }
 
 #[panic_handler]

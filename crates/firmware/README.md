@@ -28,44 +28,44 @@ Development USB IDs are `1209:0001`. Set `IASIS_USB_VID` and `IASIS_USB_PID` as 
 
 ## Port power
 
-Ports start enabled and reserve power only while attached. Disabling a port removes Rp and discharges VBUS. Targets negotiate fixed supplies over USB PD revision 2.0.
+Ports start enabled and reserve power only while attached. Disabling a port removes Rp and discharges VBUS. PD-capable targets negotiate fixed supplies over USB PD revision 2.0.
 
 A port whose voltage or negotiation fails switches its output off, discharges VBUS and attaches again. Three failures within 30 seconds, or a protection trip, hold the port off until the target is unplugged or the port is enabled again.
 
 | Supply path     | Target offer                                | Budget                                                                                      |
 | --------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Host presence   | Fixed 5 V / 0 mA PDO                        | 800 mA reserved for Iasis; remaining current selects the aggregate limit below              |
+| Host presence   | Fixed 5 V / 0 mA PDO                        | 800 mA reserved for Iasis; remaining current selects the shared trip threshold below        |
 | Charging supply | Fixed 5, 9, 15 or 20 V, up to 3 A per cable | 80% of qualified input power, less 3.5 W for logic and 35 W when the CM5 carrier is powered |
 
-The host path supports attachment and signalling with charged targets. Its current limit is shared across ports; the 0 mA PDO does not prevent pre-contract draw.
+With host USB alone, charged Apple targets use 5 V for attachment and PD signalling. The 0 mA offer specifies the charging allowance. The port ADC measures connector voltage only. Ordinary USB peripherals draw their operating current from the same 5 V supply. Each port has a nominal 0.51 A current limit. Component tolerance can put the trip point below 500 mA. All five also share a limiter whose upper trip threshold is shown below.
 
-| Upstream allowance | Aggregate target allowance |
-| ------------------ | -------------------------- |
-| 900 mA             | Off                        |
-| 1200 mA            | 170 mA                     |
-| 1500 mA            | 550 mA                     |
-| 3000 mA            | 1890 mA                    |
+| Upstream allowance | Shared limiter threshold (max) |
+| ------------------ | ------------------------------ |
+| 900 mA             | Off                            |
+| 1200 mA            | 170 mA                         |
+| 1500 mA            | 550 mA                         |
+| 3000 mA            | 1890 mA                        |
 
-Native USB-C Rp supplies the allowance. On legacy A-to-C connections, `host-budget <mA>` declares the remaining allowance including Iasis, up to 1600 mA. It clears on USB reset and never overrides native Rp.
+On a native USB-C connection, the current advertised on CC sets the allowance even while the host reconnects to the management interface. On legacy A-to-C connections, `host-budget <mA>` declares the remaining allowance including Iasis, up to 1600 mA. It clears on USB reset and never overrides native Rp.
 
 On the charging input, Iasis requests the highest-power fixed profile it supports, up to 20 V. The host USB port stays at 5 V.
 
 Ports start at 5 V and share the charging budget as targets connect and disconnect. Each target chooses from the profiles its port offers. A port adds 9, 15 and 20 V as its share grows: each appears once it can deliver at least the power of the voltage below it at 3 A. A port waits if the supply cannot cover its starting allowance. During a restore, Iasis keeps the target at its negotiated voltage while power is available.
 
-Leave the power supply connected throughout a restore. Changing the input can interrupt USB to the targets while the controller stays online.
+Changing the charging input can interrupt USB to all targets while the board stays online. Leave the supply connected or disconnected for the duration of a restore.
 
 ## Controls and status
 
 `iasis status --watch` shows the board temperature near the port 1 and 2 output switches (TH1191, sensor A) and the shared core regulator (TH1192, sensor B). On macOS it can run during a restore. Use the raw ADC counts in `status --json` for calibration.
 
-The [button and CLI controls](../../README.md#use) operate on ready ports. A target is identified by its Power Delivery contract. Once the contract has settled, Iasis asks the target which Apple debug actions its port offers, and sends DFU or reboot only where the target lists them. DFU also needs the port to list DFU USB, which a Mac does on its [DFU port](https://support.apple.com/en-us/120694) alone: told to enter DFU from another port, some Macs restart into DFU where no host can reach them. Those ports still take reboot. A target that lists neither still charges and can be restored once it is in DFU by other means; a USB-C to Lightning cable does not carry Apple debug. `iasis status` prints each port's list. DFU supports Apple Silicon and T2; the button selects Apple Silicon. Commands use the attachment generation to reject requests for a device that has since disconnected.
+The [button and CLI controls](../../README.md#use) operate on ready ports. USB peripherals can use the data link without negotiating Power Delivery. Once a PD contract has settled, Iasis asks the target which Apple debug actions its port offers, and sends DFU or reboot only where the target lists them. DFU also needs the port to list DFU USB, which a Mac does on its [DFU port](https://support.apple.com/en-us/120694) alone: told to enter DFU from another port, some Macs restart into DFU where no host can reach them. Those ports still take reboot. A target that lists neither still charges and can be restored once it is in DFU by other means; a USB-C to Lightning cable does not carry Apple debug. `iasis status` prints each port's list. DFU supports Apple Silicon and T2; the button selects Apple Silicon. Commands use the attachment generation to reject requests for a device that has since disconnected.
 
 A colour is what the port holds, a pulse is work under way or a result awaited, and brightness is the selection.
 
 | Port light      | Meaning                                                      |
 | --------------- | ------------------------------------------------------------ |
 | Off             | Empty or disabled target port                                |
-| Green           | Identified target, or restore complete                       |
+| Green           | Device with a PD contract, or restore complete               |
 | White           | Powered device without a PD contract; dim while one attaches |
 | Blue, steady    | A host sees the target in DFU or recovery                    |
 | Blue, pulsing   | DFU sent; no host has seen the result                        |
@@ -80,21 +80,23 @@ A fault keeps full brightness whatever is selected. While the button is held, th
 
 `iasis --board "Bench A" brightness 35` sets all six lights on Bench A to 35 percent. The range is 10 to 100 percent, with a factory setting of 50. Each board keeps its name and brightness through restarts and firmware updates. Its name appears in the OLED title bar.
 
-Iasis cannot tell a target in DFU from a running one: the target looks the same on its power pins either way. Only a host sees the USB mode, so blue turns steady when [`iasisd`](../../README.md#host-agent) or a restore command reports DFU on that port, and the report is forgotten three seconds after the host stops. Without a host a sent DFU keeps pulsing until the target is unplugged or restarted. With one, a DFU not seen within 15 seconds gives way to the mode the host does see. Green means an identified target, not a started one.
+Iasis cannot tell a target in DFU from a running one: the target looks the same on its power pins either way. Only a host sees the USB mode, so blue turns steady when [`iasisd`](../../README.md#host-agent) or a restore command reports DFU on that port, and the report is forgotten three seconds after the host stops. Without a host a sent DFU keeps pulsing until the target is unplugged or restarted. With one, a DFU not seen within 15 seconds gives way to the mode the host does see. A green light alone gives no information about the target's USB mode.
 
-| Status light    | Meaning                                              |
-| --------------- | ---------------------------------------------------- |
-| Green           | A host is attached                                   |
-| White           | No host; the button still sends DFU and Reboot       |
-| Blue            | Releasing the button sends DFU                       |
-| Amber           | Releasing sends Reboot                               |
-| Purple          | Releasing asks the host for a restore                |
-| Blinking purple | Erase armed. Hold until confirmed, or tap to cancel. |
-| Red             | Board fault; targets are off                         |
+| Status light    | Meaning                                                     |
+| --------------- | ----------------------------------------------------------- |
+| Green           | A host is attached                                          |
+| White           | No host; the button still sends DFU and Reboot              |
+| Blue            | Releasing the button sends DFU                              |
+| Amber           | Releasing sends Reboot                                      |
+| Purple          | Releasing asks the host for a restore                       |
+| Blinking purple | Erase armed. Hold until confirmed, or tap to cancel.        |
+| Red             | Shared power protection or root I²C fault. Targets are off. |
 
 Some cables, including USB-C to Lightning, can keep the port green after the device is unplugged. Use `iasis ports` to list devices on the host.
 
 At the Erase prompt, hold for three seconds to start the restore. You can keep holding once it starts. Letting go earlier cancels.
+
+The status LED can briefly turn red when the charging supply is unplugged. Its input protector signals while the voltage falls.
 
 A restore or revive failure reported by the host lights that port red at full brightness. The OLED labels it `FAIL` and shows `Install failed` when the port is selected. The result belongs to the current USB-C attachment. A detach clears it, including one caused by restarting the target. A manual Configurator restore needs a host process to relay its result to the board.
 
@@ -106,16 +108,18 @@ Connect an [Adafruit 938](https://www.adafruit.com/product/938) to the display I
 
 A port reads `DFU` or `REC` while the host sees it in DFU or recovery, `DFU?` for a DFU sent and not yet seen, `BOOT` after a reboot is sent, and `IMG` with a percentage while the host fetches its restore image.
 
-| Selection | Lower area                                                                                               |
-| --------- | -------------------------------------------------------------------------------------------------------- |
-| All       | Voltage measured at each occupied connector, then the input voltage and contract watts out of the supply |
-| One port  | Voltage measured at its connector and its USB link, then its contract                                    |
+| Selection | Lower area                                                                                             |
+| --------- | ------------------------------------------------------------------------------------------------------ |
+| All       | Voltage measured at each occupied connector. With a brick, input voltage and reserved/available watts. |
+| One port  | Voltage measured at its connector and its USB link, then its contract                                  |
 
 A target with a USB link shows `USB2` or `USB3` after its voltage, as the hub reports the port. A target in DFU holds USB 2 whatever its cable carries. Without a link nothing is shown, which a cable without data lines and a device that has not enumerated both look like.
 
-A contract is the most a target may draw, not what it draws: `9V 3A (27W)` reserves 27 W of the supply whether or not the target uses it, and `50/68W` totals those reservations against the watts available. Iasis measures voltage, not current. On host power the All view shows the host allowance and the shared target limit. Holding the button lists the actions the selected targets take and highlights the one a release will send. A fault, restore progress or button feedback replaces the readings.
+A contract is the most a target may draw, not what it draws: `9V 3A (27W)` reserves 27 W of the supply whether or not the target uses it, and `50/68W` totals those reservations against the watts available. Iasis measures voltage, not current. Holding the button lists the actions the selected targets take and highlights the one a release will send. A fault, restore progress or button feedback replaces the readings.
 
-`RDY` means ready for signalling. `CHG` marks a target that charges and lists neither DFU nor reboot. `PORT` marks a target on a port without DFU USB, as a Mac's ports other than its DFU port are; selecting it shows `Wrong port?`. `?` marks a powered device without a PD contract, which usually means a charge-only cable or an unsupported device. During an Iasis restore, three cycling dots mark a port waiting for stage progress. The bar under each port fills with the current stage and can start over at the next stage. Select a port to read its stage percentage. `DONE` means the worker reported completion. `UNKN` means the outcome is unknown. Restores started separately in Finder or Apple Configurator show progress on the host.
+`ATCH` means a powered USB-C attachment. `USB` means the hub has a data link or the host sees a USB device. `PD` indicates a power contract. `RDY` means the device offers Apple signalling. `PORT` identifies an Apple debug port without DFU USB. Select it to see `Wrong port?`.
+
+During an Iasis restore, three cycling dots mark a port waiting for stage progress. The bar under each port fills with the current stage and can start over at the next stage. Select a port to read its stage percentage. `DONE` means the worker reported completion. `UNKN` means the outcome is unknown. Restores started separately in Finder or Apple Configurator show progress on the host.
 
 The display is optional and works with an external restore host or the CM5. It uses mux channel 7 at `0x3d`, or `0x3c` with the address jumper changed. A bus timeout quarantines channel 7, which also carries the charging-input controller, until reboot.
 

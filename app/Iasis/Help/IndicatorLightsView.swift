@@ -23,7 +23,7 @@ struct IndicatorLightsView: View {
                 case .ports:
                     light(nil, "Off", "Empty or turned off")
                     light(.white, "White", "No power contract. Dim while connecting.")
-                    light(.green, "Green", "Device identified or restore complete")
+                    light(.green, "Green", "Device has a power contract or restore complete")
                     light(.blue, "Blue", "Host sees DFU or Recovery")
                     light(.blue, "Pulsing blue", "DFU requested, waiting for the host", .pulse)
                     light(.orange, "Amber", "Waiting for power")
@@ -38,7 +38,7 @@ struct IndicatorLightsView: View {
                     light(.orange, "Amber", "Release the button to restart")
                     light(.purple, "Purple", "Release the button to request a restore")
                     light(.purple, "Blinking purple", "Hold to confirm erasing or tap to cancel.", .blink)
-                    light(.red, "Red", "Board fault. Target ports are off.")
+                    light(.red, "Red", "Shared power protection or I²C fault. The target ports are off. This can flash briefly when the charging supply is unplugged.")
                 }
             }
             if panel == .ports {
