@@ -38,8 +38,7 @@ pub struct PortView {
     pub contract: String,
     /// The contract's power, in milliwatts.
     pub contract_mw: Option<u32>,
-    /// On a power supply, the target took the largest offer the board could
-    /// make and would use more.
+    /// The target reported a Capability Mismatch on a highest-power charging offer.
     pub short: bool,
     /// Why the port faulted, in the board's words.
     pub fault: Option<String>,
@@ -141,10 +140,8 @@ impl BoardView {
                     status.brick_requested_mv / 1000,
                     status.charging_budget_mw / 1000
                 ),
-                Supply::HostPresence => {
-                    format!("host power, {} mA for targets", status.host_limit_ma)
-                }
-                Supply::Off => "targets off".into(),
+                Supply::HostPresence => "host power".into(),
+                Supply::Off => "port power off".into(),
             },
             pool: (status.supply == Supply::Brick).then(|| Pool {
                 budget_mw: status.charging_budget_mw,
@@ -240,6 +237,11 @@ impl BoardView {
             if !agreed {
                 row.mode = None;
                 row.usb.clear();
+                let current = PortStatus {
+                    observed: None,
+                    ..*slot
+                };
+                row.state = port_state(&current, status.uptime_ms).0.into();
             }
             let live = dfu::direct_device(snapshot, port).filter(|_| agreed);
             row.device = slot
@@ -362,16 +364,19 @@ fn port_state(port: &PortStatus, uptime_ms: u64) -> (&'static str, Option<Progre
         }
     } else {
         match port.state {
-            PortState::Contract if port.debug_actions == DebugActions::Pending => "identifying",
             PortState::Contract if port.wrong_port() => "wrong port",
             PortState::Contract
-                if !port.offers(PortAction::DfuAppleSilicon)
-                    && !port.offers(PortAction::Reboot) =>
+                if port.offers(PortAction::DfuAppleSilicon) || port.offers(PortAction::Reboot) =>
             {
-                "charging"
+                "ready"
             }
-            PortState::Contract => "ready",
-            PortState::Ready if !port.pd_transition => "unknown device",
+            PortState::Ready if port.pd_transition => "attaching",
+            PortState::Ready | PortState::Contract if port.usb_connected() => "connected",
+            PortState::Contract if port.debug_actions == DebugActions::Pending => {
+                "checking actions"
+            }
+            PortState::Contract => "PD contract",
+            PortState::Ready => "attached",
             PortState::WaitingPower => "waiting for power",
             _ => "attaching",
         }
@@ -396,8 +401,8 @@ pub fn port_usb(port: &PortStatus) -> String {
         return String::new();
     };
     let mode = match seen.usb {
-        Usb::Absent => "no USB",
-        Usb::Other => "other USB device",
+        Usb::Absent => "not enumerated",
+        Usb::Other => "USB device",
         Usb::Ambiguous => "several USB devices",
         Usb::Apple(mode) => match mode {
             AppleMode::Dfu => "DFU",
@@ -435,6 +440,25 @@ fn port_contract(port: &PortStatus) -> String {
 mod stage_tests {
     use super::*;
     use iasis_protocol::RestoreStatus;
+
+    #[test]
+    fn a_usb_peripheral_needs_no_pd_contract() {
+        use iasis_protocol::Observed;
+        let mut port = PortStatus {
+            state: PortState::Ready,
+            ..PortStatus::default()
+        };
+        assert_eq!(port_state(&port, 0).0, "attached");
+        port.link = Some(Link::Usb2);
+        assert_eq!(port_state(&port, 0).0, "connected");
+        port.link = None;
+        port.observed = Some(Observed {
+            usb: Usb::Other,
+            ecid: None,
+        });
+        assert_eq!(port_state(&port, 0).0, "connected");
+        assert_eq!(port_usb(&port), "USB device");
+    }
 
     #[test]
     fn image_progress_changes_within_one_port_state() {
