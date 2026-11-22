@@ -17,10 +17,6 @@ struct Arguments {
     /// Attend one board instead of every board
     #[arg(long, value_parser = parse_serial)]
     serial: Option<u64>,
-    /// Restore with this idevicerestore instead of the host's engine, which
-    /// is Apple Configurator where it is installed
-    #[arg(long)]
-    idevicerestore: Option<PathBuf>,
     /// Per-device worker logs and scratch directories; the cache directory
     /// by default
     #[arg(long)]
@@ -30,10 +26,10 @@ struct Arguments {
 }
 
 fn main() -> Result<()> {
+    iasis::native::run_if_worker();
     let arguments = Arguments::parse();
     let options = Options {
         serial: arguments.serial,
-        idevicerestore: arguments.idevicerestore,
         logs: arguments.logs,
         family: arguments.device,
     };

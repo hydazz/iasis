@@ -32,3 +32,7 @@ system-configuration = "0.8"
 nix = { version = "0.32", features = ["fs", "net", "poll", "resource"] }
 pcap = "2.5"
 pktkit = { version = "=0.1.12", features = ["dhcp", "l2adapter", "slirp"] }
+restorekit.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+restorekit-sys.workspace = true

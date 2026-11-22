@@ -54,10 +54,7 @@ pub fn update(
     job: &RestoreStatus,
     identity: &Result<Observation, &topology::Error>,
 ) {
-    let stage = job
-        .progress
-        .as_ref()
-        .filter(|_| job.state == RestoreState::Running);
+    let stage = (job.state == RestoreState::Running).then_some(&job.progress);
     let status = stage
         .map(ToString::to_string)
         .unwrap_or_else(|| state_name(job.state, job.operation).into());
@@ -72,7 +69,7 @@ pub fn update(
         Err(err) => format!("USB discovery failed: {err}"),
     };
     let mut message = format!("{status}  {connection}");
-    if !job.message.is_empty() {
+    if stage.is_none() && !job.message.is_empty() {
         write!(message, "  {}", job.message).unwrap();
     }
     if job.state.is_terminal() {
@@ -87,7 +84,7 @@ pub fn update(
     } else if job.state.is_terminal() {
         row.disable_steady_tick();
         row.set_style(ProgressStyle::with_template("{prefix:.bold}  {wide_msg}").unwrap());
-    } else if let Some(percent) = stage.and_then(|stage| stage.percent) {
+    } else if let Some(percent) = stage.map(|stage| stage.percent) {
         if row.length().is_none() {
             row.disable_steady_tick();
             row.set_style(

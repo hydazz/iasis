@@ -7,6 +7,7 @@ pub mod home;
 pub mod host;
 pub mod identity;
 pub mod images;
+pub mod native;
 pub mod progress;
 pub mod restore;
 pub mod sharing;

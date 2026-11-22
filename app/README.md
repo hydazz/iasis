@@ -16,14 +16,14 @@ The bolt shows USB power. The cable marks a live USB link. A highlighted tip ind
 
 Select rows and use the toolbar, the Device menu or a row's context menu:
 
-| Action    | Applies to                                                                                 |
-| --------- | ------------------------------------------------------------------------------------------ |
-| Enter DFU | Each selected device that can be signalled                                                 |
-| Restart   | Each selected device that can be signalled                                                 |
-| Revive    | One device in DFU or Recovery. Apple Configurator reinstalls the system and keeps the data |
-| Restore   | Every selected device, on any number of boards. Asks first, then erases them               |
+| Action    | Applies to                                                                            |
+| --------- | ------------------------------------------------------------------------------------- |
+| Enter DFU | Each selected device that can be signalled                                            |
+| Restart   | Each selected device that can be signalled                                            |
+| Revive    | Every selected device, on any number of boards. Repairs the system and keeps the data |
+| Restore   | Every selected device, on any number of boards. Asks first, then erases them          |
 
-Restore is unavailable while any selected device cannot be restored. A Mac whose DFU is on Apple Debug USB needs Apple Configurator on this Mac.
+Restore is unavailable while any selected device cannot be restored.
 
 A board on a power supply shows, beside its name, the power allocated to its ports out of the available charging budget. A bolt with a warning marks a device that took the largest offer the board could make and would use more: with several devices sharing a supply, one with a flat battery may get too little to start.
 
@@ -67,6 +67,6 @@ The package installs:
 | `/Library/LaunchAgents/com.hydaz.Iasis.plist`       | Starts the app in the menu bar at login       |
 | `/usr/local/bin/iasis`                              | A link to the `iasis` command inside the app  |
 
-The installer starts both for the user at the console; other users get them at their next login. Restores need Apple Configurator or [idevicerestore](../README.md#restore), which the agent looks for in Homebrew's and the system's directories.
+The installer starts both for the user at the console; other users get them at their next login.
 
 The app communicates with `iasisd` over the [agent socket](../crates/iasis/README.md).

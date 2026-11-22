@@ -17,6 +17,11 @@ use iasis_protocol::AppleMode;
 use crate::identity::models::DeviceModel;
 use serde::{Deserialize, Serialize};
 
+mod integrity;
+use integrity::{FileStamp, Integrity};
+mod progress;
+pub use progress::Progress;
+
 pub const MAX_RESTORES: usize = 5;
 
 /// Checked local archive. Apple authorizes the restore when the engine
@@ -26,6 +31,7 @@ pub struct PreparedIpsw {
     path: PathBuf,
     bytes: u64,
     modified: SystemTime,
+    integrity: Integrity,
     pub product_version: String,
     pub build_version: String,
     pub product_types: Vec<String>,
@@ -37,21 +43,32 @@ impl PreparedIpsw {
     /// Read every ZIP member to verify its CRC before any device is touched.
     /// The archive stays in place and can be read by all five workers.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        Self::read(path.as_ref(), true)
+        let before_read = SystemTime::now();
+        let (mut ipsw, members) = Self::read(path.as_ref(), true)?;
+        // Someone else owns the file. A write in the same clock tick as its
+        // stamp would not show, so the content is checked again before use.
+        if !ipsw.integrity.stamp.settled_at(before_read) {
+            ipsw.integrity.proof = Some(members);
+        }
+        Ok(ipsw)
     }
 
-    /// Describe an archive whose bytes have already been checked against
-    /// their published digest.
-    pub fn open_verified(path: impl AsRef<Path>) -> Result<Self> {
-        Self::read(path.as_ref(), false)
+    /// Describe an archive the image store wrote and checked. The store is
+    /// its only writer, so its file stamp stands for that content.
+    pub(crate) fn open_stored(path: &Path) -> Result<Self> {
+        Ok(Self::read(path, false)?.0)
     }
 
-    fn read(path: &Path, check_members: bool) -> Result<Self> {
+    /// The archive and a digest of its member names, sizes and CRCs.
+    fn read(path: &Path, check_members: bool) -> Result<(Self, [u8; 32])> {
+        use sha2::{Digest, Sha256};
         let path = path.canonicalize().context("opening IPSW path")?;
         let file = File::open(&path).context("opening IPSW")?;
         let metadata = file.metadata()?;
         ensure!(metadata.is_file(), "IPSW must be a regular file");
         let modified = metadata.modified()?;
+        let stamp = FileStamp::read(&metadata)?;
+        let mut members = Sha256::new();
         let mut archive = zip::ZipArchive::new(file).context("reading IPSW ZIP directory")?;
         let mut manifest = None;
         let mut names = HashSet::new();
@@ -61,6 +78,10 @@ impl PreparedIpsw {
                 .name()
                 .context("reading IPSW member name")?
                 .into_owned();
+            members.update((name.len() as u64).to_le_bytes());
+            members.update(name.as_bytes());
+            members.update(entry.size().to_le_bytes());
+            members.update(entry.crc32().to_le_bytes());
             ensure!(names.insert(name.clone()), "duplicate IPSW member: {name}");
             if name == "BuildManifest.plist" {
                 let mut bytes = Vec::new();
@@ -134,17 +155,19 @@ impl PreparedIpsw {
                 erase_hardware.insert((id("ApChipID")?, id("ApBoardID")?));
             }
         }
+        let members: [u8; 32] = members.finalize().into();
         let prepared = Self {
             path,
             bytes: metadata.len(),
             modified,
+            integrity: Integrity::new(stamp),
             product_version: string("ProductVersion")?,
             build_version: string("ProductBuildVersion")?,
             product_types,
             erase_hardware,
         };
-        prepared.check_unchanged()?;
-        Ok(prepared)
+        prepared.check_stamp()?;
+        Ok((prepared, members))
     }
 
     pub fn path(&self) -> &Path {
@@ -160,7 +183,7 @@ impl PreparedIpsw {
     }
 
     /// Whether the archive restores this model: by the chip and board a DFU
-    /// descriptor gives, or else by the product type Configurator reads.
+    /// descriptor gives, or else by its product type.
     pub(crate) fn restores(&self, model: &DeviceModel) -> bool {
         match (model.hardware(), model.identifier()) {
             (Some((chip, board)), _) => self.erases(chip, board),
@@ -180,11 +203,21 @@ impl PreparedIpsw {
     }
 
     pub fn check_unchanged(&self) -> Result<()> {
+        self.check_at(SystemTime::now)
+    }
+
+    fn check_at(&self, now: impl FnOnce() -> SystemTime) -> Result<()> {
+        self.integrity.verify(self, now)
+    }
+
+    fn check_stamp(&self) -> Result<()> {
         let metadata = fs::metadata(&self.path).context("checking prepared IPSW")?;
+        let stamp = FileStamp::read(&metadata)?;
         ensure!(
             metadata.is_file()
                 && metadata.len() == self.bytes
-                && metadata.modified()? == self.modified,
+                && metadata.modified()? == self.modified
+                && self.integrity.stamp == stamp,
             "IPSW changed after preparation; prepare it again"
         );
         Ok(())
@@ -278,30 +311,13 @@ impl RestoreState {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Progress {
-    pub name: String,
-    /// Percentage within this stage, when the worker supplies one.
-    pub percent: Option<u8>,
-}
-
-impl std::fmt::Display for Progress {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.name)?;
-        if let Some(percent) = self.percent {
-            write!(f, " {percent}%")?;
-        }
-        Ok(())
-    }
-}
-
 #[derive(Clone, Debug, Serialize)]
 pub struct RestoreStatus {
     pub operation: Operation,
     pub ecid: u64,
     pub state: RestoreState,
     pub pid: Option<u32>,
-    pub progress: Option<Progress>,
+    pub progress: Progress,
     pub message: String,
     pub exit_code: Option<i32>,
     pub directory: PathBuf,
@@ -314,153 +330,39 @@ pub enum Operation {
     Revive,
 }
 
-enum Worker<'a> {
-    Erase(&'a PreparedIpsw, AppleMode),
-    Revive(&'a Path),
-}
-
-/// Apple Configurator supplies both DFU identity and data-preserving revive on macOS.
-pub fn configurator() -> Option<&'static Path> {
-    let path = Path::new("/Applications/Apple Configurator.app/Contents/MacOS/cfgutil");
-    (cfg!(target_os = "macos") && path.is_file()).then_some(path)
-}
-
-/// A program that erases and restores targets. A target's USB mode decides
-/// which of the host's programs can take it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum Eraser {
-    /// idevicerestore, on every host: targets in ordinary DFU.
-    Idevicerestore(PathBuf),
-    /// Apple Configurator's `cfgutil`, on a Mac that has it: targets in DFU
-    /// over ordinary USB or Apple Debug USB.
-    Configurator(PathBuf),
-}
-
-impl Eraser {
-    fn name(&self) -> &'static str {
-        match self {
-            Self::Idevicerestore(_) => "idevicerestore",
-            Self::Configurator(_) => "Apple Configurator",
-        }
-    }
-
-    fn restores(&self, mode: AppleMode) -> bool {
-        match self {
-            Self::Idevicerestore(_) => mode == AppleMode::Dfu,
-            Self::Configurator(_) => matches!(mode, AppleMode::Dfu | AppleMode::KisDfu),
-        }
-    }
-
-    /// Check that the program can run, without opening or changing a target.
-    fn check(&self) -> Result<()> {
-        let program = match self {
-            Self::Configurator(program) => {
-                ensure!(program.is_file(), "Apple Configurator is not installed");
-                return Ok(());
-            }
-            Self::Idevicerestore(program) => program,
-        };
-        let output = Command::new(program)
-            .arg("--help")
-            .output()
-            .context("idevicerestore is not installed")?;
-        ensure!(output.status.success(), "idevicerestore --help failed");
-        let help = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        for flag in [
-            "--ecid",
-            "--erase",
-            "--no-input",
-            "--plain-progress",
-            "--cache-path",
-        ] {
-            ensure!(help.contains(flag), "installed idevicerestore lacks {flag}");
-        }
-        crate::identity::check_usbmuxd().context("usbmuxd is unavailable")
-    }
-}
-
-/// The restore programs this host has, in order of preference: the one every
-/// host shares first, then Apple Configurator for what that one cannot take.
-/// Each target goes to the first that restores its mode.
+/// Restores and revives targets in DFU, over ordinary USB or Apple Debug USB,
+/// each with RestoreKit in a worker process of this executable.
 ///
 /// One engine owns the active ECID set. Clone this engine to submit batches
 /// from multiple callers without starting the same target twice. A batch is
 /// one board's targets; batches for several boards run side by side.
 #[derive(Clone)]
 pub struct RestoreEngine {
-    candidates: Vec<Eraser>,
-    usable: Arc<Mutex<Vec<Eraser>>>,
+    /// The executable the workers run.
+    program: PathBuf,
     logs_root: PathBuf,
     active: Arc<Mutex<HashSet<u64>>>,
 }
 
 impl RestoreEngine {
-    /// The engine for this host, with its idevicerestore named or looked for
-    /// by that name.
-    pub fn for_host(idevicerestore: Option<PathBuf>, logs_root: impl Into<PathBuf>) -> Self {
-        let mut candidates = vec![Eraser::Idevicerestore(
-            idevicerestore.unwrap_or_else(|| "idevicerestore".into()),
-        )];
-        candidates.extend(configurator().map(|program| Eraser::Configurator(program.to_owned())));
-        Self::with(candidates, logs_root)
+    pub fn for_host(logs_root: impl Into<PathBuf>) -> Self {
+        // An executable that cannot name itself fails each worker's start.
+        Self::with(crate::native::program().unwrap_or_default(), logs_root)
     }
 
-    fn with(candidates: Vec<Eraser>, logs_root: impl Into<PathBuf>) -> Self {
-        let engine = Self {
-            candidates,
-            usable: Arc::default(),
+    fn with(program: PathBuf, logs_root: impl Into<PathBuf>) -> Self {
+        Self {
+            program,
             logs_root: logs_root.into(),
             active: Arc::default(),
-        };
-        let _ = engine.check();
-        engine
-    }
-
-    /// Find which of the host's programs can run now. Fails when none can,
-    /// with the reason each gave.
-    pub fn check(&self) -> Result<()> {
-        let mut reasons = Vec::new();
-        let mut usable = Vec::new();
-        for eraser in &self.candidates {
-            match eraser.check() {
-                Ok(()) => usable.push(eraser.clone()),
-                Err(error) => reasons.push(format!("{error:#}")),
-            }
         }
-        let none = usable.is_empty();
-        *self.usable.lock().unwrap() = usable;
-        ensure!(!none, "no restore program: {}", reasons.join("; "));
-        Ok(())
     }
 
-    /// The programs that can run, by name.
-    pub fn name(&self) -> String {
-        let names: Vec<_> = self
-            .usable
-            .lock()
-            .unwrap()
-            .iter()
-            .map(Eraser::name)
-            .collect();
-        names.join(" and ")
-    }
-
-    /// Whether the host restores a target found in this USB mode.
+    /// Whether the host restores a target found in this USB mode. Restores
+    /// run from macOS and Linux.
     pub fn restores(&self, mode: AppleMode) -> bool {
-        self.eraser_for(mode).is_some()
-    }
-
-    fn eraser_for(&self, mode: AppleMode) -> Option<Eraser> {
-        self.usable
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|eraser| eraser.restores(mode))
-            .cloned()
+        cfg!(any(target_os = "macos", target_os = "linux"))
+            && matches!(mode, AppleMode::Dfu | AppleMode::KisDfu)
     }
 
     /// Start a deliberately selected erase batch. The caller must establish
@@ -474,52 +376,34 @@ impl RestoreEngine {
             .iter()
             .map(|&ecid| (ipsw, ecid, AppleMode::Dfu))
             .collect();
-        self.start_selected(&targets)
+        self.start_selected(&targets, Operation::Restore)
     }
 
     /// Check all selected archives and reserve every ECID before starting any
     /// worker. The caller supplies each verified target's image and the DFU
-    /// it is in, which picks the program that restores it.
+    /// it is in. A revive installs from the same image and keeps the data.
     pub fn start_selected(
         &self,
         targets: &[(&PreparedIpsw, u64, AppleMode)],
+        operation: Operation,
     ) -> Result<RestoreBatch> {
-        let selected: Vec<_> = targets
-            .iter()
-            .map(|(ipsw, ecid, mode)| (Worker::Erase(ipsw, *mode), *ecid))
-            .collect();
-        self.start(selected)
-    }
-
-    pub fn start_revive(&self, ecid: u64) -> Result<RestoreBatch> {
-        let program =
-            configurator().context("Revive requires Apple Configurator in /Applications")?;
-        self.start(vec![(Worker::Revive(program), ecid)])
-    }
-
-    fn start(&self, targets: Vec<(Worker<'_>, u64)>) -> Result<RestoreBatch> {
         ensure!(
             !targets.is_empty() && targets.len() <= MAX_RESTORES,
             "select between one and five restore targets"
         );
-        let selected: HashSet<_> = targets.iter().map(|&(_, ecid)| ecid).collect();
+        let selected: HashSet<_> = targets.iter().map(|&(_, ecid, _)| ecid).collect();
         ensure!(
             !selected.contains(&0),
             "ECID zero means automatic selection and is not allowed"
         );
         ensure!(selected.len() == targets.len(), "duplicate restore ECID");
-        // Settle every target's image and program before any worker starts.
-        let mut erasers = Vec::new();
-        for (worker, _) in &targets {
-            erasers.push(match worker {
-                Worker::Erase(ipsw, mode) => {
-                    ipsw.check_unchanged()?;
-                    Some(self.eraser_for(*mode).with_context(|| {
-                        format!("no restore program on this host takes a target in {mode:?}")
-                    })?)
-                }
-                Worker::Revive(_) => None,
-            });
+        // Settle every target's image before any worker starts.
+        for (ipsw, _, mode) in targets {
+            ipsw.check_unchanged()?;
+            ensure!(
+                self.restores(*mode),
+                "RestoreKit does not restore a target in {mode:?}"
+            );
         }
         fs::create_dir_all(&self.logs_root).context("creating restore log directory")?;
         let logs_root = self.logs_root.canonicalize()?;
@@ -530,56 +414,32 @@ impl RestoreEngine {
         );
         // Allocate every log and cache before launching the first target.
         let mut workers = Vec::new();
-        for ((worker, ecid), eraser) in targets.into_iter().zip(erasers) {
+        for &(ipsw, ecid, _) in targets {
             let directory = tempfile::Builder::new()
                 .prefix(&format!("{ecid:016x}-"))
                 .tempdir_in(&logs_root)
                 .context("creating restore worker directory")?;
-            let (command, tool, operation, image) = match (worker, eraser) {
-                (Worker::Erase(ipsw, _), Some(Eraser::Idevicerestore(program))) => {
-                    fs::create_dir(directory.path().join("cache"))?;
-                    let program = if program.components().count() > 1 {
-                        program.canonicalize().context("locating idevicerestore")?
-                    } else {
-                        program
-                    };
-                    (
-                        restore_command(&program, ipsw.path(), ecid, directory.path()),
-                        Tool::Idevicerestore,
-                        Operation::Restore,
-                        Some(ipsw.clone()),
-                    )
-                }
-                (Worker::Erase(ipsw, _), Some(Eraser::Configurator(program))) => (
-                    configurator_command(&program, ecid, directory.path(), Some(ipsw.path())),
-                    Tool::Configurator,
-                    Operation::Restore,
-                    Some(ipsw.clone()),
-                ),
-                (Worker::Erase(..), None) => unreachable!("an erase has its program"),
-                (Worker::Revive(program), _) => (
-                    configurator_command(program, ecid, directory.path(), None),
-                    Tool::Configurator,
-                    Operation::Revive,
-                    None,
-                ),
-            };
+            let mut command =
+                crate::native::worker_command(&self.program, operation, ecid, ipsw.path());
+            command
+                .current_dir(directory.path())
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
             let stdout = File::create(directory.path().join("stdout.log"))?;
             let stderr = File::create(directory.path().join("stderr.log"))?;
-            workers.push((
-                command, tool, operation, image, ecid, directory, stdout, stderr,
-            ));
+            workers.push((command, ipsw.clone(), ecid, directory, stdout, stderr));
         }
         active.extend(selected);
         drop(active);
         let mut statuses = Vec::new();
-        for (command, tool, operation, image, ecid, directory, stdout, stderr) in workers {
+        for (command, image, ecid, directory, stdout, stderr) in workers {
             let status = Arc::new(Mutex::new(RestoreStatus {
                 operation,
                 ecid,
                 state: RestoreState::Starting,
                 pid: None,
-                progress: None,
+                progress: Progress::starting(),
                 message: String::new(),
                 exit_code: None,
                 directory: directory.keep(),
@@ -590,9 +450,8 @@ impl RestoreEngine {
                 .name(format!("restore-{ecid:x}"))
                 .spawn(move || {
                     let result = image
-                        .as_ref()
-                        .map_or(Ok(()), PreparedIpsw::check_unchanged)
-                        .and_then(|()| run_worker(command, tool, &worker_status, stdout, stderr));
+                        .check_unchanged()
+                        .and_then(|()| run_worker(command, &worker_status, stdout, stderr));
                     if let Err(error) = result {
                         let mut status = worker_status.lock().unwrap();
                         status.state = RestoreState::Failed;
@@ -631,70 +490,8 @@ impl RestoreBatch {
     }
 }
 
-fn restore_command(program: &Path, ipsw: &Path, ecid: u64, directory: &Path) -> Command {
-    let mut command = Command::new(program);
-    command
-        .args([
-            "--ecid",
-            &format!("0x{ecid:x}"),
-            "--erase",
-            "--no-input",
-            "--plain-progress",
-        ])
-        .arg("--cache-path")
-        .arg(directory.join("cache"))
-        .arg("--")
-        .arg(ipsw)
-        .current_dir(directory)
-        .env("COLOR", "0")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    command
-}
-
-/// One Configurator command for one ECID: a restore from an image, or a
-/// revive, for which Configurator fetches its own.
-fn configurator_command(
-    program: &Path,
-    ecid: u64,
-    directory: &Path,
-    ipsw: Option<&Path>,
-) -> Command {
-    let mut command = Command::new(program);
-    command
-        // Configurator buffers JSON progress until exit when stdout is a pipe.
-        // Darwin's stdio honours STDBUF1 for stdout before its first write.
-        .env("STDBUF1", "L")
-        .args([
-            "--format",
-            "JSON",
-            "--progress",
-            "--ecid",
-            &format!("0x{ecid:x}"),
-        ]);
-    match ipsw {
-        Some(ipsw) => command.arg("restore").arg("--ipsw").arg(ipsw),
-        None => command.arg("revive"),
-    };
-    command
-        .current_dir(directory)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    command
-}
-
-/// The program a worker runs, which decides how its output reads.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Tool {
-    Configurator,
-    Idevicerestore,
-}
-
 fn run_worker(
     mut command: Command,
-    tool: Tool,
     status: &Arc<Mutex<RestoreStatus>>,
     stdout_log: File,
     stderr_log: File,
@@ -702,17 +499,16 @@ fn run_worker(
     let mut child = command
         .spawn()
         .with_context(|| format!("starting {}", command.get_program().to_string_lossy()))?;
-    let operation = {
+    {
         let mut status = status.lock().unwrap();
         status.pid = Some(child.id());
         status.state = RestoreState::Running;
-        status.operation
-    };
+    }
     let stdout = child.stdout.take().context("worker stdout missing")?;
     let stderr = child.stderr.take().context("worker stderr missing")?;
     let (outcome, stdout_result, stderr_result) = thread::scope(|scope| {
-        let out = scope.spawn(|| drain(stdout, stdout_log, status, tool));
-        let err = scope.spawn(|| drain(stderr, stderr_log, status, tool));
+        let out = scope.spawn(|| drain(stdout, stdout_log, status, true));
+        let err = scope.spawn(|| drain(stderr, stderr_log, status, false));
         let outcome = child.wait();
         (outcome, out.join(), err.join())
     });
@@ -724,36 +520,24 @@ fn run_worker(
     let stdout_result = stdout_result.context("reading worker stdout")?;
     let stderr_result = stderr_result.context("reading worker stderr")?;
     let reported = stdout_result || stderr_result;
-    let name = match tool {
-        Tool::Configurator => "Apple Configurator",
-        Tool::Idevicerestore => "idevicerestore",
-    };
-    if tool == Tool::Configurator && !snapshot.message.is_empty() {
-        // Configurator named an error for this device.
-        snapshot.state = RestoreState::Failed;
-    } else if !outcome.success() {
+    if !outcome.success() {
         snapshot.state = RestoreState::Failed;
         snapshot.message = if snapshot.message.is_empty() {
-            format!("{name} exited with {outcome}")
+            format!("The restore worker exited with {outcome}")
         } else {
-            format!("{name} exited with {outcome}: {}", snapshot.message)
+            format!(
+                "The restore worker exited with {outcome}: {}",
+                snapshot.message
+            )
         };
     } else if reported {
         snapshot.state = RestoreState::RestoreReported;
-        snapshot.message = match (tool, operation) {
-            (Tool::Idevicerestore, _) => "Restore service reported completion",
-            (Tool::Configurator, Operation::Restore) => {
-                "Apple Configurator reported that the restore completed"
-            }
-            (Tool::Configurator, Operation::Revive) => {
-                "Apple Configurator reported that Revive completed"
-            }
-        }
-        .into();
+        snapshot.progress.complete();
+        snapshot.message = "Restore service reported completion".into();
     } else {
         snapshot.state = RestoreState::Unconfirmed;
         snapshot.message =
-            format!("{name} exited successfully without a final result for this device");
+            "The restore worker exited successfully without a final result for this device".into();
     }
     Ok(())
 }
@@ -764,7 +548,7 @@ fn drain(
     input: impl Read,
     mut log: File,
     status: &Mutex<RestoreStatus>,
-    tool: Tool,
+    stdout: bool,
 ) -> io::Result<bool> {
     let mut input = BufReader::new(input);
     let mut line = Vec::new();
@@ -782,17 +566,12 @@ fn drain(
         }
         let text = String::from_utf8_lossy(&line);
         let text = text.trim();
-        if tool == Tool::Configurator {
-            let mut current = status.lock().unwrap();
-            reported |= configurator_message(text, &mut current);
-            continue;
-        }
-        if text == "Status: Restore Finished" {
-            reported = true;
-        }
         let mut status = status.lock().unwrap();
-        if let Some(progress) = parse_progress(text) {
-            status.progress = Some(progress);
+        if stdout {
+            reported |= text == crate::native::COMPLETE;
+            if let Some(fields) = text.strip_prefix(crate::native::STEP) {
+                status.progress.worker_step(fields);
+            }
         } else if !text.is_empty() {
             status.message = text.chars().take(512).collect();
         }
@@ -802,108 +581,6 @@ fn drain(
     }
     log.flush()?;
     Ok(reported)
-}
-
-fn configurator_message(text: &str, status: &mut RestoreStatus) -> bool {
-    let Ok(message) = serde_json::from_str::<serde_json::Value>(text) else {
-        return false;
-    };
-    let matches_target = |field: &str| {
-        let Some([id]) = message[field].as_array().map(Vec::as_slice) else {
-            return false;
-        };
-        id.as_str()
-            .and_then(|id| id.strip_prefix("0x"))
-            .and_then(|hex| u64::from_str_radix(hex, 16).ok())
-            == Some(status.ecid)
-    };
-    let step = message["Step"].as_str();
-    match message["Type"].as_str() {
-        Some("CommandOutput") => {
-            let command = match status.operation {
-                Operation::Restore => "restore",
-                Operation::Revive => "revive",
-            };
-            return message["Command"] == command && matches_target("Devices");
-        }
-        Some("Step") => {
-            status.progress = step
-                .filter(|_| matches_target("Devices"))
-                .map(|name| Progress {
-                    name: name.to_owned(),
-                    percent: None,
-                });
-        }
-        Some("Progress") => {
-            // Progress omits Devices. Accept it only inside this ECID's named step.
-            if let Some(progress) = &mut status.progress
-                && Some(progress.name.as_str()) == step
-            {
-                progress.percent = message["Progress"]
-                    .as_f64()
-                    .filter(|f| (0.0..=1.0).contains(f))
-                    .map(|f| (f * 100.0).round() as u8);
-            }
-        }
-        Some("StepComplete") if matches_target("Devices") => {
-            if status
-                .progress
-                .as_ref()
-                .is_some_and(|progress| Some(progress.name.as_str()) == step)
-            {
-                status.progress = None;
-            }
-        }
-        Some("Error")
-            if matches_target("AffectedDevices")
-                || message["AffectedDevices"]
-                    .as_array()
-                    .is_none_or(Vec::is_empty) =>
-        {
-            let description = ["FailureReason", "Detail", "Message"]
-                .into_iter()
-                .filter_map(|key| message[key].as_str())
-                .find(|value| !value.is_empty())
-                .unwrap_or("Apple Configurator reported an error");
-            status.message = match (message["Domain"].as_str(), message["Code"].as_i64()) {
-                // Revive keeps the data volume; an interrupted erase leaves none.
-                (Some("AMRestoreErrorDomain"), Some(75))
-                    if description.contains("Missing data volume") =>
-                {
-                    "The device has no data to keep. Restore it instead.".into()
-                }
-                (Some(domain), Some(code)) => format!("{description} ({domain} {code})"),
-                _ => description.to_owned(),
-            };
-        }
-        _ => {}
-    }
-    false
-}
-
-fn parse_progress(line: &str) -> Option<Progress> {
-    let mut fields = line.strip_prefix("progress: ")?.split_whitespace();
-    let step: u32 = fields.next()?.parse().ok()?;
-    let fraction = fields.next()?.parse::<f32>().ok()?;
-    if fields.next().is_some() || !fraction.is_finite() || !(0.0..=1.0).contains(&fraction) {
-        return None;
-    }
-    // idevicerestore's restore_step values label independent progress counters.
-    let name = match step {
-        0 => "Detecting Device".into(),
-        1 => "Preparing Device".into(),
-        2 => "Sending Filesystem".into(),
-        3 => "Verifying Filesystem".into(),
-        4 => "Flashing Firmware".into(),
-        5 => "Flashing Baseband".into(),
-        6 => "Updating Firmware".into(),
-        7 => "Sending Image".into(),
-        n => format!("Stage {n}"),
-    };
-    Some(Progress {
-        name,
-        percent: Some((fraction * 100.0).round() as u8),
-    })
 }
 
 #[cfg(test)]
@@ -926,12 +603,9 @@ mod tests {
         </dict></array>
         </dict></plist>"#;
 
-    /// An engine with this program for its idevicerestore, taken as usable.
-    fn idevicerestore(program: impl Into<PathBuf>, logs: impl Into<PathBuf>) -> RestoreEngine {
-        let eraser = Eraser::Idevicerestore(program.into());
-        let engine = RestoreEngine::with(vec![eraser.clone()], logs);
-        *engine.usable.lock().unwrap() = vec![eraser];
-        engine
+    /// An engine with this program in place of the executable's own worker.
+    fn native(program: impl Into<PathBuf>, logs: impl Into<PathBuf>) -> RestoreEngine {
+        RestoreEngine::with(program.into(), logs)
     }
 
     fn archive(path: &Path, manifest: Option<&str>) {
@@ -945,6 +619,58 @@ mod tests {
         zip.start_file("payload.dmg", options).unwrap();
         zip.write_all(b"fixture payload").unwrap();
         zip.finish().unwrap();
+    }
+
+    #[test]
+    fn an_archive_used_in_place_rejects_changed_content_with_the_same_file_stamp() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("local.ipsw");
+        archive(&path, Some(MANIFEST));
+        let mut bytes = fs::read(&path).unwrap();
+        let mut image = PreparedIpsw::open(&path).unwrap();
+        let offset = bytes
+            .windows(15)
+            .position(|value| value == b"fixture payload")
+            .unwrap();
+        bytes[offset] ^= 1;
+        fs::write(&path, bytes).unwrap();
+        File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(image.modified)
+            .unwrap();
+
+        // Model ZFS assigning both writes the same ctime on any test filesystem.
+        image.integrity.stamp = FileStamp::read(&fs::metadata(&path).unwrap()).unwrap();
+        image.check_stamp().unwrap();
+        assert!(image.check_unchanged().is_err());
+    }
+
+    #[test]
+    fn workers_share_only_a_settled_content_check_and_still_check_the_file_stamp() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("local.ipsw");
+        archive(&path, Some(MANIFEST));
+        let first = PreparedIpsw::open(&path).unwrap();
+        let mut second = first.clone();
+        let proof = &mut second.integrity.proof;
+        assert!(proof.is_some());
+        *proof = Some([0; 32]);
+        first.check_at(|| SystemTime::UNIX_EPOCH).unwrap();
+        assert!(second.check_unchanged().is_err());
+        first
+            .check_at(|| SystemTime::now() + Duration::from_secs(3))
+            .unwrap();
+        second.check_unchanged().unwrap();
+
+        File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(SystemTime::UNIX_EPOCH)
+            .unwrap();
+        assert!(second.check_unchanged().is_err());
     }
 
     #[test]
@@ -1047,52 +773,27 @@ mod tests {
     }
 
     #[test]
-    fn arguments_select_only_the_explicit_ecid_and_separate_cache() {
-        let command = restore_command(
-            Path::new("idevicerestore"),
-            Path::new("/shared/Apple IPSW.ipsw"),
-            0x123456789abcdef,
-            Path::new("/logs/worker"),
-        );
-        let args: Vec<_> = command
-            .get_args()
-            .map(|s| s.to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(
-            args,
-            [
-                "--ecid",
-                "0x123456789abcdef",
-                "--erase",
-                "--no-input",
-                "--plain-progress",
-                "--cache-path",
-                "/logs/worker/cache",
-                "--",
-                "/shared/Apple IPSW.ipsw"
-            ]
-        );
-        assert_eq!(command.get_current_dir(), Some(Path::new("/logs/worker")));
-    }
-
-    #[test]
-    fn progress_is_a_valid_stage_fraction() {
-        assert_eq!(
-            parse_progress("progress: 2 0.500000"),
-            Some(Progress {
-                name: "Sending Filesystem".into(),
-                percent: Some(50)
-            })
-        );
-        for line in [
-            "progress: 2 NaN",
-            "progress: 2 inf",
-            "progress: 2 1.1",
-            "progress: 2 -0.1",
-            "progress: 2 1.0 extra",
-            "Uploading filesystem: 50.0",
-        ] {
-            assert_eq!(parse_progress(line), None);
+    fn a_worker_is_given_its_operation_one_ecid_and_its_image() {
+        for (operation, verb) in [(Operation::Restore, "erase"), (Operation::Revive, "revive")] {
+            let command = crate::native::worker_command(
+                Path::new("iasisd"),
+                operation,
+                0x123456789abcdef,
+                Path::new("/shared/Apple IPSW.ipsw"),
+            );
+            let args: Vec<_> = command
+                .get_args()
+                .map(|s| s.to_string_lossy().into_owned())
+                .collect();
+            assert_eq!(
+                args,
+                [
+                    "worker",
+                    verb,
+                    "0123456789abcdef",
+                    "/shared/Apple IPSW.ipsw"
+                ]
+            );
         }
     }
 
@@ -1119,147 +820,50 @@ mod tests {
     }
 
     #[test]
-    fn configurator_attributes_progress_to_its_scoped_step_and_reports_the_device_error() {
-        let mut status = RestoreStatus {
-            operation: Operation::Revive,
-            ecid: 0x21,
-            state: RestoreState::Running,
-            pid: None,
-            progress: None,
-            message: String::new(),
-            exit_code: None,
-            directory: PathBuf::new(),
-        };
-        let mut accept = |event: serde_json::Value| {
-            let reported = configurator_message(&event.to_string(), &mut status);
-            (reported, status.progress.clone(), status.message.clone())
-        };
-        use serde_json::json;
-        let step = "Step 4 of 4: Installing System";
-        let progress = json!({"Type":"Progress","Step":step, "Progress":0.25});
-        assert_eq!(accept(progress.clone()).1, None);
-        accept(json!({"Type":"Step","Step":step,"Devices":["0x22"]}));
-        assert_eq!(accept(progress.clone()).1, None);
-        accept(json!({"Type":"Step","Step":step,"Devices":["0x21"]}));
-        assert_eq!(
-            accept(progress.clone()).1,
-            Some(Progress {
-                name: step.into(),
-                percent: Some(25)
-            })
-        );
-        assert_eq!(
-            accept(json!({"Type":"Progress","Step":step,"Progress":-1}))
-                .1
-                .unwrap()
-                .percent,
-            None
-        );
-        let completed = accept(json!({"Type":"StepComplete","Step":step,"Devices":["0x21"]}));
-        assert!(!completed.0);
-        assert_eq!(completed.1, None);
-        assert_eq!(accept(progress).1, None);
-        let mut error = json!({"Type":"Error","Message":"The device is not connected.",
-            "Detail":"","FailureReason":"","Domain":"ConfigurationUtilityKit.error","Code":603,"AffectedDevices":["0x22"]});
-        assert!(accept(error.clone()).2.is_empty());
-        error["AffectedDevices"] = json!(["0x21"]);
-        assert_eq!(
-            accept(error).2,
-            "The device is not connected. (ConfigurationUtilityKit.error 603)"
-        );
-    }
-
-    #[test]
     #[cfg(unix)]
-    fn revive_is_ecid_scoped_and_requires_configurators_result() {
-        let temp = tempfile::tempdir().unwrap();
-        let program = executable(
-            temp.path(),
-            r#"
-[ "$1 $2 $3 $4 $6" = "--format JSON --progress --ecid revive" ] && [ "$#" -eq 6 ] || exit 7
-case "$5" in
-  0x21) echo '{"Type":"CommandOutput","Command":"revive","Devices":["0x000021"]}' ;;
-  0x22) echo '{"Type":"CommandOutput","Command":"revive","Devices":["0x21"]}' ;;
-  0x23) echo '{"Type":"CommandOutput","Command":"restore","Devices":["0x23"]}' ;;
-  0x24) echo '{"Type":"Error","Message":"Device disconnected"}' >&2; exit 1 ;;
-esac
-"#,
-        );
-        let engine = idevicerestore("unused", temp.path().join("logs"));
-        let batch = engine
-            .start(
-                [0x21, 0x22, 0x23, 0x24]
-                    .map(|ecid| (Worker::Revive(&program), ecid))
-                    .into(),
-            )
-            .unwrap();
-        let jobs = finish(&batch);
-        assert_eq!(jobs[0].state, RestoreState::RestoreReported);
-        assert_eq!(jobs[1].state, RestoreState::Unconfirmed);
-        assert_eq!(jobs[2].state, RestoreState::Unconfirmed);
-        assert_eq!(jobs[3].state, RestoreState::Failed);
-        assert!(jobs[3].message.contains("Device disconnected"));
-        assert!(jobs.iter().all(|job| job.operation == Operation::Revive));
-        assert!(engine.start(vec![(Worker::Revive(&program), 0)]).is_err());
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn the_host_engine_takes_the_modes_it_restores_and_runs_one_command_per_target() {
+    fn an_engine_restores_dfu_and_gives_each_worker_its_operation() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("image.ipsw");
         archive(&path, Some(MANIFEST));
         let ipsw = PreparedIpsw::open(&path).unwrap();
         let program = executable(
             temp.path(),
-            r#"
-[ "$1 $2 $3 $4 $6 $7" = "--format JSON --progress --ecid restore --ipsw" ] && [ -f "$8" ] && [ "$#" -eq 8 ] || exit 7
-case "$5" in
-  0x31) echo '{"Type":"CommandOutput","Command":"restore","Devices":["0x31"]}' ;;
-  0x32) echo '{"Type":"Error","Message":"The device is not connected.","Domain":"ConfigurationUtilityKit.error","Code":603,"AffectedDevices":["0x32"]}' ;;
-esac
-"#,
+            r#"printf '%s\n' "$2" > operation; echo IASIS_RESTORE_COMPLETE"#,
         );
-        let logs = temp.path().join("logs");
-        let open = Eraser::Idevicerestore(executable_named(temp.path(), "open", "exit 9"));
-        let apple = Eraser::Configurator(program);
-        // A host with both gives a target to the first that restores its
-        // mode: the shared program, then Configurator.
-        let both = RestoreEngine::with(vec![open.clone(), apple.clone()], &logs);
-        *both.usable.lock().unwrap() = vec![open.clone(), apple.clone()];
-        assert_eq!(both.name(), "idevicerestore and Apple Configurator");
-        assert_eq!(both.eraser_for(AppleMode::Dfu), Some(open.clone()));
-        assert_eq!(both.eraser_for(AppleMode::KisDfu), Some(apple.clone()));
-        let alone = RestoreEngine::with(vec![open.clone()], &logs);
-        *alone.usable.lock().unwrap() = vec![open];
-        for (mode, with_apple, without) in [
-            (AppleMode::Dfu, true, true),
-            (AppleMode::KisDfu, true, false),
-            (AppleMode::Kis, false, false),
-            (AppleMode::Recovery, false, false),
-            (AppleMode::PortDfu, false, false),
-            (AppleMode::Normal, false, false),
+        let engine = native(program, temp.path().join("logs"));
+        for (mode, restores) in [
+            (AppleMode::Dfu, true),
+            (AppleMode::KisDfu, true),
+            (AppleMode::Kis, false),
+            (AppleMode::Recovery, false),
+            (AppleMode::PortDfu, false),
+            (AppleMode::Normal, false),
         ] {
-            assert_eq!(both.restores(mode), with_apple, "{mode:?}");
-            assert_eq!(alone.restores(mode), without, "{mode:?}");
+            assert_eq!(engine.restores(mode), restores, "{mode:?}");
         }
         assert!(
-            alone
-                .start_selected(&[(&ipsw, 0x31, AppleMode::KisDfu)])
+            engine
+                .start_selected(&[(&ipsw, 0x31, AppleMode::Recovery)], Operation::Revive)
                 .is_err()
         );
-        // A host whose only program is Configurator gives it every DFU.
-        let configurator = RestoreEngine::with(vec![apple.clone()], &logs);
-        *configurator.usable.lock().unwrap() = vec![apple];
-        let jobs = finish(&configurator.start_erase(&ipsw, &[0x31, 0x32]).unwrap());
-        assert_eq!(jobs[0].state, RestoreState::RestoreReported);
-        assert_eq!(
-            jobs[0].message,
-            "Apple Configurator reported that the restore completed"
-        );
-        assert_eq!(jobs[1].state, RestoreState::Failed);
-        assert!(jobs[1].message.contains("not connected"));
-        assert!(jobs.iter().all(|job| job.operation == Operation::Restore));
+        for (ecid, operation, verb) in [
+            (0x31, Operation::Restore, "erase"),
+            (0x32, Operation::Revive, "revive"),
+        ] {
+            let targets = [(&ipsw, ecid, AppleMode::KisDfu)];
+            let jobs = finish(&engine.start_selected(&targets, operation).unwrap());
+            assert_eq!(
+                jobs[0].state,
+                RestoreState::RestoreReported,
+                "{}",
+                jobs[0].message
+            );
+            assert_eq!(jobs[0].operation, operation);
+            assert_eq!(
+                fs::read_to_string(jobs[0].directory.join("operation")).unwrap(),
+                format!("{verb}\n")
+            );
+        }
     }
 
     #[test]
@@ -1273,24 +877,27 @@ esac
         };
         let first = prepare("one.ipsw");
         let changed = prepare("two.ipsw");
-        let program = executable(temp.path(), r#"printf '%s\n' "$2" "$9" > selection"#);
+        let program = executable(temp.path(), r#"printf '%s\n' "$3" "$4" > selection"#);
         let logs = temp.path().join("logs");
-        let engine = idevicerestore(program, &logs);
+        let engine = native(program, &logs);
         fs::remove_file(changed.path()).unwrap();
         assert!(
             engine
-                .start_selected(&[(&first, 1, AppleMode::Dfu), (&changed, 2, AppleMode::Dfu)])
+                .start_selected(
+                    &[(&first, 1, AppleMode::Dfu), (&changed, 2, AppleMode::Dfu)],
+                    Operation::Restore
+                )
                 .is_err()
         );
         assert!(!logs.exists());
         let second = prepare("two.ipsw");
         let targets = [(&first, 1, AppleMode::Dfu), (&second, 2, AppleMode::Dfu)];
-        let statuses = finish(&engine.start_selected(&targets).unwrap());
+        let statuses = finish(&engine.start_selected(&targets, Operation::Restore).unwrap());
         for ((ipsw, ecid, _), status) in targets.iter().zip(statuses) {
             assert_eq!(status.exit_code, Some(0), "{}", status.message);
             assert_eq!(
                 fs::read_to_string(status.directory.join("selection")).unwrap(),
-                format!("0x{ecid:x}\n{}\n", ipsw.path().display())
+                format!("{ecid:016x}\n{}\n", ipsw.path().display())
             );
         }
     }
@@ -1305,9 +912,8 @@ esac
         let program = executable(
             temp.path(),
             r#"
-ecid="$2"
-cache="$7"
-root="$(dirname "$(dirname "$cache")")"
+ecid="$3"
+root="$(dirname "$PWD")"
 touch "$root/ready-$ecid"
 attempt=0
 while :; do
@@ -1317,13 +923,13 @@ while :; do
     [ "$attempt" -lt 500 ] || exit 9
     sleep 0.01
 done
-printf 'progress: 2 0.500000\n'
+printf 'IASIS_STEP 2 0.500000\n'
 dd if=/dev/zero bs=1024 count=128 >&2 2>/dev/null
 printf '\nworker stderr drained\n' >&2
-printf 'Status: Restore Finished\n'
+printf 'IASIS_RESTORE_COMPLETE\n'
 "#,
         );
-        let engine = idevicerestore(program, temp.path().join("logs"));
+        let engine = native(program, temp.path().join("logs"));
         let first = engine.start_erase(&ipsw, &[1]).unwrap();
         assert!(engine.start_erase(&ipsw, &[1]).is_err());
         assert!(engine.start_erase(&ipsw, &[2, 3, 4, 5, 6, 7]).is_err());
@@ -1339,12 +945,10 @@ printf 'Status: Restore Finished\n'
             );
             assert_eq!(status.exit_code, Some(0));
             assert_eq!(
-                status.progress,
-                Some(Progress {
-                    name: "Sending Filesystem".into(),
-                    percent: Some(50)
-                })
+                (status.progress.name.as_str(), status.progress.percent),
+                ("Complete", 100)
             );
+            assert_eq!(status.progress.step, status.progress.steps.len());
             assert!(directories.insert(status.directory.clone()));
             assert!(
                 fs::metadata(status.directory.join("stderr.log"))
@@ -1352,6 +956,51 @@ printf 'Status: Restore Finished\n'
                     .len()
                     > 131072
             );
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn native_completion_requires_the_stdout_record_and_successful_exit() {
+        let temp = tempfile::tempdir().unwrap();
+        let program = executable(
+            temp.path(),
+            r#"
+printf 'IASIS_STEP 2 0.5\nIASIS_STEP 7 1.0\n'
+case "$1" in
+    confirmed) echo IASIS_RESTORE_COMPLETE ;;
+    diagnostic) echo IASIS_RESTORE_COMPLETE >&2 ;;
+    failed) echo IASIS_RESTORE_COMPLETE; exit 1 ;;
+esac
+"#,
+        );
+        for (arg, expected, percent) in [
+            ("confirmed", RestoreState::RestoreReported, 100),
+            ("diagnostic", RestoreState::Unconfirmed, 45),
+            ("failed", RestoreState::Failed, 45),
+        ] {
+            let mut cmd = Command::new(&program);
+            cmd.arg(arg).stdout(Stdio::piped()).stderr(Stdio::piped());
+            let status = Arc::new(Mutex::new(RestoreStatus {
+                operation: Operation::Restore,
+                ecid: 1,
+                state: RestoreState::Starting,
+                pid: None,
+                progress: Progress::starting(),
+                message: String::new(),
+                exit_code: None,
+                directory: temp.path().into(),
+            }));
+            run_worker(
+                cmd,
+                &status,
+                tempfile::tempfile().unwrap(),
+                tempfile::tempfile().unwrap(),
+            )
+            .unwrap();
+            let status = status.lock().unwrap();
+            assert_eq!(status.state, expected);
+            assert_eq!(status.progress.percent, percent);
         }
     }
 
@@ -1365,29 +1014,31 @@ printf 'Status: Restore Finished\n'
         let program = executable(
             temp.path(),
             r#"
-case "$2" in
-    0x1) printf 'progress: 7 1.0\nDONE\n'; exit 0 ;;
-    0x2) printf 'Status: Restore Finished\n'; printf 'device failed\n' >&2; exit 7 ;;
+case "$3" in
+    0000000000000001) printf 'IASIS_STEP 7 1.0\nDONE\n'; exit 0 ;;
+    0000000000000002) printf 'IASIS_RESTORE_COMPLETE\n'; printf 'device failed\n' >&2; exit 7 ;;
 esac
 "#,
         );
-        let engine = idevicerestore(program, temp.path().join("logs"));
+        let engine = native(program, temp.path().join("logs"));
         let statuses = finish(&engine.start_erase(&ipsw, &[1, 2]).unwrap());
         assert_eq!(statuses[0].state, RestoreState::Unconfirmed);
         assert_eq!(statuses[0].exit_code, Some(0));
+        assert!(statuses[0].progress.percent < 100);
         assert_eq!(statuses[1].state, RestoreState::Failed);
         assert_eq!(statuses[1].exit_code, Some(7));
+        assert!(statuses[1].progress.percent < 100);
         for ecids in [&[][..], &[0], &[1, 1], &[1, 2, 3, 4, 5, 6]] {
             assert!(engine.start_erase(&ipsw, ecids).is_err());
         }
-        let missing = idevicerestore(temp.path().join("missing"), temp.path().join("logs"));
-        assert!(missing.start_erase(&ipsw, &[1]).is_err());
-        let missing = idevicerestore(
-            "iasis-nonexistent-restore-test-program",
-            temp.path().join("logs"),
-        );
-        let status = finish(&missing.start_erase(&ipsw, &[1]).unwrap());
-        assert_eq!(status[0].state, RestoreState::Failed);
-        assert_eq!(status[0].pid, None);
+        let plain = temp.path().join("not-executable");
+        fs::write(&plain, "").unwrap();
+        // A worker that cannot start fails its own job.
+        for program in [temp.path().join("missing"), plain] {
+            let engine = native(program, temp.path().join("logs"));
+            let status = finish(&engine.start_erase(&ipsw, &[1]).unwrap());
+            assert_eq!(status[0].state, RestoreState::Failed);
+            assert_eq!(status[0].pid, None);
+        }
     }
 }
