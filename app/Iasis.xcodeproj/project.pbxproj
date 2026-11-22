@@ -33,6 +33,7 @@
 				1A5100272F00000000A0E012 /* iasis-gateway in Embed Host Tools */,
 			);
 			name = "Embed Host Tools";
+			runOnlyForDeploymentPostprocessing = 1;
 		};
 /* End PBXCopyFilesBuildPhase section */
 
@@ -40,9 +41,9 @@
 		1A5100042F00000000A0E012 /* Iasis.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Iasis.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A5100052F00000000A0E012 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
 		1A5100062F00000000A0E012 /* IasisTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = IasisTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		1A5100222F00000000A0E012 /* iasisd */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = iasisd; path = "$(DERIVED_FILE_DIR)/HostTools/iasisd"; sourceTree = "<absolute>"; };
-		1A5100232F00000000A0E012 /* iasis */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = iasis; path = "$(DERIVED_FILE_DIR)/HostTools/iasis"; sourceTree = "<absolute>"; };
-		1A5100282F00000000A0E012 /* iasis-gateway */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = "iasis-gateway"; path = "$(DERIVED_FILE_DIR)/HostTools/iasis-gateway"; sourceTree = "<absolute>"; };
+		1A5100222F00000000A0E012 /* iasisd */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = iasisd; path = ../target/release/iasisd; sourceTree = SOURCE_ROOT; };
+		1A5100232F00000000A0E012 /* iasis */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = iasis; path = ../target/release/iasis; sourceTree = SOURCE_ROOT; };
+		1A5100282F00000000A0E012 /* iasis-gateway */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = "iasis-gateway"; path = "../target/release/iasis-gateway"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -120,7 +121,6 @@
 				1A51000F2F00000000A0E012 /* Sources */,
 				1A5100092F00000000A0E012 /* Frameworks */,
 				1A5100102F00000000A0E012 /* Resources */,
-				1A5100262F00000000A0E012 /* Build Host Tools */,
 				1A5100242F00000000A0E012 /* Embed Host Tools */,
 			);
 			buildRules = (
@@ -205,27 +205,6 @@
 			);
 		};
 /* End PBXResourcesBuildPhase section */
-
-/* Begin PBXShellScriptBuildPhase section */
-		1A5100262F00000000A0E012 /* Build Host Tools */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			inputPaths = (
-				"$(SRCROOT)/scripts/build-host-tools.sh",
-			);
-			name = "Build Host Tools";
-			outputPaths = (
-				"$(DERIVED_FILE_DIR)/HostTools/iasisd",
-				"$(DERIVED_FILE_DIR)/HostTools/iasis",
-				"$(DERIVED_FILE_DIR)/HostTools/iasis-gateway",
-			);
-			shellPath = /bin/sh;
-			shellScript = (
-				"\"${SRCROOT}/scripts/build-host-tools.sh\"",
-				"",
-			);
-		};
-/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		1A51000F2F00000000A0E012 /* Sources */ = {
@@ -387,7 +366,6 @@
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
@@ -425,7 +403,6 @@
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
