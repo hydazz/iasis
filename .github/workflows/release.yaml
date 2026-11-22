@@ -1,0 +1,225 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Release
+
+on:
+  release:
+    types:
+      - published
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  MISE_NO_HOOKS: "1"
+  MISE_TASK_RUN_AUTO_INSTALL: "false"
+  RELEASE_TAG: ${{ github.event.release.tag_name }}
+
+# Board revisions are released from this repository under their own tags.
+jobs:
+  iasisos:
+    name: IasisOS
+    if: startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate release version
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          grep -Fqx "version = \"${VERSION}\"" Cargo.toml
+
+      - name: Setup Mise
+        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
+        with:
+          cache: false
+          install_args: --locked rust github:raspberrypi/pico-sdk-tools
+
+      - name: Build IasisOS
+        run: mise run firmware:uf2
+
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          cp target/thumbv8m.main-none-eabihf/release/IasisOS.uf2 "IasisOS-${VERSION}.uf2"
+          gh release upload "${RELEASE_TAG}" "IasisOS-${VERSION}.uf2" --clobber
+
+  tools:
+    name: Host tools (${{ matrix.arch }})
+    if: startsWith(github.event.release.tag_name, 'v')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-26.04
+            arch: x86_64
+          - runner: ubuntu-26.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - name: Checkout release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate release version
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          grep -Fqx "version = \"${VERSION}\"" Cargo.toml
+
+      - name: Setup Mise
+        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
+        with:
+          cache: false
+          install_args: --locked rust
+
+      - name: Build host tools
+        run: mise run host:build
+
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          ARCHIVE="iasis-${VERSION}-linux-${ARCH}.tar.gz"
+          tar -C target/release -czf "${ARCHIVE}" iasis iasisd iasis-gateway
+          gh release upload "${RELEASE_TAG}" "${ARCHIVE}" --clobber
+
+  app:
+    name: macOS release
+    if: startsWith(github.event.release.tag_name, 'v')
+    runs-on: xcode-27
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      APP_NAME: Iasis
+      PROJECT: app/Iasis.xcodeproj
+      SCHEME: Iasis
+      PKG_SIGNING_IDENTITY: "Developer ID Installer: Woodleigh School (SMLKBTR495)"
+
+    steps:
+      - name: Checkout release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Import Developer ID Application certificate
+        id: application-certificate
+        uses: apple-actions/import-codesign-certs@288b8ec97b82c66b6f2a6baaf7acc8dfbcbe331c # v7.2.0
+        with:
+          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64 }}
+          p12-password: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Validate release version
+        id: release
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          grep -Fqx "MARKETING_VERSION = ${VERSION} // x-release-please-version" app/Config/Version.xcconfig
+          grep -Fqx "version = \"${VERSION}\"" Cargo.toml
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - name: Setup Mise
+        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
+        with:
+          cache: false
+          install_args: --locked rust
+
+      - name: Build host tools
+        run: mise run host:build
+
+      - name: Archive app
+        run: |
+          xcodebuild \
+            -project "${PROJECT}" \
+            -scheme "${SCHEME}" \
+            -configuration Release \
+            -destination "generic/platform=macOS" \
+            -archivePath "${RUNNER_TEMP}/${APP_NAME}.xcarchive" \
+            ARCHS=arm64 \
+            DEVELOPMENT_TEAM="SMLKBTR495" \
+            CODE_SIGN_STYLE="Manual" \
+            CODE_SIGN_IDENTITY="Developer ID Application" \
+            archive
+
+      - name: Export app
+        run: |
+          xcodebuild \
+            -exportArchive \
+            -archivePath "${RUNNER_TEMP}/${APP_NAME}.xcarchive" \
+            -exportPath "${RUNNER_TEMP}/export" \
+            -exportOptionsPlist app/Config/ExportOptions.plist
+
+      - name: Import Developer ID Installer certificate
+        uses: apple-actions/import-codesign-certs@288b8ec97b82c66b6f2a6baaf7acc8dfbcbe331c # v7.2.0
+        with:
+          create-keychain: false
+          keychain-password: ${{ steps.application-certificate.outputs.keychain-password }}
+          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_P12_BASE64 }}
+          p12-password: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+
+      - name: Stage package payload
+        run: |
+          codesign --verify --deep --strict "${RUNNER_TEMP}/export/${APP_NAME}.app"
+          ditto --norsrc app/packaging/root "${RUNNER_TEMP}/payload"
+          ditto --norsrc "${RUNNER_TEMP}/export/${APP_NAME}.app" \
+            "${RUNNER_TEMP}/payload/Applications/${APP_NAME}.app"
+
+      - name: Build package
+        id: package
+        uses: woodleighschool/.github/actions/apple-pkg@583bc37748899a9154880b1c538b15cf46b5b05d # apple-pkg-v1.0.0
+        with:
+          payload-root: ${{ runner.temp }}/payload
+          scripts: app/packaging/scripts
+          identifier: com.hydaz.Iasis
+          version: ${{ steps.release.outputs.version }}
+          signing-identity: ${{ env.PKG_SIGNING_IDENTITY }}
+          output: dist/${{ env.APP_NAME }}-${{ steps.release.outputs.version }}.pkg
+
+      - name: Notarize package
+        uses: woodleighschool/.github/actions/apple-notarize@a85ca6bcf210fe5e22e50da1d832f211c2b44605 # apple-notarize-v2.0.0
+        with:
+          product-path: ${{ steps.package.outputs.path }}
+          issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+
+      - name: Verify package
+        env:
+          PKG_PATH: ${{ steps.package.outputs.path }}
+        run: |
+          pkgutil --check-signature "${PKG_PATH}"
+          spctl --assess --type install --verbose=2 "${PKG_PATH}"
+
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PKG_PATH: ${{ steps.package.outputs.path }}
+        run: |
+          gh release upload \
+            "${RELEASE_TAG}" \
+            "${PKG_PATH}" \
+            --clobber
