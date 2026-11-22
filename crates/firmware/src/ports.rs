@@ -494,17 +494,11 @@ impl Port<'_> {
             Supply::Brick => {
                 let available =
                     iasis_pd::fixed_offers(grant.budget_mw, grant.input_mv, grant.brick_5v_pdo);
-                let advertised = self.offers.get();
-                let steady = self.status().restoring()
-                    || self.sink.get().state() == power::DemandState::Satisfied;
-                if self.contract.get().is_some()
-                    && steady
-                    && iasis_pd::offers_still_available(&advertised, &available)
-                {
-                    advertised
-                } else {
-                    available
-                }
+                iasis_pd::select_offers(
+                    available,
+                    self.offers.get(),
+                    self.contract.get().is_some() && self.status().restoring(),
+                )
             }
             Supply::HostPresence => iasis_pd::host_offers(),
             Supply::Off => [0; 4],

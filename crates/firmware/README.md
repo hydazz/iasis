@@ -52,7 +52,7 @@ On the charging input, Iasis requests the highest-power fixed profile it support
 
 Each port starts at 5 V. With a 20 V brick, one port can offer 5, 9, 15 and 20 V at different currents for the same share of power, up to 3 A. The target chooses its profile independently. With a 9 or 12 V input, the ports offer 5 and 9 V.
 
-A new device first receives spare capacity. If it reports that its best offer is insufficient, Iasis can renegotiate with other charging devices. Their existing contracts stay funded until they have stepped down. An active restore keeps its contract while the supply can cover it. A port waits if its starting allowance is unavailable.
+A new device first receives spare capacity. If it reports that its best offer is insufficient, Iasis can renegotiate with other charging devices. Their existing contracts stay funded until they have stepped down. When a peer releases power, a connected device can negotiate a higher offer without a replug. An active restore keeps its contract while the supply can cover it. A port waits if its starting allowance is unavailable.
 
 Changing the charging input can interrupt USB to all targets while the board stays online. Leave the supply connected or disconnected for the duration of a restore.
 
