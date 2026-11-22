@@ -4,12 +4,9 @@ import SwiftUI
 struct DevicesView: View {
     static let windowID = "devices"
 
-    let model: AgentModel
-    @State private var browser: DeviceBrowser
-
-    init(model: AgentModel) {
-        self.model = model
-        _browser = State(initialValue: DeviceBrowser(model: model))
+    let browser: DeviceBrowser
+    private var model: AgentModel {
+        browser.model
     }
 
     var body: some View {
@@ -31,6 +28,7 @@ struct DevicesView: View {
                     }
                 } header: {
                     BoardHeader(group: group)
+                        .listRowSeparator(.hidden, edges: .bottom)
                 }
             }
         }
@@ -123,8 +121,6 @@ struct DevicesView: View {
     }
 }
 
-/// A board's name and, when it has a power supply, what the targets take of
-/// the supply's pool.
 private struct BoardHeader: View {
     let group: BoardDevices
 
@@ -133,14 +129,28 @@ private struct BoardHeader: View {
             Text(group.title)
                 .help("Firmware \(group.board.firmware), serial \(group.board.serial)")
             Spacer()
-            if let pool = group.board.pool {
-                Label("\(wholeWatts(pool.allocatedMw)) / \(wholeWatts(pool.budgetMw)) W", systemImage: "bolt.fill")
-                    .labelStyle(.titleAndIcon)
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .help("Power allocated to the ports out of the charging budget")
+            Group {
+                if group.devices.contains(where: \.sharesInternet) {
+                    Image(systemName: DeviceSymbol.lan)
+                        .help("Sharing internet over USB")
+                        .accessibilityLabel("Sharing internet over USB")
+                }
+                if let speed = group.board.upstreamMbps {
+                    let rate = speed >= 1000 ? "\(speed / 1000) Gbit/s" : "\(speed) Mbit/s"
+                    let detail = "Host USB \(speed >= 5000 ? "3" : "2") connection at \(rate)"
+                    Label(rate, systemImage: "cable.connector")
+                        .help(detail)
+                        .accessibilityLabel(detail)
+                }
+                if let pool = group.board.pool {
+                    Label("\(wholeWatts(pool.allocatedMw)) W of \(wholeWatts(pool.budgetMw)) W", systemImage: "powerplug.portrait")
+                        .help("Power reserved for all ports, including voltage tolerance")
+                }
             }
+            .labelStyle(.titleAndIcon)
+            .font(.caption)
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
         }
     }
 }

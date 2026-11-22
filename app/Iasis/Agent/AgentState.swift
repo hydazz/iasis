@@ -21,6 +21,7 @@ nonisolated struct AgentState: Decodable, Equatable {
         var name: String
         var session: UInt32?
         var firmware: String
+        var upstreamMbps: Int?
         /// The power supply's pool for the targets, when there is a supply.
         var pool: Pool?
         var brightness: Int
@@ -46,18 +47,20 @@ nonisolated struct AgentState: Decodable, Equatable {
         var device: String?
         var mode: String?
         var ecid: String?
-        var link: String
-        var contract: String
-        /// The contract's power, in milliwatts.
-        var allocatedMw: Int
-        var contractMw: Int?
+        var link: USBLink?
+        var power: PortPower?
         /// The target took the largest offer its board could make and would
         /// use more.
         var short: Bool
         /// Why the port faulted, in the board's words.
         var fault: String?
-        var state: String
+        var identifying: Bool
+        var request: SignalProgress?
+        var waitingForPower: Bool
+        var powered: Bool
         var wrongDfuPort: Bool
+        var needsConfigurator: Bool
+        var job: Job?
         var light: Light
         var dfu: Bool
         var reboot: Bool
@@ -70,6 +73,16 @@ nonisolated struct AgentState: Decodable, Equatable {
         var id: Int {
             number
         }
+    }
+
+    struct PortPower: Decodable, Equatable {
+        enum Source: String, Decodable {
+            case pd, usb
+        }
+
+        var source: Source
+        var millivolts: Int
+        var milliamps: Int
     }
 
     struct Pool: Decodable, Equatable {
@@ -88,6 +101,29 @@ nonisolated struct AgentState: Decodable, Equatable {
             var active: Bool
             var problem: String?
         }
+    }
+
+    enum USBLink: String, Decodable {
+        case usb, usb2, usb3
+
+        var title: String {
+            switch self {
+            case .usb: "USB"
+            case .usb2: "USB 2"
+            case .usb3: "USB 3"
+            }
+        }
+    }
+
+    enum SignalProgress: String, Decodable {
+        case enteringDfu = "entering_dfu"
+        case dfuUnconfirmed = "dfu_unconfirmed"
+        case restarting
+    }
+
+    struct Job: Decodable, Equatable {
+        var operation: Operation
+        var phase: RestorePhase
     }
 
     struct Stage: Decodable, Equatable {
@@ -123,7 +159,6 @@ nonisolated struct AgentState: Decodable, Equatable {
     struct Ending: Decodable, Equatable {
         var operation: Operation
         var logDirectory: String?
-        var ecid: String?
         var phase: RestorePhase
         var message: String
     }
