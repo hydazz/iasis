@@ -134,6 +134,8 @@ pub struct PortDevices {
 #[derive(Clone, Debug, Serialize)]
 pub struct Snapshot {
     pub hub: Topology,
+    /// Negotiated speed of the board's upstream hub connection.
+    pub upstream_mbps: Option<u16>,
     pub ports: [PortDevices; PORT_COUNT],
 }
 
@@ -235,20 +237,28 @@ fn companion(usb2: &Topology, records: &[HostPort], wired: Option<&Topology>) ->
     }
 }
 
-fn superspeed_hub(hub: &Topology, devices: &[UsbDevice], records: &[HostPort]) -> Option<Topology> {
-    // macOS can publish companions only at the upstream connector. The two
-    // USB7206C functions on that connector share physical target ports 1–5.
-    let Companion::Mapped { topology } = companion(hub, records, None) else {
-        return None;
-    };
-    let has_hub = |at: &Topology, product, superspeed| {
-        devices.iter().any(|d| {
-            &d.topology == at
-                && (d.vendor_id, d.product_id) == (0x0424, product)
-                && d.speed.is_superspeed() == superspeed
-        })
-    };
-    (has_hub(hub, 0x4206, false) && has_hub(&topology, 0x7206, true)).then_some(topology)
+fn upstream_hub<'a>(
+    hub: &Topology,
+    devices: &'a [UsbDevice],
+    records: &[HostPort],
+) -> Option<&'a UsbDevice> {
+    let usb2 = devices.iter().find(|d| {
+        &d.topology == hub
+            && (d.vendor_id, d.product_id) == (0x0424, 0x4206)
+            && !d.speed.is_superspeed()
+    })?;
+    let is_usb3_hub = |d: &UsbDevice| (d.vendor_id, d.product_id) == (0x0424, 0x7206);
+    match companion(hub, records, None) {
+        Companion::Mapped { topology } => {
+            if let Some(peer) = devices.iter().find(|d| d.topology == topology) {
+                return (is_usb3_hub(peer) && peer.speed.is_superspeed()).then_some(peer);
+            }
+        }
+        // An unpaired USB7206C could be this board's faster function.
+        Companion::Unavailable if !devices.iter().any(is_usb3_hub) => {}
+        _ => return None,
+    }
+    Some(usb2)
 }
 
 fn below(device: &Topology, connector: &Topology) -> bool {
@@ -267,11 +277,20 @@ fn group_devices(
         port_chain: hub_path(management)?.to_vec(),
     };
     let devices: Vec<_> = devices.into_iter().collect();
-    let superspeed = superspeed_hub(&hub, &devices, records);
+    let upstream = upstream_hub(&hub, &devices, records);
+    let upstream_mbps = upstream.and_then(|device| match device.speed {
+        Speed::SuperPlus => Some(10000),
+        Speed::Super => Some(5000),
+        Speed::High => Some(480),
+        Speed::Full => Some(12),
+        _ => None,
+    });
+    let superspeed = upstream.filter(|d| d.speed.is_superspeed());
     let mut ports = Port::ALL.map(|port| {
         let mut usb2 = hub.clone();
         usb2.port_chain.push(port.number());
-        let wired = superspeed.clone().map(|mut hub| {
+        let wired = superspeed.map(|device| {
+            let mut hub = device.topology.clone();
             hub.port_chain.push(port.number());
             hub
         });
@@ -311,7 +330,11 @@ fn group_devices(
                 .cmp(&(&b.topology.bus, &b.topology.port_chain))
         });
     }
-    Ok(Snapshot { hub, ports })
+    Ok(Snapshot {
+        hub,
+        upstream_mbps,
+        ports,
+    })
 }
 
 #[cfg(test)]
@@ -447,13 +470,22 @@ mod tests {
             )
             .unwrap()
         };
-        assert_eq!(discover(&usb3, &records).ports[0].devices.len(), 1);
+        let snapshot = discover(&usb3, &records);
+        assert_eq!(snapshot.ports[0].devices.len(), 1);
+        assert_eq!(snapshot.upstream_mbps, Some(10000));
+        usb3.speed = Speed::Super;
+        assert_eq!(discover(&usb3, &records).upstream_mbps, Some(5000));
+        let usb2_only =
+            group_devices(&management, [usb2.clone(), target.clone()], &records).unwrap();
+        assert_eq!(usb2_only.upstream_mbps, Some(480));
+        assert_eq!(discover(&usb3, &records[1..]).upstream_mbps, None);
         assert_eq!(
             discover(&usb3, &records).ports[1].superspeed,
             Companion::Unavailable
         );
         assert!(discover(&usb3, &records[1..]).ports[0].devices.is_empty());
         usb3.product_id = 0x1234;
+        assert_eq!(discover(&usb3, &records).upstream_mbps, None);
         assert!(discover(&usb3, &records).ports[0].devices.is_empty());
         usb3.product_id = 0x7206;
         records[3].peer = Some("other connector".into());
