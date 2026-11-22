@@ -12,13 +12,15 @@ mise run firmware:build
 mise run host:build
 ```
 
-Use Raspberry Pi's [picotool](https://github.com/raspberrypi/picotool) to flash the ELF through the host USB connection:
+`mise install` provides Raspberry Pi's [picotool](https://github.com/raspberrypi/picotool). Use it to flash the ELF through the host USB connection:
 
 ```sh
 target/release/iasis --serial <board-serial> bootloader
 picotool info
 picotool load -v -x target/thumbv8m.main-none-eabihf/release/iasis-firmware -t elf
 ```
+
+`mise run firmware:build` converts the ELF to `IasisOS.uf2` beside it, the form each release carries; `picotool load` takes either.
 
 Check that `picotool info` finds the intended board before loading. With multiple ROM devices attached, select it using picotool's bus/address options.
 
