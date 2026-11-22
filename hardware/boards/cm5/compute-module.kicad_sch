@@ -3,7 +3,7 @@
 	(generator "eeschema")
 	(generator_version "10.0")
 	(paper "A3")
-	(title_block (title "Compute module — CM5 connectors, 5 V input and fan") (date "2026-10-24") (rev "A"))
+	(title_block (title "Compute module — CM5 connectors, 5 V input and fan") (date "2026-10-24") (rev "${VERSION}"))
 	(uuid "d6242aa3-3a8b-4ce9-8cfe-3cf00e83a069")
 	(lib_symbols          
 	
