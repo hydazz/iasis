@@ -802,11 +802,21 @@ mod tests {
         executable_named(temp, "process-fixture", body)
     }
 
+    /// Write an executable script. A child writes it: Linux refuses to run a
+    /// file that is open for writing, and another test's fork would inherit
+    /// such a descriptor from this process until it execs.
     fn executable_named(temp: &Path, name: &str, body: &str) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
         let path = temp.join(name);
-        fs::write(&path, format!("#!/bin/sh\nset -eu\n{body}\n")).unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut writer = Command::new("sh")
+            .args(["-c", r#"cat > "$0" && chmod 700 "$0""#])
+            .arg(&path)
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut script = writer.stdin.take().unwrap();
+        write!(script, "#!/bin/sh\nset -eu\n{body}\n").unwrap();
+        drop(script);
+        assert!(writer.wait().unwrap().success());
         path
     }
 
