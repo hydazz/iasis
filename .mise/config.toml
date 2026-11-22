@@ -10,6 +10,7 @@ jactionlint = "v2.6.0"
 oxfmt = "0.75.0"
 node = "26.13.1"
 "npm:pyright" = "1.1.414"
+"github:raspberrypi/pico-sdk-tools" = { version = "2.3.1-0", matching = "picotool" }
 
 [settings]
 experimental = true
@@ -73,7 +74,10 @@ run = ["mise fmt --check", "oxfmt --check"]
 run = "cargo build --locked --release -p iasis"
 
 [tasks."firmware:build"]
-run = "cargo build --locked --release -p iasis-firmware --target thumbv8m.main-none-eabihf"
+run = [
+  "cargo build --locked --release -p iasis-firmware --target thumbv8m.main-none-eabihf",
+  "picotool uf2 convert --quiet target/thumbv8m.main-none-eabihf/release/iasis-firmware -t elf target/thumbv8m.main-none-eabihf/release/IasisOS.uf2",
+]
 
 [tasks."rust:fmt-check"]
 run = "cargo fmt --all -- --check"

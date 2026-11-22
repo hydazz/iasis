@@ -37,7 +37,7 @@ periphery scan \
 run = "shellcheck packaging/scripts/*"
 
 [tasks.plist-lint]
-run = "plutil -lint packaging/root/Library/LaunchAgents/*.plist"
+run = "plutil -lint Config/*.plist packaging/root/Library/LaunchAgents/*.plist"
 
 [tasks.lint]
 depends = [":shell-lint", ":plist-lint", ":periphery"]
