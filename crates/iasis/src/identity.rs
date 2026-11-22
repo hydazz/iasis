@@ -72,6 +72,22 @@ impl AppleDevice {
     }
 }
 
+/// The mode as a table or log line names it.
+pub(crate) fn mode_name(mode: AppleMode) -> &'static str {
+    match mode {
+        AppleMode::Dfu => "DFU",
+        AppleMode::KisDfu => "DFU, debug USB",
+        AppleMode::Kis => "debug USB",
+        AppleMode::PortDfu => "port DFU",
+        AppleMode::Recovery => "recovery",
+        AppleMode::Wtf => "WTF",
+        AppleMode::Restored => "restore service",
+        AppleMode::Normal => "booted",
+        // The running system or a restore; nothing has asked which.
+        AppleMode::Mux => "system",
+    }
+}
+
 fn parse_ecid(serial: &str) -> Identity {
     let fields: Vec<_> = serial
         .split_ascii_whitespace()
@@ -135,7 +151,7 @@ pub struct TargetTracker {
 pub enum Observation {
     Present { mode: AppleMode },
     Missing,
-    IdentityMissing,
+    IdentityMissing { mode: AppleMode },
     Ambiguous,
     Replaced { ecid: u64 },
     Moved { port: Port },
@@ -191,7 +207,7 @@ impl TargetTracker {
                     Observation::Present { mode: device.mode }
                 }
                 Some(ecid) if ecid != self.ecid => Observation::Replaced { ecid },
-                _ => Observation::IdentityMissing,
+                _ => Observation::IdentityMissing { mode: device.mode },
             },
             _ => Observation::Ambiguous,
         }
@@ -391,7 +407,12 @@ mod tests {
         ));
         snapshot.ports[1].devices.clear();
         snapshot.ports[0].devices[0] = device(0x1901, None);
-        assert_eq!(target.observe(9, &snapshot), Observation::IdentityMissing);
+        assert_eq!(
+            target.observe(9, &snapshot),
+            Observation::IdentityMissing {
+                mode: AppleMode::Mux
+            }
+        );
         assert_eq!(target.observe(8, &snapshot), Observation::BoardChanged);
     }
 
