@@ -3,7 +3,7 @@
 	(generator "eeschema")
 	(generator_version "10.0")
 	(paper "A3")
-	(title_block (title "Accessory port — USB 3 Type-C host port") (date "2026-10-24") (rev "A"))
+	(title_block (title "Accessory port — USB 3 Type-C host port") (date "2026-10-24") (rev "${VERSION}"))
 	(uuid "bcec78d6-f7f7-41a3-b390-d44903a6a8aa")
 	(lib_symbols     
 	

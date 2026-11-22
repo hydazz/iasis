@@ -7,7 +7,7 @@
 	(title_block
 		(title "Port voltage measurement")
 		(date "2026-10-19")
-		(rev "A")
+		(rev "${VERSION}")
 	)
 	(lib_symbols
 		(symbol "Device:C"
