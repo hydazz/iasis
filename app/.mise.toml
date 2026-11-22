@@ -1,6 +1,7 @@
 [tools]
 periphery = "3.8.0"
 swiftformat = "0.64.7"
+shellcheck = "0.11.0"
 
 [tasks.format]
 run = "swiftformat Iasis IasisTests"
@@ -9,7 +10,7 @@ run = "swiftformat Iasis IasisTests"
 run = "swiftformat Iasis IasisTests --lint"
 
 [tasks.build]
-description = "Build the unsigned macOS app with the host tools inside"
+description = "Build the unsigned macOS app"
 run = """
 xcodebuild build \
   -project Iasis.xcodeproj \
@@ -33,9 +34,17 @@ periphery scan \
   CODE_SIGNING_ALLOWED=NO
 """
 
+[tasks.shell-lint]
+description = "Lint package scripts"
+run = "shellcheck packaging/scripts/*"
+
+[tasks.plist-lint]
+description = "Lint property lists"
+run = "plutil -lint packaging/root/Library/LaunchAgents/*.plist"
+
 [tasks.lint]
-description = "Check for unused Swift code"
-depends = [":periphery"]
+description = "Check Swift code, shell scripts and property lists"
+depends = [":shell-lint", ":plist-lint", ":periphery"]
 
 [tasks.test]
 description = "Run the macOS test suite"
@@ -48,15 +57,28 @@ xcodebuild test \
 """
 
 [tasks.package]
-description = "Build the release app and an unsigned installer package"
-run = """
-xcodebuild build \
+description = "Archive the app with the host tools and build an unsigned installer package"
+depends = ["//:host:build"]
+run = [
+  """
+xcodebuild archive \
   -project Iasis.xcodeproj \
   -scheme Iasis \
-  -configuration Release \
   -destination 'generic/platform=macOS' \
-  -derivedDataPath build \
+  -archivePath build/Iasis.xcarchive \
   ARCHS=arm64 \
   CODE_SIGNING_ALLOWED=NO
-scripts/package.sh build/Build/Products/Release/Iasis.app build/Iasis.pkg
-"""
+""",
+  "rm -rf build/payload",
+  "ditto --norsrc packaging/root build/payload",
+  "ditto --norsrc build/Iasis.xcarchive/Products/Applications/Iasis.app build/payload/Applications/Iasis.app",
+  """
+pkgbuild \
+  --root build/payload \
+  --scripts packaging/scripts \
+  --identifier com.hydaz.Iasis \
+  --version "$(/usr/libexec/PlistBuddy -c 'Print :ApplicationProperties:CFBundleShortVersionString' build/Iasis.xcarchive/Info.plist)" \
+  --install-location / \
+  build/Iasis.pkg
+""",
+]

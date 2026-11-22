@@ -1,2 +1,6 @@
 [target.thumbv8m.main-none-eabihf]
 rustflags = ["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x"]
+
+[env]
+# The macOS gateway links the system libpcap, not one pkg-config finds.
+LIBPCAP_NO_PKG_CONFIG = "1"
