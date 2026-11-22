@@ -52,9 +52,6 @@ struct DeviceInspector: View {
                 } else if device.port.request != nil || device.port.stage != nil || (device.port.job != nil && device.port.result == nil) {
                     LabeledContent("Operation", value: device.activity.text)
                 }
-                if device.port.needsConfigurator {
-                    Text("Use Apple Configurator to restore this Mac.").foregroundStyle(.secondary)
-                }
                 if let result = device.port.result {
                     Section("Last \(result.operation.title)") {
                         Text(result.message)

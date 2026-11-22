@@ -518,7 +518,7 @@ pub enum RestorePhase {
 pub struct RestoreStatus {
     pub ecid: u64,
     pub phase: RestorePhase,
-    /// Current idevicerestore stage, not a percentage of the whole restore.
+    /// Overall job progress. Only a reported completion reaches 100.
     pub progress: u8,
 }
 

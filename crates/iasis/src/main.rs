@@ -15,6 +15,7 @@ use iasis::{
     dfu::{self, Attempt, Outcome, Signal},
     home::Home,
     identity::AppleMode,
+    restore::Operation,
     topology::{self, Snapshot},
     view::{BoardView, port_usb},
 };
@@ -48,13 +49,10 @@ enum Command {
     Watch,
     /// Validate a local IPSW without opening USB devices
     Ipsw { path: std::path::PathBuf },
-    /// Erase a selected batch using independent idevicerestore workers
+    /// Erase the devices on the selected ports
     Restore(batch::Options),
-    /// Revive a device with Apple Configurator, keeping its data
-    Revive {
-        #[arg(value_parser = parse_port)]
-        port: Port,
-    },
+    /// Repair the devices on the selected ports from a restore image and keep their data
+    Revive(batch::Revive),
     /// List and manage restore images
     Images {
         #[command(subcommand)]
@@ -155,6 +153,7 @@ fn parse_id(value: &str) -> Result<u16, String> {
 }
 
 fn main() -> Result<()> {
+    iasis::native::run_if_worker();
     let cli = Cli::parse();
     let ids = UsbIds {
         vendor: cli.vid,
@@ -185,14 +184,19 @@ fn main() -> Result<()> {
         (Command::Images { .. }, None) => {
             bail!("the agent keeps the restore images; start iasisd")
         }
-        (Command::Revive { port }, Some(agent)) => {
-            let serial = serial.context("select a board with --board NAME or --serial SERIAL")?;
-            return revive_through(agent, serial, *port);
-        }
-        (Command::Revive { .. }, None) => bail!("Revive requires the running macOS agent"),
         (Command::Restore(options), Some(agent)) => {
             let serial = serial.context("select a board with --board NAME or --serial SERIAL")?;
             return restore_through(agent, serial, options);
+        }
+        (Command::Revive(options), Some(agent)) => {
+            let serial = serial.context("select a board with --board NAME or --serial SERIAL")?;
+            return submit_through(
+                agent,
+                serial,
+                Operation::Revive,
+                &options.source,
+                &options.ports,
+            );
         }
         _ => {}
     }
@@ -205,6 +209,7 @@ fn main() -> Result<()> {
             | Command::Dfu { .. }
             | Command::Reboot { .. }
             | Command::Restore(_)
+            | Command::Revive(_)
     ) && serial.is_none()
     {
         bail!("select a board with --board NAME or --serial SERIAL; see `iasis list`");
@@ -241,11 +246,11 @@ fn main() -> Result<()> {
         | Command::Ipsw { .. }
         | Command::Watch
         | Command::Images { .. }
-        | Command::Sharing { .. }
-        | Command::Revive { .. } => {
+        | Command::Sharing { .. } => {
             unreachable!()
         }
         Command::Restore(options) => batch::run(&devices[0], board, options)?,
+        Command::Revive(options) => batch::revive(&devices[0], board, options)?,
         Command::Rename { name } => board.rename(&name)?,
         Command::Brightness { percent } => board.brightness(percent)?,
         Command::Bootloader => {
@@ -568,9 +573,6 @@ fn agent_text(state: &State) -> String {
             fetch.done * 100 / fetch.bytes.max(1)
         ));
     }
-    if let Some(problem) = &state.restore_problem {
-        text.push_str(&format!("Restores unavailable: {problem}\n"));
-    }
     text
 }
 
@@ -731,6 +733,24 @@ fn restore_through(agent: &mut Client, serial: u64, options: &batch::Options) ->
         !options.button,
         "iasisd is running and already answers the board's Restore hold; make the hold there"
     );
+    submit_through(
+        agent,
+        serial,
+        Operation::Restore,
+        &options.source,
+        &options.ports,
+    )
+}
+
+/// Have the agent restore or revive the selected ports' targets, and follow
+/// them to their end.
+fn submit_through(
+    agent: &mut Client,
+    serial: u64,
+    operation: Operation,
+    source: &batch::Source,
+    ports: &[Port],
+) -> Result<()> {
     let board = format!("{serial:016x}");
     let Reply::State(state) = agent.ask(&Request::State)? else {
         bail!("the agent did not return its boards");
@@ -741,8 +761,7 @@ fn restore_through(agent: &mut Client, serial: u64, options: &batch::Options) ->
         .find(|b| b.serial == board)
         .context("the board is not connected")?;
     let session = view.session.context("the board is not attended")?;
-    let targets = options
-        .ports
+    let targets = ports
         .iter()
         .map(|&physical| {
             let number = physical.number();
@@ -750,7 +769,7 @@ fn restore_through(agent: &mut Client, serial: u64, options: &batch::Options) ->
                 .ports
                 .iter()
                 .find(|p| p.number == number && p.restore)
-                .with_context(|| format!("port {number} cannot be restored"))?;
+                .with_context(|| format!("port {number} has no ready target"))?;
             Ok(Target {
                 port: physical,
                 generation: port.generation,
@@ -763,7 +782,7 @@ fn restore_through(agent: &mut Client, serial: u64, options: &batch::Options) ->
             })
         })
         .collect::<Result<_>>()?;
-    if let Some(path) = &options.ipsw {
+    if let Some(path) = &source.ipsw {
         let _spinner = progress::waiting("Checking IPSW archive");
         match agent.ask(&Request::Import {
             path: path.canonicalize().context("opening IPSW path")?,
@@ -772,42 +791,16 @@ fn restore_through(agent: &mut Client, serial: u64, options: &batch::Options) ->
             _ => {}
         }
     }
-    agent.request(&Request::Restore {
-        boards: vec![Selection {
-            board: board.clone(),
-            session,
-            targets,
-        }],
-    })?;
-    follow_work(agent, &board, &options.ports)
-}
-
-fn revive_through(agent: &mut Client, serial: u64, port: Port) -> Result<()> {
-    let board = format!("{serial:016x}");
-    let state = agent.state()?;
-    let view = state
-        .boards
-        .iter()
-        .find(|b| b.serial == board)
-        .context("the board is not connected")?;
-    let session = view.session.context("the board is not attended")?;
-    let selected = view
-        .ports
-        .iter()
-        .find(|p| p.number == port.number() && p.revive)
-        .context("Revive needs Apple Configurator and a verified device in DFU or recovery")?;
-    let ecid = selected
-        .ecid
-        .clone()
-        .context("the device has no verified ECID")?;
-    agent.request(&Request::Revive {
+    let boards = vec![Selection {
         board: board.clone(),
         session,
-        port: port.number(),
-        generation: selected.generation,
-        ecid,
+        targets,
+    }];
+    agent.request(&match operation {
+        Operation::Restore => Request::Restore { boards },
+        Operation::Revive => Request::Revive { boards },
     })?;
-    follow_work(agent, &board, &[port])
+    follow_work(agent, &board, ports)
 }
 
 fn follow_work(agent: &mut Client, board: &str, ports: &[Port]) -> Result<()> {

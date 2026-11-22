@@ -122,7 +122,7 @@ The selected port shows its negotiated voltage and current, for example `PD 20V 
 
 `ATCH` means a powered USB-C attachment. `USB` means the hub has a data link or the host sees a USB device. `PD` indicates a power contract. `RDY` means the device offers Apple signalling.
 
-During an Iasis restore, three cycling dots mark a port waiting for stage progress. The bar under each port fills with the current stage and can start over at the next stage. Select a port to read its stage percentage. `DONE` means the worker reported completion. `UNKN` means the outcome is unknown. Restores started separately in Finder or Apple Configurator show progress on the host.
+During an Iasis restore, three cycling dots mark a port waiting for its first progress update. The bar under each port follows the whole restore. Select a port to read its percentage. `DONE` means the worker reported completion. `UNKN` means the outcome is unknown. Restores started separately in Finder or Apple Configurator show progress on the host.
 
 The display is optional and works with an external restore host or the CM5. It uses mux channel 7 at `0x3d`, or `0x3c` with the address jumper changed. A bus timeout quarantines channel 7, which also carries the charging-input controller, until reboot.
 
