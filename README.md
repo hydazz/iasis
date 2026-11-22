@@ -36,7 +36,7 @@ mise run deps
 mise run host:build
 ```
 
-The host tools are `target/release/iasis` for board control and `target/release/iasisd`, the [host agent](#host-agent). On macOS, keep `iasis-gateway` beside the agent for USB Internet Sharing. Linux needs read/write access to the management USB device.
+The host tools are `target/release/iasis` for board control and `target/release/iasisd`, the [host agent](#host-agent). Keep `iasis-gateway` beside the agent for USB Internet Sharing. Linux builds need the libpcap development package (`libpcap-dev` on Debian). The agent needs read/write access to the management USB device.
 
 | Task               | Output                                                            |
 | ------------------ | ----------------------------------------------------------------- |
@@ -111,7 +111,7 @@ To run it in the background for your login session, prefix the command with `sys
 
 ### USB Internet Sharing
 
-On a Mac host, turn on **Share internet over USB** in Settings > General or use the CLI.
+On Linux or macOS, use the CLI. The Mac app also has **Share internet over USB** in Settings > General.
 
 ```sh
 iasis sharing on
@@ -119,7 +119,13 @@ iasis sharing       # show the setting and ports being served
 iasis sharing off
 ```
 
-A directly attached Apple device that offers USB Ethernet can use the Mac’s internet connection over its charging and restore cable. Sharing follows the Mac’s routing and resumes when a device restarts. The OLED shows a network symbol while the agent serves at least one port on that board.
+A directly attached Apple device that offers USB Ethernet can use the host’s internet connection over its charging and restore cable. Sharing follows the host’s routing and resumes when a device restarts. The OLED shows a network symbol while the agent serves at least one port on that board.
+
+On Linux, install libpcap and use a kernel whose `cdc_ncm` driver supports the target’s USB ID. The gateway needs read/write access to the target USB device to select its network configuration. Grant the installed gateway permission to bring up the USB interface and exchange Ethernet frames.
+
+```sh
+sudo setcap cap_net_admin,cap_net_raw=ep /path/to/iasis-gateway
+```
 
 Setup Assistant can use this connection for Automated Device Enrollment. See the [Mac app guide](app/README.md#usb-internet-sharing) for host permissions.
 

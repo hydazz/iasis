@@ -500,7 +500,7 @@ impl Agent {
     pub fn run(self: &Arc<Self>, options: &Options) -> Result<()> {
         #[cfg(unix)]
         socket::serve(self.clone())?;
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             let agent = self.clone();
             thread::Builder::new()

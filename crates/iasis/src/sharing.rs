@@ -5,8 +5,14 @@ use std::{fs, io, path::PathBuf, sync::Mutex};
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod supervisor;
+
+const SUPPORTED: bool = cfg!(any(target_os = "linux", target_os = "macos"));
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct Settings {
@@ -35,8 +41,8 @@ pub(crate) struct Sharing {
 
 struct Runtime {
     state: State,
-    #[cfg(target_os = "macos")]
-    gateways: macos::Gateways,
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    gateways: supervisor::Gateways,
 }
 
 impl Sharing {
@@ -57,12 +63,12 @@ impl Sharing {
             file,
             inner: Mutex::new(Runtime {
                 state: State {
-                    enabled: settings.enabled,
-                    problem: (!cfg!(target_os = "macos"))
-                        .then(|| "USB Internet Sharing requires a macOS host".into()),
+                    enabled: settings.enabled && SUPPORTED,
+                    problem: (!SUPPORTED)
+                        .then(|| "USB Internet Sharing requires a macOS or Linux host".into()),
                     ..State::default()
                 },
-                #[cfg(target_os = "macos")]
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
                 gateways: Default::default(),
             }),
         }
@@ -74,8 +80,8 @@ impl Sharing {
 
     pub fn configure(&self, enabled: bool) -> Result<()> {
         ensure!(
-            !enabled || cfg!(target_os = "macos"),
-            "USB Internet Sharing requires a macOS host"
+            !enabled || SUPPORTED,
+            "USB Internet Sharing requires a macOS or Linux host"
         );
         let mut runtime = self.inner.lock().unwrap();
         let state = &mut runtime.state;
@@ -90,7 +96,7 @@ impl Sharing {
         state.enabled = enabled;
         state.problem = None;
         state.ports.clear();
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         runtime.gateways.clear();
         Ok(())
     }
