@@ -37,10 +37,10 @@ struct Device: Identifiable, Equatable {
             "Empty"
         } else if let name = port.device {
             name
-        } else if !port.link.isEmpty || port.mode != nil || port.state == "connected" {
-            "USB Device"
+        } else if port.identifying {
+            "Identifying…"
         } else {
-            "Attached Device"
+            "Unknown Device"
         }
     }
 
@@ -67,54 +67,38 @@ struct Device: Identifiable, Equatable {
             ("apple tv", "appletv"),
             ("appletv", "appletv"),
         ]
-        return kinds.first { name.hasPrefix($0.0) }?.1 ?? "cable.connector"
-    }
-
-    /// The last operation, while its device is still the one on the port.
-    var result: AgentState.Ending? {
-        guard port.occupied, let result = port.result else { return nil }
-        return result.ecid == nil || result.ecid == port.ecid ? result : nil
+        return kinds.first { name.hasPrefix($0.0) }?.1 ?? "questionmark"
     }
 
     var activity: Activity {
+        if let fault = port.fault {
+            return Activity(fault, .failed)
+        }
         guard port.occupied, port.enabled else { return .idle }
         if let stage = port.stage {
             let fraction = stage.percent.map { Double($0) / 100 }
             return Activity(stage.percent.map { "\(stage.name) \($0)%" } ?? stage.name, .working(fraction))
         }
-        switch port.state {
-        case "fault": return Activity(port.fault ?? "Fault", .failed)
-        case "preparing": return Activity("Preparing", .working(nil))
-        case "restoring": return Activity("Restoring", .working(nil))
-        case "reviving": return Activity("Reviving", .working(nil))
-        case "downloading image": return Activity("Downloading image", .working(nil))
-        case "DFU sent": return Activity("Entering DFU", .working(nil))
-        case "reboot sent": return Activity("Restarting", .working(nil))
-        case "checking actions": return Activity("Checking actions", .working(nil))
-        case "attaching": return Activity("Connecting", .working(nil))
-        case "DFU unverified": return Activity("DFU not confirmed", .uncertain)
-        case "waiting for power": return Activity("Waiting for power", .caution)
-        default: break
+        if let job = port.job {
+            return Activity(job.phase, operation: job.operation)
         }
-        if let result {
-            let operation = result.operation.title
-            switch result.phase {
-            case .reported: return Activity("\(operation) complete", .done)
-            case .failed: return Activity("\(operation) failed", .failed)
-            case .unconfirmed: return Activity("\(operation) outcome unknown", .uncertain)
-            case .preparing, .running: break
-            }
+        switch port.request {
+        case .enteringDfu: return Activity("Entering DFU", .working(nil))
+        case .restarting: return Activity("Restarting", .working(nil))
+        case .dfuUnconfirmed: return Activity("DFU Not Confirmed", .uncertain)
+        case nil: break
+        }
+        if port.waitingForPower {
+            return Activity("Waiting for Power", .caution)
+        }
+        if let result = port.result {
+            return Activity(result.phase, operation: result.operation)
         }
         switch port.mode {
         case "dfu", "kis_dfu": return Activity("DFU", .none)
         case "recovery": return Activity("Recovery", .none)
         default: return .idle
         }
-    }
-
-    /// Nominal contract power in whole watts.
-    var watts: String? {
-        port.contractMw.map { "\(wholeWatts($0)) W" }
     }
 
     var restoreTarget: RestoreTarget {
@@ -138,6 +122,16 @@ struct Activity: Equatable {
 
     let text: String
     let mark: Mark
+
+    init(_ phase: AgentState.RestorePhase, operation: AgentState.Operation) {
+        switch phase {
+        case .preparing: self.init("Preparing", .working(nil))
+        case .running: self.init(operation == .revive ? "Reviving" : "Restoring", .working(nil))
+        case .reported: self.init("\(operation.title) Complete", .done)
+        case .failed: self.init("\(operation.title) Failed", .failed)
+        case .unconfirmed: self.init("\(operation.title) Outcome Unknown", .uncertain)
+        }
+    }
 
     init(_ text: String, _ mark: Mark) {
         self.text = text
@@ -201,7 +195,7 @@ struct DeviceActions: Equatable {
             )
         }
         restore = restoreProblem == nil ? RestoreConfirmation(devices) : nil
-        needsConfigurator = devices.contains { $0.port.mode == "kis_dfu" && !$0.port.restore }
+        needsConfigurator = devices.contains(where: \.port.needsConfigurator)
     }
 }
 
@@ -232,6 +226,24 @@ struct RestoreConfirmation: Equatable {
         message = ([erased, ""] + list).joined(separator: "\n")
         request = .restore(boards: boards)
     }
+}
+
+extension AgentState.PortPower {
+    var title: String {
+        source == .pd ? "PD Contract" : "USB Power"
+    }
+
+    var reading: String {
+        let volts = scaled(millivolts, by: 1000)
+        let current = (1 ..< 1000).contains(milliamps) ? "\(milliamps) mA" : "\(scaled(milliamps, by: 1000)) A"
+        let watts = scaled(millivolts * milliamps, by: 1_000_000)
+        return "\(volts) V \(current) (\(watts) W)"
+    }
+}
+
+private func scaled(_ value: Int, by divisor: Int) -> String {
+    (Decimal(value) / Decimal(divisor))
+        .formatted(.number.grouping(.never).precision(.fractionLength(0 ... 6)))
 }
 
 func wholeWatts(_ milliwatts: Int) -> Int {
