@@ -53,6 +53,10 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
+      - name: Install Linux host build tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libpcap-dev
+
       - name: Check Rust formatting
         if: runner.os == 'Linux'
         run: mise run rust:fmt-check

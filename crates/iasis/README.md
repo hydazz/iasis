@@ -26,7 +26,7 @@ A client writes requests and reads replies as JSON, one to a line. A request is 
 | `power`      | `board`, `port`, `on`                            | Enable or disable a port                                       |
 | `brightness` | `board`, `percent`                               | Save one board’s light level                                   |
 | `rename`     | `board`, `name`                                  | Save one board’s display name                                  |
-| `sharing`    | `enabled`                                        | Configure USB Internet Sharing on the host Mac                 |
+| `sharing`    | `enabled`                                        | Configure USB Internet Sharing on the host                     |
 | `keep`       | `model`                                          | Keep the newest image for a model, such as `iPad13,18`         |
 | `forget`     | `model`                                          | Stop keeping a model's image                                   |
 | `import`     | `path`                                           | Check a local IPSW and copy it into the store                  |
