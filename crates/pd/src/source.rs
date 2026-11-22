@@ -11,6 +11,21 @@ use usbpd::protocol_layer::message::data::{
 
 const RAILS_MV: [u16; 4] = [5000, 9000, 15_000, 20_000];
 
+/// Write an operating current without rounding or trailing zeros.
+pub fn write_current(out: &mut impl core::fmt::Write, ma: u16) -> core::fmt::Result {
+    if (1..1000).contains(&ma) {
+        return write!(out, "{ma}mA");
+    }
+    let amps = ma / 1000;
+    let fraction = ma % 1000;
+    match fraction {
+        0 => write!(out, "{amps}A"),
+        n if n.is_multiple_of(100) => write!(out, "{amps}.{}A", n / 100),
+        n if n.is_multiple_of(10) => write!(out, "{amps}.{:02}A", n / 10),
+        n => write!(out, "{amps}.{n:03}A"),
+    }
+}
+
 /// A fixed contract's operating current and the largest agreed draw. Capability
 /// mismatch may report a larger demand, but never increases the granted limit.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
