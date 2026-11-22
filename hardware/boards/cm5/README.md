@@ -38,4 +38,4 @@ mise run //hardware/boards/cm5:fab
 
 `build/boards/cm5/` contains `gerbers.zip`, `bom.csv` and `cpl.csv`. The board is 75.1 × 102 mm and uses the [main board's six-layer ordering settings](../iasis/README.md#jlcpcb-order). Select its accessory and service USB-C connectors (`J401`, `J501`) in the assembly order.
 
-Use `:step` for the populated STEP and `:preview` for `board.png`. The PCB revision is recorded in the KiCad title block; tag Revision A fabrication files as `cm5-rev-a`.
+Use `:step` for the populated STEP and `:preview` for `board.png`. `version.txt` holds the board's version, which the title blocks and the silkscreen print. Each ordered version is a release tagged `cm5-board-v<version>` with its fabrication files attached.
