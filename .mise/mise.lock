@@ -2,6 +2,32 @@
 
 lockfile_version = 4
 
+[[tools."github:raspberrypi/pico-sdk-tools"]]
+version = "2.3.1-0"
+backend = "github:raspberrypi/pico-sdk-tools"
+specifiers = ["2.3.1-0"]
+
+[tools."github:raspberrypi/pico-sdk-tools".options]
+matching = "picotool"
+
+[tools."github:raspberrypi/pico-sdk-tools"."platforms.linux-arm64"]
+checksum = "sha256:8cce5579c92e77c0439f34d4f49d37b1dc7d1e7c455233398f2e7b49599f67aa"
+checksum_source = "mise-versions"
+url = "https://github.com/raspberrypi/pico-sdk-tools/releases/download/v2.3.1-0/picotool-2.3.1-aarch64-lin.tar.gz"
+url_api = "https://api.github.com/repos/raspberrypi/pico-sdk-tools/releases/assets/545990699"
+
+[tools."github:raspberrypi/pico-sdk-tools"."platforms.linux-x64"]
+checksum = "sha256:878a1a1e7d8336b8be60300c7218f366d9790c0d3a211b181d6d172e80b1248e"
+checksum_source = "mise-versions"
+url = "https://github.com/raspberrypi/pico-sdk-tools/releases/download/v2.3.1-0/picotool-2.3.1-x86_64-lin.tar.gz"
+url_api = "https://api.github.com/repos/raspberrypi/pico-sdk-tools/releases/assets/545948995"
+
+[tools."github:raspberrypi/pico-sdk-tools"."platforms.macos-arm64"]
+checksum = "sha256:7bb3cea5d9f1b000fc758cf4b54774fda5c16a9899d342ef6b0c30138988793b"
+checksum_source = "mise-versions"
+url = "https://github.com/raspberrypi/pico-sdk-tools/releases/download/v2.3.1-0/picotool-2.3.1-mac.zip"
+url_api = "https://api.github.com/repos/raspberrypi/pico-sdk-tools/releases/assets/546002393"
+
 [[tools.jactionlint]]
 version = "2.6.0"
 backend = "packslip:github.com/jdx/jactionlint"
