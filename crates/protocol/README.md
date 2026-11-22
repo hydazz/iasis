@@ -10,8 +10,8 @@ Messages use vendor control transfers on endpoint zero, addressed to interface 0
 | ------------------------ | --------------------------------------------------------- |
 | Request type / recipient | Vendor / interface                                        |
 | `wIndex`                 | `0`                                                       |
-| `wValue`                 | Protocol version, `16`                                    |
-| Maximum payload          | 1344 bytes                                                |
+| `wValue`                 | Protocol version, `17`                                    |
+| Maximum payload          | 1408 bytes                                                |
 | Payload header           | ASCII `IASI`, then a little-endian `u16` protocol version |
 | Payload body             | Postcard-encoded message                                  |
 

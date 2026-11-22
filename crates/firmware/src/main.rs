@@ -391,18 +391,16 @@ async fn main(_spawner: Spawner) {
                 Supply::Brick => brick_ports,
             };
             next.host_limit_ma = host_tier.map_or(0, |tier| tier.upper_ma);
+            let input_mv = qualified_mv.unwrap_or(0) as u16;
             let demands = ports.demands();
             let budgets = match next.supply {
-                Supply::Brick => iasis_pd::power::allocate(next.charging_budget_mw, demands),
+                Supply::Brick => {
+                    iasis_pd::power::allocate(next.charging_budget_mw, input_mv, demands)
+                }
                 Supply::HostPresence => demands.map(|port| u32::from(port.attached)),
                 Supply::Off => [0; protocol::PORT_COUNT],
             };
-            ports.grant(
-                next.supply,
-                budgets,
-                qualified_mv.unwrap_or(0) as u16,
-                next.brick_source_pdos[0],
-            );
+            ports.grant(next.supply, budgets, input_mv, next.brick_source_pdos[0]);
             if host_limiter_fault {
                 ports.host_fault(protocol::PortError::HostLimiter);
             }
