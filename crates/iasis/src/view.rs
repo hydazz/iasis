@@ -10,7 +10,10 @@ use crate::{
     batch::{Device, Ending},
     dfu::{self, Signal},
     host::{PortJob, observe},
-    identity::models::{DeviceModel, Models},
+    identity::{
+        self,
+        models::{DeviceModel, Models},
+    },
     images::Store,
     restore::{Operation, Progress},
     topology::Snapshot,
@@ -488,18 +491,7 @@ pub fn port_usb(port: &PortStatus) -> String {
         Usb::Absent => "not enumerated",
         Usb::Other => "USB device",
         Usb::Ambiguous => "several USB devices",
-        Usb::Apple(mode) => match mode {
-            AppleMode::Dfu => "DFU",
-            AppleMode::KisDfu => "DFU, debug USB",
-            AppleMode::Kis => "debug USB",
-            AppleMode::PortDfu => "port DFU",
-            AppleMode::Recovery => "recovery",
-            AppleMode::Wtf => "WTF",
-            AppleMode::Restored => "restore service",
-            AppleMode::Normal => "booted",
-            // The running system or a restore; nothing has asked which.
-            AppleMode::Mux => "system",
-        },
+        Usb::Apple(mode) => identity::mode_name(mode),
     };
     match port.ecid {
         Some(ecid) => format!("{mode} {ecid:016x}"),
