@@ -4,6 +4,8 @@
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "macos")]
+pub use macos::ncm_interfaces;
 
 use iasis_protocol::{PORT_COUNT, Port};
 use nusb::{DeviceInfo, MaybeFuture};

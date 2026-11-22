@@ -32,11 +32,17 @@ Double-click a row, or show the inspector, for the device's model and ECID, its 
 
 In Settings, select a board to rename it or adjust its lights; the board keeps both when moved to another Mac. The Images tab manages restore images, and File ▸ Add Restore Image adds one from an IPSW. The Finder preference applies to all connected Apple devices. Help ▸ Indicator Lights explains the port and status lights.
 
-The app includes `iasisd` and `iasis` and communicates over the [agent socket](../crates/iasis/README.md).
+### USB internet sharing
+
+In Settings > General, turn on **Share internet over USB**. Targets with a USB Ethernet interface can use the Mac’s internet connection. A globe marks each port where sharing is active. The port inspector shows its sharing status and any connection error.
+
+Allow Iasis to access the local network when macOS prompts. You can change this in System Settings > Privacy & Security > Local Network.
+
+If a port reports a packet capture permission error, open `Install ChmodBPF.pkg` from the Wireshark disk image, then log out and back in. The package grants your account packet capture access on this Mac. [Wireshark’s macOS installation guide](https://www.wireshark.org/docs/wsug_html_chunked/ChBuildInstallOSXInstall.html).
 
 ## Build
 
-Building needs Xcode 27 and the repository's mise tools. The project's build runs `cargo` for the host tools.
+Building needs Xcode 27 and the repository’s mise tools. Xcode runs Cargo to build the Rust host tools and bundles them with the app.
 
 ```sh
 mise run //app:build     # the app, unsigned, with the host tools inside
@@ -53,11 +59,13 @@ Set `TEST_RUNNER_IASIS_LIVE_AGENT=1` when running the tests to check the connect
 
 `scripts/package.sh` stages a package from a built app:
 
-| Installed at                                        | What                                            |
-| --------------------------------------------------- | ----------------------------------------------- |
-| `/Applications/Iasis.app`                           | The app, with `iasisd` and `iasis` in `Helpers` |
-| `/Library/LaunchAgents/com.hydaz.Iasis.agent.plist` | Starts `iasisd` at login and keeps it running   |
-| `/Library/LaunchAgents/com.hydaz.Iasis.plist`       | Starts the app in the menu bar at login         |
-| `/usr/local/bin/iasis`                              | A link to the `iasis` command inside the app    |
+| Installed at                                        | What                                          |
+| --------------------------------------------------- | --------------------------------------------- |
+| `/Applications/Iasis.app`                           | The app and its bundled host tools            |
+| `/Library/LaunchAgents/com.hydaz.Iasis.agent.plist` | Starts `iasisd` at login and keeps it running |
+| `/Library/LaunchAgents/com.hydaz.Iasis.plist`       | Starts the app in the menu bar at login       |
+| `/usr/local/bin/iasis`                              | A link to the `iasis` command inside the app  |
 
 The installer starts both for the user at the console; other users get them at their next login. Restores need Apple Configurator or [idevicerestore](../README.md#restore), which the agent looks for in Homebrew's and the system's directories.
+
+The app communicates with `iasisd` over the [agent socket](../crates/iasis/README.md).

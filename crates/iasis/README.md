@@ -26,6 +26,7 @@ A client writes requests and reads replies as JSON, one to a line. A request is 
 | `power`      | `board`, `port`, `on`                            | Enable or disable a port                                       |
 | `brightness` | `board`, `percent`                               | Save one board’s light level                                   |
 | `rename`     | `board`, `name`                                  | Save one board’s display name                                  |
+| `sharing`    | `enabled`                                        | Configure USB Internet Sharing on the host Mac                 |
 | `keep`       | `model`                                          | Keep the newest image for a model, such as `iPad13,18`         |
 | `forget`     | `model`                                          | Stop keeping a model's image                                   |
 | `import`     | `path`                                           | Check a local IPSW and copy it into the store                  |
@@ -81,3 +82,5 @@ The board drops a job when its target leaves, which a restored target does by re
 `light.hue` is `off`, `red`, `green`, `white`, `blue`, `amber` or `purple`, with the meanings in the [light table](../firmware/README.md#controls-and-status). A client that draws the port in that colour agrees with the board.
 
 `images` has the `images` in the store (version, build, size, the models each supports, and whether it was `fetched` or added), the `models` kept current (with the `latest` release, whether it is `ready`, and any `error`), and the `fetch` under way with its `done` and total `bytes`.
+
+`sharing.enabled` is the saved USB Internet Sharing setting. Each entry in `sharing.ports` identifies a board and port. Its `active` flag means the port’s gateway is running. A `problem` on the sharing state or an individual port describes a failure.

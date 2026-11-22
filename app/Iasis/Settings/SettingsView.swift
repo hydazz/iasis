@@ -49,6 +49,18 @@ private struct GeneralSettings: View {
                 }
             }
             Section {
+                Toggle("Share internet over USB", isOn: Binding {
+                    model.state?.sharing.enabled == true
+                } set: { enabled in
+                    model.perform([.sharing(enabled: enabled)])
+                })
+                .disabled(model.state == nil)
+                if let problem = model.state?.sharing.problem {
+                    Label(problem, systemImage: "exclamationmark.triangle")
+                        .textSelection(.enabled)
+                }
+            }
+            Section {
                 Toggle("Open Finder when a device connects", isOn: $revealsDevices)
             } footer: {
                 Text("Finder opens a window for each device that enters DFU. This is an undocumented macOS setting and applies to every Apple device you connect.")
