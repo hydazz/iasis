@@ -14,5 +14,5 @@ mod source;
 pub use source::{
     Contract, RequestError, capabilities, fixed_contract, fixed_offers, host_offers,
     limited_by_offers, max_port_cost_mw, nominal_limit_ma, select_offers, voltage_window,
-    wants_more,
+    wants_more, write_current,
 };
