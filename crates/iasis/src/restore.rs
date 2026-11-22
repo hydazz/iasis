@@ -890,14 +890,14 @@ fn parse_progress(line: &str) -> Option<Progress> {
     }
     // idevicerestore's restore_step values label independent progress counters.
     let name = match step {
-        0 => "Detecting device".into(),
-        1 => "Preparing device".into(),
-        2 => "Sending filesystem".into(),
-        3 => "Verifying filesystem".into(),
-        4 => "Flashing firmware".into(),
-        5 => "Flashing baseband".into(),
-        6 => "Updating firmware".into(),
-        7 => "Sending image".into(),
+        0 => "Detecting Device".into(),
+        1 => "Preparing Device".into(),
+        2 => "Sending Filesystem".into(),
+        3 => "Verifying Filesystem".into(),
+        4 => "Flashing Firmware".into(),
+        5 => "Flashing Baseband".into(),
+        6 => "Updating Firmware".into(),
+        7 => "Sending Image".into(),
         n => format!("Stage {n}"),
     };
     Some(Progress {
@@ -1080,7 +1080,7 @@ mod tests {
         assert_eq!(
             parse_progress("progress: 2 0.500000"),
             Some(Progress {
-                name: "Sending filesystem".into(),
+                name: "Sending Filesystem".into(),
                 percent: Some(50)
             })
         );
@@ -1341,7 +1341,7 @@ printf 'Status: Restore Finished\n'
             assert_eq!(
                 status.progress,
                 Some(Progress {
-                    name: "Sending filesystem".into(),
+                    name: "Sending Filesystem".into(),
                     percent: Some(50)
                 })
             );
