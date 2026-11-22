@@ -25,12 +25,12 @@ env:
 jobs:
   tag:
     name: Tag
-    if: startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read
     outputs:
+      board: ${{ steps.tag.outputs.board }}
       version: ${{ steps.tag.outputs.version }}
     steps:
       - name: Checkout release
@@ -38,18 +38,33 @@ jobs:
         with:
           persist-credentials: false
 
-      # The tag's version must be the one in the release's files.
+      # Software is tagged v1.2.3 and a board iasis-board-v1.2.3. The tag's
+      # version must be the one in the release's files.
       - name: Check release version
         id: tag
         run: |
-          VERSION="${RELEASE_TAG#v}"
-          grep -Fqx "version = \"${VERSION}\"" Cargo.toml
-          grep -Fqx "MARKETING_VERSION = ${VERSION} // x-release-please-version" app/Config/Version.xcconfig
+          case "${RELEASE_TAG}" in
+            v*)
+              VERSION="${RELEASE_TAG#v}"
+              grep -Fqx "version = \"${VERSION}\"" Cargo.toml
+              grep -Fqx "MARKETING_VERSION = ${VERSION} // x-release-please-version" app/Config/Version.xcconfig
+              ;;
+            *-board-v*)
+              BOARD="${RELEASE_TAG%-board-v*}"
+              VERSION="${RELEASE_TAG#*-board-v}"
+              test "$(cat "hardware/boards/${BOARD}/version.txt")" = "${VERSION}"
+              ;;
+            *)
+              exit 1
+              ;;
+          esac
+          echo "board=${BOARD:-}" >> "${GITHUB_OUTPUT}"
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
 
   firmware:
     name: Firmware
     needs: tag
+    if: needs.tag.outputs.board == ''
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
@@ -81,6 +96,7 @@ jobs:
   linux:
     name: Linux (${{ matrix.arch }})
     needs: tag
+    if: needs.tag.outputs.board == ''
     strategy:
       fail-fast: false
       matrix:
@@ -122,6 +138,7 @@ jobs:
   macos:
     name: macOS
     needs: tag
+    if: needs.tag.outputs.board == ''
     runs-on: xcode-27
     timeout-minutes: 30
     permissions:
@@ -230,3 +247,86 @@ jobs:
             "${RELEASE_TAG}" \
             "${PKG_PATH}" \
             --clobber
+
+  board:
+    name: Board
+    needs: tag
+    if: needs.tag.outputs.board != ''
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    container:
+      image: kicad/kicad:10.0.8-full@sha256:4ae56a2c3202334383ab70ad698c649d7a9e2b7ba207088b2a38eca40a2b4e84
+      # The image's default user, kicad, can't write the runner's workspace.
+      options: --user root
+    permissions:
+      contents: read
+    env:
+      BOARD: ${{ needs.tag.outputs.board }}
+      VERSION: ${{ needs.tag.outputs.version }}
+    steps:
+      - name: Checkout release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends curl
+
+      - name: Setup Mise
+        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
+        with:
+          cache: false
+          install_args: --locked python uv
+
+      - name: Check board
+        run: mise run "//hardware/boards/${BOARD}:lint"
+
+      - name: Build fabrication files
+        run: mise run "//hardware/boards/${BOARD}:fab"
+
+      - name: Name release assets
+        run: |
+          mkdir dist
+          cd "build/boards/${BOARD}"
+          for file in gerbers.zip bom*.csv cpl*.csv; do
+            cp "${file}" "${GITHUB_WORKSPACE}/dist/${BOARD}-board-${VERSION}-${file}"
+          done
+
+      - name: Upload fabrication files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: board
+          path: dist/
+          if-no-files-found: error
+
+  board-assets:
+    name: Board assets
+    needs: board
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      # Release Please publishes every release as latest and has no per-package
+      # opt-out (googleapis/release-please#2317).
+      - name: Mark the software release as latest
+        run: |
+          software_tag="$(gh release list --exclude-drafts --exclude-pre-releases --json tagName \
+            --jq 'first(.[].tagName | select(startswith("v")))')"
+          if [[ -n "${software_tag}" ]]; then
+            gh release edit "${software_tag}" --latest
+          fi
+
+      - name: Download fabrication files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: board
+          path: dist
+
+      - name: Upload release assets
+        run: gh release upload "${RELEASE_TAG}" dist/* --clobber
