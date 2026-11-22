@@ -15,6 +15,17 @@ The optional [CM5 carrier](hardware/boards/cm5/README.md) plugs into HubPD and h
 
 See the [main board](hardware/boards/iasis/README.md) for fabrication files and ordering settings.
 
+## Software
+
+| Part                                 | Role                                         |
+| ------------------------------------ | -------------------------------------------- |
+| [IasisOS](crates/firmware/README.md) | Firmware on the board's RP2354               |
+| [`iasisd`](#host-agent)              | Host agent: follows boards and runs restores |
+| `iasis`                              | Command-line control of boards and the agent |
+| [Iasis for macOS](app/README.md)     | Menu bar app, with the host tools inside     |
+
+They share one version and are released together.
+
 ## Build
 
 Install [mise](https://mise.jdx.dev/) and, for hardware work, KiCad 10 with its standard libraries. Run from the repository root:
@@ -27,13 +38,13 @@ mise run host:build
 
 The host tools are `target/release/iasis` for board control and `target/release/iasisd`, the [host agent](#host-agent). On macOS, keep `iasis-gateway` beside the agent for USB Internet Sharing. Linux needs read/write access to the management USB device.
 
-| Task               | Output                                                             |
-| ------------------ | ------------------------------------------------------------------ |
-| `mise run build`   | Host tools, firmware, case STLs, board STEPs and fabrication files |
-| `mise run lint`    | Rust, Python, workflow and KiCad checks                            |
-| `mise run test`    | Software, placement-conversion and case-fit tests                  |
-| `mise run preview` | Board and case images                                              |
-| `mise run format`  | Formatted sources and configuration                                |
+| Task               | Output                                                            |
+| ------------------ | ----------------------------------------------------------------- |
+| `mise run build`   | Host tools, IasisOS, case STLs, board STEPs and fabrication files |
+| `mise run lint`    | Rust, Python, workflow and KiCad checks                           |
+| `mise run test`    | Software, placement-conversion and case-fit tests                 |
+| `mise run preview` | Board and case images                                             |
+| `mise run format`  | Formatted sources and configuration                               |
 
 Builds, checks and previews are separate tasks. Python tools share the root `.venv`; `mise install` also installs the Lefthook hooks.
 
@@ -185,9 +196,9 @@ Use USB 2 as a planning estimate for M1–M3 and USB 3 for M4 or newer Macs with
 | University of Utah, ten MacBooks on Acroname hubs   |           [35–40 min](https://apple.lib.utah.edu/macbook-imaging-automation-journey/) |
 | Twocanoes, fifteen Macs on its USB 3 restore system | [Under 10 min](https://tperfitt.twocanoes.com/2026/04/19/dfu-restore-for-mac-is.html) |
 
-## Firmware and protocol
+## IasisOS and protocol
 
-[Build, flash and recover the firmware](crates/firmware/README.md) through the same host USB connection. The [protocol README](crates/protocol/README.md) describes the management interface for host applications.
+[Build, flash and recover IasisOS](crates/firmware/README.md) through the same host USB connection. The [protocol README](crates/protocol/README.md) describes the management interface for host applications.
 
 ## License
 

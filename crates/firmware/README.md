@@ -1,6 +1,6 @@
-# Firmware
+# IasisOS
 
-The RP2354 firmware controls Iasis port power, USB-C attachment, Apple DFU signalling, the button, LEDs and optional OLED. Restore data passes directly through the USB hub between the host and targets.
+IasisOS is the firmware on the board's RP2354. It controls port power, USB-C attachment, Apple DFU signalling, the button, LEDs and optional OLED. Restore data passes directly through the USB hub between the host and targets.
 
 ## Build and flash
 

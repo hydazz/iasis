@@ -127,7 +127,7 @@ private struct BoardHeader: View {
     var body: some View {
         HStack {
             Text(group.title)
-                .help("Firmware \(group.board.firmware), serial \(group.board.serial)")
+                .help("IasisOS \(group.board.firmware), serial \(group.board.serial)")
             Spacer()
             Group {
                 if group.devices.contains(where: \.sharesInternet) {
