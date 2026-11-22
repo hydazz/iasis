@@ -1,10 +1,10 @@
 import Foundation
 
-/// What the agent reports: its boards, its restore images and whether it can
-/// run restores. The shapes follow the agent's socket, decoded from snake case.
+/// The shapes follow the agent's socket, decoded from snake case.
 nonisolated struct AgentState: Decodable, Equatable {
     var boards: [Board]
     var images: ImageStore
+    var sharing: Sharing
     /// Why the agent cannot run restores, when it cannot.
     var restoreProblem: String?
 
@@ -73,6 +73,19 @@ nonisolated struct AgentState: Decodable, Equatable {
     struct Pool: Decodable, Equatable {
         var budgetMw: Int
         var allocatedMw: Int
+    }
+
+    struct Sharing: Decodable, Equatable {
+        var enabled: Bool
+        var problem: String?
+        var ports: [Port]
+
+        struct Port: Decodable, Equatable {
+            var board: String
+            var port: Int
+            var active: Bool
+            var problem: String?
+        }
     }
 
     struct Stage: Decodable, Equatable {

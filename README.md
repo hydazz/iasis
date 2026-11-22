@@ -25,7 +25,7 @@ mise run deps
 mise run host:build
 ```
 
-The macOS and Linux build produces `target/release/iasis` for direct board control and `target/release/iasisd`, the [host agent](#host-agent). Linux needs read/write access to the management USB device.
+The host tools are `target/release/iasis` for board control and `target/release/iasisd`, the [host agent](#host-agent). On macOS, keep `iasis-gateway` beside the agent for USB Internet Sharing. Linux needs read/write access to the management USB device.
 
 | Task               | Output                                                             |
 | ------------------ | ------------------------------------------------------------------ |
@@ -85,17 +85,32 @@ The [firmware power table](crates/firmware/README.md#port-power) lists the limit
 target/release/iasisd
 ```
 
-It does three things:
+While the agent is running:
 
 - It tells each board which USB mode its targets are in, so a port light turns steady blue when its target really is in DFU, however it got there.
 - It keeps the [restore images](#images) and fetches the ones it lacks.
 - It runs the restores that a board's button or a client asks for.
+- On macOS, it can share an internet connection with attached devices over USB.
 
 The status light is green and the OLED shows a USB symbol while a host is attached. One host holds a board at a time. The `iasis` commands work alongside the agent, and `iasis restore` and `iasis images` use it when running. Other clients use its [local socket](crates/iasis/README.md).
 
 On macOS, the [menu bar app](app/README.md) shows the same boards and ports, sends the same actions, and its installer starts the agent at login.
 
 To run it in the background for your login session, prefix the command with `systemd-run --user --unit=iasisd --` on Linux or `launchctl submit -l local.iasisd --` on macOS. For automatic startup at login, use absolute paths in a systemd user service's `ExecStart` or a user LaunchAgent's `ProgramArguments` in `~/Library/LaunchAgents/` with `RunAtLoad` enabled. On macOS the agent belongs to the login session, as Apple Configurator restores do.
+
+### USB Internet Sharing
+
+On a Mac host, turn on **Share internet over USB** in Settings > General or use the CLI.
+
+```sh
+iasis sharing on
+iasis sharing       # show the setting and ports being served
+iasis sharing off
+```
+
+A directly attached Apple device that offers USB Ethernet can use the Mac’s internet connection over its charging and restore cable. Sharing follows the Mac’s routing and resumes when a device restarts. The OLED shows a network symbol while the agent serves at least one port on that board.
+
+Setup Assistant can use this connection for Automated Device Enrollment. See the [Mac app guide](app/README.md#usb-internet-sharing) for host permissions.
 
 ### Images
 
