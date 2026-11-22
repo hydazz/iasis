@@ -63,10 +63,13 @@ impl Button {
 
     /// The action a release would send now.
     pub fn held(&self, now: u64) -> Option<Gesture> {
-        if !self.pressed || self.consumed || self.armed.is_some() {
-            return None;
-        }
-        self.stop(now.saturating_sub(self.pressed_since))
+        self.hold_ms(now).and_then(|elapsed| self.stop(elapsed))
+    }
+
+    pub fn hold_ms(&self, now: u64) -> Option<u64> {
+        let elapsed = now.saturating_sub(self.pressed_since);
+        (self.pressed && !self.consumed && self.armed.is_none() && elapsed >= HOLD_MS)
+            .then_some(elapsed)
     }
 
     /// Ports the screen highlights and the LEDs keep at full brightness: an
@@ -118,7 +121,7 @@ impl Button {
 
     /// Called after sampling the GPIO so a press already underway cannot confirm.
     fn arm(&mut self, arm: RestoreArm, status: &Status, now: u64) -> bool {
-        if self.session != Some(arm.session) || now >= arm.expires || !arm.matches_targets(status) {
+        if self.session != Some(arm.session) || now >= arm.expires || !arm.prepared(status) {
             return false;
         }
         if self.armed == Some(arm) {
@@ -153,7 +156,7 @@ impl Button {
                 Some("Host disconnected")
             } else if now >= arm.expires {
                 Some("Restore arm expired")
-            } else if !arm.matches_targets(status) {
+            } else if !arm.prepared(status) {
                 Some("Target changed")
             } else {
                 None
@@ -330,6 +333,7 @@ mod tests {
             for (i, port) in rig.status.ports.iter_mut().enumerate() {
                 port.generation = 1;
                 port.debug_actions = DFU_PORT;
+                port.restore_access = iasis_protocol::RestoreAccess::EnterDfu;
                 port.state = if occupied & (1 << i) != 0 {
                     PortState::Contract
                 } else {
@@ -378,6 +382,14 @@ mod tests {
         }
 
         fn prepare(&mut self) -> RestoreArm {
+            for i in [0, 2] {
+                self.status.ports[i].restore_access = iasis_protocol::RestoreAccess::InDfu;
+                self.status.ports[i].ecid = Some(42);
+                self.status.ports[i].observed = Some(iasis_protocol::Observed {
+                    usb: iasis_protocol::Usb::Apple(iasis_protocol::AppleMode::Dfu),
+                    ecid: Some(42),
+                });
+            }
             self.session = Some(7);
             self.sample(false, 10);
             RestoreArm {
@@ -456,7 +468,14 @@ mod tests {
         assert_eq!(r.button.held(r.now), None);
         assert_eq!(r.release(), None);
         assert_eq!(r.button.notice(r.now), Some("No actions available"));
-        // It can still be restored: the host may find it already in DFU.
+        // The host found this USB-only device in DFU.
+        r.status.ports[1].state = PortState::Ready;
+        r.status.ports[1].restore_access = iasis_protocol::RestoreAccess::InDfu;
+        r.status.ports[1].ecid = Some(42);
+        r.status.ports[1].observed = Some(iasis_protocol::Observed {
+            usb: iasis_protocol::Usb::Apple(iasis_protocol::AppleMode::Dfu),
+            ecid: Some(42),
+        });
         r.session = Some(7);
         r.sample(false, 10);
         assert_eq!(r.button.actions(), [Gesture::Restore]);
@@ -466,7 +485,7 @@ mod tests {
         r.tap();
         r.sample(false, 10);
         assert_eq!(r.selected(), Some(4));
-        assert_eq!(r.button.actions(), [Gesture::Reboot, Gesture::Restore]);
+        assert_eq!(r.button.actions(), [Gesture::Reboot]);
         assert!(action(Gesture::Reboot, 0b01000, None)(r.hold(0)));
 
         // An answer still awaited offers nothing yet.

@@ -9,6 +9,9 @@ struct DeviceInspector: View {
             Form {
                 Section {
                     LabeledContent("Status", value: status(of: device))
+                    if device.port.wrongDfuPort {
+                        Text(Device.dfuPortHelp).foregroundStyle(.secondary)
+                    }
                     if device.port.mode == "kis_dfu", !device.port.restore {
                         Text("Use Apple Configurator to restore this Mac.")
                             .foregroundStyle(.secondary)

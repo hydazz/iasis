@@ -213,7 +213,7 @@ fn restore_targets(status: &iasis_protocol::Status, selected: &[Target]) -> Resu
         let port = target.port;
         let number = port.number();
         ensure!(
-            status.ready_mask() & (1 << port.index()) != 0,
+            status.gesture_mask(iasis_protocol::Gesture::Restore) & (1 << port.index()) != 0,
             "port {number} has no ready target"
         );
         ensure!(
@@ -297,10 +297,7 @@ impl Agent {
                 .map(|(serial, board)| {
                     let link = board.link.lock().unwrap().clone();
                     let notice = board.notice.lock().unwrap().clone();
-                    match link
-                        .as_ref()
-                        .and_then(|link| link.board_view(&self.store, &self.engine, self.family))
-                    {
+                    match link.as_ref().and_then(|link| link.board_view(&self.store)) {
                         Some(mut view) => {
                             let endings = board.endings.lock().unwrap();
                             for (port, ending) in view.ports.iter_mut().zip(endings.iter()) {
@@ -456,7 +453,13 @@ impl Agent {
 
     /// Hold one board's host session until the board or the session is lost.
     fn attend(&self, device: &DeviceInfo, board: &Attendance) -> Result<()> {
-        let link = Arc::new(Link::open(device, board.jobs.clone(), self.models.clone())?);
+        let link = Arc::new(Link::open(
+            device,
+            board.jobs.clone(),
+            self.models.clone(),
+            &self.engine,
+            self.family,
+        )?);
         println!("Board {:016x}: attending", link.board().info().serial);
         *board.device.lock().unwrap() = Some(device.clone());
         *board.link.lock().unwrap() = Some(link.clone());
@@ -839,10 +842,25 @@ mod tests {
     use super::*;
     use iasis_protocol::{PortState, Status};
 
+    fn restorable_port() -> Status {
+        let mut status = Status {
+            host: Some(iasis_protocol::HostSession {
+                id: 1,
+                restore_ready: true,
+                internet_sharing: false,
+            }),
+            ..Status::default()
+        };
+        status.ports[0].state = PortState::Contract;
+        status.ports[0].restore_access = iasis_protocol::RestoreAccess::EnterDfu;
+        status.ports[0].debug_actions =
+            iasis_protocol::DebugActions::Listed([0x0106, 0x0606, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        status
+    }
+
     #[test]
     fn restore_rejects_a_target_that_is_not_the_selected_device() {
-        let mut status = Status::default();
-        status.ports[0].state = PortState::Contract;
+        let mut status = restorable_port();
         status.ports[0].generation = 7;
         status.ports[0].ecid = Some(42);
         let wire = r#"{"port":1,"generation":7,"ecid":"000000000000002a"}"#;
@@ -877,8 +895,7 @@ mod tests {
 
     #[test]
     fn confirmation_pins_the_attachment_on_each_selected_port() {
-        let mut status = Status::default();
-        status.ports[0].state = PortState::Contract;
+        let mut status = restorable_port();
         status.ports[0].generation = 7;
         let targets = [Target {
             port: Port::ALL[0],
