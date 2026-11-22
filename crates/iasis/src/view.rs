@@ -12,7 +12,7 @@ use crate::{
     host::{PortJob, observe},
     identity::models::{DeviceModel, Models},
     images::Store,
-    restore::{Operation, Progress, RestoreEngine},
+    restore::{Operation, Progress},
     topology::Snapshot,
 };
 
@@ -32,7 +32,6 @@ pub struct PortView {
     pub waiting_for_power: bool,
     pub powered: bool,
     pub wrong_dfu_port: bool,
-    pub needs_configurator: bool,
     /// What the board's host sees on the port's USB.
     pub usb: String,
     pub link: Option<UsbLink>,
@@ -46,8 +45,8 @@ pub struct PortView {
     /// The actions the target would take now.
     pub dfu: bool,
     pub reboot: bool,
+    /// Restore, or Revive.
     pub restore: bool,
-    pub revive: bool,
     pub enabled: bool,
     /// The phase of the restore job on the port.
     pub job: Option<Job>,
@@ -217,18 +216,15 @@ impl PortView {
             self.dfu = false;
             self.reboot = false;
             self.restore = false;
-            self.revive = false;
         }
     }
 }
 
-/// What the host brings to a board's targets: their names, and the engine
-/// that says which of them it restores.
+/// What the host brings to a board's targets: their names.
 #[derive(Clone, Copy)]
 pub(crate) struct Host<'a> {
     pub store: &'a Store,
     pub models: &'a Models,
-    pub engine: &'a RestoreEngine,
     pub family: Device,
 }
 
@@ -316,7 +312,6 @@ impl BoardView {
                             && state.error.is_none(),
                         wrong_dfu_port: state.restore_access
                             == iasis_protocol::RestoreAccess::WrongMacPort,
-                        needs_configurator: false,
                         usb: port_usb(state),
                         link: match state.link.filter(|_| state.occupied()) {
                             Some(Link::Usb2) => Some(UsbLink::Usb2),
@@ -339,7 +334,6 @@ impl BoardView {
                             }),
                         dfu: available && state.offers(PortAction::DfuAppleSilicon),
                         reboot: available && state.offers(PortAction::Reboot),
-                        revive: false,
                         restore: restore & (1 << port.index()) != 0,
                         enabled: state.enabled,
                         job: state.restore.map(|job| Job {
@@ -348,7 +342,8 @@ impl BoardView {
                         }),
                         stage: state.fetch.map(|percent| Progress {
                             name: "Downloading Image".into(),
-                            percent: Some(percent),
+                            percent,
+                            ..Progress::default()
                         }),
                         result: None,
                     }
@@ -368,14 +363,11 @@ impl BoardView {
         let Host {
             store,
             models,
-            engine,
             family,
         } = *host;
         self.upstream_mbps = snapshot.upstream_mbps;
         for (port, row) in Port::ALL.into_iter().zip(&mut self.ports) {
             let assessment = dfu::assess(serial, port, status, snapshot, family.dfu_action(), None);
-            row.revive = revivable(status, snapshot, port).is_some()
-                && crate::restore::configurator().is_some();
             row.dfu = assessment.signal == Signal::Available;
             let slot = &status.ports[port.index()];
             if !row.occupied {
@@ -393,9 +385,6 @@ impl BoardView {
             // A different USB target can arrive before the board echoes the report.
             let ecid = seen.identity(slot.ecid).filter(|id| Some(*id) == slot.ecid);
             row.ecid = ecid.map(|id| format!("{id:016x}"));
-            row.needs_configurator = cfg!(target_os = "macos")
-                && row.mode == Some(AppleMode::KisDfu)
-                && !engine.restores(AppleMode::KisDfu);
             let live = dfu::direct_device(snapshot, port).filter(|_| agreed);
             if row.link.is_none() && agreed && seen.usb != Usb::Absent {
                 use crate::topology::Speed;
@@ -477,32 +466,6 @@ impl BoardView {
         }
         text
     }
-}
-
-/// A single direct USB target in recovery can be revived even when its cable
-/// does not support the Power Delivery signals used for entering DFU.
-pub(crate) fn revivable(status: &Status, snapshot: &Snapshot, port: Port) -> Option<u64> {
-    let slot = &status.ports[port.index()];
-    let seen = observe(snapshot, port);
-    (status.host.is_some()
-        && !status.i2c_root_fault
-        && !status.aggregate_power_fault
-        && slot.enabled
-        && matches!(slot.state, PortState::Ready | PortState::Contract)
-        && !slot.pd_transition
-        && slot.error.is_none()
-        && slot.faults.is_none_or(|faults| !faults.power && !faults.cc)
-        && slot.fetch.is_none()
-        && !slot.restoring()
-        && slot.command_result != iasis_protocol::CommandResult::Pending
-        && slot.observed == Some(seen)
-        && matches!(
-            seen.usb,
-            Usb::Apple(AppleMode::Dfu | AppleMode::KisDfu | AppleMode::Recovery)
-        ))
-    .then_some(seen.ecid)
-    .flatten()
-    .filter(|id| *id != 0)
 }
 
 fn job_state(phase: RestorePhase, operation: Operation) -> &'static str {
@@ -610,7 +573,7 @@ mod stage_tests {
         for value in [0, 23, 100] {
             status.ports[0].fetch = Some(value);
             let board = BoardView::new(&info, &status);
-            assert_eq!(board.ports[0].stage.as_ref().unwrap().percent, Some(value));
+            assert_eq!(board.ports[0].stage.as_ref().unwrap().percent, value);
         }
         status.ports[0].state = PortState::Fault;
         assert_eq!(
@@ -679,7 +642,7 @@ mod stage_tests {
     }
 
     #[test]
-    fn a_finished_component_is_not_a_finished_restore() {
+    fn restore_stage_follows_the_running_job_on_its_attachment() {
         let mut status = Status::default();
         status.ports[0].state = PortState::Contract;
         status.ports[0].generation = 8;
@@ -688,12 +651,13 @@ mod stage_tests {
             operation: Operation::Restore,
             stage: Some(Progress {
                 name: "Sending Image".into(),
-                percent: Some(100),
+                percent: 10,
+                ..Progress::default()
             }),
             status: RestoreStatus {
                 phase: RestorePhase::Running,
                 ecid: 42,
-                progress: 100,
+                progress: 10,
             },
         };
         status.ports[0].restore = Some(job.status);
@@ -712,13 +676,15 @@ mod stage_tests {
             port.stage,
             Some(Progress {
                 name: "Sending Image".into(),
-                percent: Some(100)
+                percent: 10,
+                ..Progress::default()
             })
         );
 
         job.stage = Some(Progress {
             name: "Sending Filesystem".into(),
-            percent: Some(23),
+            percent: 23,
+            ..Progress::default()
         });
         job.status.progress = 23;
         port.describe_job(&job);
@@ -726,11 +692,12 @@ mod stage_tests {
             port.stage,
             Some(Progress {
                 name: "Sending Filesystem".into(),
-                percent: Some(23)
+                percent: 23,
+                ..Progress::default()
             })
         );
         assert_eq!(port.job.unwrap().phase, RestorePhase::Running);
-        assert!(view.text().contains("Sending Filesystem 23%"));
+        assert!(view.text().contains("23%  Sending Filesystem"));
 
         let mut next = BoardView::new(&info, &status);
         next.ports[0].generation += 1;

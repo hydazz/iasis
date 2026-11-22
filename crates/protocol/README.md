@@ -80,7 +80,7 @@ Each report replaces the last. A port entry carries the attachment generation it
 
 A DFU request older than 15 seconds is unverified: sent, and seen by no host.
 
-A port entry can also carry the host's restore job for that attachment: a nonzero ECID, a phase and progress from 0–100 within the current restore stage. Detach clears it; five seconds without a report that carries it changes an active job to `Unconfirmed`. A port with an active or unconfirmed job refuses DFU and reboot commands with `Busy`.
+A port entry can also carry the host's restore job for that attachment: a nonzero ECID, a phase and overall progress from 0–100. The host reserves 100 for a reported completion. Detach clears it; five seconds without a report that carries it changes an active job to `Unconfirmed`. A port with an active or unconfirmed job refuses DFU and reboot commands with `Busy`.
 
 `fetch` in a port entry is the percentage of that target's restore image the host has fetched, while it is fetching one. Status returns it on the port for as long as reports carry it.
 
@@ -92,4 +92,4 @@ Local DFU and reboot events carry the selected physical port mask and attachment
 
 A restore arm identifies the session, operation, target mask, attachment generations and deadline in board uptime. Arm IDs rise within a session and each is issued once. The arm expires within 20 seconds. A fresh three-second hold confirms the arm once. A tap cancels. USB reset, host-session loss and attachment changes invalidate pending confirmation. The host checks the confirmed identifiers, target ECIDs and current attachments before launching workers.
 
-`RestoreReported` means idevicerestore reported success and exited zero. It is not a post-restore boot check.
+`RestoreReported` means the restore program reported success and exited zero. It is not a post-restore boot check.

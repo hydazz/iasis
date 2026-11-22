@@ -167,8 +167,8 @@ extension AgentState {
 }
 
 /// What can be done with a set of devices now. DFU, restart and power go to
-/// each device that takes them; a restore needs every device to be eligible,
-/// since it erases them.
+/// each device that takes them; a restore or revive needs every device to be
+/// eligible, since it runs on all of them or none.
 struct DeviceActions: Equatable {
     var dfu: [AgentRequest] = []
     var restart: [AgentRequest] = []
@@ -177,33 +177,21 @@ struct DeviceActions: Equatable {
     var power: [AgentRequest] = []
     /// The ports are on, so the power action turns them off.
     var powered = true
-    /// A Mac in DFU over Apple Debug USB on a host without Apple Configurator,
-    /// which is what restores it.
-    var needsConfigurator = false
 
     init() {}
 
-    init(_ devices: [Device], restoreProblem: String?) {
+    init(_ devices: [Device]) {
         dfu = devices.filter(\.port.dfu).map { .dfu(board: $0.serial, port: $0.port.number) }
         restart = devices.filter(\.port.reboot).map { .reboot(board: $0.serial, port: $0.port.number) }
-        if devices.count == 1, let device = devices.first, device.port.revive,
-           let session = device.session, let ecid = device.port.ecid
-        {
-            revive = .revive(
-                board: device.serial,
-                session: session,
-                port: device.port.number,
-                generation: device.port.generation,
-                ecid: ecid
-            )
+        restore = RestoreConfirmation(devices)
+        if case let .restore(boards)? = restore?.request {
+            revive = .revive(boards: boards)
         }
-        restore = restoreProblem == nil ? RestoreConfirmation(devices) : nil
         let enabled = Set(devices.map(\.port.enabled))
         if enabled.count == 1, let on = enabled.first {
             powered = on
             power = devices.map { .power(board: $0.serial, port: $0.port.number, on: !on) }
         }
-        needsConfigurator = devices.contains(where: \.port.needsConfigurator)
     }
 }
 

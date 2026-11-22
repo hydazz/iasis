@@ -7,7 +7,7 @@
 use std::{
     collections::BTreeMap,
     fs::{self, File, OpenOptions},
-    io::{Read, Seek, SeekFrom, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::{Arc, Condvar, Mutex, MutexGuard},
     thread,
@@ -560,7 +560,7 @@ impl Inner {
             }
         })?;
         fs::rename(&part, &path)?;
-        let ipsw = PreparedIpsw::open_verified(&path)?;
+        let ipsw = PreparedIpsw::open_stored(&path)?;
         ensure!(
             ipsw.build_version == firmware.build,
             "the archive is build {}, not the {} listed",
@@ -609,13 +609,33 @@ impl Store {
         lock.try_lock()
             .ok()
             .context("another Iasis process holds the image store")?;
-        let mut saved: Saved = fs::read(dir.join("index.json"))
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default();
+        let index = dir.join("index.json");
+        let mut saved: Saved = match fs::read(&index) {
+            Ok(bytes) => serde_json::from_slice(&bytes).with_context(|| {
+                format!(
+                    "{} is not an index this version reads; delete {} to empty the store",
+                    index.display(),
+                    dir.display()
+                )
+            })?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Saved::default(),
+            Err(error) => {
+                return Err(error).with_context(|| format!("reading {}", index.display()));
+            }
+        };
+        // An image whose file is not as the store left it is no longer the
+        // one the store checked.
+        let kept = saved.images.len();
         saved
             .images
-            .retain(|image| image.ipsw.check_unchanged().is_ok());
+            .retain(|image| match image.ipsw.check_unchanged() {
+                Ok(()) => true,
+                Err(error) => {
+                    eprintln!("Images: {}: {error:#}", image.ipsw.path().display());
+                    false
+                }
+            });
+        let index_changed = saved.images.len() != kept;
         let store = Self(Arc::new(Inner {
             dir,
             catalog: Box::new(catalog),
@@ -626,6 +646,9 @@ impl Store {
             changed: Condvar::new(),
             _lock: lock,
         }));
+        if index_changed {
+            store.0.save(&store.0.lock());
+        }
         let inner = store.0.clone();
         thread::Builder::new()
             .name("images".into())
@@ -883,7 +906,7 @@ impl Store {
         // A copy on the same volume shares the archive's blocks where the
         // file system can.
         fs::copy(source.path(), &kept).context("copying the archive into the store")?;
-        let ipsw = PreparedIpsw::open_verified(&kept)?;
+        let ipsw = PreparedIpsw::open_stored(&kept)?;
         let mut state = self.0.lock();
         state.saved.images.push(Image {
             ipsw: ipsw.clone(),
@@ -1151,6 +1174,38 @@ mod tests {
                 true
             })
         });
+    }
+
+    #[test]
+    fn reopening_drops_an_image_whose_file_is_not_as_the_store_left_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let local = temp.path().join("Mini.ipsw");
+        archive(&local, "25.0", "24A1", "Macmini9,1", 34);
+        let dir = temp.path().join("store");
+        let store = Store::open(&dir, Shelf::new()).unwrap();
+        let added = store.import(&local).unwrap();
+        store.close();
+        drop(store);
+        archive(added.path(), "25.0", "24A1", "Macmini9,1", 34);
+        until("the store to be free", || {
+            Store::open(&dir, Shelf::new()).is_ok_and(|store| {
+                assert!(store.snapshot().images.is_empty());
+                store.close();
+                true
+            })
+        });
+    }
+
+    #[test]
+    fn an_index_the_store_cannot_read_is_reported_and_left_alone() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = temp.path().join("index.json");
+        fs::write(&index, r#"{"images": [{"path": "/a.ipsw"}]}"#).unwrap();
+        let Err(error) = Store::open(temp.path(), Shelf::new()) else {
+            panic!("the store opened");
+        };
+        assert!(format!("{error:#}").contains("index.json"), "{error:#}");
+        assert!(fs::read_to_string(index).unwrap().contains("/a.ipsw"));
     }
 
     #[test]

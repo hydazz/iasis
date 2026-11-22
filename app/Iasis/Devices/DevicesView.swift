@@ -155,16 +155,12 @@ private struct BoardHeader: View {
     }
 }
 
-/// What the agent is doing or lacks, when there is something to say.
+/// The image the agent is downloading, while it downloads one.
 private struct AgentStatusBar: View {
     let state: AgentState
 
     var body: some View {
-        if let problem = state.restoreProblem {
-            bar {
-                Label(problem, systemImage: "exclamationmark.triangle")
-            }
-        } else if let fetch = state.images.fetch {
+        if let fetch = state.images.fetch {
             bar {
                 Label("Downloading \(fetch.version)", systemImage: "arrow.down.circle")
                 ProgressView(value: fetch.fraction)

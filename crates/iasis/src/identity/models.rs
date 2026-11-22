@@ -24,10 +24,16 @@ impl DeviceModel {
         };
         Self {
             identifier: apple.model.clone().filter(|name| !name.is_empty()),
-            hardware: device
-                .serial_number
-                .as_deref()
-                .and_then(|s| dfu_hardware(s).ok()),
+            hardware: match apple.identity {
+                super::Identity::Known {
+                    source: super::IdentitySource::Kis { chip, board },
+                    ..
+                } => Some((u32::from(chip), u32::from(board))),
+                _ => device
+                    .serial_number
+                    .as_deref()
+                    .and_then(|s| dfu_hardware(s).ok()),
+            },
         }
     }
 

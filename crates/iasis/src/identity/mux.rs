@@ -9,6 +9,7 @@ use plist::{Value, plist};
 use super::{AppleDevice, AppleMode, Identity, IdentitySource};
 use crate::topology::UsbDevice;
 
+#[cfg(not(target_os = "linux"))]
 const SOCKET: &str = "/var/run/usbmuxd";
 const TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_FRAME: usize = 1024 * 1024;
@@ -175,6 +176,9 @@ fn normalize_udid(serial: &str) -> String {
 }
 
 fn socket() -> io::Result<UnixStream> {
+    #[cfg(target_os = "linux")]
+    let socket = UnixStream::connect(crate::native::existing_mux()?)?;
+    #[cfg(not(target_os = "linux"))]
     let socket = UnixStream::connect(SOCKET)?;
     socket.set_read_timeout(Some(TIMEOUT))?;
     socket.set_write_timeout(Some(TIMEOUT))?;

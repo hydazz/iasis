@@ -30,9 +30,6 @@ struct DeviceActionButtons: View {
         }
         .keyboardShortcut(shortcuts ? KeyboardShortcut("r") : nil)
         .disabled(actions.restore == nil)
-        if actions.needsConfigurator {
-            Text("Restoring This Mac Needs Apple Configurator")
-        }
         Divider()
         // A title that stays put lets an open menu keep its item.
         Toggle("USB Power", systemImage: DeviceSymbol.power, isOn: Binding {
