@@ -10,6 +10,7 @@
 		1A5100202F00000000A0E012 /* iasisd in Embed Host Tools */ = {isa = PBXBuildFile; fileRef = 1A5100222F00000000A0E012 /* iasisd */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		1A5100212F00000000A0E012 /* iasis in Embed Host Tools */ = {isa = PBXBuildFile; fileRef = 1A5100232F00000000A0E012 /* iasis */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		1A5100272F00000000A0E012 /* iasis-gateway in Embed Host Tools */ = {isa = PBXBuildFile; fileRef = 1A5100282F00000000A0E012 /* iasis-gateway */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		1A51002B2F00000000A0E012 /* NOTICES.txt in Resources */ = {isa = PBXBuildFile; fileRef = 1A51002C2F00000000A0E012 /* NOTICES.txt */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -44,6 +45,7 @@
 		1A5100222F00000000A0E012 /* iasisd */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = iasisd; path = ../target/release/iasisd; sourceTree = SOURCE_ROOT; };
 		1A5100232F00000000A0E012 /* iasis */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = iasis; path = ../target/release/iasis; sourceTree = SOURCE_ROOT; };
 		1A5100282F00000000A0E012 /* iasis-gateway */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = "iasis-gateway"; path = "../target/release/iasis-gateway"; sourceTree = SOURCE_ROOT; };
+		1A51002C2F00000000A0E012 /* NOTICES.txt */ = {isa = PBXFileReference; lastKnownFileType = text; name = NOTICES.txt; path = ../crates/iasis/NOTICES.txt; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -107,6 +109,7 @@
 				1A5100222F00000000A0E012 /* iasisd */,
 				1A5100232F00000000A0E012 /* iasis */,
 				1A5100282F00000000A0E012 /* iasis-gateway */,
+				1A51002C2F00000000A0E012 /* NOTICES.txt */,
 			);
 			name = "Host Tools";
 			sourceTree = "<group>";
@@ -197,6 +200,7 @@
 		1A5100102F00000000A0E012 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
+				1A51002B2F00000000A0E012 /* NOTICES.txt in Resources */,
 			);
 		};
 		1A5100132F00000000A0E012 /* Resources */ = {

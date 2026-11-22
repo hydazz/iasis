@@ -29,15 +29,13 @@ use crate::{
     identity::models::Models,
     images::{Network, Snapshot, Store},
     parse_serial,
-    restore::RestoreEngine,
+    restore::{Operation, RestoreEngine},
     view::BoardView,
 };
 
 pub struct Options {
     /// Attend one board instead of every board.
     pub serial: Option<u64>,
-    /// Restore with this idevicerestore instead of the host's engine.
-    pub idevicerestore: Option<PathBuf>,
     /// Worker logs and scratch directories; the cache directory by default.
     pub logs: Option<PathBuf>,
     pub family: batch::Device,
@@ -52,8 +50,6 @@ pub struct State {
     pub submitted: Vec<Option<Ending>>,
     pub images: Snapshot,
     pub sharing: crate::sharing::State,
-    /// Why the agent cannot run restores, when it cannot.
-    pub restore_problem: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -114,13 +110,10 @@ pub enum Request {
     Restore {
         boards: Vec<Selection>,
     },
-    /// Repair one identified device in DFU or recovery and preserve its data.
+    /// Repair the selected targets from the images a restore would install
+    /// and keep their data, otherwise as `Restore`.
     Revive {
-        board: String,
-        session: u32,
-        port: u8,
-        generation: u32,
-        ecid: String,
+        boards: Vec<Selection>,
     },
     Dfu {
         board: String,
@@ -203,7 +196,6 @@ pub struct Agent {
     models: Arc<Models>,
     engine: RestoreEngine,
     family: batch::Device,
-    restore_problem: Mutex<Option<String>>,
     boards: Mutex<BTreeMap<u64, Arc<Attendance>>>,
 }
 
@@ -238,7 +230,12 @@ fn restore_targets(status: &iasis_protocol::Status, selected: &[Target]) -> Resu
 
 /// Leave a checked request for the board's attendant and wait for it to
 /// take it.
-fn submit(board: &Attendance, session: u32, targets: Vec<Target>) -> Result<Vec<PortWork>> {
+fn submit(
+    board: &Attendance,
+    session: u32,
+    targets: Vec<Target>,
+    operation: Operation,
+) -> Result<Vec<PortWork>> {
     let (accepted, receipt) = std::sync::mpsc::sync_channel(0);
     let ports: Vec<Port> = targets.iter().map(|target| target.port).collect();
     let work = {
@@ -249,6 +246,7 @@ fn submit(board: &Attendance, session: u32, targets: Vec<Target>) -> Result<Vec<
         *slot = Some(Submission {
             session,
             targets,
+            operation,
             accepted,
         });
         work
@@ -279,9 +277,8 @@ impl Agent {
         Ok(Arc::new(Self {
             store: Store::open(home.cache.join("images"), Network::default())?,
             models: Arc::new(Models::open(home.cache.join("device-models.json"))),
-            engine: RestoreEngine::for_host(options.idevicerestore.clone(), logs),
+            engine: RestoreEngine::for_host(logs),
             family: options.family,
-            restore_problem: Mutex::new(None),
             boards: Mutex::default(),
             sharing: crate::sharing::Sharing::open(home.state.join("usb-sharing.json")),
             home,
@@ -306,7 +303,6 @@ impl Agent {
                                         port.attach_result(view.session, result);
                                     } else {
                                         port.restore = false;
-                                        port.revive = false;
                                         port.reboot = false;
                                         port.dfu = false;
                                     }
@@ -325,7 +321,6 @@ impl Agent {
             submitted: Vec::new(),
             images: self.store.snapshot(),
             sharing: self.sharing.state(),
-            restore_problem: self.restore_problem.lock().unwrap().clone(),
         }
     }
 
@@ -360,10 +355,7 @@ impl Agent {
     /// Hand a client's restore request to each board's attendant. Every
     /// selection is checked before any board is asked, so a stale one
     /// starts nothing.
-    fn restore(&self, selections: &[Selection]) -> Result<Vec<PortWork>> {
-        if let Some(problem) = self.restore_problem.lock().unwrap().clone() {
-            bail!(problem);
-        }
+    fn restore(&self, selections: &[Selection], operation: Operation) -> Result<Vec<PortWork>> {
         ensure!(!selections.is_empty(), "no ports selected");
         let mut checked = Vec::new();
         for selection in selections {
@@ -384,7 +376,7 @@ impl Agent {
         }
         let mut work = Vec::new();
         for (board, session, targets) in checked {
-            work.extend(submit(&board, session, targets)?);
+            work.extend(submit(&board, session, targets, operation)?);
         }
         Ok(work)
     }
@@ -394,30 +386,12 @@ impl Agent {
             Request::State | Request::Watch => {
                 return Reply::State(Box::new(self.state()));
             }
-            Request::Restore { boards } => self.restore(&boards).map(|work| *submitted = work),
-            Request::Revive {
-                board,
-                session,
-                port,
-                generation,
-                ecid,
-            } => (|| {
-                let (attendance, link) = self.board(&board)?;
-                ensure!(link.session() == session, "the board has reconnected");
-                let port = Port::try_from(port)
-                    .ok()
-                    .context("ports are numbered 1 to 5")?;
-                let ecid = parse_serial(&ecid).map_err(anyhow::Error::msg)?;
-                batch::revive(
-                    &link,
-                    &self.engine,
-                    port,
-                    generation,
-                    ecid,
-                    &attendance.endings,
-                )
-                .map(|work| *submitted = work)
-            })(),
+            Request::Restore { boards } => self
+                .restore(&boards, Operation::Restore)
+                .map(|work| *submitted = work),
+            Request::Revive { boards } => self
+                .restore(&boards, Operation::Revive)
+                .map(|work| *submitted = work),
             Request::Dfu { board, port } => self.command(&board, port, self.family.dfu_action()),
             Request::Reboot { board, port } => self.command(&board, port, PortAction::Reboot),
             Request::Power { board, port, on } => self.command(
@@ -467,28 +441,16 @@ impl Agent {
         *board.notice.lock().unwrap() = None;
         let result = (|| -> Result<()> {
             loop {
-                // Showing the targets' modes needs nothing; restores need
-                // the host's engine.
-                let problem = self.restore_problem.lock().unwrap().clone();
-                if let Some(problem) = problem {
-                    ensure!(link.alive(), link.failure());
-                    link.restore_ready(false)?;
-                    if let Some(request) = board.requests.lock().unwrap().take() {
-                        let _ = request.accepted.send(Err(problem));
-                    }
-                    thread::sleep(Duration::from_millis(500));
-                } else {
-                    let outcome = batch::listen(
-                        &link,
-                        device,
-                        &self.engine,
-                        &Images::Store(&self.store),
-                        self.family,
-                        &board.requests,
-                        &board.endings,
-                    )?;
-                    *board.notice.lock().unwrap() = outcome;
-                }
+                let outcome = batch::listen(
+                    &link,
+                    device,
+                    &self.engine,
+                    &Images::Store(&self.store),
+                    self.family,
+                    &board.requests,
+                    &board.endings,
+                )?;
+                *board.notice.lock().unwrap() = outcome;
             }
         })();
         *board.link.lock().unwrap() = None;
@@ -523,26 +485,7 @@ impl Agent {
         }
         let mut attendants: BTreeMap<u64, (JoinHandle<Result<()>>, Instant)> = BTreeMap::new();
         let mut errors: BTreeMap<u64, String> = BTreeMap::new();
-        let mut checked: Option<Instant> = None;
         loop {
-            // Look often for a missing worker to appear, and seldom for a
-            // present one to go.
-            let interval = match *self.restore_problem.lock().unwrap() {
-                Some(_) => Duration::from_secs(10),
-                None => Duration::from_secs(300),
-            };
-            if checked.is_none_or(|at| at.elapsed() >= interval) {
-                checked = Some(Instant::now());
-                let problem = self.engine.check().err().map(|error| format!("{error:#}"));
-                let mut current = self.restore_problem.lock().unwrap();
-                if *current != problem {
-                    match &problem {
-                        Some(problem) => eprintln!("Restores unavailable: {problem}"),
-                        None => println!("Restores available through {}", self.engine.name()),
-                    }
-                    *current = problem;
-                }
-            }
             let finished: Vec<u64> = attendants
                 .iter()
                 .filter(|(_, (attendant, _))| attendant.is_finished())

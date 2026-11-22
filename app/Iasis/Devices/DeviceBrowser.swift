@@ -28,7 +28,7 @@ final class DeviceBrowser {
     }
 
     func actions(for ids: Set<Device.ID>) -> DeviceActions {
-        DeviceActions(devices(in: ids), restoreProblem: model.state?.restoreProblem)
+        DeviceActions(devices(in: ids))
     }
 }
 

@@ -5,7 +5,9 @@ nonisolated enum AgentRequest: Encodable, Equatable {
     case watch
     /// Erases the targets. The user has confirmed.
     case restore(boards: [RestoreSelection])
-    case revive(board: String, session: UInt32, port: Int, generation: UInt32, ecid: String)
+    /// Repairs the targets from the images a restore would install and keeps
+    /// their data.
+    case revive(boards: [RestoreSelection])
     case dfu(board: String, port: Int)
     case reboot(board: String, port: Int)
     case power(board: String, port: Int, on: Bool)
@@ -19,7 +21,7 @@ nonisolated enum AgentRequest: Encodable, Equatable {
     case refresh
 
     private enum CodingKeys: String, CodingKey {
-        case op, board, boards, port, session, generation, ecid, name, on, percent, model, path, build, enabled
+        case op, board, boards, port, name, on, percent, model, path, build, enabled
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -30,13 +32,9 @@ nonisolated enum AgentRequest: Encodable, Equatable {
         case let .restore(boards):
             try fields.encode("restore", forKey: .op)
             try fields.encode(boards, forKey: .boards)
-        case let .revive(board, session, port, generation, ecid):
+        case let .revive(boards):
             try fields.encode("revive", forKey: .op)
-            try fields.encode(board, forKey: .board)
-            try fields.encode(session, forKey: .session)
-            try fields.encode(port, forKey: .port)
-            try fields.encode(generation, forKey: .generation)
-            try fields.encode(ecid, forKey: .ecid)
+            try fields.encode(boards, forKey: .boards)
         case let .dfu(board, port):
             try fields.encode("dfu", forKey: .op)
             try fields.encode(board, forKey: .board)

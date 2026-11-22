@@ -178,7 +178,7 @@ impl Assessment {
     pub fn describe(&self) -> String {
         let mode = match self.usb_mode {
             Some(AppleMode::Dfu) => "USB DFU (05ac:1227)",
-            Some(AppleMode::KisDfu) => "DFU over Apple Debug USB (05ac:1881, Apple Configurator)",
+            Some(AppleMode::KisDfu) => "DFU over Apple Debug USB (05ac:1881)",
             Some(AppleMode::Kis) => "Apple Debug USB (05ac:1881)",
             Some(AppleMode::Recovery) => "Recovery mode",
             Some(AppleMode::PortDfu) => "Port DFU",

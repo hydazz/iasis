@@ -182,10 +182,10 @@ type Identified = [Option<(Enumeration, AppleDevice)>; PORT_COUNT];
 
 fn unidentified_usb(snapshot: &Snapshot, port: Port) -> Option<&UsbDevice> {
     dfu::direct_device(snapshot, port).filter(|device| {
-        device.apple.as_ref().is_some_and(|apple| {
-            apple.mode == AppleMode::Kis
-                || (cfg!(target_os = "macos") && apple.mode == AppleMode::Mux)
-        })
+        device
+            .apple
+            .as_ref()
+            .is_some_and(|apple| apple.mode == AppleMode::Kis || apple.mode == AppleMode::Mux)
     })
 }
 
@@ -419,7 +419,10 @@ impl Shared {
         }
         if mask != 0 {
             #[cfg(target_os = "macos")]
-            crate::identity::configurator::query(&mut snapshot, mask);
+            {
+                crate::native::identify(&mut snapshot, mask);
+                crate::identity::configurator::query(&mut snapshot, mask);
+            }
             #[cfg(not(target_os = "macos"))]
             snapshot.query_port_identities(mask);
         }
@@ -610,7 +613,6 @@ impl Link {
             &crate::view::Host {
                 store,
                 models: &self.shared.models,
-                engine: &self.shared.engine,
                 family: self.shared.family,
             },
         );
@@ -792,7 +794,6 @@ mod tests {
         };
         let path = dir.path().join("device-models.json");
         let models = Models::open(path.clone());
-        let engine = crate::restore::RestoreEngine::for_host(Some("unused".into()), dir.path());
         let one = Port::ALL[0];
         // The board echoes each report and keeps the ECID it carried.
         let sample = |status: &mut Status, usb: &Snapshot, models: &Models| -> PortView {
@@ -808,7 +809,6 @@ mod tests {
                 &crate::view::Host {
                     store: &store,
                     models,
-                    engine: &engine,
                     family: Device::AppleSilicon,
                 },
             );
@@ -849,7 +849,7 @@ mod tests {
         let silent = sample(&mut status, &usb, &models);
         assert_eq!(silent.device, row.device);
         assert_eq!(silent.ecid, row.ecid);
-        assert!(silent.mode.is_none() && !silent.revive);
+        assert!(silent.mode.is_none());
 
         // A mode that gives the ECID alone is named from what was learned.
         usb.ports[0]

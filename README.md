@@ -36,7 +36,9 @@ mise run deps
 mise run host:build
 ```
 
-The host tools are `target/release/iasis` for board control and `target/release/iasisd`, the [host agent](#host-agent). Keep `iasis-gateway` beside the agent for USB Internet Sharing. Linux builds need the libpcap development package (`libpcap-dev` on Debian). The agent needs read/write access to the management USB device.
+The host tools are `target/release/iasis` for board control and `target/release/iasisd`, the [host agent](#host-agent). Keep `iasis-gateway` beside both. The agent needs read/write access to the management USB device.
+
+The build compiles the restore engine's C libraries from source. Install their build tools first: on macOS, the Xcode command line tools and `brew install autoconf automake libtool pkg-config cmake openssl`; on Debian or Ubuntu, `build-essential git autoconf automake libtool pkg-config cmake libssl-dev libcurl4-openssl-dev zlib1g-dev libpcap-dev`.
 
 | Task               | Output                                                            |
 | ------------------ | ----------------------------------------------------------------- |
@@ -107,7 +109,7 @@ The status light is green and the OLED shows a USB symbol while a host is attach
 
 On macOS, the [menu bar app](app/README.md) shows the same boards and ports, sends the same actions, and its installer starts the agent at login.
 
-To run it in the background for your login session, prefix the command with `systemd-run --user --unit=iasisd --` on Linux or `launchctl submit -l local.iasisd --` on macOS. For automatic startup at login, use absolute paths in a systemd user service's `ExecStart` or a user LaunchAgent's `ProgramArguments` in `~/Library/LaunchAgents/` with `RunAtLoad` enabled. On macOS the agent belongs to the login session, as Apple Configurator restores do.
+To run it in the background for your login session, prefix the command with `systemd-run --user --unit=iasisd --` on Linux or `launchctl submit -l local.iasisd --` on macOS. For automatic startup at login, use absolute paths in a systemd user service's `ExecStart` or a user LaunchAgent's `ProgramArguments` in `~/Library/LaunchAgents/` with `RunAtLoad` enabled.
 
 ### USB Internet Sharing
 
@@ -144,20 +146,9 @@ An image added from a file stays until it is removed. Where several images fit a
 
 While an image is being fetched for a target, its port pulses purple, the OLED labels it `IMG`, and `iasis` shows the percentage.
 
-### Revive
-
-With Apple Configurator installed on macOS and the agent running, use `iasis --board "Bench A" revive 2` to attempt a data-preserving repair of a device in DFU or Recovery. The command follows the operation and reports its result.
-
 ### Restore
 
-The host restores each target with the first of its restore programs that takes the target's DFU:
-
-| Program            | Hosts                                       | Restores                                                                                 |
-| ------------------ | ------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| idevicerestore     | macOS and Linux                             | Targets in ordinary DFU (`05ac:1227`)                                                    |
-| Apple Configurator | macOS, with Configurator in `/Applications` | Targets in DFU over ordinary USB or Apple Debug USB (`05ac:1881`), as M4 and M5 Macs use |
-
-A host with one of them restores what that one takes. Install [idevicerestore](https://github.com/libimobiledevice/idevicerestore) and its dependencies; for source builds, configure with `--without-limera1n`. It uses the system `usbmuxd` service, which macOS includes and Linux needs installed and running. Pass `--idevicerestore /path/to/idevicerestore` to `iasisd` or `iasis restore` if it is not on the `PATH`.
+Restores are built into the host tools through [RestoreKit](https://github.com/fcjr/restorekit), for targets in ordinary DFU and Apple Debug USB DFU. On Linux the user running them needs read/write access to the target's USB device across mode changes. Iasis uses the system usbmuxd when present. Otherwise it starts a private multiplexer that its restores share.
 
 ```sh
 target/release/iasis --serial 0123456789abcdef restore --ports 1,2,3,4,5 --erase
@@ -165,11 +156,11 @@ target/release/iasis --serial 0123456789abcdef restore --ports 1,2,3,4,5 --erase
 
 **`--erase` erases the selected targets.** With the agent running, the request goes to it and the command follows the restore to its end. Without the agent, the command hosts the board for its own run; there, `--button` confirms the erase on the board, and `--button` without `--ports` chooses the targets there too. Name an IPSW before the options to restore from that file instead of the newest release. Use `--host-ma 1200` to set a legacy host allowance for a run without the agent.
 
-Iasis runs one process per target, selected by its unique ECID, and a batch can mix both programs. Without Apple Configurator, use Iasis to put a Mac with Apple Debug USB DFU into DFU and restore it from a Mac that has Configurator.
+Iasis starts one restore process for each authorized ECID. A failed restore ends that target’s job.
 
-Percentages apply to the current restore stage. Logs and working files go under `restores/` in the cache directory, or the directory passed to `--logs`. Allow space for an extracted OS image per worker. Iasis matches each image to the target's chip and board IDs, or to its product type where Apple Debug USB gives no IDs. The restore program checks Apple signing.
+Iasis cannot restore or revive the MacBook Neo yet. After its first boot stage the Neo stays on Apple Debug USB, and RestoreKit waits for it to leave. Apple Configurator can restore it once `iasis dfu` has put it in DFU.
 
-When restoring new Macs with Configurator, keep the host session unlocked until Configurator confirms completion. A locked host can defer the target’s USB network interface and time out waiting for it to boot. Allow disk space for one expanded IPSW per target, even when one Configurator command restores the whole batch.
+The progress bar follows the whole restore. The host shows the current stage alongside it. Repeated firmware and image transfers can hold the bar at the same percentage until the next milestone. Logs and working files go under `restores/` in the cache directory, or the directory passed to `--logs`. Allow space for an extracted OS image per worker. Iasis matches each image to the target's chip and board IDs, or to its product type when only a model identifier is available. The restore program checks Apple signing.
 
 On macOS 27.3, run this once as the user running Finder to suppress automatic DFU windows. This undocumented preference also affects automatic reveals for other connected Apple devices.
 
@@ -181,30 +172,38 @@ To restore the default behaviour, run `defaults delete com.apple.AMPDeviceDiscov
 
 #### Button restores
 
-With the agent running and a restore program installed, the board's Restore hold needs nothing else. Tap to select targets, then hold until the status light turns purple and release. Preparation puts the targets into DFU and fetches any image the agent lacks. Once the erase is ready, the status light blinks purple: hold for three seconds to confirm, or tap to cancel. The agent keeps listening after cancellation and while workers run.
+With the agent running, the board's Restore hold needs nothing else. Tap to select targets, then hold until the status light turns purple and release. Preparation puts the targets into DFU and fetches any image the agent lacks. Once the erase is ready, the status light blinks purple: hold for three seconds to confirm, or tap to cancel. The agent keeps listening after cancellation and while workers run.
 
 An erase stays ready for 20 seconds. If a long download outlasts your wait, make the Restore hold again once the port is steady blue: the image is in the store by then.
 
 #### Example restore times
 
-These Rev A timings use a cached macOS 27.0 IPSW. The single-Mac column times the restore worker. The five-Mac column times the whole command on one hub, including preparation.
+These Rev A timings use cached macOS 27 IPSWs. The single-Mac column times the restore worker. The five-Mac column times the whole command on one hub, including preparation.
 
-| Target      | Image transfer        | Restore worker                               |                     One Mac | Five together |
-| ----------- | --------------------- | -------------------------------------------- | --------------------------: | ------------: |
-| M1 Air      | USB 2                 | idevicerestore                               |                     15m 06s |       58m 14s |
-| M1 Air      | USB 2                 | idevicerestore, experimental binary FileData |                     12m 36s |       47m 57s |
-| M1 Air      | USB 2                 | Apple Configurator                           | 17m 01s (alongside an iPad) |       51m 22s |
-| M5 Air      | USB 3, 10 Gb/s        | Apple Configurator                           |               4m 07s–5m 33s |             — |
-| MacBook Neo | USB 2 debug transport | Apple Configurator                           |                     22m 28s |             — |
+| Target | Image transfer | Restore worker                               |       One Mac | Five together |
+| ------ | -------------- | -------------------------------------------- | ------------: | ------------: |
+| M1 Air | USB 2          | idevicerestore                               |       15m 06s |       58m 14s |
+| M1 Air | USB 2          | idevicerestore, experimental binary FileData |       12m 36s |       47m 57s |
+| M5 Air | USB 3, 10 Gb/s | RestoreKit                                   | 3m 59s–4m 21s |             — |
 
 The five M1s shared a 480 Mb/s uplink and reached 45 MB/s combined. Across two boards, ten jobs overlapped for 4m 52s and at least eight Macs transferred data together.
 
-Use USB 2 as a planning estimate for M1–M3 and USB 3 for M4 or newer Macs with a SuperSpeed restore link. Five-Mac USB 3 time is unmeasured. The Neo advertised SuperSpeed while its image travelled over USB 2.
+Use USB 2 as a planning estimate for M1–M3 and USB 3 for M4 or newer Macs with a SuperSpeed restore link. Five-Mac USB 3 time is unmeasured.
 
 | Other benches                                       |                                                                   Reported batch time |
 | --------------------------------------------------- | ------------------------------------------------------------------------------------: |
 | University of Utah, ten MacBooks on Acroname hubs   |           [35–40 min](https://apple.lib.utah.edu/macbook-imaging-automation-journey/) |
 | Twocanoes, fifteen Macs on its USB 3 restore system | [Under 10 min](https://tperfitt.twocanoes.com/2026/04/19/dfu-restore-for-mac-is.html) |
+
+### Revive
+
+Revive repairs a device and keeps its data: a Mac gets its firmware and recoveryOS reinstalled, an iPhone or iPad its system. It installs the image a restore would and enters DFU the same way, through the agent or without it.
+
+```sh
+target/release/iasis --serial 0123456789abcdef revive --ports 2
+```
+
+A revived Mac can start in recoveryOS and ask for an administrator's password before macOS starts.
 
 ## IasisOS and protocol
 
