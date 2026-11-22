@@ -41,22 +41,22 @@ If a port reports a packet capture permission error, open `Install ChmodBPF.pkg`
 
 ## Build
 
-Building needs Xcode 27 and the repository’s mise tools. Xcode runs Cargo to build the Rust host tools and bundles them with the app.
+Building needs Xcode 27. `Iasis.xcodeproj` builds and runs in Xcode on its own. The app talks to whichever `iasisd` is running; start one first, or the menu shows Agent Not Running.
 
 ```sh
-mise run //app:build     # the app, unsigned, with the host tools inside
+mise run //app:build     # the app, unsigned
 mise run //app:test
-mise run //app:lint      # reject unused Swift code
-mise run //app:package   # the release app and an unsigned installer in app/build
+mise run //app:lint      # unused Swift code, package scripts and property lists
+mise run //app:package   # an unsigned installer in app/build
 ```
 
-`Iasis.xcodeproj` opens in Xcode as usual. An unsigned build runs on the Mac that built it; start `iasisd` first, or the menu shows Agent Not Running. The host tools are built for the Mac's own architecture.
+An archive embeds `iasisd`, `iasis` and `iasis-gateway` from `target/release` in `Contents/Helpers`. `//app:package` builds them first; before archiving in Xcode, run `mise run host:build`. They are built for the Mac's own architecture.
 
 Set `TEST_RUNNER_IASIS_LIVE_AGENT=1` when running the tests to check the connection to the local agent.
 
 ## Installer
 
-`scripts/package.sh` stages a package from a built app:
+The package installs:
 
 | Installed at                                        | What                                          |
 | --------------------------------------------------- | --------------------------------------------- |
