@@ -153,10 +153,12 @@ pub fn charging_budget_mw(input_mv: u16, current_50ma: u8, side_power: bool) -> 
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum DemandState {
+    /// No accepted PD request.
     #[default]
     Unknown,
     Satisfied,
     AtLimit,
+    /// The sink reached a highest-power profile that the pool can expand.
     Shortfall,
 }
 
@@ -180,11 +182,7 @@ impl SinkDemand {
             return;
         };
         if crate::wants_more(pdo, rdo) {
-            // Some sinks clear mismatch in their next request for the same
-            // full offer. Only actual headroom can resolve their shortfall.
-            let needs_more = self.state == DemandState::Shortfall || rdo & (1 << 26) != 0;
-            self.state = if needs_more
-                && (rdo & 0x3ff) >= (pdo & 0x3ff)
+            self.state = if (rdo & 0x3ff) >= (pdo & 0x3ff)
                 && crate::source::highest_offer(offers, rdo)
                 && offers.iter().any(|&p| p != 0 && p & 0x3ff < 300)
             {
@@ -220,16 +218,32 @@ pub struct PortDemand {
     pub active: Option<Contract>,
     /// Reserved from Request acceptance until PS_RDY completes.
     pub pending: Option<Contract>,
+    /// Charging capacity reserved while the first offer is on the wire.
+    pub first_offer_mw: u32,
     pub demand: DemandState,
     /// Preserve the contract powering an active restore.
     pub restoring: bool,
 }
 
 impl PortDemand {
-    fn held_mw(self) -> u32 {
+    fn contract_mw(self) -> u32 {
         self.active
             .map_or(0, Contract::cost_mw)
             .max(self.pending.map_or(0, Contract::cost_mw))
+    }
+
+    fn held_mw(self) -> u32 {
+        self.contract_mw().max(self.first_offer_mw)
+    }
+
+    /// The USB allowance of an admitted port and any larger accepted contract.
+    pub fn allocated_mw(self, admitted: bool) -> u32 {
+        let committed = self.contract_mw();
+        if self.attached && admitted {
+            committed.max(Contract::USB_DEFAULT.cost_mw())
+        } else {
+            committed
+        }
     }
 }
 
@@ -256,7 +270,7 @@ fn fair_shares(budget: u32, floors: [u32; 5], caps: [u32; 5]) -> [u32; 5] {
 /// Per-port ceilings for new Requests. Zero withdraws the port's stage. A
 /// smaller nonzero ceiling keeps an old contract powered through renegotiation.
 /// Old advertisements must still be checked against the current ceiling.
-pub fn allocate(pool_mw: u32, ports: [PortDemand; 5]) -> [u32; 5] {
+pub fn allocate(pool_mw: u32, input_mv: u16, ports: [PortDemand; 5]) -> [u32; 5] {
     let held = ports.map(PortDemand::held_mw);
     let mut priority = [0, 1, 2, 3, 4];
     priority.sort_unstable_by_key(|&i| (!ports[i].restoring, held[i] == 0, held[i], i));
@@ -265,7 +279,7 @@ pub fn allocate(pool_mw: u32, ports: [PortDemand; 5]) -> [u32; 5] {
     let mut floor_room = pool_mw;
     let mut contract_room = pool_mw;
     for i in priority {
-        let mut floor = Contract::USB_DEFAULT.cost_mw();
+        let mut floor = Contract::USB_DEFAULT.cost_mw().max(ports[i].first_offer_mw);
         if ports[i].restoring {
             floor = floor.max(held[i]);
         }
@@ -313,19 +327,21 @@ pub fn allocate(pool_mw: u32, ports: [PortDemand; 5]) -> [u32; 5] {
         }
     }
 
-    // If nobody asked for the spare power, leave it available to all sinks.
-    let outstanding_demand =
-        (0..5).any(|i| floors[i] != 0 && ports[i].demand != DemandState::Satisfied);
+    // Fund charging demand before offering spare watts for discovery. A port
+    // without a Request holds only its USB allowance, however long it stays.
+    let port_max = crate::source::max_port_cost_mw(input_mv);
+    let charging = (0..5).any(|i| floors[i] > 0 && ports[i].demand.at_limit());
     let caps = core::array::from_fn(|i| {
-        if floors[i] == 0 {
-            0
-        } else if !outstanding_demand || ports[i].demand != DemandState::Satisfied {
-            pool_mw
+        let demand = ports[i].demand;
+        if floors[i] > 0 && (demand.at_limit() || (!charging && demand == DemandState::Satisfied)) {
+            keep[i].max(port_max)
         } else {
             keep[i]
         }
     });
-    let mut targets = fair_shares(pool_mw, keep, caps);
+    let charging_shares = fair_shares(pool_mw, keep, caps);
+    let caps = core::array::from_fn(|i| if floors[i] > 0 { pool_mw } else { 0 });
+    let mut targets = fair_shares(pool_mw, charging_shares, caps);
 
     if (0..5)
         .try_fold(pool_mw, |mw, i| mw.checked_sub(held[i].max(targets[i])))
@@ -408,29 +424,31 @@ mod tests {
 
     #[test]
     fn spare_power_follows_attachments_and_sink_demand() {
-        let pool = charging_budget_mw(19_000, 94, false);
+        let pool = 60_000;
         let mut ports = [PortDemand::default(); 5];
         ports[4] = sink();
-        assert_eq!(allocate(pool, ports), [0, 0, 0, 0, pool]);
+        assert_eq!(allocate(pool, 19_000, ports), [0, 0, 0, 0, pool]);
 
         ports[2] = sink();
-        assert_eq!(allocate(pool, ports), [0, 0, pool / 2, 0, pool / 2]);
+        assert_eq!(allocate(pool, 19_000, ports), [0, 0, pool / 2, 0, pool / 2]);
+        ports[4].active = Some(Contract::USB_DEFAULT);
+        ports[4].demand = DemandState::AtLimit;
         let satisfied = contract(5000, 1000);
         ports[2].active = Some(satisfied);
         ports[2].demand = DemandState::Satisfied;
         assert_eq!(
-            allocate(pool, ports),
+            allocate(pool, 19_000, ports),
             [0, 0, satisfied.cost_mw(), 0, pool - satisfied.cost_mw()]
         );
 
         // A withdrawing connector continues costing power until it is isolated.
         ports[2].attached = false;
         assert_eq!(
-            allocate(pool, ports),
+            allocate(pool, 19_000, ports),
             [0, 0, 0, 0, pool - satisfied.cost_mw()]
         );
         ports[2].active = None;
-        assert_eq!(allocate(pool, ports), [0, 0, 0, 0, pool]);
+        assert_eq!(allocate(pool, 19_000, ports), [0, 0, 0, 0, pool]);
     }
 
     #[test]
@@ -439,7 +457,10 @@ mod tests {
         let mut ports = [PortDemand::default(); 5];
         ports[1] = sink();
         ports[4] = sink();
-        ports[4].active = Some(contract(5000, 3000));
+        for i in [1, 4] {
+            ports[i].active = Some(contract(5000, 3000));
+            ports[i].demand = DemandState::AtLimit;
+        }
 
         let mut demand = SinkDemand::default();
         for (rdo, expected_ma) in [
@@ -450,20 +471,20 @@ mod tests {
             (0x2304_1104, 3000),
             (0x2303_20c8, 3000), // sink requests 2 A on the same profiles
         ] {
-            let offers = crate::fixed_offers(allocate(pool, ports)[1], 19_000, 0);
+            let offers = crate::fixed_offers(allocate(pool, 19_000, ports)[1], 19_000, 0);
             assert_eq!((offers[1] & 0x3ff) * 10, expected_ma);
             demand.accept(&offers, rdo);
             ports[1].active = Some(crate::fixed_contract(&offers, rdo).unwrap());
             ports[1].demand = demand.state();
         }
-        let offers = crate::fixed_offers(allocate(pool, ports)[1], 19_000, 0);
+        let offers = crate::fixed_offers(allocate(pool, 19_000, ports)[1], 19_000, 0);
         assert_eq!((offers[1] & 0x3ff) * 10, 2000);
     }
 
     #[test]
     fn five_connected_macs_can_each_request_the_measured_two_amp_profile() {
         let pool = charging_budget_mw(19_000, 94, false);
-        let shares = allocate(pool, [sink(); 5]);
+        let shares = allocate(pool, 19_000, [sink(); 5]);
         assert_eq!(shares, [pool / 5; 5]);
         for share in shares {
             let objects = crate::source::fixed_offers(share, 19_000, 0);
@@ -482,11 +503,84 @@ mod tests {
         let mut ports = [PortDemand::default(); 5];
         ports[0] = sink();
         ports[0].active = Some(first);
+        ports[0].demand = DemandState::Satisfied;
+        let before = allocate(pool, 19_000, ports);
         ports[1] = sink();
+        let ceiling = contract(20_000, 3000).cost_mw();
+        let after = allocate(pool, 19_000, ports);
+        assert_eq!(after, [ceiling, pool - ceiling, 0, 0, 0]);
         assert_eq!(
-            allocate(pool, ports),
-            [first.cost_mw(), pool - first.cost_mw(), 0, 0, 0]
+            crate::fixed_offers(before[0], 19_000, 0),
+            crate::fixed_offers(after[0], 19_000, 0)
         );
+    }
+
+    #[test]
+    fn a_usb_peripheral_keeps_its_starting_allowance_beside_charging_sinks() {
+        let pool = charging_budget_mw(19_000, 94, false);
+        let starting = Contract::USB_DEFAULT.cost_mw();
+        let mut ports = [PortDemand::default(); 5];
+        for (i, grant) in [
+            (0, contract(20_000, 1040)),
+            (1, contract(5000, 3000)),
+            (3, contract(15_000, 1380)),
+        ] {
+            ports[i] = PortDemand {
+                active: Some(grant),
+                demand: DemandState::AtLimit,
+                ..sink()
+            };
+        }
+        let disconnected = allocate(pool, 19_000, ports);
+        ports[2] = sink();
+        let attached = allocate(pool, 19_000, ports);
+        assert_eq!(
+            crate::fixed_offers(attached[2], 19_000, 0),
+            crate::fixed_offers(starting, 19_000, 0)
+        );
+        for i in [0, 1, 3] {
+            assert!(attached[i] >= ports[i].held_mw());
+        }
+        ports[2].active = Some(Contract::USB_DEFAULT);
+        assert_eq!(allocate(pool, 19_000, ports), attached);
+
+        // Peers briefly select 5 V while negotiating. Their released watts
+        // must not turn a USB attachment into a fourth charging participant.
+        ports[3].active = Some(contract(5000, 3000));
+        let changing = allocate(pool, 19_000, ports);
+        assert_eq!(
+            crate::fixed_offers(changing[2], 19_000, 0),
+            crate::fixed_offers(starting, 19_000, 0)
+        );
+        ports[3].active = Some(contract(15_000, 1380));
+        ports[2] = PortDemand::default();
+        assert_eq!(allocate(pool, 19_000, ports), disconnected);
+    }
+
+    #[test]
+    fn a_first_full_power_request_can_redistribute_without_mismatch() {
+        let pool = charging_budget_mw(19_000, 94, false);
+        let mut ports = [PortDemand::default(); 5];
+        ports[0] = PortDemand {
+            active: Some(contract(20_000, 3000)),
+            demand: DemandState::AtLimit,
+            ..sink()
+        };
+        ports[1] = sink();
+        let initial = allocate(pool, 19_000, ports);
+        let offers = crate::fixed_offers(initial[1], 19_000, 0);
+        let rdo = 0x4300_8822; // 20 V / 340 mA, Capability Mismatch clear.
+        let request = crate::fixed_contract(&offers, rdo).unwrap();
+        let mut demand = SinkDemand::default();
+        demand.accept(&offers, rdo);
+        ports[1].demand = demand.state();
+        ports[1].active = Some(request);
+        let cut = allocate(pool, 19_000, ports);
+        assert_eq!(cut, [pool / 2, initial[1], 0, 0, 0]);
+        ports[0].pending = Some(contract(20_000, 1670));
+        assert_eq!(allocate(pool, 19_000, ports), cut);
+        ports[0].active = ports[0].pending.take();
+        assert_eq!(allocate(pool, 19_000, ports), [pool / 2, pool / 2, 0, 0, 0]);
     }
 
     #[test]
@@ -498,7 +592,7 @@ mod tests {
         ports[0].active = Some(large);
         ports[0].demand = DemandState::AtLimit;
         ports[1] = sink();
-        let initial = allocate(pool, ports);
+        let initial = allocate(pool, 19_000, ports);
         assert_eq!(initial, [large.cost_mw(), pool - large.cost_mw(), 0, 0, 0]);
 
         // The M5 joining an M3 at 20 V / 3 A took 20 V / 340 mA with mismatch.
@@ -514,21 +608,101 @@ mod tests {
         assert_eq!(accepted, contract(20_000, 340));
         ports[1].active = Some(accepted);
         ports[1].demand = demand.state();
-        let cut = allocate(pool, ports);
+        let cut = allocate(pool, 19_000, ports);
         assert_eq!(cut, [pool / 2, initial[1], 0, 0, 0]);
 
         ports[0].restoring = true;
-        assert_eq!(allocate(pool, ports), initial);
+        assert_eq!(allocate(pool, 19_000, ports), initial);
         ports[0].restoring = false;
         ports[0].demand = DemandState::Satisfied;
-        assert_eq!(allocate(pool, ports), initial);
+        assert_eq!(allocate(pool, 19_000, ports), initial);
         ports[0].demand = DemandState::AtLimit;
         let lower = contract(15_000, 2000);
         ports[0].pending = Some(lower);
-        assert_eq!(allocate(pool, ports), cut);
+        assert_eq!(allocate(pool, 19_000, ports), cut);
         ports[0].active = Some(lower);
         ports[0].pending = None;
-        assert!(allocate(pool, ports)[1] >= pool / 2);
+        assert!(allocate(pool, 19_000, ports)[1] >= pool / 2);
+    }
+
+    #[test]
+    fn an_admitted_port_keeps_its_usb_allowance_on_a_zero_current_contract() {
+        let mut port = sink();
+        assert_eq!(port.allocated_mw(false), 0);
+        port.active = Some(contract(5000, 0));
+        assert_eq!(port.allocated_mw(true), 4815);
+        port.attached = false;
+        assert_eq!(port.allocated_mw(true), 0);
+    }
+
+    #[test]
+    fn a_first_offer_stays_funded_until_the_reply_or_failed_transmission() {
+        let pool = 60_000;
+        let mut ports = [PortDemand::default(); 5];
+        ports[0] = sink();
+        ports[1] = sink();
+        let offered = allocate(pool, 19_000, ports)[1];
+        ports[1].first_offer_mw = offered;
+        ports[1].active = Some(Contract::USB_DEFAULT);
+        assert_eq!(ports[1].allocated_mw(true), 4815);
+        assert_eq!(ports[1].held_mw(), offered);
+        ports[0].active = Some(contract(20_000, 1400));
+        ports[0].demand = DemandState::Shortfall;
+        ports[2] = sink();
+        assert_eq!(allocate(pool, 19_000, ports)[1], offered);
+        ports[1].first_offer_mw = 0;
+        assert_eq!(
+            allocate(pool, 19_000, ports)[1],
+            Contract::USB_DEFAULT.cost_mw()
+        );
+        ports[1].pending = Some(contract(20_000, 780));
+        assert_eq!(ports[1].allocated_mw(true), 16_380);
+        ports[1].active = ports[1].pending.take();
+        ports[1].pending = Some(Contract::USB_DEFAULT);
+        assert_eq!(ports[1].allocated_mw(true), 16_380);
+    }
+
+    #[test]
+    fn simultaneous_pd_attachments_settle_on_a_weak_input() {
+        let pool = charging_budget_mw(8550, 60, false);
+        let share = pool / 3;
+        for order in [[0, 1, 2], [2, 1, 0], [1, 2, 0]] {
+            let mut ports = [PortDemand::default(); 5];
+            ports[..3].fill(sink());
+            let mut sinks = [SinkDemand::default(); 3];
+            for port in &mut ports[..3] {
+                port.first_offer_mw = share;
+            }
+            let mut offers = [crate::fixed_offers(share, 8550, 0); 3];
+            let mut settled = false;
+            for _ in 0..12 {
+                for i in order {
+                    let grants = allocate(pool, 8550, ports);
+                    let offer = offers[i][1] & 0x3ff;
+                    let rdo = (2 << 28) | (offer << 10) | offer;
+                    let request = crate::fixed_contract(&offers[i], rdo).unwrap();
+                    if ports[i].first_offer_mw > 0 {
+                        assert!(request.permitted(grants[i], 8550));
+                        ports[i].first_offer_mw = 0;
+                    }
+                    if request.permitted(grants[i], 8550) {
+                        sinks[i].accept(&offers[i], rdo);
+                        ports[i].active = Some(request);
+                        ports[i].demand = sinks[i].state();
+                    }
+                    offers[i] = crate::fixed_offers(grants[i], 8550, 0);
+                }
+                if ports[..3]
+                    .iter()
+                    .all(|p| p.active == Some(contract(9000, 510)))
+                    && allocate(pool, 8550, ports) == [share, share, share, 0, 0]
+                {
+                    settled = true;
+                    break;
+                }
+            }
+            assert!(settled, "attachment order {order:?}");
+        }
     }
 
     #[test]
@@ -539,7 +713,11 @@ mod tests {
         assert_eq!(offers.map(|p| (p & 0x3ff) * 10), [930, 510, 0, 0]);
         let mut ports = [PortDemand::default(); 5];
         let mut demand = [SinkDemand::default(); 3];
-        ports[..3].fill(sink());
+        ports[..3].fill(PortDemand {
+            active: Some(contract(9000, 510)),
+            demand: DemandState::AtLimit,
+            ..sink()
+        });
         // The 3 Macs alternate rails and set or clear mismatch, while
         // continuing to request the ceiling of the profile they select.
         for (i, rdo) in [
@@ -558,7 +736,7 @@ mod tests {
             demand[i].accept(&offers, rdo);
             ports[i].active = Some(crate::fixed_contract(&offers, rdo).unwrap());
             ports[i].demand = demand[i].state();
-            assert_eq!(allocate(pool, ports), [share, share, share, 0, 0]);
+            assert_eq!(allocate(pool, 8550, ports), [share, share, share, 0, 0]);
         }
         assert!(demand.iter().all(|d| d.state() == DemandState::Shortfall));
     }
@@ -573,20 +751,22 @@ mod tests {
         let mut ports = [PortDemand::default(); 5];
         ports[0] = sink();
         ports[0].active = Some(old);
+        ports[0].demand = DemandState::AtLimit;
         ports[1] = sink();
         ports[1].active = Some(peer);
+        ports[1].demand = DemandState::Satisfied;
         ports[2] = sink();
 
         let cut = [reduced.cost_mw(), peer.cost_mw(), 0, 0, 0];
-        assert_eq!(allocate(pool, ports), cut);
+        assert_eq!(allocate(pool, 19_000, ports), cut);
         ports[0].pending = Some(reduced);
-        assert_eq!(allocate(pool, ports), cut);
+        assert_eq!(allocate(pool, 19_000, ports), cut);
         // An increasing transition reserves its larger contract too.
         ports[0].active = Some(reduced);
         ports[0].pending = Some(old);
-        assert_eq!(allocate(pool, ports), cut);
+        assert_eq!(allocate(pool, 19_000, ports), cut);
         ports[0].pending = None;
-        assert_eq!(allocate(pool, ports), [cut[0], cut[1], floor, 0, 0]);
+        assert_eq!(allocate(pool, 19_000, ports), [cut[0], cut[1], floor, 0, 0]);
     }
 
     #[test]
@@ -595,7 +775,7 @@ mod tests {
         let mut ports = [sink(); 5];
         ports[4].active = Some(Contract::USB_DEFAULT);
         for count in 0..=5 {
-            let shares = allocate(count * floor, ports);
+            let shares = allocate(count * floor, 19_000, ports);
             assert_eq!(
                 shares.iter().filter(|&&mw| mw >= floor).count(),
                 count as usize
@@ -603,7 +783,7 @@ mod tests {
             assert_eq!(shares[4], if count == 0 { 0 } else { floor });
             if count > 0 {
                 assert_eq!(
-                    allocate(count * floor - 1, ports)
+                    allocate(count * floor - 1, 19_000, ports)
                         .into_iter()
                         .filter(|&mw| mw > 0)
                         .count(),
@@ -622,12 +802,12 @@ mod tests {
         let floor = Contract::USB_DEFAULT.cost_mw();
         let pool = live.cost_mw() + 3 * floor;
         assert_eq!(
-            allocate(pool, ports),
+            allocate(pool, 19_000, ports),
             [floor, floor, floor, 0, live.cost_mw()]
         );
         ports[4].restoring = false;
         assert_eq!(
-            allocate(pool, ports),
+            allocate(pool, 19_000, ports),
             [floor, floor, floor, 0, live.cost_mw() - floor]
         );
 
@@ -635,7 +815,7 @@ mod tests {
         ports[4].restoring = true;
         ports[0].active = Some(live);
         assert_eq!(
-            allocate(live.cost_mw(), ports),
+            allocate(live.cost_mw(), 19_000, ports),
             [0, 0, 0, 0, live.cost_mw()]
         );
     }
@@ -654,6 +834,7 @@ mod tests {
                     attached: mask & (1 << i) != 0,
                     active: contracts[(phase + i) % 4],
                     pending: if i == 2 { contracts[3 - phase] } else { None },
+                    first_offer_mw: 0,
                     demand: [
                         DemandState::Unknown,
                         DemandState::Shortfall,
@@ -664,7 +845,7 @@ mod tests {
                 });
                 let held = ports.map(PortDemand::held_mw);
                 for pool in (0..=80_000).step_by(1301) {
-                    let grants = allocate(pool, ports);
+                    let grants = allocate(pool, 19_000, ports);
                     let mut retained = 0;
                     let mut before_isolation = 0;
                     for i in 0..5 {

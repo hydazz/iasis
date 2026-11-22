@@ -52,7 +52,7 @@ On the charging input, Iasis requests the highest-power fixed profile it support
 
 Each port starts at 5 V. With a 20 V brick, one port can offer 5, 9, 15 and 20 V at different currents for the same share of power, up to 3 A. The target chooses its profile independently. With a 9 or 12 V input, the ports offer 5 and 9 V.
 
-A new device first receives spare capacity. If it reports that its best offer is insufficient, Iasis can renegotiate with other charging devices. Their existing contracts stay funded until they have stepped down. When a peer releases power, a connected device can negotiate a higher offer without a replug. An active restore keeps its contract while the supply can cover it. A port waits if its starting allowance is unavailable.
+On brick power, Iasis reserves 5 V / 900 mA to start a port. If that allowance is unavailable, the port waits. A new device can also be offered spare charging capacity. Once a device requests the full current of a highest-power profile, Iasis can redistribute power among charging devices. Existing contracts stay funded until the devices step down. When power becomes available, Iasis updates the charging ports one at a time, so a device can take a higher offer without a replug. An active restore keeps its contract while the supply can cover it.
 
 Changing the charging input can interrupt USB to all targets while the board stays online. Leave the supply connected or disconnected for the duration of a restore.
 
@@ -113,13 +113,13 @@ A port reads `DFU` or `REC` while the host sees it in DFU or recovery, `DFU?` fo
 | Selection | Lower area                                                                                             |
 | --------- | ------------------------------------------------------------------------------------------------------ |
 | All       | Voltage measured at each occupied connector. With a brick, input voltage and reserved/available watts. |
-| One port  | Voltage measured at its connector and its USB link, then its contract                                  |
+| One port  | Connector voltage and USB link, then the PD contract or default USB allowance.                         |
 
 A target with a USB link shows `USB2` or `USB3` after its voltage, as the hub reports the port. A target in DFU holds USB 2 whatever its cable carries. Without a link nothing is shown, which a cable without data lines and a device that has not enumerated both look like.
 
-A contract is the most a target may draw, not what it draws: `9V 3A (27W)` reserves 27 W of the supply whether or not the target uses it, and `50/68W` totals those reservations against the watts available. Iasis measures voltage, not current. Holding the button lists the actions the selected targets take and highlights the one a release will send. A fault, restore progress or button feedback replaces the readings.
+The selected port shows its negotiated voltage and current, for example `PD 20V 800mA (16W)`. A port on the brick’s default USB allowance shows `USB 5V 900mA (5W)`. Watts in parentheses come from nominal voltage and current before display rounding. The overview counts the capacity reserved from the brick, including the USB starting allowance and voltage tolerance. Holding the button lists the actions the selected targets take and highlights the one a release will send. A fault, restore progress or button feedback replaces the readings.
 
-`ATCH` means a powered USB-C attachment. `USB` means the hub has a data link or the host sees a USB device. `PD` indicates a power contract. `RDY` means the device offers Apple signalling. `PORT` identifies an Apple debug port without DFU USB. Select it to see `Wrong port?`.
+`ATCH` means a powered USB-C attachment. `USB` means the hub has a data link or the host sees a USB device. `PD` indicates a power contract. `RDY` means the device offers Apple signalling.
 
 During an Iasis restore, three cycling dots mark a port waiting for stage progress. The bar under each port fills with the current stage and can start over at the next stage. Select a port to read its stage percentage. `DONE` means the worker reported completion. `UNKN` means the outcome is unknown. Restores started separately in Finder or Apple Configurator show progress on the host.
 
