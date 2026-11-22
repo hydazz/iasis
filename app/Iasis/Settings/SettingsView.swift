@@ -33,6 +33,9 @@ private struct GeneralSettings: View {
                         }
                     }
                     LabeledContent("Serial", value: selected.serial)
+                    if !selected.firmware.isEmpty {
+                        LabeledContent("IasisOS", value: selected.firmware)
+                    }
                     if selected.ports.isEmpty {
                         Text(selected.notice ?? "Board Unavailable")
                     } else {
