@@ -228,6 +228,7 @@ mod tests {
         let connected = steady(&status)[0];
         assert_eq!(connected, [0, 10, 2]);
         status.host = host(true);
+        status.ports[0].restore_access = iasis_protocol::RestoreAccess::EnterDfu;
         let mut button = Button::default();
         let mut now = 0;
         let mut sample = |button: &mut Button, status: &Status, arm, down, elapsed| {
@@ -251,6 +252,9 @@ mod tests {
         sample(&mut button, &status, None, false, 10);
         sample(&mut button, &status, None, false, 40);
 
+        status.ports[0].restore_access = iasis_protocol::RestoreAccess::InDfu;
+        status.ports[0].observed = seen(AppleMode::Dfu);
+        status.ports[0].ecid = Some(1);
         let arm = RestoreArm {
             session: 1,
             id: 1,
@@ -261,7 +265,7 @@ mod tests {
         sample(&mut button, &status, Some(arm), false, 10);
         let pixels = indicators(&status, &button, 8000);
         assert_eq!(pixels[0], PURPLE);
-        assert_eq!(pixels[5], GREEN);
+        assert_eq!(pixels[5], BLUE);
         assert_eq!(pixels[4], [0, 3, 0]);
         assert_eq!(indicators(&status, &button, 8400)[0], [6, 0, 6]);
         status.aggregate_power_fault = true;

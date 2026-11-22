@@ -70,6 +70,7 @@ Each port has:
 | `allocated_mw`                       | Brick budget committed to the port, including voltage tolerance and the USB starting allowance where applicable |
 | `contract_mw`, `short`               | Contract power and whether the target reported a Capability Mismatch on its highest-power offer                 |
 | `fault`                              | Why the port faulted, in the words the board's display uses, or null                                            |
+| `wrong_dfu_port`                     | An identified Mac answered the action query and its connector lacks DFU USB                                     |
 | `dfu`, `reboot`, `restore`, `revive` | The actions the target would take now                                                                           |
 | `enabled`                            | The port is powered                                                                                             |
 | `job`                                | The restore phase: `Preparing`, `Running`, `Reported`, `Unconfirmed`, `Failed`                                  |

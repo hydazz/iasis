@@ -71,7 +71,7 @@ impl Session {
                     && arm.id > self.last_arm.get()
                     && now < arm.expires
                     && arm.expires - now <= RESTORE_ARM_MS
-                    && arm.matches_targets(status) =>
+                    && arm.prepared(status) =>
             {
                 self.last_arm.set(arm.id);
                 self.pending.set(Some(arm));
@@ -129,6 +129,7 @@ mod tests {
         let mut report = report(1, false);
         report.ports[2] = Some(PortReport {
             generation: 7,
+            restore_access: iasis_protocol::RestoreAccess::InDfu,
             observed: Observed {
                 usb: Usb::Apple(AppleMode::Dfu),
                 ecid: Some(1),
@@ -157,6 +158,12 @@ mod tests {
         let mut status = Status::default();
         status.ports[1].state = PortState::Contract;
         status.ports[1].generation = 5;
+        status.ports[1].restore_access = iasis_protocol::RestoreAccess::InDfu;
+        status.ports[1].ecid = Some(42);
+        status.ports[1].observed = Some(iasis_protocol::Observed {
+            usb: iasis_protocol::Usb::Apple(iasis_protocol::AppleMode::Dfu),
+            ecid: Some(42),
+        });
         let mut arm = RestoreArm {
             session: 1,
             id: 1,
@@ -167,6 +174,9 @@ mod tests {
         assert!(session.report(report(1, false).session, 0));
         assert!(!session.apply(HostControl::Arm(arm), &status, 10));
         assert!(session.report(report(1, true).session, 10));
+        status.ports[1].restore_access = iasis_protocol::RestoreAccess::EnterDfu;
+        assert!(!session.apply(HostControl::Arm(arm), &status, 10));
+        status.ports[1].restore_access = iasis_protocol::RestoreAccess::InDfu;
         assert!(session.apply(HostControl::Arm(arm), &status, 10));
         assert!(session.awaiting_button(11));
         assert_eq!(session.take_arm(11), Some(arm));
