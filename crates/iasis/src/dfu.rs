@@ -466,7 +466,7 @@ pub fn assess(
         if signal == Signal::MultipleTransports {
             return Outcome::TargetUnclear;
         }
-        if identity == Some(Observation::IdentityMissing)
+        if matches!(identity, Some(Observation::IdentityMissing { .. }))
             && matches!(
                 usb_mode,
                 Some(AppleMode::Dfu | AppleMode::Kis | AppleMode::KisDfu)
