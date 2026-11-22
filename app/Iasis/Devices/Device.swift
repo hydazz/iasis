@@ -91,7 +91,6 @@ struct Device: Identifiable, Equatable {
         case "checking actions": return Activity("Checking actions", .working(nil))
         case "attaching": return Activity("Connecting", .working(nil))
         case "DFU unverified": return Activity("DFU not confirmed", .uncertain)
-        case "wrong port": return Activity("Not a DFU port", .caution)
         case "waiting for power": return Activity("Waiting for power", .caution)
         default: break
         }
@@ -111,9 +110,9 @@ struct Device: Identifiable, Equatable {
         }
     }
 
-    /// The contract's power in whole watts, as the board's display gives it.
+    /// Nominal contract power in whole watts.
     var watts: String? {
-        port.contractMw.map { "\(($0 + 500) / 1000) W" }
+        port.contractMw.map { "\(wholeWatts($0)) W" }
     }
 
     var restoreTarget: RestoreTarget {
@@ -239,4 +238,8 @@ struct RestoreConfirmation: Equatable {
         message = ([erased, ""] + list).joined(separator: "\n")
         request = .restore(boards: boards)
     }
+}
+
+func wholeWatts(_ milliwatts: Int) -> Int {
+    (milliwatts + 500) / 1000
 }

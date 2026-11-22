@@ -900,12 +900,13 @@ fn print_status(status: &Status) {
     for port in Port::ALL {
         let state = &status.ports[port.index()];
         println!(
-            "port {}  {:?}  {:?}  generation {}  VBUS ADC {:?}  contract {} mV / {} mA  faults {:?}  error {:?}  command {} {:?}",
+            "port {}  {:?}  {:?}  generation {}  VBUS ADC {:?}  allocated {} mW  contract {} mV / {} mA  faults {:?}  error {:?}  command {} {:?}",
             port.number(),
             state.state,
             state.orientation,
             state.generation,
             state.vbus_adc,
+            state.allocated_mw,
             state.contract_mv,
             state.contract_ma,
             state.faults,
@@ -956,11 +957,12 @@ fn print_status(status: &Status) {
         }
     }
     println!(
-        "bus ADC {:?}  CH224 status {:?}  input request {} mV  qualified allowance {:?} mA  charging budget {} mW",
+        "bus ADC {:?}  CH224 status {:?}  input request {} mV  qualified allowance {:?} mA  allocated {} / {} mW",
         status.bus_voltage_adc,
         status.ch224_status,
         status.brick_requested_mv,
         status.ch224_current_50ma.map(|units| u16::from(units) * 50),
+        status.allocated_mw(),
         status.charging_budget_mw
     );
     for (bank, adc) in ["A", "B"].into_iter().zip(status.thermistor_adc) {

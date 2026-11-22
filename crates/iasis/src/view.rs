@@ -36,6 +36,8 @@ pub struct PortView {
     pub usb: String,
     pub link: String,
     pub contract: String,
+    /// Brick capacity committed to this port.
+    pub allocated_mw: u32,
     /// The contract's power, in milliwatts.
     pub contract_mw: Option<u32>,
     /// The target reported a Capability Mismatch on a highest-power charging offer.
@@ -105,7 +107,7 @@ pub struct BoardView {
     pub session: Option<u32>,
     pub firmware: String,
     pub supply: String,
-    /// What a power supply gives the targets and what their contracts take
+    /// What a power supply gives the targets and what the ports have committed
     /// of it. A board on its host's power alone has none.
     pub pool: Option<Pool>,
     /// A host holds the board, and whether it takes restore requests.
@@ -145,7 +147,7 @@ impl BoardView {
             },
             pool: (status.supply == Supply::Brick).then(|| Pool {
                 budget_mw: status.charging_budget_mw,
-                allocated_mw: status.ports.iter().filter_map(contract_mw).sum(),
+                allocated_mw: status.allocated_mw(),
             }),
             host: status.host.is_some(),
             restores: status.restore_session().is_some(),
@@ -176,6 +178,7 @@ impl BoardView {
                         }
                         .into(),
                         contract: port_contract(state),
+                        allocated_mw: state.allocated_mw,
                         contract_mw: contract_mw(state),
                         short: state.supply == Supply::Brick
                             && contract_mw(state).is_some()
@@ -364,7 +367,6 @@ fn port_state(port: &PortStatus, uptime_ms: u64) -> (&'static str, Option<Progre
         }
     } else {
         match port.state {
-            PortState::Contract if port.wrong_port() => "wrong port",
             PortState::Contract
                 if port.offers(PortAction::DfuAppleSilicon) || port.offers(PortAction::Reboot) =>
             {

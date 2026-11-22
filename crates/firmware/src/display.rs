@@ -13,7 +13,7 @@ use embedded_graphics::{
     text::{Baseline, Text},
 };
 use heapless::{String, Vec};
-use iasis_pd::power::millivolts;
+use iasis_pd::{Contract, power::millivolts};
 use iasis_protocol::{
     AppleMode, CommandError, CommandResult, Gesture, Link, Port, PortAction, PortError, PortState,
     PortStatus, RestorePhase, Status, Supply, Usb,
@@ -288,7 +288,6 @@ pub fn label(port: &PortStatus) -> &'static str {
         PortState::Unattached => "--",
         PortState::Debouncing => "CC",
         PortState::Starting => "STRT",
-        PortState::Contract if port.wrong_port() => "PORT",
         PortState::Contract
             if port.offers(PortAction::DfuAppleSilicon) || port.offers(PortAction::Reboot) =>
         {
@@ -414,34 +413,22 @@ fn details(status: &Status, port: &PortStatus) -> [String<32>; 2] {
     pair(message, "")
 }
 
-fn contract_mw(port: &PortStatus) -> u32 {
-    u32::from(port.contract_mv) * u32::from(port.contract_ma) / 1000
+fn watts(milliwatts: u32) -> u32 {
+    (milliwatts + 500) / 1000
 }
 
-fn watts(out: &mut impl Write, mw: u32) {
-    let tenths = (mw + 50) / 100;
-    if tenths >= 100 {
-        write!(out, "{}W", (tenths + 5) / 10).unwrap();
-    } else {
-        write!(out, "{}.{}W", tenths / 10, tenths % 10).unwrap();
-    }
-}
-
-/// Contract current in 10 mA steps, without trailing zeros.
 fn amps(out: &mut impl Write, ma: u16) {
-    let (whole, hundredths) = (ma / 1000, ma % 1000 / 10);
-    if hundredths == 0 {
-        write!(out, "{whole}A").unwrap();
-    } else if hundredths % 10 == 0 {
-        write!(out, "{whole}.{}A", hundredths / 10).unwrap();
+    let rounded = (u32::from(ma) + 50) / 100 * 100;
+    if rounded == 0 && ma > 0 {
+        write!(out, "{ma}mA").unwrap();
+    } else if rounded.is_multiple_of(1000) {
+        write!(out, "{}A", rounded / 1000).unwrap();
     } else {
-        write!(out, "{whole}.{hundredths:02}A").unwrap();
+        write!(out, "{rounded}mA").unwrap();
     }
 }
 
-/// The measured connector voltage leads. The contract below it, watts in
-/// brackets, is the most the sink may draw, not its draw: Iasis has no
-/// current sense.
+/// Connector readings and the negotiated contract or default USB allowance.
 fn readings(port: &PortStatus) -> [String<32>; 2] {
     if !port.occupied() {
         return pair("No target", "");
@@ -461,31 +448,33 @@ fn readings(port: &PortStatus) -> [String<32>; 2] {
         }
         lines[0].push_str(link).unwrap();
     }
-    if port.wrong_port() {
-        lines[1].push_str("Wrong port?").unwrap();
-    } else if port.contract_ma > 0 {
-        write!(lines[1], "{}V ", port.contract_mv / 1000).unwrap();
-        amps(&mut lines[1], port.contract_ma);
-        lines[1].push_str(" (").unwrap();
-        watts(&mut lines[1], contract_mw(port));
-        lines[1].push(')').unwrap();
-    }
+    let (kind, mv, ma) = if port.contract_mv > 0 {
+        ("PD", port.contract_mv, port.contract_ma)
+    } else if port.supply == Supply::Brick && port.allocated_mw > 0 {
+        let usb = Contract::USB_DEFAULT;
+        ("USB", usb.millivolts, usb.operating_ma)
+    } else {
+        return lines;
+    };
+    write!(lines[1], "{kind} {}V ", mv / 1000).unwrap();
+    amps(&mut lines[1], ma);
+    let mw = u32::from(mv) * u32::from(ma) / 1000;
+    write!(lines[1], " ({}W)", watts(mw)).unwrap();
     lines
 }
 
-/// Measured input voltage, then contract watts out of the pool.
+/// Measured input voltage and the allocated share of the charging budget.
 fn supply(status: &Status) -> String<32> {
     let mut line = String::new();
     if status.supply == Supply::Brick {
         if let Some(mv) = status.bus_voltage_adc.and_then(millivolts) {
             write!(line, "{}.{}V  ", mv / 1000, mv % 1000 / 100).unwrap();
         }
-        let reserved: u32 = status.ports.iter().map(contract_mw).sum();
         write!(
             line,
             "{}/{}W",
-            (reserved + 500) / 1000,
-            (status.charging_budget_mw + 500) / 1000
+            watts(status.allocated_mw()),
+            watts(status.charging_budget_mw)
         )
         .unwrap();
     } else if let Some(error) = status.upstream_error {
@@ -653,10 +642,11 @@ fn centered<D: DrawTarget<Color = BinaryColor>>(
     small: bool,
 ) -> Result<(), D::Error> {
     let small = small || value.len() > 21;
+    let width = value.len() as i32 * if small { 5 } else { 6 };
     text(
         target,
         value,
-        (128 - value.len() as i32 * if small { 5 } else { 6 }) / 2,
+        SIZE.width as i32 / 2 - width / 2,
         y,
         small,
         ON,
@@ -760,6 +750,12 @@ mod tests {
                 0x0606, 0x0106, 0x0105, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             ]),
             supply: Supply::Brick,
+            allocated_mw: iasis_pd::Contract {
+                millivolts: mv,
+                operating_ma: ma,
+                limit_ma: ma,
+            }
+            .cost_mw(),
             contract_mv: mv,
             contract_ma: ma,
             orientation: Some(Orientation::Cc2),
@@ -785,7 +781,7 @@ mod tests {
         for now in [0, 3000, 15_000, 90_000] {
             let view = view(&status, &one, now);
             assert_eq!(view.ports, 1);
-            assert_eq!(view.lines, pair("", "5V 0.9A (4.5W)"));
+            assert_eq!(view.lines, pair("", "PD 5V 900mA (5W)"));
         }
         let empty = selecting(2);
         let vacant = view(&status, &empty, 0);
@@ -804,18 +800,53 @@ mod tests {
         let button = selecting(0);
         for raw in [None, Some(4096), Some(u16::MAX)] {
             status.ports[0].vbus_adc = raw;
-            assert_eq!(view(&status, &button, 0).lines, pair("", "20V 2.25A (45W)"));
+            assert_eq!(
+                view(&status, &button, 0).lines,
+                pair("", "PD 20V 2300mA (45W)")
+            );
         }
         status.ports[0].vbus_adc = Some(520);
         assert_eq!(
             view(&status, &button, 0).lines,
-            pair("VBUS 5.03V", "20V 2.25A (45W)")
+            pair("VBUS 5.03V", "PD 20V 2300mA (45W)")
         );
+        status.ports[0] = PortStatus {
+            allocated_mw: iasis_pd::Contract::USB_DEFAULT.cost_mw(),
+            ..contract(5000, 0)
+        };
+        assert_eq!(view(&status, &button, 0).lines[1], "PD 5V 0A (0W)");
         status.ports[0] = PortStatus {
             supply: Supply::HostPresence,
             ..contract(5000, 0)
         };
-        assert_eq!(view(&status, &button, 0).lines, pair("", ""));
+        assert_eq!(view(&status, &button, 0).lines, pair("", "PD 5V 0A (0W)"));
+    }
+
+    #[test]
+    fn power_rows_center_the_whole_line() {
+        let usb = PortStatus {
+            state: PortState::Ready,
+            allocated_mw: Contract::USB_DEFAULT.cost_mw(),
+            ..contract(0, 0)
+        };
+        for (port, row) in [
+            (contract(20_000, 780), "PD 20V 800mA (16W)"),
+            (contract(20_000, 220), "PD 20V 200mA (4W)"),
+            (contract(5000, 30), "PD 5V 30mA (0W)"),
+            (contract(5000, 0), "PD 5V 0A (0W)"),
+            (usb, "USB 5V 900mA (5W)"),
+        ] {
+            let mut status = Status::default();
+            status.ports[0] = port;
+            let view = view(&status, &selecting(0), 0);
+            assert_eq!(view.lines[1], row);
+            let frame = frame(&view);
+            let mut lit =
+                (0..128).filter(|&x| (54..64).any(|y| frame.pixel(Point::new(x, y)) == Some(ON)));
+            let left = lit.next().unwrap();
+            let right = 127 - lit.next_back().unwrap();
+            assert!(left.abs_diff(right) <= 2, "{row}: {left}, {right}");
+        }
     }
 
     #[test]
@@ -882,7 +913,7 @@ mod tests {
         for mode in [AppleMode::Dfu, AppleMode::KisDfu] {
             status.ports[0].observed = seen(mode);
             assert_eq!(label(&status.ports[0]), "DFU");
-            assert_eq!(view(&status, &button, 0).lines, pair("", "9V 3A (27W)"));
+            assert_eq!(view(&status, &button, 0).lines, pair("", "PD 9V 3A (27W)"));
         }
         // DFU a host sees needs no request behind it.
         status.ports[0].request = None;
@@ -908,7 +939,7 @@ mod tests {
     }
 
     #[test]
-    fn a_target_on_a_port_without_dfu_usb_reads_as_the_wrong_port() {
+    fn a_debug_port_without_dfu_keeps_its_power_readings() {
         let mut status = Status::default();
         // An M1 Mac's other port lists reboot alone; an M5's lists DFU too.
         for list in [
@@ -919,8 +950,9 @@ mod tests {
                 debug_actions: DebugActions::Listed(list),
                 ..contract(5000, 2000)
             };
-            assert_eq!(label(&status.ports[0]), "PORT");
-            assert_eq!(view(&status, &selecting(0), 0).lines[1], "Wrong port?");
+            assert!(!status.ports[0].offers(PortAction::DfuAppleSilicon));
+            assert_eq!(label(&status.ports[0]), "RDY");
+            assert_eq!(view(&status, &selecting(0), 0).lines[1], "PD 5V 2A (10W)");
         }
         assert_eq!(label(&contract(5000, 2000)), "RDY");
     }
@@ -931,6 +963,7 @@ mod tests {
         status.ports[0] = contract(9000, 3000);
         status.ports[1] = PortStatus {
             state: PortState::Ready,
+            allocated_mw: iasis_pd::Contract::USB_DEFAULT.cost_mw(),
             ..contract(0, 0)
         };
         status.ports[2].error = Some(PortError::Voltage);
@@ -1095,7 +1128,7 @@ mod tests {
     }
 
     #[test]
-    fn all_shows_contract_power_per_port_and_the_supply() {
+    fn the_board_total_includes_a_usb_port_without_a_pd_contract() {
         let mut status = Status {
             supply: Supply::Brick,
             bus_voltage_adc: Some(2081),
@@ -1107,16 +1140,21 @@ mod tests {
         status.ports[1] = contract(9000, 830);
         status.ports[3] = PortStatus {
             state: PortState::Ready,
+            allocated_mw: iasis_pd::Contract::USB_DEFAULT.cost_mw(),
             ..contract(0, 0)
         };
         for (port, raw) in [(0, 2068), (1, 930), (3, 520), (4, 520)] {
             status.ports[port].vbus_adc = Some(raw);
         }
         let button = Button::default();
+        assert_eq!(
+            view(&status, &selecting(3), 0).lines[1],
+            "USB 5V 900mA (5W)"
+        );
         let brick = view(&status, &button, 0);
         // An empty port's residual reading is not shown.
         assert_eq!(brick.cells, ["20V", "9.0V", "", "5.0V", ""]);
-        assert_eq!(brick.lines, pair("", "20.1V  52/68W"));
+        assert_eq!(brick.lines, pair("", "20.1V  60/68W"));
 
         let host = Status {
             supply: Supply::HostPresence,
@@ -1142,7 +1180,7 @@ mod tests {
             ..contract(5000, 900)
         };
         let button = selecting(1);
-        assert_eq!(view(&status, &button, 0).lines[1], "5V 0.9A (4.5W)");
+        assert_eq!(view(&status, &button, 0).lines[1], "PD 5V 900mA (5W)");
         status.ports[1].restore = Some(RestoreStatus {
             ecid: 1,
             phase: RestorePhase::Running,
@@ -1193,7 +1231,7 @@ mod tests {
         status.ports[0].error = Some(PortError::HostLimiter);
         assert_eq!(view(&status, &button, 700).lines[0], "Host limiter tripped");
         status.ports[0].error = None;
-        assert_eq!(view(&status, &button, 3200).lines[1], "5V 0.9A (4.5W)");
+        assert_eq!(view(&status, &button, 3200).lines[1], "PD 5V 900mA (5W)");
     }
 
     #[test]
