@@ -7,7 +7,7 @@
 	(title_block
 		(title "Five independent target channels")
 		(date "2026-10-19")
-		(rev "A")
+		(rev "${VERSION}")
 	)
 	(lib_symbols)
 	(text "Five independent target channels"

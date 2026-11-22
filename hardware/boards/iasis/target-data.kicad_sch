@@ -7,7 +7,7 @@
 	(title_block
 		(title "USB-C data and PD")
 		(date "2026-10-19")
-		(rev "A")
+		(rev "${VERSION}")
 	)
 	(lib_symbols
 		(symbol "Connector:USB_C_Receptacle"
