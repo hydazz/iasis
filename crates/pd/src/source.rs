@@ -104,15 +104,19 @@ pub fn fixed_offers(budget_mw: u32, input_mv: u16, brick_5v_pdo: u32) -> [u32; 4
     objects
 }
 
-/// Whether an explicit contract can keep its advertised capabilities without
-/// inviting another negotiation. Its flags and every advertised PDO must
-/// remain valid under the available supply.
-pub fn offers_still_available(advertised: &[u32; 4], available: &[u32; 4]) -> bool {
-    advertised[0] != 0
+/// During a restore, keep a funded capability list to avoid a voltage transition.
+pub fn select_offers(available: [u32; 4], advertised: [u32; 4], restoring: bool) -> [u32; 4] {
+    if restoring
+        && advertised[0] != 0
         && advertised
             .iter()
             .zip(available)
-            .all(|(&old, &new)| old == 0 || (old >> 10 == new >> 10 && old <= new))
+            .all(|(&old, new)| old == 0 || (old >> 10 == new >> 10 && old <= new))
+    {
+        advertised
+    } else {
+        available
+    }
 }
 
 /// A 5 V contract permits Apple PD signalling on the host supply.
@@ -325,23 +329,23 @@ mod tests {
     fn an_active_restore_can_keep_its_advertised_list_only_while_every_offer_is_funded() {
         let brick = fixed(5000, 3000).with_unconstrained_power(true).0;
         let offered = fixed_offers(21_000, 19_000, brick);
-        assert!(offers_still_available(
-            &offered,
-            &fixed_offers(63_000, 19_000, brick)
-        ));
-        assert!(!offers_still_available(
-            &offered,
-            &fixed_offers(20_999, 19_000, brick)
-        ));
-        assert!(!offers_still_available(
-            &offered,
-            &fixed_offers(63_000, 8550, brick)
-        ));
-        assert!(!offers_still_available(
-            &offered,
-            &fixed_offers(63_000, 19_000, 0)
-        ));
-        assert!(!offers_still_available(&[0; 4], &offered));
+        let full = fixed_offers(63_000, 19_000, brick);
+        assert_eq!(select_offers(full, offered, true), offered);
+        assert_eq!(select_offers(full, [0; 4], true), full);
+        for changed in [
+            fixed_offers(20_999, 19_000, brick),
+            fixed_offers(63_000, 8550, brick),
+            fixed_offers(63_000, 19_000, 0),
+        ] {
+            assert_eq!(select_offers(changed, offered, true), changed);
+        }
+    }
+
+    #[test]
+    fn a_connected_sink_sees_capacity_released_by_its_peers() {
+        let floor = fixed_offers(Contract::USB_DEFAULT.cost_mw(), 19_000, 0);
+        let full = fixed_offers(70_443, 19_000, 0);
+        assert_eq!(select_offers(full, floor, false), full);
     }
 
     #[test]
