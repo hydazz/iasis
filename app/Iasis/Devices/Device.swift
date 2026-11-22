@@ -15,6 +15,8 @@ struct Device: Identifiable, Equatable {
     let port: AgentState.Port
     let sharing: AgentState.Sharing.Port?
 
+    static let dfuPortHelp = "Connect the cable to the Mac’s DFU port."
+
     var sharesInternet: Bool {
         sharing?.active == true
     }

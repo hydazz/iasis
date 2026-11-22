@@ -18,7 +18,7 @@ use iasis_pd::{
 };
 use iasis_protocol::{
     CommandError, CommandResult, DebugActions, FaultContract, FaultSample, HostReport, Link,
-    Observed, Orientation, PORT_COUNT, PortAction, PortCommand, PortError, PortFaults, PortState,
+    Orientation, PORT_COUNT, PortAction, PortCommand, PortError, PortFaults, PortReport, PortState,
     PortStatus, RestorePhase, Supply,
 };
 use usbpd::{
@@ -97,7 +97,7 @@ struct Shared {
     feedback_deadline: Cell<u64>,
     /// The host's view and its image fetch, with the attachment they
     /// describe.
-    observed: Cell<Option<(u32, Observed, Option<u8>)>>,
+    report: Cell<Option<PortReport>>,
     /// The target's ECID with the attachment it was read on.
     identity: Cell<Option<(u32, u64)>>,
     tracker: Cell<Tracker>,
@@ -122,9 +122,9 @@ impl Shared {
         let status = self.status.get();
         let grant = self.grant.get();
         let view = self
-            .observed
+            .report
             .get()
-            .filter(|(generation, _, _)| *generation == status.generation);
+            .filter(|entry| entry.generation == status.generation);
         PortStatus {
             allocated_mw: self
                 .demand
@@ -133,9 +133,12 @@ impl Shared {
             vbus_adc: self.vbus.get(),
             faults: self.pins.get(),
             link: self.link.get(),
-            observed: view.map(|(_, observed, _)| observed),
+            observed: view.map(|entry| entry.observed),
             ecid: self.identity(status.generation),
-            fetch: view.and_then(|(_, _, fetch)| fetch),
+            restore_access: view.map(|entry| entry.restore_access).unwrap_or_default(),
+            fetch: view
+                .and_then(|entry| entry.fetch)
+                .map(|percent| percent.min(100)),
             request: self.tracker.get().request(),
             ..status
         }
@@ -241,13 +244,7 @@ impl Ports {
             let status = port.status.get();
             if let Some(report) = report {
                 let entry = iasis_firmware::host_session::entry(&report, index, &status);
-                port.observed.set(entry.map(|entry| {
-                    (
-                        entry.generation,
-                        entry.observed,
-                        entry.fetch.map(|percent| percent.min(100)),
-                    )
-                }));
+                port.report.set(entry);
                 if let Some(entry) = entry {
                     let known = port.identity(status.generation);
                     let ecid = entry.observed.identity(known);
@@ -275,7 +272,7 @@ impl Ports {
                     port.feedback_deadline.set(now + 5000);
                 }
             } else if !present {
-                port.observed.set(None);
+                port.report.set(None);
             }
             let mut tracker = port.tracker.get();
             tracker.update(&port.snapshot(), now);
