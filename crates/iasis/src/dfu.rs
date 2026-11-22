@@ -1,7 +1,8 @@
 //! DFU observations for one physical connector and one attachment generation.
 
 use iasis_protocol::{
-    CommandResult, DebugActions, Port, PortAction, PortError, PortState, PortStatus, Status, Supply,
+    CommandResult, DebugActions, Port, PortAction, PortError, PortState, PortStatus, RestoreAccess,
+    Status, Supply,
 };
 use serde::Serialize;
 
@@ -27,6 +28,7 @@ pub enum Signal {
     NoPdContract,
     NoDebug,
     NotOffered,
+    WrongMacPort,
     MultipleTransports,
     Ambiguous,
     DifferentDevice,
@@ -52,9 +54,8 @@ impl Signal {
             Self::NoDebug => {
                 "The target does not answer Apple debug, so Iasis cannot signal it. Enter DFU on the device itself."
             }
-            Self::NotOffered => {
-                "This port of the target does not offer DFU. Use the Mac's DFU port."
-            }
+            Self::NotOffered => "The target does not offer DFU on this connection.",
+            Self::WrongMacPort => "Connect to the Mac's DFU port.",
             Self::MultipleTransports => {
                 "Apple Debug USB is present alongside two Mac interfaces advertising the same USB serial. If a restore is in progress, leave the cable connected."
             }
@@ -150,6 +151,30 @@ pub struct Assessment {
 }
 
 impl Assessment {
+    pub(crate) fn restore_access(
+        &self,
+        port: &PortStatus,
+        action: PortAction,
+        supports: impl FnOnce(AppleMode) -> bool,
+    ) -> RestoreAccess {
+        match self.signal {
+            Signal::AlreadyDfu if self.ecid.is_some() && self.usb_mode.is_some_and(supports) => {
+                RestoreAccess::InDfu
+            }
+            Signal::Available => RestoreAccess::EnterDfu,
+            // A finished restore can leave its USB service on an otherwise idle port.
+            Signal::Restoring
+                if self.usb_mode == Some(AppleMode::Restored)
+                    && !port.restoring()
+                    && port.offers(action) =>
+            {
+                RestoreAccess::EnterDfu
+            }
+            Signal::WrongMacPort => RestoreAccess::WrongMacPort,
+            _ => RestoreAccess::Unavailable,
+        }
+    }
+
     pub fn describe(&self) -> String {
         let mode = match self.usb_mode {
             Some(AppleMode::Dfu) => "USB DFU (05ac:1227)",
@@ -215,13 +240,7 @@ impl Attempt {
         snapshot: &Snapshot,
         result: CommandResult,
     ) -> Self {
-        let was_mac = snapshot.ports[port.index()].devices.iter().any(|d| {
-            d.vendor_id == 0x05ac
-                && (matches!(d.product_id, 0x1903 | 0x1905)
-                    || d.product
-                        .as_deref()
-                        .is_some_and(|n| n.starts_with("Mac") || n.starts_with("iMac")))
-        });
+        let was_mac = direct_device(snapshot, port).is_some_and(is_mac);
         Self {
             generation: before.generation,
             uptime_ms: before.uptime_ms,
@@ -235,6 +254,17 @@ impl Attempt {
             }),
         }
     }
+}
+
+fn is_mac(device: &UsbDevice) -> bool {
+    let Some(apple) = &device.apple else {
+        return false;
+    };
+    let mac_name = |name: &str| name.starts_with("Mac") || name.starts_with("iMac");
+    apple
+        .model
+        .as_deref()
+        .map_or_else(|| device.product.as_deref().is_some_and(mac_name), mac_name)
 }
 
 pub fn direct_device(snapshot: &Snapshot, port: Port) -> Option<&UsbDevice> {
@@ -380,7 +410,13 @@ pub fn assess(
     } else if p.debug_actions == DebugActions::Silent {
         Signal::NoDebug
     } else if !p.offers(action) {
-        Signal::NotOffered
+        if single.is_some_and(is_mac)
+            && matches!(p.debug_actions, DebugActions::Listed(ids) if !ids.contains(&iasis_protocol::DFU_USB))
+        {
+            Signal::WrongMacPort
+        } else {
+            Signal::NotOffered
+        }
     } else {
         Signal::Available
     };
@@ -635,6 +671,7 @@ mod tests {
         s.ports[0]
             .devices
             .push(apple(AppleMode::Normal, 0x1905, Some(42)));
+        s.ports[0].devices[0].apple.as_mut().unwrap().model = Some("Mac16,1".into());
         let attempt = sent(&st, &s, CommandResult::Acknowledged);
         let unconfirmed = sent(&st, &s, CommandResult::Unconfirmed);
         s.ports[0].devices.clear();
@@ -752,6 +789,66 @@ mod tests {
         device.apple = None;
         s.ports[0].devices.push(device);
         assert_eq!(report(&st, &s, None).signal, Signal::DifferentDevice);
+    }
+
+    #[test]
+    fn usb_only_restore_requires_an_identified_mode_the_host_supports() {
+        let mut st = status();
+        st.ports[0].state = PortState::Ready;
+        let mut usb = snapshot();
+        for (mode, ecid, supports, expected) in [
+            (AppleMode::Mux, Some(42), true, RestoreAccess::Unavailable),
+            (
+                AppleMode::PortDfu,
+                Some(42),
+                true,
+                RestoreAccess::Unavailable,
+            ),
+            (AppleMode::Dfu, None, true, RestoreAccess::Unavailable),
+            (AppleMode::Dfu, Some(42), true, RestoreAccess::InDfu),
+            (
+                AppleMode::KisDfu,
+                Some(42),
+                false,
+                RestoreAccess::Unavailable,
+            ),
+            (AppleMode::KisDfu, Some(42), true, RestoreAccess::InDfu),
+        ] {
+            usb.ports[0].devices = vec![apple(mode, 0x1227, ecid)];
+            assert_eq!(
+                report(&st, &usb, None).restore_access(
+                    &st.ports[0],
+                    PortAction::DfuAppleSilicon,
+                    |_| supports
+                ),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn only_an_identified_mac_missing_dfu_usb_gets_the_connector_hint() {
+        let mut st = status();
+        let mut usb = snapshot();
+        usb.ports[0]
+            .devices
+            .push(apple(AppleMode::Mux, 0x12ac, Some(42)));
+        st.ports[0].debug_actions =
+            DebugActions::Listed([0x0106, 0x0105, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        for (model, expected) in [
+            (None, Signal::NotOffered),
+            (Some("iPad7,11"), Signal::NotOffered),
+            (Some("Mac15,8"), Signal::WrongMacPort),
+        ] {
+            usb.ports[0].devices[0].apple.as_mut().unwrap().model = model.map(str::to_owned);
+            assert_eq!(report(&st, &usb, None).signal, expected);
+        }
+        st.ports[0].debug_actions = DebugActions::Silent;
+        assert_eq!(report(&st, &usb, None).signal, Signal::NoDebug);
+        // DFU USB present, but the command for this family is absent.
+        st.ports[0].debug_actions =
+            DebugActions::Listed([0x0606, 0x0105, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(report(&st, &usb, None).signal, Signal::NotOffered);
     }
 
     #[test]
