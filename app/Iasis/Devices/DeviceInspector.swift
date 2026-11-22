@@ -31,6 +31,10 @@ struct DeviceInspector: View {
                 Section("Connection") {
                     LabeledContent("Board", value: device.boardTitle)
                     LabeledContent("Port", value: device.port.number.formatted())
+                    LabeledContent("Internet sharing", value: device.sharesInternet ? "Yes" : "No")
+                    if let problem = device.sharing?.problem {
+                        Label(problem, systemImage: "exclamationmark.triangle")
+                    }
                     if device.port.occupied {
                         if let mode = device.port.modeTitle {
                             LabeledContent("Mode", value: mode)

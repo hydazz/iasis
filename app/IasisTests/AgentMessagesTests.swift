@@ -22,6 +22,8 @@ struct AgentMessagesTests {
         let fraction = try #require(state.images.fetch?.fraction)
         #expect(abs(fraction - 0.43) < 0.001)
         #expect(state.restoreProblem == nil)
+        #expect(state.sharing.enabled)
+        #expect(state.sharing.ports[0] == .init(board: board.serial, port: 3, active: true))
     }
 
     /// Against the agent running on this Mac, when `IASIS_LIVE_AGENT` is set.
@@ -50,6 +52,8 @@ struct AgentMessagesTests {
         (.revive(board: "a0e0", session: 77, port: 2, generation: 4, ecid: "0014692221e0801e"), #"{"board":"a0e0","ecid":"0014692221e0801e","generation":4,"op":"revive","port":2,"session":77}"#),
         (.dfu(board: "a0e0", port: 2), #"{"board":"a0e0","op":"dfu","port":2}"#),
         (.power(board: "a0e0", port: 1, on: false), #"{"board":"a0e0","on":false,"op":"power","port":1}"#),
+        (.sharing(enabled: true), #"{"enabled":true,"op":"sharing"}"#),
+        (.sharing(enabled: false), #"{"enabled":false,"op":"sharing"}"#),
         (.brightness(board: "a0e0", percent: 30), #"{"board":"a0e0","op":"brightness","percent":30}"#),
         (.rename(board: "a0e0", name: "Bench A"), #"{"board":"a0e0","name":"Bench A","op":"rename"}"#),
         (.importImage(path: "/tmp/a.ipsw"), #"{"op":"import","path":"\/tmp\/a.ipsw"}"#),

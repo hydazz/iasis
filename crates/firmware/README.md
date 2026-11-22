@@ -105,7 +105,7 @@ If updates stop during preparation or restore, the port turns steady purple afte
 
 ## OLED
 
-Connect an [Adafruit 938](https://www.adafruit.com/product/938) to the display I²C connector. The 128×64 screen shows all five physical ports. Bars beside a port number show its USB link: one for USB 2, two for USB 3. A selected port that a hold would reach is filled; any other selected port is outlined. A plug indicates brick power and a USB symbol an attached host.
+Connect an [Adafruit 938](https://www.adafruit.com/product/938) to the display I²C connector. The 128×64 screen shows all five physical ports. Bars beside a port number show its USB link: one for USB 2, two for USB 3. A selected port that a hold would reach is filled; any other selected port is outlined. In the menubar, a plug means brick power. The USB symbol marks a live Iasis host session. A network symbol appears while the host shares Internet access on at least one of the board’s ports.
 
 A port reads `DFU` or `REC` while the host sees it in DFU or recovery, `DFU?` for a DFU sent and not yet seen, `BOOT` after a reboot is sent, and `IMG` with a percentage while the host fetches its restore image.
 

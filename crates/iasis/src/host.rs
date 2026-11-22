@@ -230,6 +230,7 @@ struct Shared {
     models: Arc<Models>,
     fetching: Mutex<[Option<(u32, u8)>; PORT_COUNT]>,
     restore_ready: AtomicBool,
+    internet_sharing: AtomicBool,
     alive: AtomicBool,
     stop: AtomicBool,
     next_arm: AtomicU32,
@@ -284,6 +285,7 @@ impl Shared {
             session: HostSession {
                 id: self.session,
                 restore_ready: self.restore_ready.load(Ordering::Relaxed),
+                internet_sharing: self.internet_sharing.load(Ordering::Relaxed),
             },
             ports: compose(
                 &seen,
@@ -405,6 +407,7 @@ impl Link {
             models,
             fetching: Mutex::default(),
             restore_ready: AtomicBool::new(false),
+            internet_sharing: AtomicBool::new(false),
             alive: AtomicBool::new(true),
             stop: AtomicBool::new(false),
             next_arm: AtomicU32::new(1),
@@ -462,6 +465,29 @@ impl Link {
     /// The ports as last sampled for the board.
     pub fn seen(&self) -> Seen {
         self.shared.view.lock().unwrap().seen
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn sharing_targets(&self) -> Vec<(Port, topology::MacAttachment)> {
+        let view = self.shared.view.lock().unwrap();
+        let Some((status, snapshot)) = &view.sample else {
+            return Vec::new();
+        };
+        Port::ALL
+            .into_iter()
+            .filter(|port| status.ports[port.index()].occupied())
+            .filter_map(|port| {
+                let device = dfu::direct_device(snapshot, port)?;
+                (device.vendor_id == 0x05ac).then_some((port, device.macos_attachment?))
+            })
+            .collect()
+    }
+
+    /// Report whether the host is serving any of this board's USB network links.
+    pub fn set_internet_sharing(&self, active: bool) {
+        self.shared
+            .internet_sharing
+            .store(active, Ordering::Relaxed);
     }
 
     /// Tell the board whether a button restore request would be answered.

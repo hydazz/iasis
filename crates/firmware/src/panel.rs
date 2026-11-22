@@ -160,6 +160,7 @@ mod tests {
         Some(HostSession {
             id: 1,
             restore_ready,
+            internet_sharing: false,
         })
     }
 

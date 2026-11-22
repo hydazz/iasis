@@ -60,6 +60,13 @@ enum Command {
         #[command(subcommand)]
         command: Option<ImagesCommand>,
     },
+    /// Share this host’s internet connection with attached USB devices
+    Sharing {
+        #[command(subcommand)]
+        command: Option<SharingCommand>,
+        #[arg(long)]
+        json: bool,
+    },
     /// List boards, firmware versions and USB paths
     List,
     /// Read ADC counts, faults and bus observations
@@ -107,6 +114,14 @@ enum Command {
         #[arg(value_parser = parse_port)]
         port: Port,
     },
+}
+
+#[derive(Subcommand)]
+enum SharingCommand {
+    /// Start sharing the host connection
+    On,
+    /// Stop sharing
+    Off,
 }
 
 #[derive(Subcommand)]
@@ -162,6 +177,10 @@ fn main() -> Result<()> {
     };
     let mut agent = Client::connect(&Home::locate()?);
     match (&command, agent.as_mut()) {
+        (Command::Sharing { command, json }, Some(agent)) => {
+            return sharing(agent, command.as_ref(), *json);
+        }
+        (Command::Sharing { .. }, None) => bail!("USB Internet Sharing requires the running agent"),
         (Command::Images { command }, Some(agent)) => return images(agent, command.as_ref()),
         (Command::Images { .. }, None) => {
             bail!("the agent keeps the restore images; start iasisd")
@@ -222,6 +241,7 @@ fn main() -> Result<()> {
         | Command::Ipsw { .. }
         | Command::Watch
         | Command::Images { .. }
+        | Command::Sharing { .. }
         | Command::Revive { .. } => {
             unreachable!()
         }
@@ -604,6 +624,38 @@ fn overview(ids: UsbIds, serial: Option<u64>, watch: bool) -> Result<()> {
         }
         thread::sleep(Duration::from_millis(500));
     }
+}
+
+fn sharing(agent: &mut Client, command: Option<&SharingCommand>, json: bool) -> Result<()> {
+    if let Some(command) = command {
+        agent.request(&Request::Sharing {
+            enabled: matches!(command, SharingCommand::On),
+        })?;
+    }
+    let sharing = agent.state()?.sharing;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&sharing)?);
+        return Ok(());
+    }
+    println!(
+        "USB Internet Sharing {}",
+        if sharing.enabled { "on" } else { "off" }
+    );
+    if let Some(problem) = sharing.problem {
+        println!("{problem}");
+    }
+    for target in sharing.ports {
+        println!(
+            "{}  port {}  {}",
+            target.board,
+            target.port,
+            target
+                .problem
+                .as_deref()
+                .unwrap_or(if target.active { "sharing" } else { "starting" })
+        );
+    }
+    Ok(())
 }
 
 fn images(agent: &mut Client, command: Option<&ImagesCommand>) -> Result<()> {

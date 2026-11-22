@@ -11,6 +11,7 @@ nonisolated enum AgentRequest: Encodable, Equatable {
     case power(board: String, port: Int, on: Bool)
     case rename(board: String, name: String)
     case brightness(board: String, percent: Int)
+    case sharing(enabled: Bool)
     case keep(model: String)
     case forget(model: String)
     case importImage(path: String)
@@ -18,7 +19,7 @@ nonisolated enum AgentRequest: Encodable, Equatable {
     case refresh
 
     private enum CodingKeys: String, CodingKey {
-        case op, board, boards, port, session, generation, ecid, name, on, percent, model, path, build
+        case op, board, boards, port, session, generation, ecid, name, on, percent, model, path, build, enabled
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -57,6 +58,9 @@ nonisolated enum AgentRequest: Encodable, Equatable {
             try fields.encode(board, forKey: .board)
             try fields.encode("brightness", forKey: .op)
             try fields.encode(percent, forKey: .percent)
+        case let .sharing(enabled):
+            try fields.encode("sharing", forKey: .op)
+            try fields.encode(enabled, forKey: .enabled)
         case let .keep(model):
             try fields.encode("keep", forKey: .op)
             try fields.encode(model, forKey: .model)
