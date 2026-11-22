@@ -10,7 +10,7 @@
 	(title_block
 		(title "iasis-cm5")
 		(date "2026")
-		(rev "A")
+		(rev "${VERSION}")
 	)
 	(layers
 		(0 "F.Cu" signal)

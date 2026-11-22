@@ -47,6 +47,12 @@ def variant_args(variant):
     return ["--variant", variant] if variant else []
 
 
+def version_args(board):
+    """Define the version the board's title blocks and silkscreen print."""
+    version = (board.parent / "version.txt").read_text().strip()
+    return ["--define-var", f"VERSION={version}"]
+
+
 def main():
     ap = parser(__doc__)
     ap.add_argument(
@@ -66,6 +72,7 @@ def main():
                 "--refill-zones",
                 "--severity-error",
                 "--exit-code-violations",
+                *version_args(board),
                 "--format",
                 "json",
                 "-o",
@@ -77,6 +84,7 @@ def main():
                 "erc",
                 "--severity-error",
                 "--exit-code-violations",
+                *version_args(board),
                 "--format",
                 "json",
                 "-o",

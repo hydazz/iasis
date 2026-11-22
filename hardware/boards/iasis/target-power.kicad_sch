@@ -7,7 +7,7 @@
 	(title_block
 		(title "Target output — common host branch, gating and discharge")
 		(date "2026-10-19")
-		(rev "A")
+		(rev "${VERSION}")
 	)
 	(lib_symbols
 		(symbol "74xGxx:74LVC2G08"

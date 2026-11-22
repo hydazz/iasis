@@ -7,7 +7,7 @@
 	(title_block
 		(title "IASIS — USB-C DFU hub")
 		(date "2026-10-19")
-		(rev "A")
+		(rev "${VERSION}")
 	)
 	(lib_symbols)
 	(text "Power"

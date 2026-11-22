@@ -3,7 +3,7 @@
 	(generator "eeschema")
 	(generator_version "10.0")
 	(paper "A3")
-	(title_block (title "NVMe — M.2 M-key socket and 3.3 V supply") (date "2026-10-24") (rev "A"))
+	(title_block (title "NVMe — M.2 M-key socket and 3.3 V supply") (date "2026-10-24") (rev "${VERSION}"))
 	(uuid "a95e2b08-e5a0-489e-9ccf-4a7f127c170e")
 	(lib_symbols      
 	
