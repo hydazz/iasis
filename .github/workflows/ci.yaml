@@ -73,6 +73,41 @@ jobs:
           mise run firmware:test
           mise run firmware:build
 
+  app:
+    name: App
+    runs-on: xcode-27
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Mise
+        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
+        with:
+          install_args: --locked rust periphery swiftformat shellcheck
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Check app formatting
+        run: mise run //app:fmt-check
+
+      - name: Lint app
+        run: mise run //app:lint
+
+      - name: Test app
+        run: mise run //app:test
+
+      - name: Package app with host tools
+        run: mise run //app:package
+
   hardware:
     name: Hardware
     runs-on: ubuntu-26.04
@@ -140,6 +175,7 @@ jobs:
     if: ${{ !cancelled() }}
     name: Build Success
     needs:
+      - app
       - hardware
       - software
     runs-on: ubuntu-26.04
