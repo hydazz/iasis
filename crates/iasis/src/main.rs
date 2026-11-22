@@ -67,7 +67,7 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// List boards, firmware versions and USB paths
+    /// List boards, IasisOS versions and USB paths
     List,
     /// Read ADC counts, faults and bus observations
     Status {
@@ -534,7 +534,7 @@ fn list(ids: UsbIds, serial: Option<u64>) -> Result<()> {
                 let info = board.info();
                 let [major, minor, patch] = info.firmware_version;
                 println!(
-                    "{:016x}  {}  firmware {major}.{minor}.{patch}  bus {} port {:?}",
+                    "{:016x}  {}  IasisOS {major}.{minor}.{patch}  bus {} port {:?}",
                     info.serial,
                     if name.as_str().is_empty() {
                         "(unnamed)"
