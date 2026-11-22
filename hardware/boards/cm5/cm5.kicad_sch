@@ -4,7 +4,7 @@
 	(generator_version "10.0")
 	(uuid "6a022b51-582b-478a-88ab-528b7c0cb8e3")
 	(paper "A3")
-	(title_block (title "IASIS CM5 — side board") (date "2026-10-24") (rev "A"))
+	(title_block (title "IASIS CM5 — side board") (date "2026-10-24") (rev "${VERSION}"))
 	(lib_symbols  )
 (text "Compute" (exclude_from_sim no) (at 25.4 45.72 0) (effects (font (size 1.778 1.778) (bold yes)) (justify left top)) (uuid "7731b501-4acf-4551-a897-2be0e4163a13"))
 (text "CM5 connectors, 5 V input, fan" (exclude_from_sim no) (at 30.48 67.31 0) (effects (font (size 1.27 1.27)) (justify left top)) (uuid "ed76bb87-4f80-46b8-aca2-d91db7097a2c"))

@@ -7,7 +7,7 @@
 	(title_block
 		(title "USB 3.2 Gen 2 hub — target ports 1–5 and the controller")
 		(date "2026-10-19")
-		(rev "A")
+		(rev "${VERSION}")
 	)
 	(lib_symbols
 		(symbol "74xGxx:74AUP1G08"

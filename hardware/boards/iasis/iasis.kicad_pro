@@ -1317,7 +1317,9 @@
       "Side link"
     ]
   ],
-  "text_variables": {},
+  "text_variables": {
+    "VERSION": "dev"
+  },
   "tuning_profiles": {
     "meta": {
       "version": 0

@@ -3,7 +3,7 @@
 	(generator "eeschema")
 	(generator_version "10.0")
 	(paper "A4")
-	(title_block (title "Ethernet — gigabit RJ45") (date "2026-10-24") (rev "A"))
+	(title_block (title "Ethernet — gigabit RJ45") (date "2026-10-24") (rev "${VERSION}"))
 	(uuid "afa7f471-ee4f-4fd0-9c99-a733f4153688")
 	(lib_symbols     
 	
