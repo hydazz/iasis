@@ -1,85 +1,84 @@
 import SwiftUI
 
-/// The menu bar menu: each board's devices, then the app.
 struct StatusMenu: View {
-    let model: AgentModel
+    let browser: DeviceBrowser
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        let state = model.menu
-        if let boards = state.boards {
-            if boards.isEmpty {
+        let model = browser.model
+        let live = model.state?.devices ?? []
+        if let snapshot = model.menuSnapshot {
+            if snapshot.boards.isEmpty {
                 Text("No Boards Connected")
             }
-            ForEach(boards) { board in
+            ForEach(snapshot.boardDevices) { board in
                 Section(board.title) {
-                    if let notice = board.notice {
+                    let ports = board.devices.filter(\.isSelectable)
+                    if let notice = board.board.notice {
                         Text(notice)
-                    }
-                    if board.devices.isEmpty, board.notice == nil {
+                    } else if ports.isEmpty {
                         Text("No Devices")
                     }
-                    ForEach(board.devices) { entry in
-                        DeviceMenu(entry: entry, model: model)
+                    ForEach(ports) { port in
+                        let device = live.first { port.sameAttachment(as: $0) }
+                        Menu {
+                            Button("Get Info", systemImage: "info.circle") {
+                                browser.selection = [port.id]
+                                browser.showsInspector = true
+                                showDevices()
+                            }
+                            Divider()
+                            if let device {
+                                DeviceActionButtons(actions: DeviceActions([device], restoreProblem: model.state?.restoreProblem)) {
+                                    model.perform($0)
+                                } restore: { confirmation in
+                                    showDevices()
+                                    browser.confirming = confirmation
+                                }
+                            }
+                        } label: {
+                            Text("\(port.port.number)  \(port.shortName)")
+                            if let status = device?.menuSubtitle {
+                                Text(status)
+                            }
+                        }
+                        .disabled(device == nil)
                     }
                 }
             }
-            if let download = state.download {
-                Divider()
-                Text("Downloading Image")
-                    .badge(Text(download))
+            if let fetch = model.state?.images.fetch, !live.contains(where: { $0.port.stage != nil && $0.port.job == nil }) {
+                Text("Downloading Image").badge(Text(fetch.fraction.formatted(.percent)))
             }
-            if let problem = state.restoreProblem {
-                Divider()
+            if let problem = snapshot.restoreProblem {
                 Text(problem)
             }
         } else {
             Text("Agent Not Running")
         }
         Divider()
-        Button("Open Iasis") {
-            openWindow(id: DevicesView.windowID)
-            NSApp.activate()
-        }
-        .keyboardShortcut("o")
-        SettingsLink()
-            .keyboardShortcut(",")
+        Button("Open Iasis", action: showDevices).keyboardShortcut("o")
+        SettingsLink().keyboardShortcut(",")
         Divider()
-        Button("Quit Iasis") { NSApp.terminate(nil) }
-            .keyboardShortcut("q")
+        Button("Quit Iasis") { NSApp.terminate(nil) }.keyboardShortcut("q")
+    }
+
+    private func showDevices() {
+        openWindow(id: DevicesView.windowID)
+        NSApp.activate()
     }
 }
 
-/// A device's line in the menu, with its actions in a submenu.
-private struct DeviceMenu: View {
-    let entry: StatusMenuState.Entry
-    let model: AgentModel
-
-    var body: some View {
-        let device = entry.device
-        Menu {
-            DeviceActionButtons(actions: entry.actions) { requests in
-                model.perform(requests)
-            } restore: { confirmation in
-                if confirm(confirmation) {
-                    model.perform([confirmation.request])
-                }
-            }
-        } label: {
-            Label(entry.title, systemImage: "\(device.port.number).circle")
-        }
-        .badge(device.activity.text.isEmpty ? nil : Text(device.activity.text))
+extension Device {
+    func sameAttachment(as live: Device) -> Bool {
+        id == live.id && session == live.session && port.generation == live.port.generation &&
+            (port.ecid == nil || port.ecid == live.port.ecid) && live.isSelectable
     }
 
-    /// A menu has closed by the time its action runs, so it cannot hold a sheet.
-    private func confirm(_ restore: RestoreConfirmation) -> Bool {
-        let alert = NSAlert()
-        alert.messageText = restore.title
-        alert.informativeText = restore.message
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Restore").hasDestructiveAction = true
-        NSApp.activate()
-        return alert.runModal() == .alertSecondButtonReturn
+    var menuSubtitle: String? {
+        let text = activity.text
+        if !text.isEmpty {
+            return text
+        }
+        return port.wrongDfuPort ? "PORT" : nil
     }
 }

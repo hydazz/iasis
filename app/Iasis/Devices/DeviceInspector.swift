@@ -8,56 +8,54 @@ struct DeviceInspector: View {
         if devices.count == 1, let device = devices.first {
             Form {
                 Section {
-                    LabeledContent("Status", value: status(of: device))
+                    LabeledContent("Port", value: "\(device.boardTitle) · \(device.port.number)")
+                    if let ecid = device.port.ecid {
+                        LabeledContent("ECID", value: ecid)
+                    }
+                    if let link = device.port.link {
+                        LabeledContent("USB Link", value: link.title)
+                    }
+                    if let mode = device.port.modeTitle {
+                        LabeledContent("USB Mode", value: mode)
+                    }
                     if device.port.wrongDfuPort {
                         Text(Device.dfuPortHelp).foregroundStyle(.secondary)
                     }
-                    if device.port.mode == "kis_dfu", !device.port.restore {
-                        Text("Use Apple Configurator to restore this Mac.")
-                            .foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Label(device.name, systemImage: device.symbol ?? "powerplug")
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                }
-                if device.port.occupied, device.port.device != nil || device.port.ecid != nil {
-                    Section("Device") {
-                        if let model = device.port.device {
-                            LabeledContent("Model", value: model)
-                        }
-                        if let ecid = device.port.ecid {
-                            LabeledContent("ECID", value: ecid)
-                        }
-                    }
-                }
-                Section("Connection") {
-                    LabeledContent("Board", value: device.boardTitle)
-                    LabeledContent("Port", value: device.port.number.formatted())
-                    LabeledContent("Internet sharing", value: device.sharesInternet ? "Yes" : "No")
                     if let problem = device.sharing?.problem {
                         Label(problem, systemImage: "exclamationmark.triangle")
+                    } else if device.sharesInternet {
+                        Label("Internet Sharing", systemImage: DeviceSymbol.lan)
                     }
-                    if device.port.occupied {
-                        if let mode = device.port.modeTitle {
-                            LabeledContent("Mode", value: mode)
+                } header: {
+                    DeviceName(device: device, lineLimit: nil)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .textCase(nil)
+                }
+                if device.port.powered || device.port.power != nil || device.port.waitingForPower || device.port.short {
+                    Section("Power") {
+                        if let power = device.port.power {
+                            LabeledContent(power.title, value: power.reading)
+                                .help(power.source == .usb ? "Default USB power available to this device" : "Power negotiated by this device")
+                        } else if device.port.powered {
+                            Text("USB Power")
                         }
-                        if !device.port.link.isEmpty {
-                            LabeledContent("USB link", value: device.port.link)
-                        }
-                        if device.port.allocatedMw > 0 {
-                            LabeledContent("Power allocation", value: "\(wholeWatts(device.port.allocatedMw)) W")
-                        }
-                        if let watts = device.watts {
-                            LabeledContent("PD contract", value: "\(device.port.contract) (\(watts))")
-                        }
-                        if device.port.short {
-                            Text("The device reports that the available power does not meet its requirements.")
-                                .foregroundStyle(.secondary)
+                        if device.port.waitingForPower {
+                            Text("Waiting for Power")
+                        } else if device.port.short {
+                            Text("The device reports insufficient power.").foregroundStyle(.secondary)
                         }
                     }
                 }
-                if let result = device.result {
+                if let fault = device.port.fault {
+                    Label(fault, systemImage: "exclamationmark.triangle")
+                } else if device.port.request != nil || device.port.stage != nil || (device.port.job != nil && device.port.result == nil) {
+                    LabeledContent("Operation", value: device.activity.text)
+                }
+                if device.port.needsConfigurator {
+                    Text("Use Apple Configurator to restore this Mac.").foregroundStyle(.secondary)
+                }
+                if let result = device.port.result {
                     Section("Last \(result.operation.title)") {
                         Text(result.message)
                         if let directory = result.logDirectory {
@@ -76,14 +74,6 @@ struct DeviceInspector: View {
             ContentUnavailableView("\(devices.count) Devices Selected", systemImage: "rectangle.stack")
         }
     }
-
-    private func status(of device: Device) -> String {
-        let text = device.activity.text
-        if !text.isEmpty {
-            return text
-        }
-        return device.port.state.prefix(1).uppercased() + device.port.state.dropFirst()
-    }
 }
 
 private extension AgentState.Port {
@@ -94,8 +84,8 @@ private extension AgentState.Port {
         case "recovery": "Recovery"
         case "kis": "Debug USB"
         case "port_dfu": "Port DFU"
-        case "restored": "Restore service"
-        case "normal": "Started up"
+        case "restored": "Restore Service"
+        case "normal": "Started Up"
         case "mux": "System"
         case "wtf": "WTF"
         default: mode

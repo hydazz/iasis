@@ -81,6 +81,9 @@ pub type Requests = Arc<Mutex<Option<Submission>>>;
 /// target leaves, which a restored target does by restarting.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Ending {
+    /// Preparation can fail before the target supplies an ECID.
+    #[serde(skip)]
+    pub(crate) attachment: Option<(u32, u32)>,
     pub operation: Operation,
     pub log_directory: Option<PathBuf>,
     pub ecid: Option<String>,
@@ -264,6 +267,7 @@ pub fn listen(
                     endings,
                     target.port,
                     Ending {
+                        attachment: Some((link.session(), target.generation)),
                         operation: Operation::Restore,
                         ecid: target.ecid.map(|id| format!("{id:016x}")),
                         log_directory: None,
@@ -572,6 +576,7 @@ fn monitor(link: &Link, running: Running, endings: &Endings) -> Result<()> {
                     endings,
                     target.port,
                     Ending {
+                        attachment: None,
                         operation: job.operation,
                         log_directory: Some(job.directory.clone()),
                         ecid: Some(format!("{:016x}", job.ecid)),
@@ -1022,6 +1027,7 @@ mod tests {
             &slots,
             a.port,
             Ending {
+                attachment: None,
                 operation: Operation::Revive,
                 ecid: Some("0000000000000011".into()),
                 phase: RestorePhase::Failed,

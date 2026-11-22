@@ -92,6 +92,7 @@ fn appears_elsewhere(snapshot: &Snapshot, port: Port, ecid: u64) -> bool {
 #[derive(Default)]
 struct Observer {
     last: Seen,
+    attached_at_ms: [u64; PORT_COUNT],
     stable: Seen,
 }
 
@@ -103,12 +104,14 @@ impl Observer {
             let now = state
                 .occupied()
                 .then(|| (state.generation, observe(snapshot, port)));
+            if now.map(|(generation, _)| generation)
+                != self.last[index].map(|(generation, _)| generation)
+            {
+                self.attached_at_ms[index] = status.uptime_ms;
+                self.stable[index] = None;
+            }
             if now == self.last[index] {
                 self.stable[index] = now;
-            } else if self.stable[index].map(|(generation, _)| generation)
-                != now.map(|(generation, _)| generation)
-            {
-                self.stable[index] = None;
             }
             self.last[index] = now;
         }
@@ -576,17 +579,19 @@ impl Link {
             &crate::view::Host {
                 store,
                 models: &self.shared.models,
+                engine: &self.shared.engine,
                 family: self.shared.family,
             },
         );
-        for (port, job) in board
-            .ports
-            .iter_mut()
-            .zip(self.shared.jobs.lock().unwrap().iter())
-        {
-            if let Some(job) = job {
-                port.describe_job(job);
+        let jobs = self.shared.jobs.lock().unwrap();
+        for (index, row) in board.ports.iter_mut().enumerate() {
+            if let Some(job) = &jobs[index] {
+                row.describe_job(job);
             }
+            let age_ms = status
+                .uptime_ms
+                .saturating_sub(view.observer.attached_at_ms[index]);
+            row.identify_for(age_ms);
         }
         Some(board)
     }
@@ -721,6 +726,7 @@ mod tests {
         };
         let path = dir.path().join("device-models.json");
         let models = Models::open(path.clone());
+        let engine = crate::restore::RestoreEngine::for_host(Some("unused".into()), dir.path());
         let one = Port::ALL[0];
         // The board echoes each report and keeps the ECID it carried.
         let sample = |status: &mut Status, usb: &Snapshot, models: &Models| -> PortView {
@@ -736,6 +742,7 @@ mod tests {
                 &crate::view::Host {
                     store: &store,
                     models,
+                    engine: &engine,
                     family: Device::AppleSilicon,
                 },
             );
