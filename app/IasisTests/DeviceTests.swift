@@ -97,7 +97,7 @@ struct DeviceTests {
         state.boards.append(other)
 
         let chosen = state.devices.filter { [2, 4].contains($0.port.number) }
-        let actions = DeviceActions(chosen, restoreProblem: nil)
+        let actions = DeviceActions(chosen)
         let confirmation = try #require(actions.restore)
         #expect(confirmation.title == "Restore 4 Devices?")
         #expect(confirmation.message.contains("Repair Bench, Port 2: MacBook Air (13-inch, M5)"))
@@ -112,25 +112,25 @@ struct DeviceTests {
         ]))
 
         // One device that cannot be restored withholds the erase from all.
-        #expect(DeviceActions(state.devices.filter { [3, 4].contains($0.port.number) }, restoreProblem: nil).restore == nil)
-        #expect(DeviceActions(chosen, restoreProblem: "idevicerestore is missing").restore == nil)
+        #expect(DeviceActions(state.devices.filter { [3, 4].contains($0.port.number) }).restore == nil)
         state.boards[1].session = nil
-        #expect(DeviceActions(state.devices.filter { [2, 4].contains($0.port.number) }, restoreProblem: nil).restore == nil)
+        #expect(DeviceActions(state.devices.filter { [2, 4].contains($0.port.number) }).restore == nil)
         #expect(RestoreConfirmation([state.devices[1]])?.title == "Restore MacBook Air?")
     }
 
     @Test func actionsGoToTheDevicesThatTakeThem() throws {
         var state = try Fixtures.state
         let board = "a0e012192cdfdb67"
-        let all = DeviceActions(state.devices.filter(\.isSelectable), restoreProblem: nil)
+        let all = DeviceActions(state.devices.filter(\.isSelectable))
         #expect(all.dfu == [.dfu(board: board, port: 4)])
         #expect(all.restart == [.reboot(board: board, port: 2), .reboot(board: board, port: 4)])
         #expect(all.revive == nil)
-        #expect(all.needsConfigurator)
 
-        state.boards[0].ports[1].revive = true
-        let mac = DeviceActions([state.devices[1]], restoreProblem: nil)
-        #expect(mac.revive == .revive(board: board, session: 77, port: 2, generation: 2, ecid: "001a79d10e6bc01c"))
+        state.boards[0].ports[1].restore = true
+        let mac = DeviceActions([state.devices[1]])
+        let target = RestoreTarget(port: 2, generation: 2, ecid: "001a79d10e6bc01c")
+        let selection = RestoreSelection(board: board, session: 77, targets: [target])
+        #expect(mac.revive == .revive(boards: [selection]))
     }
 
     @Test func boardsWithOneNameAreToldApart() throws {

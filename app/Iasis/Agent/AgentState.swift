@@ -5,8 +5,6 @@ nonisolated struct AgentState: Decodable, Equatable {
     var boards: [Board]
     var images: ImageStore
     var sharing: Sharing
-    /// Why the agent cannot run restores, when it cannot.
-    var restoreProblem: String?
 
     func title(for board: Board) -> String {
         let matches = boards.filter { $0.displayName.caseInsensitiveCompare(board.displayName) == .orderedSame }
@@ -59,13 +57,11 @@ nonisolated struct AgentState: Decodable, Equatable {
         var waitingForPower: Bool
         var powered: Bool
         var wrongDfuPort: Bool
-        var needsConfigurator: Bool
         var job: Job?
         var light: Light
         var dfu: Bool
         var reboot: Bool
         var restore: Bool
-        var revive: Bool
         var enabled: Bool
         var stage: Stage?
         var result: Ending?
