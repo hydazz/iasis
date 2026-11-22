@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 15;
+pub const VERSION: u16 = 16;
 pub const MAX_PACKET: usize = 1344;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
@@ -444,6 +444,8 @@ pub struct HostSession {
     pub id: u32,
     /// The host can prepare a restore when the button asks for one.
     pub restore_ready: bool,
+    /// The host is sharing Internet access on at least one of this board's ports.
+    pub internet_sharing: bool,
 }
 
 /// A host's view of one port, bound to the attachment it describes.
@@ -1099,6 +1101,7 @@ mod tests {
             host: Some(HostSession {
                 id: u32::MAX,
                 restore_ready: true,
+                internet_sharing: true,
             }),
             settings: Settings {
                 name: BoardName::new("ABCDEFGHIJKLMNOP").unwrap(),
@@ -1113,6 +1116,33 @@ mod tests {
         for end in 0..packet.len() {
             assert!(decode::<Status>(&packet[..end]).is_err());
         }
+    }
+
+    #[test]
+    fn largest_host_report_fits_one_control_transfer() {
+        let report = HostReport {
+            serial: u64::MAX,
+            session: HostSession {
+                id: u32::MAX,
+                restore_ready: true,
+                internet_sharing: true,
+            },
+            ports: [Some(PortReport {
+                generation: u32::MAX,
+                observed: Observed {
+                    usb: Usb::Apple(AppleMode::KisDfu),
+                    ecid: Some(u64::MAX),
+                },
+                restore: Some(RestoreStatus {
+                    ecid: u64::MAX,
+                    phase: RestorePhase::Running,
+                    progress: 100,
+                }),
+                fetch: Some(100),
+            }); PORT_COUNT],
+        };
+        let mut buffer = [0; MAX_PACKET];
+        assert_eq!(decode(encode(&report, &mut buffer).unwrap()), Ok(report));
     }
 
     #[test]
@@ -1148,11 +1178,13 @@ mod tests {
         status.host = Some(HostSession {
             id: 1,
             restore_ready: false,
+            internet_sharing: false,
         });
         assert_eq!(status.gesture_mask(Gesture::Restore), 0);
         status.host = Some(HostSession {
             id: 1,
             restore_ready: true,
+            internet_sharing: false,
         });
         assert_eq!(status.gesture_mask(Gesture::Restore), 0b01111);
         assert!(status.ports[0].offers(PortAction::DfuT2));

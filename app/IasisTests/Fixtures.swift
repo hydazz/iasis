@@ -14,6 +14,8 @@ nonisolated enum Fixtures {
     "images":{"images":[{"path":"/cache/26B131-UniversalMac_27.2.1_26B131_Restore.ipsw","bytes":25595954706,"modified":{"secs_since_epoch":1795138779,"nanos_since_epoch":501524796},"product_version":"27.2.1","build_version":"26B131","product_types":["Mac13,1","Mac13,2"],"erase_hardware":[[24641,6]],"fetched":false}],
     "models":[{"identifier":"iPad13,18","name":"iPad (WiFi, 10th generation)","latest":{"version":"27.2.1","build":"24B156","url":"https://updates.cdn-apple.com/x/iPad_Fall_2022_27.2.1_24B156_Restore.ipsw","sha256":"b546","bytes":10941876409},"error":null,"ready":false}],
     "fetch":{"version":"27.2.1","build":"24B156","bytes":10941876409,"done":4704986855}},
+    "sharing":{"enabled":true,"problem":null,
+    "ports":[{"board":"a0e012192cdfdb67","port":3,"active":true},{"board":"a0e012192cdfdb67","port":4,"active":false,"problem":"Cannot open USB interface"}]},
     "restore_problem":null}}
     """#
 

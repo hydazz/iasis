@@ -13,6 +13,11 @@ struct Device: Identifiable, Equatable {
     let serial: String
     let session: UInt32?
     let port: AgentState.Port
+    let sharing: AgentState.Sharing.Port?
+
+    var sharesInternet: Bool {
+        sharing?.active == true
+    }
 
     var id: ID {
         ID(board: serial, port: port.number)
@@ -154,8 +159,9 @@ extension AgentState {
     var boardDevices: [BoardDevices] {
         boards.map { board in
             let title = title(for: board)
-            return BoardDevices(board: board, title: title, devices: board.ports.map {
-                Device(boardTitle: title, serial: board.serial, session: board.session, port: $0)
+            return BoardDevices(board: board, title: title, devices: board.ports.map { port in
+                let portSharing = sharing.ports.first { $0.board == board.serial && $0.port == port.number }
+                return Device(boardTitle: title, serial: board.serial, session: board.session, port: port, sharing: portSharing)
             })
         }
     }

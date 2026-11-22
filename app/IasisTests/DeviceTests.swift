@@ -3,6 +3,21 @@ import Foundation
 import Testing
 
 struct DeviceTests {
+    @Test func internetSharingFollowsTheActivePortOnItsBoard() throws {
+        var state = try Fixtures.state
+        var other = state.boards[0]
+        other.serial = "817a23bd502453b4"
+        state.boards.append(other)
+
+        #expect(state.devices.filter(\.sharesInternet).map(\.id) == [
+            Device.ID(board: "a0e012192cdfdb67", port: 3),
+        ])
+        #expect(state.devices[3].sharing?.problem == "Cannot open USB interface")
+        #expect(state.devices[8].sharing?.problem == nil)
+        state.sharing.ports = []
+        #expect(state.devices.filter(\.sharesInternet).isEmpty)
+    }
+
     @Test func everyPortIsARowThatKeepsItsPlace() throws {
         var state = try Fixtures.state
         let devices = state.devices

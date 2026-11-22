@@ -17,6 +17,17 @@ struct DeviceRowView: View {
             Text(device.name)
                 .foregroundStyle(device.port.occupied ? .primary : .tertiary)
                 .lineLimit(1)
+            if let problem = device.sharing?.problem {
+                Image(systemName: "exclamationmark.triangle")
+                    .help(problem)
+                    .accessibilityLabel("Internet sharing")
+                    .accessibilityValue(Text(problem))
+            } else if device.sharesInternet {
+                Image(systemName: "globe")
+                    .foregroundStyle(.secondary)
+                    .help("Sharing internet over USB")
+                    .accessibilityLabel("Sharing internet over USB")
+            }
             Spacer(minLength: 12)
             Text(activity.text)
                 .foregroundStyle(.secondary)

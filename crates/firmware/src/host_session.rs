@@ -18,8 +18,7 @@ pub fn entry(report: &HostReport, index: usize, port: &PortStatus) -> Option<Por
 
 #[derive(Default)]
 pub struct Session {
-    id: Cell<u32>,
-    restore_ready: Cell<bool>,
+    last: Cell<Option<HostSession>>,
     deadline: Cell<u64>,
     last_arm: Cell<u32>,
     pending: Cell<Option<RestoreArm>>,
@@ -33,10 +32,7 @@ impl Session {
 
     pub fn active(&self, now: u64) -> Option<HostSession> {
         if now < self.deadline.get() {
-            Some(HostSession {
-                id: self.id.get(),
-                restore_ready: self.restore_ready.get(),
-            })
+            self.last.get()
         } else {
             self.disconnect();
             None
@@ -57,23 +53,21 @@ impl Session {
     pub fn report(&self, session: HostSession, now: u64) -> bool {
         let active = self.active(now).map(|session| session.id);
         let id = session.id;
-        if active.is_none() && id != 0 && id != self.id.get() {
-            self.id.set(id);
+        if active.is_none() && id != 0 && self.last.get().is_none_or(|last| last.id != id) {
             self.last_arm.set(0);
         } else if active != Some(id) {
             return false;
         }
-        self.restore_ready.set(session.restore_ready);
+        self.last.set(Some(session));
         self.deadline.set(now + HOST_SESSION_MS);
         true
     }
 
     pub fn apply(&self, command: HostControl, status: &Status, now: u64) -> bool {
-        let active = self.active(now).map(|session| session.id);
+        let active = self.active(now);
         match command {
             HostControl::Arm(arm)
-                if active == Some(arm.session)
-                    && self.restore_ready.get()
+                if active.is_some_and(|host| host.id == arm.session && host.restore_ready)
                     && arm.id > self.last_arm.get()
                     && now < arm.expires
                     && arm.expires - now <= RESTORE_ARM_MS
@@ -82,7 +76,7 @@ impl Session {
                 self.last_arm.set(arm.id);
                 self.pending.set(Some(arm));
             }
-            HostControl::End(id) if active == Some(id) => self.disconnect(),
+            HostControl::End(id) if active.is_some_and(|host| host.id == id) => self.disconnect(),
             _ => return false,
         }
         true
@@ -97,7 +91,11 @@ mod tests {
     fn report(id: u32, restore_ready: bool) -> HostReport {
         HostReport {
             serial: 0,
-            session: HostSession { id, restore_ready },
+            session: HostSession {
+                id,
+                restore_ready,
+                internet_sharing: false,
+            },
             ports: [None; 5],
         }
     }
@@ -109,18 +107,18 @@ mod tests {
         assert!(!session.report(report(0, false).session, 0));
         assert!(session.report(report(1, false).session, 0));
         assert!(!session.report(report(2, false).session, 1));
-        assert!(session.report(report(1, true).session, 2000));
-        assert_eq!(
-            session.active(4999),
-            Some(HostSession {
-                id: 1,
-                restore_ready: true
-            })
-        );
+        let sharing = HostSession {
+            internet_sharing: true,
+            ..report(1, true).session
+        };
+        assert!(session.report(sharing, 2000));
+        assert!(!session.report(report(2, false).session, 3000));
+        assert_eq!(session.active(4999), Some(sharing));
         assert_eq!(session.active(5000), None);
         // The lapsed identity is refused; a new one takes the board.
         assert!(!session.report(report(1, true).session, 5001));
         assert!(session.report(report(2, false).session, 5001));
+        assert_eq!(session.active(5001), Some(report(2, false).session));
         assert!(session.apply(HostControl::End(2), &status, 5002));
         assert_eq!(session.active(5003), None);
     }
