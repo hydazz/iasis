@@ -26,20 +26,21 @@ pub const FRAME_MS: u64 = 200;
 const ON: BinaryColor = BinaryColor::On;
 const OFF: BinaryColor = BinaryColor::Off;
 
-const BOLT: &[&str] = &[
-    "....##..", "...##...", "..##....", ".#####..", "...##...", "..##....", ".##.....", ".#......",
-];
+// Menubar glyphs are nine rows high and drawn on rows 1 to 9, which leaves
+// the bar's outer pixels lit around them.
 const USB: &[&str] = &[
-    ".....#.....",
-    "....###....",
-    ".....#.....",
-    "..#..#..##.",
-    ".###.#..##.",
-    "..#..#..#..",
-    "...#.#.#...",
-    "....###....",
-    ".....#.....",
-    "....###....",
+    "....#....",
+    "...###...",
+    "....#..##",
+    "##..#..##",
+    "##..#.#..",
+    "..#.##...",
+    "...##....",
+    "....#....",
+    "...###...",
+];
+const PLUG: &[&str] = &[
+    ".#.#.", ".#.#.", "#####", "#...#", "#...#", "#...#", ".###.", "..#..", "..#..",
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -499,11 +500,14 @@ pub fn draw<D: DrawTarget<Color = BinaryColor>>(
         true,
         OFF,
     )?;
-    if view.brick {
-        glyph(target, BOLT, 98, 1, OFF)?;
-    }
-    if view.connected {
-        glyph(target, USB, 114, 0, OFF)?;
+    // Glyphs pack against the right edge, so an absent one leaves no gap.
+    let mut right = 127;
+    for (shown, rows) in [(view.brick, PLUG), (view.connected, USB)] {
+        if shown {
+            right -= rows[0].len() as i32;
+            glyph(target, rows, right, 1, OFF)?;
+            right -= 2;
+        }
     }
     for physical in Port::ALL {
         let x = physical.index() as i32 * 26;
@@ -683,32 +687,42 @@ fn glyph<D: DrawTarget<Color = BinaryColor>>(
 }
 
 fn face<D: DrawTarget<Color = BinaryColor>>(target: &mut D, face: Face) -> Result<(), D::Error> {
-    line(target, (1, 0), (11, 0), OFF)?;
-    line(target, (0, 1), (0, 8), OFF)?;
-    line(target, (12, 1), (12, 8), OFF)?;
-    line(target, (1, 9), (11, 9), OFF)?;
-    let eye = if face == Face::Blink { 3 } else { 2 };
-    line(target, (3, eye), (3, 3), OFF)?;
-    line(target, (9, eye), (9, 3), OFF)?;
-    line(target, (6, 2), (6, 4), OFF)?;
-    line(target, (5, 4), (6, 4), OFF)?;
+    line(target, (2, 1), (12, 1), OFF)?;
+    line(target, (1, 2), (1, 8), OFF)?;
+    line(target, (13, 2), (13, 8), OFF)?;
+    line(target, (2, 9), (12, 9), OFF)?;
+    let eye = if face == Face::Blink { 4 } else { 3 };
+    line(target, (4, eye), (4, 4), OFF)?;
+    line(target, (10, eye), (10, 4), OFF)?;
+    // A frown starts a row above a smile, so the nose ends a row higher to clear it.
+    let nose = if face == Face::Fault { 4 } else { 5 };
+    line(target, (7, 3), (7, nose), OFF)?;
+    line(target, (6, nose), (7, nose), OFF)?;
     if let Face::Busy(tick) = face {
-        let x = 5 + i32::from(tick);
-        line(target, (x, 7), (x, 7), OFF)?;
-    } else {
-        let y = if face == Face::Fault { 6 } else { 7 };
-        line(target, (5, y), (7, y), OFF)?;
-        let y = if face == Face::Fault { 7 } else { 6 };
-        line(target, (4, y), (4, y), OFF)?;
-        line(target, (8, y), (8, y), OFF)?;
+        let x = 6 + i32::from(tick);
+        return line(target, (x, 7), (x, 7), OFF);
     }
-    Ok(())
+    let (mouth, corners) = if face == Face::Fault { (6, 7) } else { (7, 6) };
+    line(target, (5, mouth), (9, mouth), OFF)?;
+    line(target, (4, corners), (4, corners), OFF)?;
+    line(target, (10, corners), (10, corners), OFF)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use embedded_graphics::{
+        framebuffer::Framebuffer,
+        image::GetPixel,
+        pixelcolor::raw::{BigEndian, RawU1},
+    };
     use iasis_protocol::{DebugActions, Orientation, RestoreStatus};
+
+    fn frame(view: &View) -> Framebuffer<BinaryColor, RawU1, BigEndian, 128, 64, 1024> {
+        let mut pixels = Framebuffer::new();
+        draw(&mut pixels, view).unwrap();
+        pixels
+    }
 
     /// A target on its DFU port, which lists DFU and reboot.
     fn contract(mv: u16, ma: u16) -> PortStatus {
@@ -885,27 +899,6 @@ mod tests {
 
     #[test]
     fn a_highlighted_target_is_filled_and_any_other_port_outlined() {
-        struct Frame([[bool; 128]; 64]);
-        impl OriginDimensions for Frame {
-            fn size(&self) -> Size {
-                SIZE
-            }
-        }
-        impl DrawTarget for Frame {
-            type Color = BinaryColor;
-            type Error = core::convert::Infallible;
-            fn draw_iter<I: IntoIterator<Item = Pixel<BinaryColor>>>(
-                &mut self,
-                pixels: I,
-            ) -> Result<(), Self::Error> {
-                for Pixel(point, color) in pixels {
-                    if (0..128).contains(&point.x) && (0..64).contains(&point.y) {
-                        self.0[point.y as usize][point.x as usize] = color.is_on();
-                    }
-                }
-                Ok(())
-            }
-        }
         let mut status = Status::default();
         status.ports[0] = contract(9000, 3000);
         status.ports[1] = PortStatus {
@@ -925,10 +918,9 @@ mod tests {
         assert_eq!(label(&status.ports[0]), "RDY");
         assert_eq!(label(&status.ports[1]), "ATCH");
         assert_eq!(label(&status.ports[3]), "PD");
-        let mut frame = Frame([[false; 128]; 64]);
-        draw(&mut frame, &view).unwrap();
+        let frame = frame(&view);
         // The box spans x..x+23 on rows 14..24; column x+2 clears the digit.
-        let lit = |port: usize, dx: usize, y: usize| frame.0[y][port * 26 + dx];
+        let lit = |port, dx, y| frame.pixel(Point::new(port * 26 + dx, y)) == Some(ON);
         assert!(lit(0, 0, 18) && lit(0, 2, 18));
         for port in [1, 2, 3] {
             assert!(lit(port, 0, 18) && lit(port, 22, 18) && lit(port, 2, 14));
@@ -946,6 +938,63 @@ mod tests {
         let after = view(&status, &button, 0);
         assert_eq!(after.name, status.settings.name);
         assert_eq!(after.changed_pages(Some(&before)), 0b11);
+    }
+
+    #[test]
+    fn the_menubar_keeps_its_outer_pixels_lit_around_every_face_and_glyph() {
+        let mut status = Status {
+            supply: Supply::Brick,
+            host: Some(iasis_protocol::HostSession {
+                id: 1,
+                restore_ready: false,
+            }),
+            ..Status::default()
+        };
+        status.settings.name = iasis_protocol::BoardName::new("ABCDEFGHIJKLMNOP").unwrap();
+        let mut shown = view(&status, &Button::default(), 0);
+        for face in [
+            Face::Idle,
+            Face::Blink,
+            Face::Busy(0),
+            Face::Busy(2),
+            Face::Fault,
+        ] {
+            shown.face = face;
+            let pixels = frame(&shown);
+            for point in pixels.bounding_box().points() {
+                if point.y <= 10 && (point.y % 10 == 0 || point.x % 127 == 0) {
+                    assert_eq!(pixels.pixel(point), Some(ON), "{point:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn menubar_glyphs_pack_against_the_right_edge() {
+        let mut status = Status {
+            host: Some(iasis_protocol::HostSession {
+                id: 1,
+                restore_ready: false,
+            }),
+            ..Status::default()
+        };
+        let shows = |status: &Status, rows: &[&str], x: i32| {
+            let pixels = frame(&view(status, &Button::default(), 0));
+            rows.iter().enumerate().all(|(dy, row)| {
+                row.bytes().enumerate().all(|(dx, ink)| {
+                    let point = Point::new(x + dx as i32, 1 + dy as i32);
+                    pixels.pixel(point) == Some(if ink == b'#' { OFF } else { ON })
+                })
+            })
+        };
+        // Without a brick, USB takes the edge.
+        assert!(shows(&status, USB, 118));
+        status.supply = Supply::Brick;
+        assert!(shows(&status, PLUG, 122));
+        assert!(shows(&status, USB, 111));
+        status.host = None;
+        assert!(shows(&status, PLUG, 122));
+        assert!(shows(&status, &["........."; 9], 111));
     }
 
     #[test]
