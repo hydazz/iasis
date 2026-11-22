@@ -57,6 +57,7 @@ nonisolated struct AgentState: Decodable, Equatable {
         /// Why the port faulted, in the board's words.
         var fault: String?
         var state: String
+        var wrongDfuPort: Bool
         var light: Light
         var dfu: Bool
         var reboot: Bool

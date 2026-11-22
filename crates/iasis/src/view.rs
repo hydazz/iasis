@@ -15,7 +15,7 @@ use crate::{
     host::{PortJob, observe},
     identity::models::{DeviceModel, Models},
     images::Store,
-    restore::{Operation, Progress, RestoreEngine},
+    restore::{Operation, Progress},
     topology::Snapshot,
 };
 
@@ -35,6 +35,7 @@ pub struct PortView {
     /// What the board's host sees on the port's USB.
     pub usb: String,
     pub link: String,
+    pub wrong_dfu_port: bool,
     pub contract: String,
     /// Brick capacity committed to this port.
     pub allocated_mw: u32,
@@ -96,7 +97,6 @@ impl PortView {
 pub(crate) struct Host<'a> {
     pub store: &'a Store,
     pub models: &'a Models,
-    pub engine: &'a RestoreEngine,
     pub family: Device,
 }
 
@@ -131,6 +131,7 @@ impl BoardView {
     pub fn new(info: &Info, status: &Status) -> Self {
         let [major, minor, patch] = info.firmware_version;
         let ready = status.ready_mask();
+        let restore = status.gesture_mask(iasis_protocol::Gesture::Restore);
         Self {
             serial: format!("{:016x}", info.serial),
             name: status.settings.name.as_str().to_owned(),
@@ -177,6 +178,8 @@ impl BoardView {
                             _ => "",
                         }
                         .into(),
+                        wrong_dfu_port: state.restore_access
+                            == iasis_protocol::RestoreAccess::WrongMacPort,
                         contract: port_contract(state),
                         allocated_mw: state.allocated_mw,
                         contract_mw: contract_mw(state),
@@ -189,7 +192,7 @@ impl BoardView {
                         dfu: available && state.offers(PortAction::DfuAppleSilicon),
                         reboot: available && state.offers(PortAction::Reboot),
                         revive: false,
-                        restore: available && status.restore_session().is_some(),
+                        restore: restore & (1 << port.index()) != 0,
                         enabled: state.enabled,
                         job: state.restore.map(|job| job.phase),
                         stage,
@@ -211,7 +214,6 @@ impl BoardView {
         let Host {
             store,
             models,
-            engine,
             family,
         } = *host;
         for (port, row) in Port::ALL.into_iter().zip(&mut self.ports) {
@@ -219,18 +221,6 @@ impl BoardView {
             row.revive = crate::restore::configurator().is_some()
                 && revivable(status, snapshot, port).is_some();
             row.dfu = assessment.signal == Signal::Available;
-            // A target not yet in DFU is asked to enter it. One already
-            // there needs a mode the host's engine restores.
-            row.restore &= match assessment.signal {
-                Signal::Available | Signal::PortDfu => true,
-                Signal::AlreadyDfu => {
-                    assessment
-                        .usb_mode
-                        .is_some_and(|mode| engine.restores(mode))
-                        && assessment.ecid.is_some()
-                }
-                _ => false,
-            };
             let slot = &status.ports[port.index()];
             if !row.occupied {
                 continue;
@@ -238,6 +228,8 @@ impl BoardView {
             // The board and the USB tree are read at different moments.
             let agreed = slot.observed == Some(observe(snapshot, port));
             if !agreed {
+                row.restore = false;
+                row.wrong_dfu_port = false;
                 row.mode = None;
                 row.usb.clear();
                 let current = PortStatus {
