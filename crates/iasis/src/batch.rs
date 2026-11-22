@@ -29,11 +29,26 @@ use indicatif::{MultiProgress, ProgressDrawTarget};
 
 use crate::progress;
 
+/// Where a batch's images come from, and what the host contributes.
+#[derive(Args)]
+pub struct Source {
+    /// Use this local IPSW instead of the image store, which fetches the
+    /// newest release for each target
+    pub ipsw: Option<PathBuf>,
+    #[arg(long, value_enum, default_value = "apple-silicon")]
+    pub device: Device,
+    /// Remaining legacy host allowance, including Iasis and excluding other loads
+    #[arg(long, value_parser = clap::value_parser!(u16).range(0..=1600))]
+    pub host_ma: Option<u16>,
+    /// Worker logs and scratch directories; the cache directory by default
+    #[arg(long)]
+    pub logs: Option<PathBuf>,
+}
+
 #[derive(Args)]
 pub struct Options {
-    /// Restore from this local IPSW instead of the image store, which
-    /// fetches the newest release for each target
-    pub ipsw: Option<PathBuf>,
+    #[command(flatten)]
+    pub source: Source,
     /// Physical ports to erase, comma-separated
     #[arg(long, value_delimiter = ',', value_parser = super::parse_port, required_unless_present = "button")]
     pub ports: Vec<Port>,
@@ -44,18 +59,15 @@ pub struct Options {
     /// Authorize erasing the selected targets
     #[arg(long, required = true)]
     pub erase: bool,
-    #[arg(long, value_enum, default_value = "apple-silicon")]
-    pub device: Device,
-    /// Remaining legacy host allowance, including Iasis and excluding other loads
-    #[arg(long, value_parser = clap::value_parser!(u16).range(0..=1600))]
-    pub host_ma: Option<u16>,
-    /// Restore with this idevicerestore instead of the host's engine, which
-    /// is Apple Configurator where it is installed
-    #[arg(long)]
-    pub idevicerestore: Option<PathBuf>,
-    /// Worker logs and scratch directories; the cache directory by default
-    #[arg(long)]
-    pub logs: Option<PathBuf>,
+}
+
+#[derive(Args)]
+pub struct Revive {
+    #[command(flatten)]
+    pub source: Source,
+    /// Physical ports to revive, comma-separated
+    #[arg(long, value_delimiter = ',', value_parser = super::parse_port, required = true)]
+    pub ports: Vec<Port>,
 }
 
 /// Where a restore's images come from.
@@ -71,6 +83,8 @@ pub enum Images<'a> {
 pub struct Submission {
     pub session: u32,
     pub targets: Vec<Target>,
+    /// Erase, or revive and keep the data.
+    pub operation: Operation,
     pub accepted: std::sync::mpsc::SyncSender<Result<(), String>>,
 }
 
@@ -141,10 +155,40 @@ impl Device {
 /// session until its workers finish.
 pub fn run(device: &nusb::DeviceInfo, board: &Board, options: Options) -> Result<()> {
     ensure!(options.erase, "restore requires --erase");
+    run_batch(
+        device,
+        board,
+        Operation::Restore,
+        options.source,
+        &options.ports,
+        options.button,
+    )
+}
+
+/// Revive a batch as the board's host: install each target from the image a
+/// restore would use and keep its data.
+pub fn revive(device: &nusb::DeviceInfo, board: &Board, options: Revive) -> Result<()> {
+    run_batch(
+        device,
+        board,
+        Operation::Revive,
+        options.source,
+        &options.ports,
+        false,
+    )
+}
+
+fn run_batch(
+    device: &nusb::DeviceInfo,
+    board: &Board,
+    operation: Operation,
+    source: Source,
+    ports: &[Port],
+    button: bool,
+) -> Result<()> {
     let home = Home::locate()?;
-    let logs = options.logs.unwrap_or_else(|| home.cache.join("restores"));
-    let engine = RestoreEngine::for_host(options.idevicerestore, logs);
-    engine.check()?;
+    let logs = source.logs.unwrap_or_else(|| home.cache.join("restores"));
+    let engine = RestoreEngine::for_host(logs);
     // Take the board before the long image check, which another host's
     // session would make pointless.
     let link = Link::open(
@@ -152,9 +196,9 @@ pub fn run(device: &nusb::DeviceInfo, board: &Board, options: Options) -> Result
         Jobs::default(),
         Arc::default(),
         &engine,
-        options.device,
+        source.device,
     )?;
-    let given = match &options.ipsw {
+    let given = match &source.ipsw {
         Some(path) => {
             let ipsw = progress::check_ipsw(path)?;
             println!(
@@ -165,7 +209,7 @@ pub fn run(device: &nusb::DeviceInfo, board: &Board, options: Options) -> Result
         }
         None => Vec::new(),
     };
-    let store = match options.ipsw {
+    let store = match source.ipsw {
         Some(_) => None,
         None => Some(Store::open(home.cache.join("images"), Network::default())?),
     };
@@ -173,22 +217,22 @@ pub fn run(device: &nusb::DeviceInfo, board: &Board, options: Options) -> Result
         Some(store) => Images::Store(store),
         None => Images::Given(&given),
     };
-    if let Some(ma) = options.host_ma {
+    if let Some(ma) = source.host_ma {
         board.host_budget(ma)?;
     }
-    let action = options.device.dfu_action();
-    let (targets, failed) = if options.button {
+    let action = source.device.dfu_action();
+    let (targets, failed) = if button {
         ensure!(
             board.info().capabilities & protocol::CAP_RESTORE_ARM != 0,
             "board does not support prepared erase confirmation"
         );
         link.restore_ready(true)?;
-        if options.ports.is_empty() {
+        if ports.is_empty() {
             println!(
                 "On Iasis, tap to select the targets, then hold the button until Restore and release to prepare them for erase."
             );
         }
-        let selected = selection(&link, &options.ports, None)?.0;
+        let selected = selection(&link, ports, None)?.0;
         let targets = prepare_selected(board, &link, &engine, &selected, action, &images)?;
         link.restore_ready(false)?;
         (targets, false)
@@ -196,7 +240,7 @@ pub fn run(device: &nusb::DeviceInfo, board: &Board, options: Options) -> Result
         let deadline = Instant::now() + Duration::from_secs(3);
         let status = loop {
             let status = board.status()?;
-            if options.ports.iter().all(|port| {
+            if ports.iter().all(|port| {
                 matches!(
                     status.ports[port.index()].state,
                     PortState::Ready | PortState::Contract | PortState::Fault | PortState::Disabled
@@ -207,11 +251,11 @@ pub fn run(device: &nusb::DeviceInfo, board: &Board, options: Options) -> Result
             }
             thread::sleep(Duration::from_millis(50));
         };
-        let selected = select_ports(&options.ports, &status)?;
+        let selected = select_ports(ports, &status)?;
         let (targets, failed) = enter_dfu(board, &link, &engine, &selected, action)?;
         (resolve(&link, &engine, &targets, &images)?, failed)
     };
-    let running = start(&link, &engine, &images, targets, failed, options.button)?;
+    let running = start(&link, &engine, &images, targets, operation, failed, button)?;
     monitor(&link, running, &Endings::default())
 }
 
@@ -230,11 +274,16 @@ pub fn listen(
 ) -> Result<Option<String>> {
     let action = family.dfu_action();
     link.restore_ready(true)?;
-    let (selected, button) = match selection(link, &[], Some(requests)) {
+    let (selected, asked) = match selection(link, &[], Some(requests)) {
         Ok(selected) => selected,
         // A client named ports that cannot be restored.
         Err(error) if link.alive() => return Ok(Some(format!("{error:#}"))),
         Err(error) => return Err(error),
+    };
+    let button = matches!(asked, Asked::Board);
+    let operation = match asked {
+        Asked::Client { operation } => operation,
+        Asked::Board => Operation::Restore,
     };
     if button && let Err(error) = reserve(endings, &selected) {
         return Ok(Some(error.to_string()));
@@ -257,7 +306,7 @@ pub fn listen(
             );
             resolve(link, engine, &targets, images)?
         };
-        start(link, engine, images, targets, false, true)
+        start(link, engine, images, targets, operation, false, true)
     })();
     let running = match request {
         Ok(running) => running,
@@ -268,7 +317,7 @@ pub fn listen(
                     target.port,
                     Ending {
                         attachment: Some((link.session(), target.generation)),
-                        operation: Operation::Restore,
+                        operation,
                         ecid: target.ecid.map(|id| format!("{id:016x}")),
                         log_directory: None,
                         phase: RestorePhase::Failed,
@@ -287,71 +336,6 @@ pub fn listen(
         }
     });
     Ok(None)
-}
-
-/// Launch Configurator against the verified ECID on the selected attachment.
-pub(crate) fn revive(
-    link: &Arc<Link>,
-    engine: &RestoreEngine,
-    port: Port,
-    generation: u32,
-    ecid: u64,
-    endings: &Endings,
-) -> Result<Vec<PortWork>> {
-    let board = link.board();
-    let mut snapshot = topology::discover(board.topology())?;
-    crate::identity::query(&mut snapshot, 1 << port.index());
-    let status = board.status()?;
-    ensure!(
-        status.host.is_some_and(|host| host.id == link.session()) && link.alive(),
-        "the board has reconnected"
-    );
-    ensure!(
-        status.ports[port.index()].generation == generation,
-        "the selected device changed"
-    );
-    ensure!(
-        crate::view::revivable(&status, &snapshot, port) == Some(ecid),
-        "Revive needs the selected device in verified DFU or recovery"
-    );
-    let target = TargetTracker::pin(board.info().serial, &snapshot, port)?;
-    let work = reserve(
-        endings,
-        &[Target {
-            port,
-            generation,
-            ecid: Some(ecid),
-        }],
-    )?;
-    let workers = engine.start_revive(ecid).inspect_err(|_| {
-        endings.lock().unwrap()[port.index()] = None;
-    })?;
-    link.job(
-        port,
-        Some(PortJob {
-            generation,
-            status: RestoreStatus {
-                ecid,
-                phase: RestorePhase::Preparing,
-                progress: 0,
-            },
-            operation: Operation::Revive,
-            stage: None,
-        }),
-    );
-    let running = Running {
-        targets: vec![(target, generation)],
-        workers,
-        failed: false,
-        _leases: Vec::new(),
-    };
-    let (reporter, endings) = (link.clone(), endings.clone());
-    thread::spawn(move || {
-        if let Err(error) = monitor(&reporter, running, &endings) {
-            eprintln!("Revive: {error:#}");
-        }
-    });
-    Ok(work)
 }
 
 /// The DFU a verified target is in, when the host restores that mode, and
@@ -445,6 +429,7 @@ fn start(
     engine: &RestoreEngine,
     images: &Images,
     mut targets: ChosenTargets,
+    operation: Operation,
     mut failed: bool,
     require_all: bool,
 ) -> Result<Running> {
@@ -495,7 +480,7 @@ fn start(
             .collect(),
         Images::Given(_) => Vec::new(),
     };
-    let workers = engine.start_selected(&inputs)?;
+    let workers = engine.start_selected(&inputs, operation)?;
     Ok(Running {
         targets: targets
             .into_iter()
@@ -532,7 +517,7 @@ fn monitor(link: &Link, running: Running, endings: &Endings) -> Result<()> {
     loop {
         let snapshot = topology::discover(board.topology());
         let jobs = batch.snapshots();
-        // Do not open a competing restored service while idevicerestore owns it.
+        // Do not open a competing restored service while the restore owns it.
         for (index, job) in jobs.iter().enumerate() {
             let (target, generation) = &targets[index];
             if !active.contains(&target.port) {
@@ -563,10 +548,10 @@ fn monitor(link: &Link, running: Running, endings: &Endings) -> Result<()> {
                 status: RestoreStatus {
                     ecid: job.ecid,
                     phase,
-                    progress: job.progress.as_ref().and_then(|p| p.percent).unwrap_or(0),
+                    progress: job.progress.percent,
                 },
                 operation: job.operation,
-                stage: job.progress.clone(),
+                stage: Some(job.progress.clone()),
             });
             link.job(target.port, feedback);
             if job.state.is_terminal() {
@@ -613,7 +598,7 @@ fn monitor(link: &Link, running: Running, endings: &Endings) -> Result<()> {
 }
 
 type VerifiedTargets = Vec<(TargetTracker, u32)>;
-/// Verified targets, each with the image that will erase it.
+/// Verified targets, each with the image that will restore it.
 type ChosenTargets = Vec<(TargetTracker, u32, PreparedIpsw)>;
 
 fn select_ports(ports: &[Port], status: &Status) -> Result<Vec<Target>> {
@@ -634,17 +619,26 @@ fn select_ports(ports: &[Port], status: &Status) -> Result<Vec<Target>> {
     Ok(selected)
 }
 
-/// The ports to restore, and whether the board's button chose them: those
-/// named, those a client asks for, or those the board's Restore hold selects.
+/// Who asked for a restore.
+#[derive(Clone, Copy)]
+enum Asked {
+    /// A hold on the board, or the ports a command named.
+    Board,
+    /// A client, which says whether to erase or revive.
+    Client { operation: Operation },
+}
+
+/// The ports to restore, and who asked: those named, those a client asks
+/// for, or those the board's Restore hold selects.
 fn selection(
     link: &Link,
     ports: &[Port],
     requests: Option<&Requests>,
-) -> Result<(Vec<Target>, bool)> {
+) -> Result<(Vec<Target>, Asked)> {
     let board = link.board();
     let initial = board.status()?;
     if !ports.is_empty() {
-        return Ok((select_ports(ports, &initial)?, true));
+        return Ok((select_ports(ports, &initial)?, Asked::Board));
     }
     let mut last = initial.button.map_or(0, |e| e.id);
     loop {
@@ -667,7 +661,10 @@ fn selection(
             if request.accepted.send(Ok(())).is_err() {
                 continue;
             }
-            return Ok((request.targets, false));
+            let asked = Asked::Client {
+                operation: request.operation,
+            };
+            return Ok((request.targets, asked));
         }
         if let Some(event) = status.button
             && event.id != last
@@ -688,7 +685,7 @@ fn selection(
                         }
                     })
                     .collect();
-                return Ok((selected, true));
+                return Ok((selected, Asked::Board));
             }
         }
         thread::sleep(Duration::from_millis(100));
@@ -795,23 +792,6 @@ fn confirmed(arm: RestoreArm, status: &Status) -> Result<bool> {
     }
 }
 
-/// Why the host's engine cannot take a target in DFU.
-fn unsupported(engine: &RestoreEngine, assessment: &dfu::Assessment) -> String {
-    let debug = matches!(
-        assessment.usb_mode,
-        Some(AppleMode::Kis | AppleMode::KisDfu)
-    );
-    if debug && !engine.restores(AppleMode::KisDfu) {
-        format!(
-            "{} Its DFU is on Apple Debug USB, which {} cannot restore. Install Apple Configurator.",
-            assessment.describe(),
-            engine.name()
-        )
-    } else {
-        assessment.describe()
-    }
-}
-
 /// Bring each selected target to a DFU the host's engine restores, with its
 /// ECID verified there.
 fn enter_dfu(
@@ -869,11 +849,7 @@ fn enter_dfu(
             }
             protocol::RestoreAccess::EnterDfu => {}
             _ => {
-                eprintln!(
-                    "port {}: {}",
-                    port.number(),
-                    unsupported(engine, &assessment)
-                );
+                eprintln!("port {}: {}", port.number(), assessment.describe());
                 failed = true;
                 continue;
             }
@@ -921,21 +897,14 @@ fn enter_dfu(
                 action,
                 Some(previous),
             );
-            // Apple Debug USB reaches DFU only through an engine that reads it.
-            let debug = matches!(
-                assessment.usb_mode,
-                Some(AppleMode::Kis | AppleMode::KisDfu)
-            ) && !engine.restores(AppleMode::KisDfu);
-            if debug
-                || matches!(
-                    assessment.signal,
-                    Signal::MultipleTransports
-                        | Signal::Ambiguous
-                        | Signal::DifferentDevice
-                        | Signal::Fault
-                )
-                || (assessment.signal == Signal::Restoring
-                    && dfu::job_in_progress(&status.ports[port.index()]))
+            if matches!(
+                assessment.signal,
+                Signal::MultipleTransports
+                    | Signal::Ambiguous
+                    | Signal::DifferentDevice
+                    | Signal::Fault
+            ) || (assessment.signal == Signal::Restoring
+                && dfu::job_in_progress(&status.ports[port.index()]))
                 || matches!(
                     assessment.outcome,
                     Some(
@@ -943,11 +912,7 @@ fn enter_dfu(
                     )
                 )
             {
-                eprintln!(
-                    "port {}: {}",
-                    port.number(),
-                    unsupported(engine, &assessment)
-                );
+                eprintln!("port {}: {}", port.number(), assessment.describe());
                 failed = true;
                 return false;
             }

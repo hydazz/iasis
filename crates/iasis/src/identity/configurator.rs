@@ -218,13 +218,21 @@ fn model_identifier(model: &str) -> bool {
     })
 }
 
+/// Apple Configurator's command-line tool, where Configurator installs it.
+const CFGUTIL: &str = "/Applications/Apple Configurator.app/Contents/MacOS/cfgutil";
+
 type Cache = HashMap<MacAttachment, (Instant, Option<(u64, String)>)>;
 static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(Mutex::default);
 
 pub(crate) fn query(snapshot: &mut Snapshot, mask: u8) {
     let Ok(mut cache) = CACHE.lock() else { return };
     enrich(snapshot, mask, &mut cache, MacAttachment::present, |args| {
-        let executable = crate::restore::configurator().unwrap_or(Path::new("cfgutil"));
+        let installed = Path::new(CFGUTIL);
+        let executable = if installed.is_file() {
+            installed
+        } else {
+            Path::new("cfgutil")
+        };
         run(
             Command::new(executable)
                 .args(["--format", "JSON"])

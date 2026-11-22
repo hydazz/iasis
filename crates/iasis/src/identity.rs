@@ -5,11 +5,6 @@ pub(crate) mod configurator;
 pub(crate) mod models;
 mod mux;
 
-/// Check the existing local daemon; no device connection or pairing is made.
-pub fn check_usbmuxd() -> std::io::Result<()> {
-    mux::list().map(|_| ())
-}
-
 pub use iasis_protocol::AppleMode;
 use iasis_protocol::Port;
 use serde::Serialize;
@@ -21,6 +16,7 @@ use crate::topology::{Snapshot, UsbDevice};
 #[serde(rename_all = "snake_case")]
 pub enum IdentitySource {
     UsbSerial,
+    Kis { chip: u16, board: u8 },
     Restored,
     Lockdown,
     Configurator,
@@ -223,7 +219,10 @@ fn matching_ports(snapshot: &Snapshot, ecid: u64) -> Vec<Port> {
 }
 
 pub(crate) fn query(snapshot: &mut Snapshot, mask: u8) {
+    #[cfg(target_os = "linux")]
+    crate::native::prepare_ios_identity(snapshot, mask);
     query_mux(snapshot, mask);
+    crate::native::identify(snapshot, mask);
     #[cfg(target_os = "macos")]
     configurator::query(snapshot, mask);
 }
@@ -246,6 +245,9 @@ fn query_mux(snapshot: &mut Snapshot, mask: u8) {
     if candidates.is_empty() {
         return;
     }
+    #[cfg(target_os = "linux")]
+    let list = crate::native::mux_path().and_then(|_| mux::list());
+    #[cfg(not(target_os = "linux"))]
     let list = mux::list();
     for device in candidates {
         let result = match &list {
@@ -333,56 +335,6 @@ mod tests {
                 "{serial}"
             );
         }
-    }
-
-    #[test]
-    fn reviving_requires_a_matching_direct_device_and_an_idle_attachment() {
-        use iasis_protocol::{HostSession, Observed, PortState, Status, Usb};
-        let mut snapshot = snapshot();
-        let port = Port::ALL[0];
-        let mut status = Status {
-            host: Some(HostSession {
-                id: 7,
-                restore_ready: false,
-                internet_sharing: false,
-            }),
-            ..Status::default()
-        };
-        let slot = &mut status.ports[0];
-        slot.state = PortState::Ready;
-        slot.enabled = true;
-        for mode in [
-            AppleMode::Dfu,
-            AppleMode::KisDfu,
-            AppleMode::Recovery,
-            AppleMode::Normal,
-            AppleMode::PortDfu,
-        ] {
-            let mut target = device(0x1227, Some(42));
-            target.apple.as_mut().unwrap().mode = mode;
-            snapshot.ports[0].devices = vec![target];
-            status.ports[0].observed = Some(Observed {
-                usb: Usb::Apple(mode),
-                ecid: Some(42),
-            });
-            let expected = matches!(
-                mode,
-                AppleMode::Dfu | AppleMode::KisDfu | AppleMode::Recovery
-            )
-            .then_some(42);
-            assert_eq!(crate::view::revivable(&status, &snapshot, port), expected);
-        }
-        snapshot.ports[0].devices = vec![device(0x1227, Some(42))];
-        assert_eq!(crate::view::revivable(&status, &snapshot, port), None);
-        status.ports[0].observed = Some(Observed {
-            usb: Usb::Apple(AppleMode::Dfu),
-            ecid: Some(42),
-        });
-        status.ports[0].fetch = Some(10);
-        assert_eq!(crate::view::revivable(&status, &snapshot, port), None);
-        status.ports[0].fetch = None;
-        snapshot.ports[1].devices = vec![device(0x1227, Some(42))];
-        assert_eq!(crate::view::revivable(&status, &snapshot, port), None);
     }
 
     #[test]

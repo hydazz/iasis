@@ -29,7 +29,7 @@ struct StatusMenu: View {
                             }
                             Divider()
                             if let device {
-                                DeviceActionButtons(actions: DeviceActions([device], restoreProblem: model.state?.restoreProblem)) {
+                                DeviceActionButtons(actions: DeviceActions([device])) {
                                     model.perform($0)
                                 } restore: { confirmation in
                                     showDevices()
@@ -48,9 +48,6 @@ struct StatusMenu: View {
             }
             if let fetch = model.state?.images.fetch, !live.contains(where: { $0.port.stage != nil && $0.port.job == nil }) {
                 Text("Downloading Image").badge(Text(fetch.fraction.formatted(.percent)))
-            }
-            if let problem = snapshot.restoreProblem {
-                Text(problem)
             }
         } else {
             Text("Agent Not Running")

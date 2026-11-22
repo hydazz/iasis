@@ -67,7 +67,7 @@ enum Indicator {
     None,
     Attention,
     Activity(u8),
-    Stage(u32),
+    Progress(u32),
 }
 
 pub struct View {
@@ -144,13 +144,13 @@ pub fn view(status: &Status, button: &Button, now: u64) -> View {
         } else {
             match port.restore.map(|r| (r.phase, r.progress)) {
                 None if port.fetch.is_some() => {
-                    Indicator::Stage((u32::from(port.fetch.unwrap_or(0)) * 23).div_ceil(100))
+                    Indicator::Progress((u32::from(port.fetch.unwrap_or(0)) * 23).div_ceil(100))
                 }
                 Some((RestorePhase::Preparing, _) | (RestorePhase::Running, 0)) => {
                     Indicator::Activity(tick)
                 }
                 Some((RestorePhase::Running, percent)) => {
-                    Indicator::Stage((u32::from(percent.min(100)) * 23).div_ceil(100))
+                    Indicator::Progress((u32::from(percent) * 23).div_ceil(100).min(22))
                 }
                 _ => Indicator::None,
             }
@@ -164,7 +164,7 @@ pub fn view(status: &Status, button: &Button, now: u64) -> View {
         Face::Fault
     } else if columns
         .iter()
-        .any(|(_, i)| matches!(i, Indicator::Activity(_) | Indicator::Stage(_)))
+        .any(|(_, i)| matches!(i, Indicator::Activity(_) | Indicator::Progress(_)))
     {
         Face::Busy(tick)
     } else if now % 6000 >= 5800 {
@@ -366,7 +366,7 @@ fn details(status: &Status, port: &PortStatus) -> [String<32>; 2] {
             RestorePhase::Running => {
                 let mut lines = pair("Installing", "");
                 if job.progress > 0 {
-                    write!(lines[1], "Stage {}%", job.progress.min(100)).unwrap();
+                    write!(lines[1], "{}%", job.progress.min(99)).unwrap();
                 }
                 lines
             }
@@ -560,7 +560,7 @@ pub fn draw<D: DrawTarget<Color = BinaryColor>>(
         match indicator {
             Indicator::None => {}
             Indicator::Attention => line(target, (x, 36), (x + 22, 36), ON)?,
-            Indicator::Stage(width) => fill(target, x, 36, *width, 2)?,
+            Indicator::Progress(width) => fill(target, x, 36, *width, 2)?,
             Indicator::Activity(active) => {
                 for i in 0..3 {
                     let style = if i == *active {
@@ -1216,10 +1216,7 @@ mod tests {
             phase: RestorePhase::Running,
             progress: 255,
         });
-        assert_eq!(
-            view(&status, &button, 0).lines,
-            pair("Installing", "Stage 100%")
-        );
+        assert_eq!(view(&status, &button, 0).lines, pair("Installing", "99%"));
         assert_eq!(view(&status, &Button::default(), 0).lines[0], "");
         status.ports[1].restore.as_mut().unwrap().progress = 0;
         assert_eq!(view(&status, &button, 0).lines, pair("Installing", ""));
@@ -1448,7 +1445,7 @@ mod tests {
             driver.flush().unwrap();
             if now < 17_600 {
                 let frame = full.borrow();
-                // 37% of the first port's 23-pixel stage bar covers nine pixels.
+                // 37% of the first port's 23-pixel progress bar covers nine pixels.
                 let bar_row = &frame.pixels[4 * 128..4 * 128 + 23];
                 for (x, column) in bar_row.iter().enumerate() {
                     assert_eq!(column & (1 << 5) != 0, x < 9);
