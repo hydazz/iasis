@@ -5,7 +5,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from board import cli, parser, paths, variant_args, variants
+from board import cli, parser, paths, variant_args, variants, version_args
 from jlc_cpl import convert
 
 
@@ -34,12 +34,24 @@ def main():
             "--page-size-mode",
             "2",
             "--exclude-drawing-sheet",
+            *version_args(source),
             "--output",
             work / "bottom.svg",
             source,
         )
         gerbers = work / "gerbers"
-        cli("pcb", "export", "gerbers", "--check-zones", "-o", gerbers, "-l", layers, source)
+        cli(
+            "pcb",
+            "export",
+            "gerbers",
+            "--check-zones",
+            *version_args(source),
+            "-o",
+            gerbers,
+            "-l",
+            layers,
+            source,
+        )
         cli("pcb", "export", "drill", "--excellon-separate-th", "-o", gerbers, source)
         with zipfile.ZipFile(work / "gerbers.zip", "w", zipfile.ZIP_DEFLATED) as archive:
             for file in sorted(gerbers.iterdir()):

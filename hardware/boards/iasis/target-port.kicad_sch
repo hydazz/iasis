@@ -7,7 +7,7 @@
 	(title_block
 		(title "Target port — one circuit used five times")
 		(date "2026-10-19")
-		(rev "A")
+		(rev "${VERSION}")
 	)
 	(lib_symbols)
 	(text "Only per-port signals cross this page.\n3V3_AON, 5V_LOGIC, HOST_TARGET_5V and HV_CHARGE\nare explicit common rails inside their circuit sheets.\nUSB data, CC, host presence, discharge and telemetry\nremain fitted in both assembly populations."

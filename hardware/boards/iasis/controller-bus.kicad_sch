@@ -7,7 +7,7 @@
 	(title_block
 		(title "Management buses")
 		(date "2026-10-19")
-		(rev "A")
+		(rev "${VERSION}")
 	)
 	(lib_symbols
 		(symbol "74xGxx:74AUP1G08"
