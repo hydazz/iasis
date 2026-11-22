@@ -135,6 +135,67 @@ fn location_id(id: u32) -> Option<Topology> {
     })
 }
 
+/// Join public NCM Ethernet interfaces to the exact USB enumeration that owns them.
+pub fn ncm_interfaces() -> io::Result<std::collections::BTreeMap<u64, String>> {
+    use io_kit_sys::{
+        IOObjectConformsTo, IORegistryEntryGetParentEntry, IORegistryEntryGetRegistryEntryID,
+    };
+    let parent = |object: &Object| {
+        let mut parent = 0;
+        (unsafe { IORegistryEntryGetParentEntry(object.0, c"IOService".as_ptr(), &mut parent) }
+            == 0)
+            .then(|| Object(parent))
+    };
+    let mut iterator = 0;
+    let result = unsafe {
+        IOServiceGetMatchingServices(
+            0,
+            IOServiceMatching(c"IOEthernetInterface".as_ptr()),
+            &mut iterator,
+        )
+    };
+    if result != 0 {
+        return Err(io::Error::other(format!(
+            "IOKit network enumeration failed: {result:#x}"
+        )));
+    }
+    let iterator = Object(iterator);
+    let mut interfaces = std::collections::BTreeMap::new();
+    loop {
+        let id = unsafe { IOIteratorNext(iterator.0) };
+        if id == 0 {
+            break;
+        }
+        let iface = Object(id);
+        let Some(name) = string_property(&iface, "BSD Name") else {
+            continue;
+        };
+        if !name
+            .strip_prefix("en")
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+        {
+            continue;
+        }
+        let Some(mut ancestor) = parent(&iface) else {
+            continue;
+        };
+        if unsafe { IOObjectConformsTo(ancestor.0, c"AppleUSBNCM11Data".as_ptr()) } == 0 {
+            continue;
+        }
+        while let Some(next) = parent(&ancestor) {
+            ancestor = next;
+            if unsafe { IOObjectConformsTo(ancestor.0, c"IOUSBHostDevice".as_ptr()) } != 0 {
+                let mut device_id = 0;
+                if unsafe { IORegistryEntryGetRegistryEntryID(ancestor.0, &mut device_id) } == 0 {
+                    interfaces.insert(device_id, name);
+                }
+                break;
+            }
+        }
+    }
+    Ok(interfaces)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

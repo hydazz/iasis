@@ -345,6 +345,7 @@ mod tests {
             self.status.host = self.session.map(|id| HostSession {
                 id,
                 restore_ready: true,
+                internet_sharing: false,
             });
             self.button
                 .sample(&self.status, self.pending.take(), down, self.now)
