@@ -1,7 +1,7 @@
 use std::{borrow::Cow, fmt::Write, path::Path, time::Duration};
 
 use crate::{
-    identity::Observation,
+    identity::{self, Observation},
     restore::{Operation, PreparedIpsw, RestoreState, RestoreStatus},
     topology,
 };
@@ -59,9 +59,15 @@ pub fn update(
         .map(ToString::to_string)
         .unwrap_or_else(|| state_name(job.state, job.operation).into());
     let connection = match identity {
-        Ok(Observation::Present { mode }) => format!("USB {mode:?}"),
+        // The row names the ECID being restored. Only a descriptor that
+        // carries it shows the same target is still on the port.
+        Ok(Observation::Present { mode }) => {
+            format!("USB: {}, ECID matches", identity::mode_name(*mode))
+        }
         Ok(Observation::Missing) => "Target absent from USB".into(),
-        Ok(Observation::IdentityMissing) => "ECID unavailable".into(),
+        Ok(Observation::IdentityMissing { mode }) => {
+            format!("USB: {}", identity::mode_name(*mode))
+        }
         Ok(Observation::Ambiguous) => "Ambiguous USB identity".into(),
         Ok(Observation::Replaced { ecid }) => format!("Replaced by ECID {ecid:016x}"),
         Ok(Observation::Moved { port }) => format!("Moved to port {}", port.number()),
