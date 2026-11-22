@@ -1,4 +1,12 @@
 mod network;
+#[cfg(target_os = "linux")]
+#[path = "linux.rs"]
+mod platform;
+#[cfg(target_os = "macos")]
+#[path = "macos.rs"]
+mod platform;
+#[cfg(target_os = "linux")]
+pub(super) use platform::prepare_usb;
 
 use std::{
     collections::HashSet,
@@ -12,12 +20,10 @@ use std::{
 use anyhow::{Context, Result, bail, ensure};
 use nix::{
     errno::Errno,
-    fcntl::{FcntlArg, OFlag, fcntl},
     ifaddrs::getifaddrs,
-    libc,
     poll::{PollFd, PollFlags, PollTimeout, poll},
     sys::resource::{Resource, getrlimit, setrlimit},
-    sys::socket::{AddressFamily, MsgFlags, SockFlag, SockType, SockaddrStorage, recv, socket},
+    sys::socket::{MsgFlags, SockaddrStorage, recv},
 };
 use pcap::{Active, Capture, Direction, Error, Linktype};
 use pktkit::{Frame, MacAddr};
@@ -69,8 +75,6 @@ fn verify_attachment(link: &str, id: u64) -> Result<()> {
 }
 
 fn capture(link: &str) -> Result<Capture<Active>> {
-    const PERMISSION: &str =
-        "BPF access required. Install ChmodBPF from Wireshark and log in again.";
     let result = Capture::from_device(link)?
         .promisc(true)
         .snaplen(65535)
@@ -78,8 +82,9 @@ fn capture(link: &str) -> Result<Capture<Active>> {
         .timeout(10)
         .open();
     let mut rx = result.map_err(|err| {
-        if err.to_string().to_ascii_lowercase().contains("permission") {
-            anyhow::anyhow!("{PERMISSION}")
+        let message = err.to_string().to_ascii_lowercase();
+        if message.contains("permission") || message.contains("operation not permitted") {
+            anyhow::anyhow!("{}", platform::CAPTURE_PERMISSION)
         } else {
             anyhow::Error::new(err).context(format!("open {link}"))
         }
@@ -88,17 +93,8 @@ fn capture(link: &str) -> Result<Capture<Active>> {
         rx.get_datalink() == Linktype::ETHERNET,
         "USB capture requires Ethernet"
     );
-    ensure!(
-        fcntl(&rx, FcntlArg::F_GETFL)? & OFlag::O_ACCMODE.bits() == OFlag::O_RDWR.bits(),
-        "{PERMISSION}"
-    );
     rx.direction(Direction::In)?;
     rx.filter("arp or ip", true)?;
-    // Preserve the virtual router's source MAC on Ethernet frames written to BPF.
-    let complete: libc::c_uint = 1;
-    if unsafe { libc::ioctl(rx.as_raw_fd(), libc::BIOCSHDRCMPLT, &complete) } == -1 {
-        return Err(io::Error::last_os_error()).context("set USB Ethernet source address");
-    }
     Ok(rx.setnonblock()?)
 }
 
@@ -116,25 +112,32 @@ pub(super) fn run(link: &str, network: Ipv4Addr, target: u64, dns: Ipv4Addr) -> 
     if soft < wanted {
         setrlimit(resource, wanted, hard).context("allow concurrent USB network connections")?;
     }
-    let routes = socket(AddressFamily::Route, SockType::Raw, SockFlag::empty(), None)?;
+    let routes = platform::address_monitor()?;
     let mut addresses = Addresses::read(link)?;
     ensure!(
         unicast(dns) && !addresses.host.contains(&dns),
         "need a reachable IPv4 DNS server"
     );
-    let mut rx = capture(link)?;
+    let (mut rx, tx) = platform::open_link(link, target)?;
+    let tx = File::from(tx);
     verify_attachment(link, target)?;
-
-    // A duplicate descriptor lets pktkit's socket threads write complete frames on the
-    // same verified BPF binding while the main thread reads with libpcap.
-    let tx = File::from(rx.as_fd().try_clone_to_owned()?);
     let output = Arc::new(move |frame: &Frame| {
         let data = frame.as_bytes();
-        match (&tx).write(data) {
-            Ok(size) if size == data.len() => Ok(()),
-            result => {
-                eprintln!("USB Ethernet write failed: {result:?}");
-                std::process::exit(1);
+        loop {
+            match (&tx).write(data) {
+                Ok(size) if size == data.len() => return Ok(()),
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                // A full transmit queue drops a frame, as on physical Ethernet.
+                Err(e)
+                    if e.kind() == io::ErrorKind::WouldBlock
+                        || e.raw_os_error() == Some(nix::libc::ENOBUFS) =>
+                {
+                    return Ok(());
+                }
+                result => {
+                    eprintln!("USB Ethernet write failed: {result:?}");
+                    std::process::exit(1);
+                }
             }
         }
     });
@@ -166,7 +169,7 @@ pub(super) fn run(link: &str, network: Ipv4Addr, target: u64, dns: Ipv4Addr) -> 
             let mut message = [0u8; 4096];
             let size = recv(routes.as_raw_fd(), &mut message, MsgFlags::empty())?;
             ensure!(size >= 4, "lost interface address monitor");
-            if matches!(i32::from(message[3]), libc::RTM_NEWADDR | libc::RTM_DELADDR) {
+            if platform::addresses_changed(&message[..size]) {
                 addresses = Addresses::read(link)?;
             }
         }

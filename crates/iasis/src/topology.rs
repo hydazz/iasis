@@ -1,9 +1,11 @@
 //! Physical connector discovery using host USB port relationships.
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", all(test, unix)))]
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "linux")]
+pub use linux::{linux_usb_id, ncm_interfaces, public_ncm_control};
 #[cfg(target_os = "macos")]
 pub use macos::ncm_interfaces;
 
@@ -68,6 +70,9 @@ pub struct UsbDevice {
     #[cfg(target_os = "macos")]
     #[serde(skip)]
     pub macos_attachment: Option<MacAttachment>,
+    #[cfg(target_os = "linux")]
+    #[serde(skip)]
+    pub linux_device_address: u8,
 }
 
 #[cfg(target_os = "macos")]
@@ -106,6 +111,8 @@ impl From<DeviceInfo> for UsbDevice {
                 location_id: device.location_id(),
                 registry_entry_id: device.registry_entry_id(),
             }),
+            #[cfg(target_os = "linux")]
+            linux_device_address: device.device_address(),
         }
     }
 }
@@ -374,6 +381,8 @@ mod tests {
             apple: None,
             #[cfg(target_os = "macos")]
             macos_attachment: None,
+            #[cfg(target_os = "linux")]
+            linux_device_address: 1,
         }
     }
 
