@@ -20,7 +20,7 @@ mise run //hardware/boards/iasis:fab
 | `preview` | `board.png` beside the source board                                       |
 | `lint`    | `drc.json` and `erc.json`                                                 |
 
-Outputs other than previews go to `build/boards/BOARD/`. `lint` checks DRC, schematic parity and ERC, refilling zones in memory. It writes both reports and fails on errors. Exports use the saved design and leave source files unchanged; run checks separately.
+Outputs other than previews go to `build/boards/BOARD/`. `lint` checks DRC, schematic parity and ERC, refilling zones in memory. It writes both reports and fails on errors. Exports use the saved design and leave source files unchanged; run checks separately. Title blocks and silkscreen print `${VERSION}`, which the tools take from the board's `version.txt`.
 
 Pass `--output DIR` to choose another output directory. Relative paths resolve from the board directory under mise. To rebuild a cached STEP or preview, use `mise run --force //hardware/boards/iasis:step`.
 

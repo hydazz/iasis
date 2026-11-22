@@ -7,7 +7,7 @@
 	(title_block
 		(title "Side link — planar header")
 		(date "2026-10-24")
-		(rev "A")
+		(rev "${VERSION}")
 	)
 	(lib_symbols
 		(symbol "Connector_Generic:Conn_01x20"

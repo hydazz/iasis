@@ -3,7 +3,7 @@
 	(generator "eeschema")
 	(generator_version "10.0")
 	(paper "A3")
-	(title_block (title "5 V supply — SIDE_BUS buck to 5 V") (date "2026-10-24") (rev "A"))
+	(title_block (title "5 V supply — SIDE_BUS buck to 5 V") (date "2026-10-24") (rev "${VERSION}"))
 	(uuid "9c89e7f5-cb6e-4c81-9bd6-4838b74e6a13")
 	(lib_symbols  
 	
