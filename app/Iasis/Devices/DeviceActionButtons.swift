@@ -35,7 +35,7 @@ struct DeviceActionButtons: View {
         }
         Divider()
         // A title that stays put lets an open menu keep its item.
-        Toggle("Port Power", systemImage: DeviceSymbol.power, isOn: Binding {
+        Toggle("USB Power", systemImage: DeviceSymbol.power, isOn: Binding {
             actions.powered
         } set: { _ in
             perform(actions.power)
@@ -50,4 +50,5 @@ enum DeviceSymbol {
     static let revive = "cross.case"
     static let restore = "arrow.counterclockwise"
     static let power = "power"
+    static let lan = "rectangle.connected.to.line.below"
 }

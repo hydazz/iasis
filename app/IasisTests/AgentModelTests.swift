@@ -5,13 +5,16 @@ import Testing
 struct AgentModelTests {
     @Test func theModelFollowsTheAgent() async throws {
         let state = try Fixtures.state
-        let model = AgentModel(agent: FakeAgent(reports: [state]))
+        let agent = FakeAgent(reports: [state])
+        let model = AgentModel(agent: agent)
         #expect(model.state == nil)
         model.start()
         try await waitUntil { model.state != nil }
         #expect(model.state == state)
-        try await waitUntil { model.menu.boards != nil }
-        #expect(model.menu == StatusMenuState(state))
+        var next = state
+        next.boards[0].ports[1].device = "iPhone"
+        await agent.publish(next)
+        try await waitUntil { model.state?.devices[1].name == "iPhone" }
     }
 
     @Test func menuStatusFollowsConnectedBoardsAndPortLights() throws {
