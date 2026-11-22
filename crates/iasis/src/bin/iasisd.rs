@@ -9,6 +9,7 @@ use iasis::{
 
 #[derive(Parser)]
 #[command(
+    name = "iasisd",
     version,
     about = "Attend every Iasis board: show each what its targets are doing, keep the restore images current and run the restores the boards and clients ask for"
 )]
