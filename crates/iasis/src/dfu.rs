@@ -523,6 +523,7 @@ mod tests {
     }
     fn snapshot() -> Snapshot {
         Snapshot {
+            upstream_mbps: None,
             hub: Topology {
                 bus: "00".into(),
                 port_chain: vec![1],

@@ -33,6 +33,11 @@ fn read_hub_ports(hub: &Path) -> io::Result<Vec<HostPort>> {
         .and_then(|name| name.to_str())
         .ok_or_else(|| io::Error::other("invalid sysfs hub path"))?;
     let mut ports = Vec::new();
+    match fs::canonicalize(hub.join("port")) {
+        Ok(path) => add_port(&mut ports, &path)?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
     for entry in fs::read_dir(hub)? {
         let path = entry?.path();
         if !path
@@ -49,16 +54,21 @@ fn read_hub_ports(hub: &Path) -> io::Result<Vec<HostPort>> {
             {
                 continue;
             }
-            let source = read_port(&path)?;
-            if let Some(peer) = &source.peer {
-                ports.push(read_port(Path::new(peer))?);
-            }
-            ports.push(source);
+            add_port(&mut ports, &path)?;
         }
     }
     ports.sort_by(|a, b| a.path.cmp(&b.path));
     ports.dedup_by(|a, b| a.path == b.path);
     Ok(ports)
+}
+
+fn add_port(ports: &mut Vec<HostPort>, path: &Path) -> io::Result<()> {
+    let source = read_port(path)?;
+    if let Some(peer) = &source.peer {
+        ports.push(read_port(Path::new(peer))?);
+    }
+    ports.push(source);
+    Ok(())
 }
 
 fn read_port(path: &Path) -> io::Result<HostPort> {
@@ -145,9 +155,22 @@ mod tests {
         let usb3 = root.join("2-7/2-7:1.0/2-7-port2");
         fs::create_dir_all(&usb2).unwrap();
         fs::create_dir_all(&usb3).unwrap();
+        let host2 = root.join("usb1-port3");
+        let host3 = root.join("usb2-port7");
+        fs::create_dir(&host2).unwrap();
+        fs::create_dir(&host3).unwrap();
+        symlink(&host2, hub.join("port")).unwrap();
+        symlink(&host3, host2.join("peer")).unwrap();
+        symlink(&host2, host3.join("peer")).unwrap();
         symlink(&usb3, usb2.join("peer")).unwrap();
         symlink(&usb2, usb3.join("peer")).unwrap();
         let ports = read_hub_ports(&hub).unwrap();
+        assert_eq!(
+            super::super::companion(&parse_port_name("usb1-port3").unwrap(), &ports, None),
+            super::super::Companion::Mapped {
+                topology: parse_port_name("usb2-port7").unwrap()
+            }
+        );
         assert_eq!(
             super::super::companion(
                 &Topology {

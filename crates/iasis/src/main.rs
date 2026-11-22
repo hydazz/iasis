@@ -300,9 +300,12 @@ fn main() -> Result<()> {
             if json {
                 println!(
                     "{}",
-                    serde_json::json!({"hub":snapshot.hub,"ports":reports})
+                    serde_json::json!({"hub":snapshot.hub,"upstream_mbps":snapshot.upstream_mbps,"ports":reports})
                 );
             } else {
+                if let Some(speed) = snapshot.upstream_mbps {
+                    println!("upstream {speed} Mb/s");
+                }
                 for report in reports {
                     let slot = report.slot;
                     println!("port {}  {}", slot.port.number(), report.dfu.describe());
