@@ -28,6 +28,17 @@ const OFF: BinaryColor = BinaryColor::Off;
 
 // Menubar glyphs are nine rows high and drawn on rows 1 to 9, which leaves
 // the bar's outer pixels lit around them.
+const NETWORK: &[&str] = &[
+    "...###...",
+    "...#.#...",
+    "...###...",
+    "....#....",
+    ".#######.",
+    ".#.....#.",
+    "###...###",
+    "#.#...#.#",
+    "###...###",
+];
 const USB: &[&str] = &[
     "....#....",
     "...###...",
@@ -69,6 +80,7 @@ pub struct View {
     /// Highlighted ports a hold reaches, drawn filled; the rest are outlined.
     pub targets: u8,
     pub connected: bool,
+    internet_sharing: bool,
     name: iasis_protocol::BoardName,
     brick: bool,
     face: Face,
@@ -91,9 +103,19 @@ impl View {
             return 0xff;
         }
         let mut pages = 0;
-        if (self.name, self.brick, self.connected, self.face)
-            != (old.name, old.brick, old.connected, old.face)
-        {
+        if (
+            self.name,
+            self.brick,
+            self.connected,
+            self.internet_sharing,
+            self.face,
+        ) != (
+            old.name,
+            old.brick,
+            old.connected,
+            old.internet_sharing,
+            old.face,
+        ) {
             pages |= 0b0000_0011;
         }
         if (self.ports, self.targets, self.bars) != (old.ports, old.targets, old.bars) {
@@ -163,6 +185,7 @@ pub fn view(status: &Status, button: &Button, now: u64) -> View {
             ports & button.reach()
         },
         connected: status.host.is_some(),
+        internet_sharing: status.host.is_some_and(|host| host.internet_sharing),
         brick: status.supply == Supply::Brick,
         face,
         bars: status.ports.each_ref().map(|port| match port.link {
@@ -502,7 +525,11 @@ pub fn draw<D: DrawTarget<Color = BinaryColor>>(
     )?;
     // Glyphs pack against the right edge, so an absent one leaves no gap.
     let mut right = 127;
-    for (shown, rows) in [(view.brick, PLUG), (view.connected, USB)] {
+    for (shown, rows) in [
+        (view.brick, PLUG),
+        (view.connected, USB),
+        (view.internet_sharing, NETWORK),
+    ] {
         if shown {
             right -= rows[0].len() as i32;
             glyph(target, rows, right, 1, OFF)?;
@@ -842,6 +869,7 @@ mod tests {
         status.host = Some(HostSession {
             id: 1,
             restore_ready: false,
+            internet_sharing: false,
         });
         assert!(view(&status, &button, 0).connected);
         // The host still sees the running system while the target restarts.
@@ -947,6 +975,7 @@ mod tests {
             host: Some(iasis_protocol::HostSession {
                 id: 1,
                 restore_ready: false,
+                internet_sharing: true,
             }),
             ..Status::default()
         };
@@ -975,6 +1004,7 @@ mod tests {
             host: Some(iasis_protocol::HostSession {
                 id: 1,
                 restore_ready: false,
+                internet_sharing: true,
             }),
             ..Status::default()
         };
@@ -987,14 +1017,50 @@ mod tests {
                 })
             })
         };
-        // Without a brick, USB takes the edge.
+        // Without a brick, USB takes the edge and the network glyph follows it.
         assert!(shows(&status, USB, 118));
+        assert!(shows(&status, NETWORK, 107));
         status.supply = Supply::Brick;
         assert!(shows(&status, PLUG, 122));
         assert!(shows(&status, USB, 111));
+        assert!(shows(&status, NETWORK, 100));
         status.host = None;
         assert!(shows(&status, PLUG, 122));
         assert!(shows(&status, &["........."; 9], 111));
+    }
+
+    #[test]
+    fn sharing_adds_the_network_glyph_beside_usb_even_with_a_full_title() {
+        let mut status = Status {
+            supply: Supply::Brick,
+            host: Some(iasis_protocol::HostSession {
+                id: 1,
+                restore_ready: false,
+                internet_sharing: false,
+            }),
+            ..Status::default()
+        };
+        status.settings.name = iasis_protocol::BoardName::new("ABCDEFGHIJKLMNOP").unwrap();
+        let button = Button::default();
+        let idle = view(&status, &button, 0);
+        status.host.as_mut().unwrap().internet_sharing = true;
+        let active = view(&status, &button, 0);
+        assert_eq!(active.changed_pages(Some(&idle)), 0b11);
+        let before = frame(&idle);
+        let after = frame(&active);
+        for point in after.bounding_box().points() {
+            if (100..109).contains(&point.x) && (1..10).contains(&point.y) {
+                assert_eq!(before.pixel(point), Some(ON));
+                let ink = NETWORK[(point.y - 1) as usize].as_bytes()[(point.x - 100) as usize];
+                assert_eq!(after.pixel(point), Some(if ink == b'#' { OFF } else { ON }));
+            } else {
+                assert_eq!(after.pixel(point), before.pixel(point));
+            }
+        }
+        status.host = None;
+        let disconnected = view(&status, &button, 0);
+        assert!(!disconnected.internet_sharing);
+        assert_eq!(disconnected.changed_pages(Some(&active)), 0b11);
     }
 
     #[test]

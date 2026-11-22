@@ -51,6 +51,7 @@ pub struct State {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub submitted: Vec<Option<Ending>>,
     pub images: Snapshot,
+    pub sharing: crate::sharing::State,
     /// Why the agent cannot run restores, when it cannot.
     pub restore_problem: Option<String>,
 }
@@ -142,6 +143,10 @@ pub enum Request {
         board: String,
         percent: u8,
     },
+    /// Share a host network connection with attached USB devices.
+    Sharing {
+        enabled: bool,
+    },
     /// Keep the newest image for a model.
     Keep {
         model: String,
@@ -193,6 +198,7 @@ impl Attendance {
 
 pub struct Agent {
     home: Home,
+    sharing: crate::sharing::Sharing,
     store: Store,
     models: Arc<Models>,
     engine: RestoreEngine,
@@ -277,6 +283,7 @@ impl Agent {
             family: options.family,
             restore_problem: Mutex::new(None),
             boards: Mutex::default(),
+            sharing: crate::sharing::Sharing::open(home.state.join("usb-sharing.json")),
             home,
         }))
     }
@@ -320,6 +327,7 @@ impl Agent {
                 .collect(),
             submitted: Vec::new(),
             images: self.store.snapshot(),
+            sharing: self.sharing.state(),
             restore_problem: self.restore_problem.lock().unwrap().clone(),
         }
     }
@@ -434,6 +442,7 @@ impl Agent {
             Request::Forget { model } => self.store.forget(&model),
             Request::Import { path } => self.store.import(&path).map(|_| ()),
             Request::Remove { build } => self.store.remove(&build),
+            Request::Sharing { enabled } => self.sharing.configure(enabled),
             Request::Refresh => {
                 self.store.refresh();
                 Ok(())
@@ -488,6 +497,27 @@ impl Agent {
     pub fn run(self: &Arc<Self>, options: &Options) -> Result<()> {
         #[cfg(unix)]
         socket::serve(self.clone())?;
+        #[cfg(target_os = "macos")]
+        {
+            let agent = self.clone();
+            thread::Builder::new()
+                .name("usb-sharing".into())
+                .spawn(move || {
+                    agent.sharing.run(|| {
+                        agent
+                            .boards
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .filter_map(|(serial, board)| {
+                                let link = board.link.lock().unwrap().clone()?;
+                                (board.present.load(Ordering::Relaxed) && link.alive())
+                                    .then_some((*serial, link))
+                            })
+                            .collect()
+                    })
+                })?;
+        }
         let mut attendants: BTreeMap<u64, (JoinHandle<Result<()>>, Instant)> = BTreeMap::new();
         let mut errors: BTreeMap<u64, String> = BTreeMap::new();
         let mut checked: Option<Instant> = None;

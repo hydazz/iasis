@@ -8,6 +8,7 @@ use directories::ProjectDirs;
 pub struct Home {
     /// Restore images and worker scratch: large, and safe to delete.
     pub cache: PathBuf,
+    pub state: PathBuf,
     runtime: PathBuf,
 }
 
@@ -19,6 +20,7 @@ impl Home {
         if let Some(root) = env::var_os("IASIS_HOME").map(PathBuf::from) {
             return Ok(Self {
                 cache: root.join("cache"),
+                state: root.clone(),
                 runtime: root,
             });
         }
@@ -34,6 +36,7 @@ impl Home {
             runtime: given("RUNTIME_DIRECTORY")
                 .or_else(|| dirs.runtime_dir().map(ToOwned::to_owned))
                 .unwrap_or_else(|| state.clone()),
+            state,
         })
     }
 
