@@ -426,17 +426,6 @@ fn watts(milliwatts: u32) -> u32 {
     (milliwatts + 500) / 1000
 }
 
-fn amps(out: &mut impl Write, ma: u16) {
-    let rounded = (u32::from(ma) + 50) / 100 * 100;
-    if rounded == 0 && ma > 0 {
-        write!(out, "{ma}mA").unwrap();
-    } else if rounded.is_multiple_of(1000) {
-        write!(out, "{}A", rounded / 1000).unwrap();
-    } else {
-        write!(out, "{rounded}mA").unwrap();
-    }
-}
-
 /// Connector readings and the negotiated contract or default USB allowance.
 fn readings(port: &PortStatus) -> [String<32>; 2] {
     if !port.occupied() {
@@ -466,7 +455,7 @@ fn readings(port: &PortStatus) -> [String<32>; 2] {
         return lines;
     };
     write!(lines[1], "{kind} {}V ", mv / 1000).unwrap();
-    amps(&mut lines[1], ma);
+    iasis_pd::write_current(&mut lines[1], ma).unwrap();
     let mw = u32::from(mv) * u32::from(ma) / 1000;
     write!(lines[1], " ({}W)", watts(mw)).unwrap();
     lines
@@ -489,7 +478,7 @@ fn supply(status: &Status) -> String<32> {
     } else if let Some(error) = status.upstream_error {
         line.push_str(error.text()).unwrap();
     } else if status.supply == Supply::Off {
-        line.push_str("Port power off").unwrap();
+        line.push_str("USB Power Off").unwrap();
     }
     line
 }
@@ -817,13 +806,13 @@ mod tests {
             status.ports[0].vbus_adc = raw;
             assert_eq!(
                 view(&status, &button, 0).lines,
-                pair("", "PD 20V 2300mA (45W)")
+                pair("", "PD 20V 2.25A (45W)")
             );
         }
         status.ports[0].vbus_adc = Some(520);
         assert_eq!(
             view(&status, &button, 0).lines,
-            pair("VBUS 5.03V", "PD 20V 2300mA (45W)")
+            pair("VBUS 5.03V", "PD 20V 2.25A (45W)")
         );
         status.ports[0] = PortStatus {
             allocated_mw: iasis_pd::Contract::USB_DEFAULT.cost_mw(),
@@ -845,8 +834,8 @@ mod tests {
             ..contract(0, 0)
         };
         for (port, row) in [
-            (contract(20_000, 780), "PD 20V 800mA (16W)"),
-            (contract(20_000, 220), "PD 20V 200mA (4W)"),
+            (contract(20_000, 780), "PD 20V 780mA (16W)"),
+            (contract(20_000, 220), "PD 20V 220mA (4W)"),
             (contract(5000, 30), "PD 5V 30mA (0W)"),
             (contract(5000, 0), "PD 5V 0A (0W)"),
             (usb, "USB 5V 900mA (5W)"),
@@ -1210,7 +1199,7 @@ mod tests {
             host_allowance_ma: 900,
             ..Status::default()
         };
-        assert_eq!(view(&limited, &button, 0).lines[1], "Port power off");
+        assert_eq!(view(&limited, &button, 0).lines[1], "USB Power Off");
     }
 
     #[test]
