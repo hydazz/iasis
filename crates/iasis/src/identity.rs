@@ -341,6 +341,7 @@ mod tests {
             host: Some(HostSession {
                 id: 7,
                 restore_ready: false,
+                internet_sharing: false,
             }),
             ..Status::default()
         };

@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		1A5100202F00000000A0E012 /* iasisd in Embed Host Tools */ = {isa = PBXBuildFile; fileRef = 1A5100222F00000000A0E012 /* iasisd */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		1A5100212F00000000A0E012 /* iasis in Embed Host Tools */ = {isa = PBXBuildFile; fileRef = 1A5100232F00000000A0E012 /* iasis */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		1A5100272F00000000A0E012 /* iasis-gateway in Embed Host Tools */ = {isa = PBXBuildFile; fileRef = 1A5100282F00000000A0E012 /* iasis-gateway */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -29,6 +30,7 @@
 			files = (
 				1A5100202F00000000A0E012 /* iasisd in Embed Host Tools */,
 				1A5100212F00000000A0E012 /* iasis in Embed Host Tools */,
+				1A5100272F00000000A0E012 /* iasis-gateway in Embed Host Tools */,
 			);
 			name = "Embed Host Tools";
 		};
@@ -40,6 +42,7 @@
 		1A5100062F00000000A0E012 /* IasisTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = IasisTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A5100222F00000000A0E012 /* iasisd */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = iasisd; path = "$(DERIVED_FILE_DIR)/HostTools/iasisd"; sourceTree = "<absolute>"; };
 		1A5100232F00000000A0E012 /* iasis */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = iasis; path = "$(DERIVED_FILE_DIR)/HostTools/iasis"; sourceTree = "<absolute>"; };
+		1A5100282F00000000A0E012 /* iasis-gateway */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = "iasis-gateway"; path = "$(DERIVED_FILE_DIR)/HostTools/iasis-gateway"; sourceTree = "<absolute>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -102,6 +105,7 @@
 			children = (
 				1A5100222F00000000A0E012 /* iasisd */,
 				1A5100232F00000000A0E012 /* iasis */,
+				1A5100282F00000000A0E012 /* iasis-gateway */,
 			);
 			name = "Host Tools";
 			sourceTree = "<group>";
@@ -213,6 +217,7 @@
 			outputPaths = (
 				"$(DERIVED_FILE_DIR)/HostTools/iasisd",
 				"$(DERIVED_FILE_DIR)/HostTools/iasis",
+				"$(DERIVED_FILE_DIR)/HostTools/iasis-gateway",
 			);
 			shellPath = /bin/sh;
 			shellScript = (
@@ -387,6 +392,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Iasis shares this Mac's network with devices connected by USB so they can activate and enroll in device management.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -424,6 +430,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Iasis shares this Mac's network with devices connected by USB so they can activate and enroll in device management.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

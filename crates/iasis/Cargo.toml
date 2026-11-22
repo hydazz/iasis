@@ -26,3 +26,7 @@ directories = "6.0.0"
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
 io-kit-sys = "0.5"
+system-configuration = "0.8"
+nix = { version = "0.32", features = ["fs", "net", "poll", "resource"] }
+pcap = "2.5"
+pktkit = { version = "=0.1.12", features = ["dhcp", "l2adapter", "slirp"] }

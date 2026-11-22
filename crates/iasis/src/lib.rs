@@ -9,6 +9,7 @@ pub mod identity;
 pub mod images;
 pub mod progress;
 pub mod restore;
+pub mod sharing;
 pub mod topology;
 pub mod view;
 
