@@ -439,7 +439,10 @@ impl<'a> Phy<'a> {
 }
 
 /// The PD engine's view of the port.
-pub struct PdPhy<'a, 'p>(pub &'a Phy<'p>);
+pub struct PdPhy<'a, 'p> {
+    pub phy: &'a Phy<'p>,
+    pub first_offer_mw: &'a Cell<u32>,
+}
 
 impl Driver for PdPhy<'_, '_> {
     const HAS_AUTO_GOOD_CRC: bool = true;
@@ -450,20 +453,20 @@ impl Driver for PdPhy<'_, '_> {
 
     async fn receive(&mut self, buffer: &mut [u8]) -> Result<usize, DriverRxError> {
         loop {
-            if self.0.hard_reset.take() {
+            if self.phy.hard_reset.take() {
                 return Err(DriverRxError::HardReset);
             }
-            if let Some(packet) = self.0.inbox.borrow_mut().pop_front() {
+            if let Some(packet) = self.phy.inbox.borrow_mut().pop_front() {
                 buffer[..packet.len()].copy_from_slice(&packet);
                 return Ok(packet.len());
             }
-            self.0.received.wait().await;
+            self.phy.received.wait().await;
         }
     }
 
     async fn transmit(&mut self, data: &[u8]) -> Result<(), DriverTxError> {
-        if self.0.hard_reset.take() {
-            self.0.answering.set(true);
+        if self.phy.hard_reset.take() {
+            self.phy.answering.set(true);
             return Err(DriverTxError::HardReset);
         }
         // The engine composes revision 3 messages. Present them as revision
@@ -476,43 +479,47 @@ impl Driver for PdPhy<'_, '_> {
         if message[0] & 0x1f == NOT_SUPPORTED && message[1] & 0xf0 == 0 {
             message[0] = (message[0] & !0x1f) | REJECT;
         }
-        match self.0.send(SOP, &message).await {
+        let result = match self.phy.send(SOP, &message).await {
             Ok(Tx::Sent) => Ok(()),
-            Ok(_) if self.0.hard_reset.take() => {
-                self.0.answering.set(true);
+            Ok(_) if self.phy.hard_reset.take() => {
+                self.phy.answering.set(true);
                 Err(DriverTxError::HardReset)
             }
             Ok(_) => Err(DriverTxError::Discarded),
             Err(error) => {
-                self.0.fail(error);
+                self.phy.fail(error);
                 Timer::after_millis(1).await;
                 Err(DriverTxError::Discarded)
             }
+        };
+        if result.is_err() {
+            self.first_offer_mw.set(0);
         }
+        result
     }
 
     async fn transmit_hard_reset(&mut self) -> Result<(), DriverTxError> {
-        let _transmitter = self.0.transmitter.lock().await;
-        self.0.hard_sent.set(false);
+        let _transmitter = self.phy.transmitter.lock().await;
+        self.phy.hard_sent.set(false);
         // The engine also answers a received hard reset with one of its own.
-        if !self.0.answering.take() {
-            self.0
+        if !self.phy.answering.take() {
+            self.phy
                 .resets_sent
-                .set(self.0.resets_sent.get().saturating_add(1));
+                .set(self.phy.resets_sent.get().saturating_add(1));
         }
         let written = async {
-            let mut io = self.0.io.lock().await;
-            let bus = io.port(self.0.channel).await?;
+            let mut io = self.phy.io.lock().await;
+            let bus = io.port(self.phy.channel).await?;
             write(bus, CONTROL3, RETRIES | SEND_HARD_RESET).await
         };
         if let Err(error) = written.await {
-            self.0.fail(error);
+            self.phy.fail(error);
             Timer::after_millis(1).await;
             return Err(DriverTxError::Discarded);
         }
         let sent = async {
-            while !self.0.hard_sent.take() {
-                self.0.completed.wait().await;
+            while !self.phy.hard_sent.take() {
+                self.phy.completed.wait().await;
             }
         };
         // The controller sends once the line is idle; tHardResetComplete bounds it.

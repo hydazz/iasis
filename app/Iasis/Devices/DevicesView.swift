@@ -134,18 +134,14 @@ private struct BoardHeader: View {
                 .help("Firmware \(group.board.firmware), serial \(group.board.serial)")
             Spacer()
             if let pool = group.board.pool {
-                Label("\(watts(pool.allocatedMw)) / \(watts(pool.budgetMw)) W", systemImage: "bolt.fill")
+                Label("\(wholeWatts(pool.allocatedMw)) / \(wholeWatts(pool.budgetMw)) W", systemImage: "bolt.fill")
                     .labelStyle(.titleAndIcon)
                     .font(.caption)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                    .help("Power the devices have agreed, of what the power supply has for them")
+                    .help("Power allocated to the ports out of the charging budget")
             }
         }
-    }
-
-    private func watts(_ milliwatts: Int) -> Int {
-        (milliwatts + 500) / 1000
     }
 }
 
