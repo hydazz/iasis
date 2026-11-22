@@ -124,6 +124,9 @@ jobs:
           cache: false
           install_args: --locked rust
 
+      - name: Install native build tools
+        run: sudo apt-get update && sudo apt-get install -y libpcap-dev
+
       - name: Build host tools
         run: mise run host:build
 
