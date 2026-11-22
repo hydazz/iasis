@@ -34,7 +34,7 @@ private struct GeneralSettings: View {
                     }
                     LabeledContent("Serial", value: selected.serial)
                     if selected.ports.isEmpty {
-                        Text(selected.notice ?? "Board unavailable")
+                        Text(selected.notice ?? "Board Unavailable")
                     } else {
                         BoardSettings(board: selected, model: model)
                             .id(selected.serial)
@@ -49,7 +49,7 @@ private struct GeneralSettings: View {
                 }
             }
             Section {
-                Toggle("Share internet over USB", isOn: Binding {
+                Toggle("Share Internet over USB", isOn: Binding {
                     model.state?.sharing.enabled == true
                 } set: { enabled in
                     model.perform([.sharing(enabled: enabled)])
@@ -61,7 +61,7 @@ private struct GeneralSettings: View {
                 }
             }
             Section {
-                Toggle("Open Finder when a device connects", isOn: $revealsDevices)
+                Toggle("Open Finder When a Device Connects", isOn: $revealsDevices)
             } footer: {
                 Text("Finder opens a window for each device that enters DFU. This is an undocumented macOS setting and applies to every Apple device you connect.")
             }
@@ -82,7 +82,7 @@ private struct BoardSettings: View {
 
     var body: some View {
         LabeledContent("Name") {
-            TextField("Board name", text: Binding(get: { draft ?? board.name }, set: { draft = $0 }), prompt: Text("Iasis"))
+            TextField("Board Name", text: Binding(get: { draft ?? board.name }, set: { draft = $0 }), prompt: Text("Iasis"))
                 .labelsHidden()
                 .onSubmit(saveName)
                 .help("Up to 16 printable ASCII characters. An empty name resets the board name.")
@@ -93,7 +93,7 @@ private struct BoardSettings: View {
             value: Binding(get: { lightLevel.value(reading: board.brightness) }, set: { lightLevel.drag(to: $0) }),
             in: 10 ... 100
         ) {
-            Text("Light brightness")
+            Text("Light Brightness")
         } onEditingChanged: { editing in
             if !editing, let percent = lightLevel.release(reading: board.brightness) {
                 let previous = writing
@@ -203,19 +203,19 @@ private struct ImageSettings: View {
 
     private func status(of kept: AgentState.Model, fetch: AgentState.Fetch?) -> String {
         guard let latest = kept.latest else {
-            return kept.error ?? "Asking for the newest release"
+            return kept.error ?? "Checking for Updates"
         }
         let release = "\(latest.version) (\(latest.build))"
         if kept.ready {
-            return "\(release), ready"
+            return "\(release), Ready"
         }
         if let error = kept.error {
             return "\(release): \(error)"
         }
         if let fetch, fetch.build == latest.build {
-            return "\(release), downloading \(fetch.fraction.formatted(.percent.precision(.fractionLength(0))))"
+            return "\(release), Downloading \(fetch.fraction.formatted(.percent.precision(.fractionLength(0))))"
         }
-        return "\(release), waiting to download"
+        return "\(release), Waiting to Download"
     }
 
     private func summary(of image: AgentState.Image) -> String {

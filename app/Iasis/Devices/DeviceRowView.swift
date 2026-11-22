@@ -9,37 +9,29 @@ struct DeviceRowView: View {
         let activity = device.activity
         HStack(spacing: 8) {
             PortBadge(number: device.port.number, light: device.port.light)
-            Image(systemName: device.symbol ?? "circle")
-                .foregroundStyle(.secondary)
-                .opacity(device.symbol == nil ? 0 : 1)
-                .frame(width: 22)
-                .accessibilityHidden(true)
-            Text(device.name)
-                .foregroundStyle(device.port.occupied ? .primary : .tertiary)
-                .lineLimit(1)
-            if let problem = device.sharing?.problem {
-                Image(systemName: "exclamationmark.triangle")
-                    .help(problem)
-                    .accessibilityLabel("Internet sharing")
-                    .accessibilityValue(Text(problem))
-            } else if device.sharesInternet {
-                Image(systemName: "globe")
+            DeviceName(device: device)
+            ConnectionMarks(device: device)
+            if device.port.wrongDfuPort {
+                Text("PORT")
+                    .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
-                    .help("Sharing internet over USB")
-                    .accessibilityLabel("Sharing internet over USB")
+                    .help(Device.dfuPortHelp)
+                    .accessibilityLabel(Device.dfuPortHelp)
             }
-            Spacer(minLength: 12)
-            Text(activity.text)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .lineLimit(1)
-            // Each mark has its own place, taken or not.
-            Color.clear
-                .frame(width: 16, height: 16)
-                .overlay { PowerMark(device: device) }
-            Color.clear
-                .frame(width: 16, height: 16)
-                .overlay { ActivityMark(mark: activity.mark) }
+            if activity != .idle {
+                Text(activity.text)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .help(activity.text)
+            }
+            if case .working = activity.mark {
+                Spacer(minLength: 4)
+                ActivityMark(mark: activity.mark)
+            } else {
+                ActivityMark(mark: activity.mark)
+                Spacer(minLength: 4)
+            }
         }
         .accessibilityElement(children: .combine)
     }
@@ -60,18 +52,71 @@ struct PortBadge: View {
     }
 }
 
-/// The target reported a shortfall on the port’s highest-power offer.
-struct PowerMark: View {
+struct DeviceName: View {
+    let device: Device
+
+    var lineLimit: Int? = 1
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Group {
+                if device.port.identifying {
+                    ProgressView().controlSize(.small)
+                } else if let symbol = device.symbol {
+                    Image(systemName: symbol)
+                } else {
+                    Color.clear.frame(height: 1)
+                }
+            }
+            .frame(width: 20)
+            .foregroundStyle(.secondary)
+            .accessibilityHidden(true)
+            Text(device.name)
+                .italic(device.port.identifying)
+                .foregroundStyle(device.port.identifying || !device.port.occupied ? .secondary : .primary)
+                .lineLimit(lineLimit)
+                .help(device.name)
+        }
+    }
+}
+
+private struct ConnectionMarks: View {
     let device: Device
 
     var body: some View {
-        if device.port.short, let watts = device.watts {
-            Image(systemName: "bolt.trianglebadge.exclamationmark.fill")
-                .symbolRenderingMode(.multicolor)
-                .foregroundStyle(.yellow)
-                .help("PD contract of \(watts). The device reports insufficient power.")
-                .accessibilityLabel("Power contract limited to \(watts)")
+        HStack(spacing: 6) {
+            if device.port.powered {
+                let limited = device.port.short
+                let power = if let reading = device.port.power, reading.source == .pd {
+                    "\(reading.title) · \(reading.reading)"
+                } else {
+                    "USB Power"
+                }
+                let detail = limited ? "\(power). The device reports insufficient power." : power
+                Image(systemName: limited ? "bolt.trianglebadge.exclamationmark.fill" : "bolt.fill")
+                    .foregroundStyle(limited ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                    .help(detail)
+                    .accessibilityLabel(detail)
+            }
+            if let link = device.port.link {
+                Image(systemName: "cable.connector")
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(Color.secondary, link == .usb3 ? Color(nsColor: .controlAccentColor) : Color.secondary)
+                    .help(link.title)
+                    .accessibilityLabel(link.title)
+            }
+            if let problem = device.sharing?.problem {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                    .help(problem)
+                    .accessibilityLabel("Internet sharing: \(problem)")
+            } else if device.sharesInternet {
+                Image(systemName: DeviceSymbol.lan)
+                    .help("Sharing internet over USB")
+                    .accessibilityLabel("Sharing internet over USB")
+            }
         }
+        .foregroundStyle(.secondary)
     }
 }
 
@@ -83,14 +128,9 @@ struct ActivityMark: View {
         case .none:
             EmptyView()
         case let .working(fraction):
-            if let fraction {
-                ProgressView(value: fraction)
-                    .progressViewStyle(.circular)
-                    .controlSize(.small)
-            } else {
-                ProgressView()
-                    .controlSize(.small)
-            }
+            ProgressView(value: fraction)
+                .progressViewStyle(.circular)
+                .controlSize(.small)
         case .done:
             Image(systemName: "checkmark.circle.fill")
                 .foregroundStyle(.green)
@@ -106,7 +146,7 @@ struct ActivityMark: View {
         case .caution:
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.yellow)
-                .accessibilityLabel("Needs attention")
+                .accessibilityLabel("Needs Attention")
         }
     }
 }

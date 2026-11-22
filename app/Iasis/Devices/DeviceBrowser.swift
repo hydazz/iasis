@@ -7,7 +7,7 @@ import SwiftUI
 final class DeviceBrowser {
     let model: AgentModel
     var selection = Set<Device.ID>()
-    var showsInspector = false
+    var showsInspector = true
     /// The erase the user is being asked to confirm.
     var confirming: RestoreConfirmation?
 

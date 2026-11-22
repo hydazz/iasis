@@ -41,4 +41,5 @@ enum DeviceSymbol {
     static let restart = "restart"
     static let revive = "cross.case"
     static let restore = "arrow.counterclockwise"
+    static let lan = "rectangle.connected.to.line.below"
 }

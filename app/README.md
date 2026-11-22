@@ -6,26 +6,28 @@ Iasis lives in the menu bar and shows what is on every port of every connected b
 
 The cable dims when no board is connected. A ring over its tail shows work under way, and a red mark means a board or port needs attention.
 
-The menu lists each board's devices by port number, with what each is doing. A device's submenu has Enter DFU, Restart, Revive, Restore and the port's power. An open menu follows each device as its state changes. A device that arrives, leaves or is identified under another name appears when the menu is next opened. Open Iasis shows the window.
+The menu groups devices by board and shows the physical port number beside each name. Choose a device for its actions or choose Get Info to open its inspector. Operation progress updates while the menu is open. Its port list refreshes when it closes.
 
 ## Window
 
-Each port is one row: its number in the colour of its light on the board, pulsing while the light pulses, then the device and what the port is doing. A finished restore or revive stays on the row until the device leaves. A device keeps its name for as long as it stays plugged in, including a Mac that has started up and left USB.
+Each row represents a physical port. Its number follows the port light. A new attachment shows _Identifying…_ until the agent learns its name or the initial lookup ends. A question mark represents an unrecognized device. A Mac keeps its name when it leaves USB while still plugged in.
+
+The bolt shows USB power. The cable marks a live USB link. A highlighted tip indicates USB 3. A wired network symbol marks active internet sharing. **PORT** means the connected Mac reports that this connector lacks DFU USB. Hover over an indicator or open Get Info for details.
 
 Select rows and use the toolbar, the Device menu or a row's context menu:
 
-| Action     | Applies to                                                                                 |
-| ---------- | ------------------------------------------------------------------------------------------ |
-| Enter DFU  | Each selected device that can be signalled                                                 |
-| Restart    | Each selected device that can be signalled                                                 |
-| Revive     | One device in DFU or Recovery. Apple Configurator reinstalls the system and keeps the data |
-| Restore    | Every selected device, on any number of boards. Asks first, then erases them               |
+| Action    | Applies to                                                                                 |
+| --------- | ------------------------------------------------------------------------------------------ |
+| Enter DFU | Each selected device that can be signalled                                                 |
+| Restart   | Each selected device that can be signalled                                                 |
+| Revive    | One device in DFU or Recovery. Apple Configurator reinstalls the system and keeps the data |
+| Restore   | Every selected device, on any number of boards. Asks first, then erases them               |
 
 Restore is unavailable while any selected device cannot be restored. A Mac whose DFU is on Apple Debug USB needs Apple Configurator on this Mac.
 
 A board on a power supply shows, beside its name, the power allocated to its ports out of the available charging budget. A bolt with a warning marks a device that took the largest offer the board could make and would use more: with several devices sharing a supply, one with a flat battery may get too little to start.
 
-Double-click a row, or show the inspector, for the device's model and ECID, its USB mode, link, power allocation and any PD contract, and the last operation with its log folder. The bar under the list reports an image download, or why restores are unavailable.
+Select a row to inspect its identity, USB connection, power and last operation. Power shows the PD contract or default USB allowance with exact nominal watts in parentheses. The toolbar lets you hide or show the inspector. The bar under the list reports an image download, or why restores are unavailable.
 
 ## Settings and Help
 
@@ -33,7 +35,7 @@ In Settings, select a board to rename it or adjust its lights; the board keeps b
 
 ### USB internet sharing
 
-In Settings > General, turn on **Share internet over USB**. Targets with a USB Ethernet interface can use the Mac’s internet connection. A globe marks each port where sharing is active. The port inspector shows its sharing status and any connection error.
+In Settings > General, turn on **Share Internet over USB**. Targets with a USB Ethernet interface can use the Mac’s internet connection. The inspector shows sharing errors on the affected port.
 
 Allow Iasis to access the local network when macOS prompts. You can change this in System Settings > Privacy & Security > Local Network.
 
