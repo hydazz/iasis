@@ -10,7 +10,7 @@ Messages use vendor control transfers on endpoint zero, addressed to interface 0
 | ------------------------ | --------------------------------------------------------- |
 | Request type / recipient | Vendor / interface                                        |
 | `wIndex`                 | `0`                                                       |
-| `wValue`                 | Protocol version, `17`                                    |
+| `wValue`                 | Protocol version, `18`                                    |
 | Maximum payload          | 1408 bytes                                                |
 | Payload header           | ASCII `IASI`, then a little-endian `u16` protocol version |
 | Payload body             | Postcard-encoded message                                  |
@@ -85,7 +85,7 @@ A port entry can also carry the host's restore job for that attachment: a nonzer
 
 ## Button events and restore arms
 
-Local DFU and reboot events carry the selected physical port mask and attachment generations. The button offers Restore only while the session's host reports `restore_ready`. Holding to Restore sends a preparation request for the selected targets to that session. The host prepares the image and targets before issuing a restore arm.
+Local DFU and reboot events carry the selected physical port mask and attachment generations. The session must report `restore_ready` to offer Restore. Each generation-bound port report carries `restore_access`: the host can signal DFU on this connector, sees the identified device in a DFU mode its restore engine supports, recognizes a Mac on a connector without DFU USB, or has no restore path. Only the first two offer Restore. Holding to Restore sends a preparation request for the selected targets to that session. The host prepares the image and targets before issuing a restore arm.
 
 A restore arm identifies the session, operation, target mask, attachment generations and deadline in board uptime. Arm IDs rise within a session and each is issued once. The arm expires within 20 seconds. A fresh three-second hold confirms the arm once. A tap cancels. USB reset, host-session loss and attachment changes invalidate pending confirmation. The host checks the confirmed identifiers, target ECIDs and current attachments before launching workers.
 
