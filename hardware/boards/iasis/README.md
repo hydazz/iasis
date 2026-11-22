@@ -52,4 +52,4 @@ Open `iasis.kicad_pro` in KiCad. Shared symbols, footprints and models are in `.
 
 Use `mise run //hardware/boards/iasis:step` for the populated STEP and `:preview` for `board.png`. The [board tools](../../tools/README.md) describe the exports and checks.
 
-The title-block revision appears on the underside silkscreen. Hub and HubPD share it. Tag a fabrication commit as `iasis-rev-a` for Revision A and retain its fabrication package; software versions are separate.
+`version.txt` holds the board's version, which the title blocks and the underside silkscreen print. Hub and HubPD share it. Each ordered version is a release tagged `iasis-board-v<version>` with its `gerbers.zip`, BOM and placement files attached. Revision A, the first order, is version 1.0.0; its files are in the `iasis-rev-a` release. Software versions are separate.
