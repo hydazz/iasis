@@ -205,6 +205,15 @@ pub fn view(status: &Status, button: &Button, now: u64) -> View {
         view.lines = pair("Power fault", "Targets off");
     } else if button.armed().is_some() {
         view.lines = pair("Erase", "Hold 3s");
+    } else if button.hold_ms(now).is_some()
+        && selected.is_some_and(|port| {
+            port.restore_access == iasis_protocol::RestoreAccess::WrongMacPort
+                && port.error.is_none()
+                && !port.restoring()
+        })
+    {
+        view.lines = pair("Not in DFU port", "");
+        view.held = button.held(now).map(|action| (button.actions(), action));
     } else if let Some(action) = button.held(now) {
         view.held = Some((button.actions(), action));
     } else if let Some(lines) = selected
@@ -579,19 +588,25 @@ pub fn draw<D: DrawTarget<Color = BinaryColor>>(
     }
     line(target, (0, 39), (127, 39), ON)?;
     if let Some((actions, held)) = &view.held {
+        let top = if view.lines[0].is_empty() {
+            45
+        } else {
+            centered(target, &view.lines[0], 41, true)?;
+            50
+        };
         let width = |action: Gesture| name(action).len() as i32 * 6;
         let total: i32 = actions.iter().map(|action| width(*action)).sum();
         let gap = (128 - total) / (actions.len() as i32 + 1);
         let mut x = gap;
         for &action in actions {
             if action == *held {
-                fill(target, x - 3, 45, width(action) as u32 + 5, 14)?;
+                fill(target, x - 3, top, width(action) as u32 + 5, 14)?;
             }
             text(
                 target,
                 name(action),
                 x,
-                47,
+                top + 2,
                 false,
                 if action == *held { OFF } else { ON },
             )?;
@@ -871,7 +886,8 @@ mod tests {
             let view = view(&status, &selecting(0), 0);
             assert_eq!(view.columns[0].0, column);
             assert_eq!(view.lines, pair(reading, ""));
-            assert_eq!(status.ready_mask(), 0);
+            assert_eq!(status.gesture_mask(Gesture::Dfu), 0);
+            assert_eq!(status.gesture_mask(Gesture::Restore), 0);
         }
     }
 
@@ -955,6 +971,31 @@ mod tests {
             assert_eq!(view(&status, &selecting(0), 0).lines[1], "PD 5V 2A (10W)");
         }
         assert_eq!(label(&contract(5000, 2000)), "RDY");
+    }
+
+    #[test]
+    fn a_wrong_mac_connector_explains_the_missing_actions_only_on_hold() {
+        use iasis_protocol::RestoreAccess;
+        let mut status = Status::default();
+        status.ports[4] = PortStatus {
+            debug_actions: DebugActions::Listed([0x0106, 0x0105, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            restore_access: RestoreAccess::WrongMacPort,
+            ..contract(5000, 0)
+        };
+        let mut button = selecting(4);
+        button.sample(&status, None, false, 0);
+        assert_eq!(view(&status, &button, 0).lines[1], "PD 5V 0A (0W)");
+        for now in [10, 50, 600] {
+            button.sample(&status, None, true, now);
+        }
+        let held = view(&status, &button, 600);
+        assert_eq!(held.lines[0], "Not in DFU port");
+        assert_eq!(held.held.unwrap().1, Gesture::Reboot);
+        button.selected = None;
+        assert!(view(&status, &button, 600).lines[0].is_empty());
+        button.selected = Some(Port::ALL[4]);
+        status.ports[4].restore_access = RestoreAccess::Unavailable;
+        assert!(view(&status, &button, 600).lines[0].is_empty());
     }
 
     #[test]

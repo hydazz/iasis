@@ -144,7 +144,13 @@ pub fn run(device: &nusb::DeviceInfo, board: &Board, options: Options) -> Result
     engine.check()?;
     // Take the board before the long image check, which another host's
     // session would make pointless.
-    let link = Link::open(device, Jobs::default(), Arc::default())?;
+    let link = Link::open(
+        device,
+        Jobs::default(),
+        Arc::default(),
+        &engine,
+        options.device,
+    )?;
     let given = match &options.ipsw {
         Some(path) => {
             let ipsw = progress::check_ipsw(path)?;
@@ -644,7 +650,7 @@ fn selection(
             let current = status.restore_session() == Some(request.session)
                 && request.session == link.session()
                 && request.targets.iter().all(|target| {
-                    status.ready_mask() & (1 << target.port.index()) != 0
+                    status.gesture_mask(Gesture::Restore) & (1 << target.port.index()) != 0
                         && status.ports[target.port.index()].generation == target.generation
                 });
             if !current {
@@ -723,11 +729,23 @@ fn prepare_selected(
     for (target, generation, _) in &targets {
         draft.generations[target.port.index()] = *generation;
     }
-    let status = board.status()?;
-    ensure!(
-        draft.matches_targets(&status),
-        "prepared targets changed; no erase armed"
-    );
+    // The board must have received the host observation for the new DFU enumeration.
+    let deadline = Instant::now() + Duration::from_millis(protocol::HOST_SESSION_MS);
+    let status = loop {
+        let status = board.status()?;
+        ensure!(
+            status.restore_session() == Some(link.session()) && draft.matches_targets(&status),
+            "prepared targets changed; no erase armed"
+        );
+        if draft.prepared(&status) {
+            break status;
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "board has no verified DFU report for the prepared targets"
+        );
+        thread::sleep(Duration::from_millis(50));
+    };
     for (target, _, image) in &targets {
         println!(
             "Prepared port {}, ECID {:016x} for {} ({})",
@@ -762,7 +780,7 @@ fn prepare_selected(
 fn confirmed(arm: RestoreArm, status: &Status) -> Result<bool> {
     ensure!(status.uptime_ms < arm.expires, "erase arm expired");
     ensure!(
-        arm.matches_targets(status),
+        arm.prepared(status),
         "prepared targets changed; erase cancelled"
     );
     match status.restore_decision {
@@ -827,8 +845,10 @@ fn enter_dfu(
             "the device on port {} is not the one selected",
             port.number()
         );
-        match (assessment.signal, assessment.usb_mode) {
-            (Signal::AlreadyDfu, Some(mode)) if engine.restores(mode) => {
+        match assessment.restore_access(&status.ports[port.index()], action, |mode| {
+            engine.restores(mode)
+        }) {
+            protocol::RestoreAccess::InDfu => {
                 match TargetTracker::pin(board.info().serial, &snapshot, port) {
                     Ok(target) if ecid.is_some_and(|id| id != target.ecid) => {
                         eprintln!("port {}: another device is in DFU", port.number());
@@ -842,15 +862,7 @@ fn enter_dfu(
                 }
                 continue;
             }
-            (Signal::PortDfu, _) => {
-                pending.push((port, generation, None));
-                continue;
-            }
-            (Signal::Available, _) => {}
-            // The restore service with no job on the board is what a run
-            // that ended left behind. A confirmed erase takes it from there.
-            (Signal::Restoring, Some(AppleMode::Restored))
-                if !dfu::job_in_progress(&status.ports[port.index()]) => {}
+            protocol::RestoreAccess::EnterDfu => {}
             _ => {
                 eprintln!(
                     "port {}: {}",
@@ -867,13 +879,7 @@ fn enter_dfu(
                 pending.push((
                     port,
                     generation,
-                    Some(Attempt::new(
-                        board.info().serial,
-                        port,
-                        &assessment,
-                        &snapshot,
-                        result,
-                    )),
+                    Attempt::new(board.info().serial, port, &assessment, &snapshot, result),
                 ));
             }
             Err(error) => {
@@ -908,7 +914,7 @@ fn enter_dfu(
                 &status,
                 &snapshot,
                 action,
-                previous.as_ref(),
+                Some(previous),
             );
             // Apple Debug USB reaches DFU only through an engine that reads it.
             let debug = matches!(
@@ -1039,6 +1045,12 @@ mod tests {
         };
         let mut status = Status::default();
         status.ports[2].generation = 12;
+        status.ports[2].restore_access = iasis_protocol::RestoreAccess::InDfu;
+        status.ports[2].ecid = Some(42);
+        status.ports[2].observed = Some(iasis_protocol::Observed {
+            usb: iasis_protocol::Usb::Apple(iasis_protocol::AppleMode::Dfu),
+            ecid: Some(42),
+        });
         status.ports[2].state = PortState::Contract;
         status.button = Some(protocol::ButtonEvent {
             id: 1,

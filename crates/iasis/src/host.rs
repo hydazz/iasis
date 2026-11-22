@@ -19,7 +19,7 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 use iasis_protocol::{
     AppleMode, HostControl, HostReport, HostSession, Observed, PORT_COUNT, Port, PortReport,
-    RestoreArm, RestorePhase, RestoreStatus, Status, Usb,
+    RestoreAccess, RestoreArm, RestorePhase, RestoreStatus, Status, Usb,
 };
 use nusb::{DeviceInfo, transfer::TransferError};
 
@@ -162,7 +162,7 @@ enum Unsent {
 #[derive(Default)]
 struct View {
     observer: Observer,
-    seen: Seen,
+    access: [RestoreAccess; PORT_COUNT],
     /// Board uptime at the last sample. A smaller reading is a restart.
     uptime_ms: u64,
     sample: Option<(Status, Snapshot)>,
@@ -203,6 +203,7 @@ fn settle(jobs: &mut [Option<PortJob>; PORT_COUNT], status: &Status, restarted: 
 /// attachment.
 fn compose(
     seen: &Seen,
+    access: [RestoreAccess; PORT_COUNT],
     jobs: &[Option<PortJob>; PORT_COUNT],
     fetching: &[Option<(u32, u8)>; PORT_COUNT],
 ) -> [Option<PortReport>; PORT_COUNT] {
@@ -211,6 +212,7 @@ fn compose(
         *entry = seen[index].map(|(generation, observed)| PortReport {
             generation,
             observed,
+            restore_access: access[index],
             restore: jobs[index]
                 .as_ref()
                 .filter(|job| job.generation == generation)
@@ -225,6 +227,8 @@ fn compose(
 
 struct Shared {
     board: Board,
+    engine: crate::restore::RestoreEngine,
+    family: crate::batch::Device,
     session: u32,
     jobs: Jobs,
     models: Arc<Models>,
@@ -271,7 +275,23 @@ impl Shared {
             bail!("the board restarted");
         }
         view.uptime_ms = status.uptime_ms;
-        view.seen = view.observer.sample(&status, &snapshot);
+        let seen = view.observer.sample(&status, &snapshot);
+        let action = self.family.dfu_action();
+        view.access = Port::ALL.map(|port| {
+            let slot = &status.ports[port.index()];
+            if seen[port.index()] != Some((slot.generation, observe(&snapshot, port))) {
+                return RestoreAccess::Unavailable;
+            }
+            dfu::assess(
+                self.board.info().serial,
+                port,
+                &status,
+                &snapshot,
+                action,
+                None,
+            )
+            .restore_access(slot, action, |mode| self.engine.restores(mode))
+        });
         remember_models(&snapshot, &self.models);
         view.sample = Some((status, snapshot));
         Ok(())
@@ -279,7 +299,10 @@ impl Shared {
 
     /// Send the current view and jobs, renewing the session.
     fn send(&self) -> Result<(), Unsent> {
-        let seen = self.view.lock().unwrap().seen;
+        let (seen, access) = {
+            let view = self.view.lock().unwrap();
+            (view.observer.stable, view.access)
+        };
         let report = HostReport {
             serial: self.board.info().serial,
             session: HostSession {
@@ -289,6 +312,7 @@ impl Shared {
             },
             ports: compose(
                 &seen,
+                access,
                 &self.jobs.lock().unwrap(),
                 &self.fetching.lock().unwrap(),
             ),
@@ -397,11 +421,19 @@ pub struct Link {
 impl Link {
     /// Take the board's host session. The board refuses while another host
     /// holds it.
-    pub(crate) fn open(device: &DeviceInfo, jobs: Jobs, models: Arc<Models>) -> Result<Self> {
+    pub(crate) fn open(
+        device: &DeviceInfo,
+        jobs: Jobs,
+        models: Arc<Models>,
+        engine: &crate::restore::RestoreEngine,
+        family: crate::batch::Device,
+    ) -> Result<Self> {
         let board = Board::listen(device)?;
         let session = (RandomState::new().hash_one(board.info().serial) as u32).max(1);
         let shared = Arc::new(Shared {
             board,
+            engine: engine.clone(),
+            family,
             session,
             jobs,
             models,
@@ -460,11 +492,6 @@ impl Link {
                 .clone()
                 .unwrap_or_else(|| "host session lost".into())
         )
-    }
-
-    /// The ports as last sampled for the board.
-    pub fn seen(&self) -> Seen {
-        self.shared.view.lock().unwrap().seen
     }
 
     #[cfg(target_os = "macos")]
@@ -538,8 +565,6 @@ impl Link {
     pub(crate) fn board_view(
         &self,
         store: &crate::images::Store,
-        engine: &crate::restore::RestoreEngine,
-        family: crate::batch::Device,
     ) -> Option<crate::view::BoardView> {
         let view = self.shared.view.lock().unwrap();
         let (status, snapshot) = view.sample.as_ref()?;
@@ -551,8 +576,7 @@ impl Link {
             &crate::view::Host {
                 store,
                 models: &self.shared.models,
-                engine,
-                family,
+                family: self.shared.family,
             },
         );
         for (port, job) in board
@@ -696,7 +720,6 @@ mod tests {
         };
         let path = dir.path().join("device-models.json");
         let models = Models::open(path.clone());
-        let engine = crate::restore::RestoreEngine::for_host(Some("unused".into()), dir.path());
         let one = Port::ALL[0];
         // The board echoes each report and keeps the ECID it carried.
         let sample = |status: &mut Status, usb: &Snapshot, models: &Models| -> PortView {
@@ -712,7 +735,6 @@ mod tests {
                 &crate::view::Host {
                     store: &store,
                     models,
-                    engine: &engine,
                     family: Device::AppleSilicon,
                 },
             );
@@ -886,7 +908,7 @@ mod tests {
         jobs[1] = Some(on(2, RestorePhase::Running));
         // Nor is an image fetch begun for one.
         let fetching = [Some((3, 40)), Some((2, 40)), None, None, None];
-        let report = compose(&view, &jobs, &fetching);
+        let report = compose(&view, Default::default(), &jobs, &fetching);
         assert_eq!(report[0].unwrap().restore, Some(job(RestorePhase::Running)));
         assert_eq!(report[1].unwrap().restore, None);
         assert_eq!(report[0].unwrap().fetch, Some(40));

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 17;
+pub const VERSION: u16 = 18;
 pub const MAX_PACKET: usize = 1408;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
@@ -141,6 +141,7 @@ pub struct PortStatus {
     pub link: Option<Link>,
     /// What the host finds on this attachment's USB, while a host reports.
     pub observed: Option<Observed>,
+    pub restore_access: RestoreAccess,
     /// The target's ECID, once a host has read it on this attachment. The
     /// board keeps it until the attachment ends, through a target that stops
     /// answering on USB and a host that goes away.
@@ -351,12 +352,22 @@ impl PortStatus {
     /// DFU also needs DFU USB on the port: told to enter DFU from a port
     /// without it, a Mac restarts into DFU where no host can reach it.
     pub fn offers(&self, action: PortAction) -> bool {
+        if self.state != PortState::Contract {
+            return false;
+        }
         match (self.debug_actions, action.debug_action()) {
             (DebugActions::Listed(list), Some(id)) => {
                 list.contains(&id) && (action == PortAction::Reboot || list.contains(&DFU_USB))
             }
             _ => false,
         }
+    }
+
+    pub fn in_restorable_dfu(&self) -> bool {
+        self.restore_access == RestoreAccess::InDfu
+            && self.observed.is_some_and(|seen| {
+                seen.dfu() && seen.ecid.is_some_and(|id| id != 0 && Some(id) == self.ecid)
+            })
     }
 
     /// A restore is under way or its outcome is unknown.
@@ -417,6 +428,13 @@ pub struct RestoreArm {
 }
 
 impl RestoreArm {
+    pub fn prepared(&self, status: &Status) -> bool {
+        self.matches_targets(status)
+            && Port::ALL.into_iter().all(|p| {
+                self.ports & (1 << p.index()) == 0 || status.ports[p.index()].in_restorable_dfu()
+            })
+    }
+
     pub fn matches_targets(&self, status: &Status) -> bool {
         self.ports != 0
             && self.ports & status.ready_mask() == self.ports
@@ -444,11 +462,22 @@ pub struct HostSession {
     pub internet_sharing: bool,
 }
 
+/// How the session's host can prepare this attachment for restore.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum RestoreAccess {
+    #[default]
+    Unavailable,
+    EnterDfu,
+    InDfu,
+    WrongMacPort,
+}
+
 /// A host's view of one port, bound to the attachment it describes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PortReport {
     pub generation: u32,
     pub observed: Observed,
+    pub restore_access: RestoreAccess,
     pub restore: Option<RestoreStatus>,
     /// Percent of this target's restore image fetched so far.
     pub fetch: Option<u8>,
@@ -812,32 +841,39 @@ impl Status {
         mask
     }
 
-    /// Ready targets a button gesture reaches. DFU and reboot go only where
-    /// the target lists them. A restore request needs a host that can prepare
-    /// one and reaches every ready target, since the host may find one
-    /// already in DFU.
+    /// The ready attachments on which a gesture has a usable path.
     pub fn gesture_mask(&self, gesture: Gesture) -> u8 {
-        let action = match gesture {
-            Gesture::Dfu => PortAction::DfuAppleSilicon,
-            Gesture::Reboot => PortAction::Reboot,
-            Gesture::Restore if self.restore_session().is_some() => return self.ready_mask(),
-            Gesture::Restore => return 0,
-        };
         let mut mask = 0;
         for (i, port) in self.ports.iter().enumerate() {
-            mask |= u8::from(port.offers(action)) << i;
+            let offered = match gesture {
+                Gesture::Dfu => port.offers(PortAction::DfuAppleSilicon),
+                Gesture::Reboot => port.offers(PortAction::Reboot),
+                Gesture::Restore => {
+                    self.restore_session().is_some()
+                        && match port.restore_access {
+                            RestoreAccess::EnterDfu => {
+                                port.offers(PortAction::DfuAppleSilicon)
+                                    || port.offers(PortAction::DfuT2)
+                            }
+                            RestoreAccess::InDfu => port.in_restorable_dfu(),
+                            _ => false,
+                        }
+                }
+            };
+            mask |= u8::from(offered) << i;
         }
         mask & self.ready_mask()
     }
 
-    /// Ports with a stable PD contract eligible for a local action or a prepared erase.
+    /// Stable powered attachments available for an operation.
     pub fn ready_mask(&self) -> u8 {
         if self.i2c_root_fault || self.aggregate_power_fault {
             return 0;
         }
         let mut mask = 0;
         for (i, port) in self.ports.iter().enumerate() {
-            if port.state == PortState::Contract
+            if matches!(port.state, PortState::Ready | PortState::Contract)
+                && port.faults.is_none_or(|f| !f.power && !f.cc)
                 && !port.pd_transition
                 && port.error.is_none()
                 && port.command_result != CommandResult::Pending
@@ -1054,6 +1090,7 @@ mod tests {
                     phase: RestorePhase::Failed,
                     progress: 100,
                 }),
+                restore_access: RestoreAccess::InDfu,
                 observed: Some(Observed {
                     usb: Usb::Apple(AppleMode::KisDfu),
                     ecid: Some(u64::MAX),
@@ -1130,6 +1167,7 @@ mod tests {
             },
             ports: [Some(PortReport {
                 generation: u32::MAX,
+                restore_access: RestoreAccess::InDfu,
                 observed: Observed {
                     usb: Usb::Apple(AppleMode::KisDfu),
                     ecid: Some(u64::MAX),
@@ -1171,7 +1209,16 @@ mod tests {
             state: PortState::Ready,
             ..listed(&[0x0106, 0x0105])
         };
-        assert_eq!(status.ready_mask(), 0b01111);
+        status.ports[0].restore_access = RestoreAccess::EnterDfu;
+        status.ports[2].restore_access = RestoreAccess::WrongMacPort;
+        // A USB-only target entered DFU manually.
+        status.ports[4].restore_access = RestoreAccess::InDfu;
+        status.ports[4].observed = Some(Observed {
+            usb: Usb::Apple(AppleMode::Dfu),
+            ecid: Some(42),
+        });
+        status.ports[4].ecid = Some(42);
+        assert_eq!(status.ready_mask(), 0b11111);
         assert_eq!(status.gesture_mask(Gesture::Dfu), 0b00001);
         assert_eq!(status.gesture_mask(Gesture::Reboot), 0b00101);
         // A restore request needs a host that can prepare one.
@@ -1187,7 +1234,7 @@ mod tests {
             restore_ready: true,
             internet_sharing: false,
         });
-        assert_eq!(status.gesture_mask(Gesture::Restore), 0b01111);
+        assert_eq!(status.gesture_mask(Gesture::Restore), 0b10001);
         assert!(status.ports[0].offers(PortAction::DfuT2));
         assert!(!status.ports[2].offers(PortAction::DfuT2));
         assert!(!status.ports[0].offers(PortAction::Enable));
