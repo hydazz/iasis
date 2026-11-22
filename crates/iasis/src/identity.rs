@@ -305,6 +305,8 @@ mod tests {
             apple: AppleDevice::from_usb(0x05ac, pid, serial.as_deref()),
             #[cfg(target_os = "macos")]
             macos_attachment: None,
+            #[cfg(target_os = "linux")]
+            linux_device_address: 1,
         }
     }
 

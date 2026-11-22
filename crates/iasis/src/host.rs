@@ -77,6 +77,37 @@ pub fn observe(snapshot: &Snapshot, port: Port) -> Observed {
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn sharing_target(status: &Status, snapshot: &Snapshot, port: Port) -> Option<u64> {
+    let state = &status.ports[port.index()];
+    let device = dfu::direct_device(snapshot, port)?;
+    if !state.occupied() || device.vendor_id != 0x05ac {
+        return None;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // The Mac host only serves an existing public NCM interface.
+        Some(device.macos_attachment?.registry_entry_id)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // Linux may have to switch a booted device into its network configuration.
+        if state.restoring()
+            || !matches!(
+                device.apple.as_ref()?.mode,
+                AppleMode::Mux | AppleMode::Normal
+            )
+        {
+            return None;
+        }
+        topology::linux_usb_id(
+            device.topology.bus.parse().ok()?,
+            device.linux_device_address,
+            &device.topology.port_chain,
+        )
+    }
+}
+
 fn appears_elsewhere(snapshot: &Snapshot, port: Port, ecid: u64) -> bool {
     snapshot
         .ports
@@ -127,6 +158,8 @@ struct Enumeration {
     serial_number: Option<String>,
     #[cfg(target_os = "macos")]
     registry_entry_id: Option<u64>,
+    #[cfg(target_os = "linux")]
+    device_address: u8,
 }
 
 impl From<&UsbDevice> for Enumeration {
@@ -139,6 +172,8 @@ impl From<&UsbDevice> for Enumeration {
             registry_entry_id: device
                 .macos_attachment
                 .map(|attachment| attachment.registry_entry_id),
+            #[cfg(target_os = "linux")]
+            device_address: device.linux_device_address,
         }
     }
 }
@@ -497,19 +532,15 @@ impl Link {
         )
     }
 
-    #[cfg(target_os = "macos")]
-    pub(crate) fn sharing_targets(&self) -> Vec<(Port, topology::MacAttachment)> {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub(crate) fn sharing_targets(&self) -> Vec<(Port, u64)> {
         let view = self.shared.view.lock().unwrap();
         let Some((status, snapshot)) = &view.sample else {
             return Vec::new();
         };
         Port::ALL
             .into_iter()
-            .filter(|port| status.ports[port.index()].occupied())
-            .filter_map(|port| {
-                let device = dfu::direct_device(snapshot, port)?;
-                (device.vendor_id == 0x05ac).then_some((port, device.macos_attachment?))
-            })
+            .filter_map(|port| Some((port, sharing_target(status, snapshot, port)?)))
             .collect()
     }
 
@@ -693,6 +724,8 @@ mod tests {
             apple: AppleDevice::from_usb(vendor, product, serial.as_deref()),
             #[cfg(target_os = "macos")]
             macos_attachment: None,
+            #[cfg(target_os = "linux")]
+            linux_device_address: 1,
         }
     }
 
@@ -706,6 +739,39 @@ mod tests {
             }
         }
         status
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sharing_prepares_only_booted_candidates_directly_on_an_idle_occupied_port() {
+        let port = Port::ALL[0];
+        let mut status = attached([Some(6), None, None, None, None]);
+        let mut usb = snapshot();
+        usb.ports[0]
+            .devices
+            .push(device(port, 0x05ac, 0x12ab, None));
+        let expected = topology::linux_usb_id(1, 1, &[3, 1]).unwrap();
+        assert_eq!(sharing_target(&status, &usb, port), Some(expected));
+        let apple = usb.ports[0].devices[0].apple.as_mut().unwrap();
+        apple.mode = AppleMode::Restored;
+        assert_eq!(sharing_target(&status, &usb, port), None);
+        usb.ports[0].devices[0].apple.as_mut().unwrap().mode = AppleMode::Normal;
+        status.ports[0].restore = Some(RestoreStatus {
+            ecid: 42,
+            phase: RestorePhase::Running,
+            progress: 0,
+        });
+        assert_eq!(sharing_target(&status, &usb, port), None);
+        status.ports[0].restore = None;
+        usb.ports[0].devices[0].topology.port_chain.push(2);
+        assert_eq!(sharing_target(&status, &usb, port), None);
+        usb.ports[0].devices[0] = device(port, 0x05ac, 0x1905, None);
+        assert_eq!(sharing_target(&Status::default(), &usb, port), None);
+        assert_eq!(sharing_target(&status, &usb, port), Some(expected));
+        for product in [0x1227, 0x1281, 0x1881, 0xffff] {
+            usb.ports[0].devices[0] = device(port, 0x05ac, product, None);
+            assert_eq!(sharing_target(&status, &usb, port), None);
+        }
     }
 
     #[test]
