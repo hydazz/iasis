@@ -61,10 +61,12 @@ pub enum Error {
     #[error("settings storage is full; unplug targets briefly, then retry")]
     SettingsFull,
     #[error(
-        "board firmware speaks protocol {board} and this tool protocol {}; update one to match the other",
-        protocol::VERSION
+        "IasisOS on this board and these tools are from different builds; update one to match the other"
     )]
-    Firmware { board: u16 },
+    Firmware {
+        /// The protocol version the board speaks.
+        board: u16,
+    },
 }
 
 #[derive(Clone, Copy, Debug)]
