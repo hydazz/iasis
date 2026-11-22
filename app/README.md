@@ -24,9 +24,9 @@ Select rows and use the toolbar, the Device menu or a row's context menu:
 
 Restore is unavailable while any selected device cannot be restored. A Mac whose DFU is on Apple Debug USB needs Apple Configurator on this Mac.
 
-A board on a power supply shows, beside its name, the power its devices have agreed out of what the supply has for them. A bolt with a warning marks a device that took the largest offer the board could make and would use more: with several devices sharing a supply, one with a flat battery may get too little to start.
+A board on a power supply shows, beside its name, the power allocated to its ports out of the available charging budget. A bolt with a warning marks a device that took the largest offer the board could make and would use more: with several devices sharing a supply, one with a flat battery may get too little to start.
 
-Double-click a row, or show the inspector, for the device's model and ECID, its USB mode, link and power contract, and the last operation with its log folder. The bar under the list reports an image download, or why restores are unavailable.
+Double-click a row, or show the inspector, for the device's model and ECID, its USB mode, link, power allocation and any PD contract, and the last operation with its log folder. The bar under the list reports an image download, or why restores are unavailable.
 
 ## Settings and Help
 

@@ -42,6 +42,9 @@ struct DeviceInspector: View {
                         if !device.port.link.isEmpty {
                             LabeledContent("USB link", value: device.port.link)
                         }
+                        if device.port.allocatedMw > 0 {
+                            LabeledContent("Power allocation", value: "\(wholeWatts(device.port.allocatedMw)) W")
+                        }
                         if let watts = device.watts {
                             LabeledContent("PD contract", value: "\(device.port.contract) (\(watts))")
                         }

@@ -49,6 +49,7 @@ nonisolated struct AgentState: Decodable, Equatable {
         var link: String
         var contract: String
         /// The contract's power, in milliwatts.
+        var allocatedMw: Int
         var contractMw: Int?
         /// The target took the largest offer its board could make and would
         /// use more.

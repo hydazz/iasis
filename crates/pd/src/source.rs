@@ -53,6 +53,22 @@ fn supports_voltage(mv: u16, input_mv: u16) -> bool {
     }
 }
 
+/// Shared budget that funds the port's largest profile on this input.
+pub fn max_port_cost_mw(input_mv: u16) -> u32 {
+    RAILS_MV
+        .into_iter()
+        .rev()
+        .find(|&mv| supports_voltage(mv, input_mv))
+        .map_or(0, |millivolts| {
+            Contract {
+                millivolts,
+                operating_ma: 3000,
+                limit_ma: 3000,
+            }
+            .cost_mw()
+        })
+}
+
 /// Converter limit for a contract: 10 mΩ shunt, 50 mA register steps and
 /// 250 mA of headroom above the agreed current.
 pub const fn nominal_limit_ma(ma: u16) -> u16 {

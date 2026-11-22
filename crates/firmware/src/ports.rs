@@ -65,8 +65,6 @@ const STAGE_REST: Duration = Duration::from_millis(250);
 /// New offers are sent once they have held, and the sink has been silent,
 /// for this long.
 const OFFER_SETTLE: Duration = Duration::from_secs(1);
-/// tNoResponse: a sink silent for this long holds only the USB default.
-const NO_RESPONSE: Duration = Duration::from_secs(5);
 /// A target is asked for its debug actions this many times before it counts
 /// as silent, once its contract has held for OFFER_SETTLE.
 const ACTION_ASKS: u8 = 3;
@@ -122,11 +120,16 @@ impl Shared {
 
     fn snapshot(&self) -> PortStatus {
         let status = self.status.get();
+        let grant = self.grant.get();
         let view = self
             .observed
             .get()
             .filter(|(generation, _, _)| *generation == status.generation);
         PortStatus {
+            allocated_mw: self
+                .demand
+                .get()
+                .allocated_mw(grant.supply == Supply::Brick && grant.budget_mw > 0),
             vbus_adc: self.vbus.get(),
             faults: self.pins.get(),
             link: self.link.get(),
@@ -142,6 +145,7 @@ impl Shared {
 /// The board's side of the ports: measurements in, grants in, status out.
 pub struct Ports {
     ports: [Shared; PORT_COUNT],
+    last_offer_update: Cell<Instant>,
 }
 
 impl Ports {
@@ -150,7 +154,10 @@ impl Ports {
         for port in &ports {
             port.update(|status| status.enabled = true);
         }
-        Self { ports }
+        Self {
+            ports,
+            last_offer_update: Cell::new(Instant::MIN),
+        }
     }
 
     pub fn sample(&self, index: usize, vbus: Option<u16>, pins: PortFaults) {
@@ -323,6 +330,7 @@ impl Ports {
     pub async fn run(&self, io: &SharedIo, index: usize, mut int: Input<'static>) -> ! {
         let port = Port {
             shared: &self.ports[index],
+            last_offer_update: &self.last_offer_update,
             io,
             index,
             phy: Phy::new(io, index),
@@ -330,11 +338,10 @@ impl Ports {
             contract: Cell::new(None),
             enforced: Cell::new(Contract::USB_DEFAULT),
             pending: Cell::new(None),
+            first_offer_mw: Cell::new(0),
             lowering: Cell::new(None),
             offers: Cell::new([0; 4]),
             sink: Cell::new(SinkDemand::default()),
-            listening: Cell::new(Instant::MIN),
-            silent: Cell::new(false),
             rejected: Cell::new(0),
             asks: Cell::new(0),
             quiet: Cell::new(Instant::MIN),
@@ -401,6 +408,7 @@ impl usbpd::timers::Timer for Clock {
 
 struct Port<'a> {
     shared: &'a Shared,
+    last_offer_update: &'a Cell<Instant>,
     io: &'a SharedIo,
     index: usize,
     phy: Phy<'a>,
@@ -412,14 +420,11 @@ struct Port<'a> {
     enforced: Cell<Contract>,
     /// An accepted request and its RDO, reserved until PS_RDY.
     pending: Cell<Option<(Contract, u32)>>,
+    first_offer_mw: Cell<u32>,
     lowering: Cell<Option<(Instant, Contract)>>,
     /// The capabilities last given to the PD engine.
     offers: Cell<[u32; 4]>,
     sink: Cell<SinkDemand>,
-    /// When the port began waiting for a sink's first request.
-    listening: Cell<Instant>,
-    /// No request arrived within NO_RESPONSE.
-    silent: Cell<bool>,
     rejected: Cell<u16>,
     /// Asks left for the target's debug actions.
     asks: Cell<u8>,
@@ -505,11 +510,12 @@ impl Port<'_> {
         }
     }
 
-    /// Begin waiting for a sink's first request. What an earlier contract
-    /// learned about the target no longer holds.
-    fn listen(&self) {
-        self.listening.set(Instant::now());
-        self.silent.set(false);
+    fn advertise(&self, offers: [u32; 4]) {
+        self.offers.set(offers);
+        self.update(|status| status.pd_source_pdos = offers);
+    }
+
+    fn reset_debug_discovery(&self) {
         self.asks.set(ACTION_ASKS);
         self.update(|status| status.debug_actions = DebugActions::Pending);
     }
@@ -526,10 +532,9 @@ impl Port<'_> {
             attached,
             active: on_brick.then(|| self.enforced.get()),
             pending: self.pending.get().filter(|_| on_brick).map(|(c, _)| c),
+            first_offer_mw: self.first_offer_mw.get(),
             demand: if on_brick && self.contract.get().is_some() {
                 self.sink.get().state()
-            } else if self.silent.get() {
-                power::DemandState::Satisfied
             } else {
                 power::DemandState::Unknown
             },
@@ -685,12 +690,10 @@ impl Port<'_> {
                 return Err(PortError::Voltage);
             }
         }
-        let offers = self.current_offers();
-        self.offers.set(offers);
-        self.listen();
+        self.advertise(self.current_offers());
+        self.reset_debug_discovery();
         self.update(|status| {
             status.state = PortState::Ready;
-            status.pd_source_pdos = offers;
             status.error = None;
             status.fault_sample = None;
         });
@@ -701,7 +704,11 @@ impl Port<'_> {
             accepted: false,
             candidate: None,
         };
-        let mut source = Source::<_, Clock, _>::new(PdPhy(&self.phy), policy, false);
+        let driver = PdPhy {
+            phy: &self.phy,
+            first_offer_mw: &self.first_offer_mw,
+        };
+        let mut source = Source::<_, Clock, _>::new(driver, policy, false);
         match select3(source.run(), self.supervise(), self.phy.run(int)).await {
             // The engine ends when the sink stops answering or the supply
             // could not follow a request.
@@ -727,13 +734,6 @@ impl Port<'_> {
                 return Ok(());
             }
             let now = Instant::now();
-            if !self.silent.get()
-                && self.contract.get().is_none()
-                && now - self.listening.get() >= NO_RESPONSE
-            {
-                self.silent.set(true);
-                self.publish();
-            }
             let transition = self.status().pd_transition;
             if !self.phy.cc_open() {
                 open_since = None;
@@ -959,9 +959,10 @@ impl Port<'_> {
     /// Hard reset: VBUS to vSafe0V, tSrcRecover, then vSafe5V.
     async fn power_cycle(&self) -> Result<(), PortError> {
         self.contract.set(None);
+        self.first_offer_mw.set(0);
         self.lowering.set(None);
         self.sink.set(SinkDemand::default());
-        self.listen();
+        self.reset_debug_discovery();
         self.update(|status| {
             status.pd_transition = true;
             status.state = PortState::Ready;
@@ -1060,6 +1061,7 @@ impl Port<'_> {
 
         self.contract.set(None);
         self.pending.set(None);
+        self.first_offer_mw.set(0);
         self.lowering.set(None);
         self.sink.set(SinkDemand::default());
         self.fault.set(None);
@@ -1193,17 +1195,28 @@ struct Policy<'a, 'p> {
 
 impl DevicePolicyManager for Policy<'_, '_> {
     fn source_capabilities(&mut self) -> SourceCapabilities {
-        // Without a contract there is no request to cross, so each
-        // advertisement carries the present offers.
-        let offers = self.port.current_offers();
-        if self.port.contract.get().is_none() && offers[0] != 0 {
-            self.port.offers.set(offers);
-            self.port.update(|status| status.pd_source_pdos = offers);
+        // Discovery retries may use the latest budget until GoodCRC. The
+        // engine then reads the same capabilities again to decode the Request.
+        if self.port.contract.get().is_none() && self.port.first_offer_mw.get() == 0 {
+            let offers = self.port.current_offers();
+            if offers[0] != 0 {
+                if self.port.supply.get() == Supply::Brick {
+                    let grant = self.port.shared.grant.get();
+                    self.port.first_offer_mw.set(
+                        grant
+                            .budget_mw
+                            .min(iasis_pd::max_port_cost_mw(grant.input_mv)),
+                    );
+                    self.port.publish();
+                }
+                self.port.advertise(offers);
+            }
         }
         iasis_pd::capabilities(&self.port.offers.get())
     }
 
     async fn evaluate_request(&mut self, request: &PowerSource) -> CapabilityResponse {
+        self.port.first_offer_mw.set(0);
         let PowerSource::FixedVariableSupply(request) = request else {
             return CapabilityResponse::Reject;
         };
@@ -1222,6 +1235,7 @@ impl DevicePolicyManager for Policy<'_, '_> {
         // Without an accepted request the engine is settling a sink that
         // never negotiated, already at vSafe5V.
         if !core::mem::take(&mut self.accepted) {
+            self.port.first_offer_mw.set(0);
             return Ok(());
         }
         let moved = self.port.transition().await;
@@ -1246,16 +1260,25 @@ impl DevicePolicyManager for Policy<'_, '_> {
             let offers = self.port.current_offers();
             if offers == self.port.offers.get() || offers[0] == 0 {
                 self.candidate = None;
+            } else if self.port.contract.get().is_none() {
+                // The engine is waiting for a replacement after a first Request
+                // the current budget could no longer fund.
+                self.candidate = None;
+                self.port.advertise(offers);
+                return Event::UpdatedSourceCapabilities;
             } else if self.candidate.is_none_or(|(held, _)| held != offers) {
                 self.candidate = Some((offers, Instant::now()));
             } else if self
                 .candidate
                 .is_some_and(|(_, since)| since.elapsed() >= OFFER_SETTLE)
                 && self.port.quiet.get().elapsed() >= OFFER_SETTLE
+                && self.port.last_offer_update.get().elapsed() >= OFFER_SETTLE
             {
+                // A sink can change voltage even for a current-only update.
+                // Space unsolicited renegotiations across the shared input.
+                self.port.last_offer_update.set(Instant::now());
                 self.candidate = None;
-                self.port.offers.set(offers);
-                self.port.update(|status| status.pd_source_pdos = offers);
+                self.port.advertise(offers);
                 return Event::UpdatedSourceCapabilities;
             }
             Timer::after_millis(10).await;
