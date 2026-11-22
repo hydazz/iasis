@@ -8,7 +8,7 @@ struct MenuTests {
         let state = try Fixtures.state
         let agent = FakeAgent(reports: [state])
         let model = AgentModel(agent: agent)
-        let menu = NSHostingMenu(rootView: DeviceActionButtons(actions: DeviceActions([state.devices[1]], restoreProblem: nil)) {
+        let menu = NSHostingMenu(rootView: DeviceActionButtons(actions: DeviceActions([state.devices[1]])) {
             model.perform($0)
         } restore: { _ in })
         menu.update()

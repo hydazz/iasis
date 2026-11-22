@@ -22,7 +22,6 @@ struct AgentMessagesTests {
         #expect(state.images.models.first?.latest?.build == "24B156")
         let fraction = try #require(state.images.fetch?.fraction)
         #expect(abs(fraction - 0.43) < 0.001)
-        #expect(state.restoreProblem == nil)
         #expect(state.sharing.enabled)
         #expect(state.sharing.ports[0] == .init(board: board.serial, port: 3, active: true))
     }
@@ -50,7 +49,10 @@ struct AgentMessagesTests {
             .restore(boards: [.init(board: "a0e0", session: 77, targets: [.init(port: 2, generation: 4), .init(port: 3, generation: 1, ecid: "0014692221e0801e")])]),
             #"{"boards":[{"board":"a0e0","session":77,"targets":[{"generation":4,"port":2},{"ecid":"0014692221e0801e","generation":1,"port":3}]}],"op":"restore"}"#
         ),
-        (.revive(board: "a0e0", session: 77, port: 2, generation: 4, ecid: "0014692221e0801e"), #"{"board":"a0e0","ecid":"0014692221e0801e","generation":4,"op":"revive","port":2,"session":77}"#),
+        (
+            .revive(boards: [.init(board: "a0e0", session: 77, targets: [.init(port: 2, generation: 4)])]),
+            #"{"boards":[{"board":"a0e0","session":77,"targets":[{"generation":4,"port":2}]}],"op":"revive"}"#
+        ),
         (.dfu(board: "a0e0", port: 2), #"{"board":"a0e0","op":"dfu","port":2}"#),
         (.power(board: "a0e0", port: 1, on: false), #"{"board":"a0e0","on":false,"op":"power","port":1}"#),
         (.sharing(enabled: true), #"{"enabled":true,"op":"sharing"}"#),

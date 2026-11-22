@@ -78,7 +78,7 @@ depends = [
 run = ["mise fmt --check", "oxfmt --check"]
 
 [tasks."host:build"]
-description = "Build the Iasis CLI and restore listener"
+description = "Build the Iasis host tools"
 run = "cargo build --locked --release -p iasis"
 
 [tasks."firmware:build"]
