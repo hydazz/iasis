@@ -37,6 +37,14 @@ use iasis_protocol::{self as protocol, Info, PortFaults, Status, Supply};
 
 include!(concat!(env!("OUT_DIR"), "/config.rs"));
 
+/// What `picotool info` reports for the image.
+#[unsafe(link_section = ".bi_entries")]
+#[used]
+static PICOTOOL_ENTRIES: [embassy_rp::binary_info::EntryAddr; 2] = [
+    embassy_rp::binary_info::rp_program_name!(c"IasisOS"),
+    embassy_rp::binary_info::rp_cargo_version!(),
+];
+
 const FLASH_BYTES: usize = 2 * 1024 * 1024;
 type SettingsStore =
     iasis_firmware::settings::Store<Flash<'static, peripherals::FLASH, Blocking, FLASH_BYTES>>;

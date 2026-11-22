@@ -14,10 +14,23 @@ SECTIONS
   {
     __start_block_addr = .;
     KEEP(*(.start_block));
+    KEEP(*(.boot_info));
   } > FLASH
 } INSERT AFTER .vector_table;
 
 _stext = ALIGN(ADDR(.start_block) + SIZEOF(.start_block), ALIGNOF(.text));
+
+/* The name and version picotool reads, found through .boot_info. */
+SECTIONS
+{
+  .bi_entries : ALIGN(4)
+  {
+    __bi_entries_start = .;
+    KEEP(*(.bi_entries));
+    . = ALIGN(4);
+    __bi_entries_end = .;
+  } > FLASH
+} INSERT AFTER .text;
 
 SECTIONS
 {
