@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 16;
-pub const MAX_PACKET: usize = 1344;
+pub const VERSION: u16 = 17;
+pub const MAX_PACKET: usize = 1408;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
 pub const GET_STATUS: u8 = 2;
@@ -118,6 +118,8 @@ pub struct PortStatus {
     pub restore: Option<RestoreStatus>,
     pub pd_source_pdos: [u32; 4],
     pub pd_request: Option<u32>,
+    /// Brick capacity committed to this port, including voltage tolerance.
+    pub allocated_mw: u32,
     pub contract_mv: u16,
     pub contract_ma: u16,
     pub pd_transition: bool,
@@ -354,12 +356,6 @@ impl PortStatus {
             }
             _ => false,
         }
-    }
-
-    /// The target answers Apple debug on a port without DFU USB, as a Mac
-    /// does on every port but its DFU port.
-    pub fn wrong_port(&self) -> bool {
-        matches!(self.debug_actions, DebugActions::Listed(list) if !list.contains(&DFU_USB))
     }
 
     /// A restore is under way or its outcome is unknown.
@@ -787,6 +783,10 @@ pub struct Status {
 }
 
 impl Status {
+    pub fn allocated_mw(&self) -> u32 {
+        self.ports.iter().map(|port| port.allocated_mw).sum()
+    }
+
     /// The session a restore request goes to: a host that can prepare one.
     pub fn restore_session(&self) -> Option<u32> {
         self.host
@@ -1018,6 +1018,7 @@ mod tests {
                 supply: Supply::Brick,
                 pd_source_pdos: [u32::MAX; 4],
                 pd_request: Some(u32::MAX),
+                allocated_mw: u32::MAX,
                 contract_mv: u16::MAX,
                 contract_ma: u16::MAX,
                 pd_transition: true,
