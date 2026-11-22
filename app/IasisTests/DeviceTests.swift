@@ -22,7 +22,7 @@ struct DeviceTests {
         var state = try Fixtures.state
         let devices = state.devices
         #expect(devices.map(\.port.number) == [1, 2, 3, 4, 5])
-        #expect(devices.map(\.name) == ["Empty", "MacBook Air (13-inch, M5)", "iPad", "USB Device", "Attached Device"])
+        #expect(devices.map(\.name) == ["Empty", "MacBook Air (13-inch, M5)", "iPad", "Unknown Device", "Unknown Device"])
         #expect(devices.map(\.isSelectable) == [false, true, true, true, true])
         #expect(devices[1].symbol == "laptopcomputer")
         #expect(devices[0].symbol == nil)
@@ -41,13 +41,28 @@ struct DeviceTests {
     @Test func aPeripheralWithNoAppleModeIsAnOrdinaryDevice() throws {
         var state = try Fixtures.state
         state.boards[0].ports[0].occupied = true
-        state.boards[0].ports[0].state = "attached"
-        #expect(state.devices[0].name == "Attached Device")
-        state.boards[0].ports[0].state = "connected"
-        #expect(state.devices[0].name == "USB Device")
+        state.boards[0].ports[0].identifying = true
+        #expect(state.devices[0].name == "Identifying…")
+        state.boards[0].ports[0].identifying = false
+        #expect(state.devices[0].name == "Unknown Device")
+        state.boards[0].ports[0].link = .usb2
+        #expect(state.devices[0].name == "Unknown Device")
         state.boards[0].ports[0].device = "USB JTAG/serial debug unit"
         #expect(state.devices[0].name == "USB JTAG/serial debug unit")
         #expect(state.devices[0].activity == .idle)
+    }
+
+    @Test func precisePowerReadingsDistinguishAnAllowanceFromAContract() {
+        let usb = AgentState.PortPower(source: .usb, millivolts: 5000, milliamps: 900)
+        #expect(usb.title == "USB Power")
+        #expect(usb.reading == "5 V 900 mA (4.5 W)")
+        var pd = AgentState.PortPower(source: .pd, millivolts: 20000, milliamps: 780)
+        #expect(pd.title == "PD Contract")
+        #expect(pd.reading == "20 V 780 mA (15.6 W)")
+        pd.milliamps = 2250
+        #expect(pd.reading == "20 V 2.25 A (45 W)")
+        pd.milliamps = 0
+        #expect(pd.reading == "20 V 0 A (0 W)")
     }
 
     @Test func aPortSaysWhatItIsDoingInWordsAndOneMark() throws {
@@ -55,25 +70,20 @@ struct DeviceTests {
         let activity = { (state: AgentState, port: Int) in state.devices[port - 1].activity }
         #expect(activity(state, 1) == .idle)
         #expect(activity(state, 2) == Activity("DFU", .none))
-        #expect(activity(state, 3) == Activity("Sending filesystem 43%", .working(0.43)))
+        #expect(activity(state, 3) == Activity("Sending Filesystem 43%", .working(0.43)))
         #expect(activity(state, 5) == Activity("Protection tripped", .failed))
-        #expect(state.devices[2].watts == "15 W")
-        #expect(state.devices[0].watts == nil)
+        state.boards[0].ports[4].enabled = false
+        #expect(activity(state, 5) == Activity("Protection tripped", .failed))
 
-        // A result describes the device it was for, while that device stays.
-        #expect(activity(state, 4) == .idle)
-        state.boards[0].ports[3].ecid = "0002250e3c04c01e"
-        #expect(activity(state, 4) == Activity("Restore complete", .done))
+        #expect(activity(state, 4) == Activity("Restore Complete", .done))
         state.boards[0].ports[3].result?.phase = .failed
-        #expect(activity(state, 4) == Activity("Restore failed", .failed))
-        state.boards[0].ports[3].ecid = "0000000000001234"
+        #expect(activity(state, 4) == Activity("Restore Failed", .failed))
+        state.boards[0].ports[3].result = nil
         #expect(activity(state, 4) == .idle)
-        state.boards[0].ports[3].occupied = false
-        #expect(state.devices[3].result == nil)
 
         state.boards[0].ports[1].mode = nil
         #expect(activity(state, 2) == .idle)
-        state.boards[0].ports[1].state = "reboot sent"
+        state.boards[0].ports[1].request = .restarting
         #expect(activity(state, 2) == Activity("Restarting", .working(nil)))
     }
 
@@ -91,10 +101,10 @@ struct DeviceTests {
         let confirmation = try #require(actions.restore)
         #expect(confirmation.title == "Restore 4 Devices?")
         #expect(confirmation.message.contains("Repair Bench, Port 2: MacBook Air (13-inch, M5)"))
-        #expect(confirmation.message.contains("Cart, Port 4: USB Device"))
+        #expect(confirmation.message.contains("Cart, Port 4: Unknown Device"))
         let targets = [
             RestoreTarget(port: 2, generation: 2, ecid: "001a79d10e6bc01c"),
-            RestoreTarget(port: 4, generation: 4),
+            RestoreTarget(port: 4, generation: 4, ecid: "0002250e3c04c01e"),
         ]
         #expect(confirmation.request == .restore(boards: [
             RestoreSelection(board: "a0e012192cdfdb67", session: 77, targets: targets),

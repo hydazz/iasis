@@ -3,26 +3,29 @@ import SwiftUI
 @main
 struct IasisApp: App {
     @NSApplicationDelegateAdaptor private var delegate: AppDelegate
-    @State private var model: AgentModel
+    @State private var browser: DeviceBrowser
+    private var model: AgentModel {
+        browser.model
+    }
 
     init() {
         let model = AgentModel(agent: AgentClient())
         model.start()
-        _model = State(initialValue: model)
+        _browser = State(initialValue: DeviceBrowser(model: model))
     }
 
     var body: some Scene {
         MenuBarExtra {
-            StatusMenu(model: model)
+            StatusMenu(browser: browser)
         } label: {
-            MenuBarLabel(status: model.menu.status, delegate: delegate)
+            MenuBarLabel(status: MenuBarStatus(model.state), delegate: delegate)
         }
         .menuBarExtraStyle(.menu)
 
         Window("Iasis", id: DevicesView.windowID) {
-            DevicesView(model: model)
+            DevicesView(browser: browser)
         }
-        .defaultSize(width: 540, height: 440)
+        .defaultSize(width: 720, height: 414)
         .defaultLaunchBehavior(AppDelegate.launchedInBackground ? .suppressed : .presented)
         .restorationBehavior(.disabled)
         .commands {

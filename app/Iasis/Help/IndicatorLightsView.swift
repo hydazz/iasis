@@ -25,11 +25,11 @@ struct IndicatorLightsView: View {
                     light(.white, "White", "No power contract. Dim while connecting.")
                     light(.green, "Green", "Device has a power contract or restore complete")
                     light(.blue, "Blue", "Host sees DFU or Recovery")
-                    light(.blue, "Pulsing blue", "DFU requested, waiting for the host", .pulse)
+                    light(.blue, "Pulsing Blue", "DFU requested, waiting for the host", .pulse)
                     light(.orange, "Amber", "Waiting for power")
-                    light(.orange, "Pulsing amber", "Restart requested", .pulse)
+                    light(.orange, "Pulsing Amber", "Restart requested", .pulse)
                     light(.purple, "Purple", "Restore outcome unknown. Check the host.")
-                    light(.purple, "Pulsing purple", "Fetching an image or restoring", .pulse)
+                    light(.purple, "Pulsing Purple", "Fetching an image or restoring", .pulse)
                     light(.red, "Red", "Port fault or restore failed")
                 case .status:
                     light(.white, "White", "Board running on its own")
@@ -37,7 +37,7 @@ struct IndicatorLightsView: View {
                     light(.blue, "Blue", "Release the button to enter DFU")
                     light(.orange, "Amber", "Release the button to restart")
                     light(.purple, "Purple", "Release the button to request a restore")
-                    light(.purple, "Blinking purple", "Hold to confirm erasing or tap to cancel.", .blink)
+                    light(.purple, "Blinking Purple", "Hold to confirm erasing or tap to cancel.", .blink)
                     light(.red, "Red", "Shared power protection or I²C fault. The target ports are off. This can flash briefly when the charging supply is unplugged.")
                 }
             }

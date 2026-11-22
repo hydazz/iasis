@@ -303,7 +303,7 @@ impl Agent {
                             for (port, ending) in view.ports.iter_mut().zip(endings.iter()) {
                                 if let Some(work) = ending {
                                     if let Some(result) = work.get() {
-                                        port.result = Some(result.clone());
+                                        port.attach_result(view.session, result);
                                     } else {
                                         port.restore = false;
                                         port.revive = false;
@@ -751,6 +751,7 @@ mod socket {
         }];
         let submitted = batch::reserve(&slots, &selection).unwrap();
         let result = Ending {
+            attachment: None,
             operation: Operation::Restore,
             ecid: Some("000000000000002a".into()),
             phase: RestorePhase::Failed,
