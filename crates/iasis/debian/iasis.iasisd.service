@@ -17,9 +17,6 @@ RuntimeDirectoryMode=0750
 # exchanges its frames.
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
-# Each restore runs in a worker process that finishes its device when the
-# agent stops; the gateways end with the agent.
-KillMode=process
 Restart=on-failure
 
 [Install]
