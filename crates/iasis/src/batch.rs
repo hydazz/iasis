@@ -8,7 +8,6 @@ use std::{
 
 use crate::{
     Board,
-    agent::Target,
     dfu::{self, Attempt, Outcome, Signal},
     home::Home,
     host::{Jobs, Link, PortJob},
@@ -23,6 +22,7 @@ use crate::{
 };
 use anyhow::{Context, Result, bail, ensure};
 use clap::Args;
+use iasis_api::{Ending, Target};
 use iasis_protocol::{
     self as protocol, Gesture, Port, PortAction, PortState, RestoreArm, RestoreDecision,
     RestorePhase, RestoreStatus, Status,
@@ -95,22 +95,19 @@ pub struct Submission {
 /// A client's request waiting for the board's attendant.
 pub type Requests = Arc<Mutex<Option<Submission>>>;
 
-/// How a port's last restore ended. The board forgets a result when its
+/// How a port's last operation ended. The board forgets a result when its
 /// target leaves, which a restored target does by restarting.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct Ending {
-    /// Preparation can fail before the target supplies an ECID.
-    #[serde(skip)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Ended {
+    /// The session and generation of the attachment it was tried on, for an
+    /// operation that ended before a worker ran. Its result describes that
+    /// attachment alone, not the device when it comes back.
     pub(crate) attachment: Option<(u32, u32)>,
-    pub operation: Operation,
-    pub log_directory: Option<PathBuf>,
-    pub ecid: Option<String>,
-    pub phase: RestorePhase,
-    pub message: String,
+    pub ending: Ending,
 }
 
 /// The port and its submitting client share this operation's result across USB sessions.
-pub type PortWork = Arc<OnceLock<Ending>>;
+pub type PortWork = Arc<OnceLock<Ended>>;
 pub type Endings = Arc<Mutex<[Option<PortWork>; protocol::PORT_COUNT]>>;
 
 pub(crate) fn reserve(endings: &Endings, selected: &[Target]) -> Result<Vec<PortWork>> {
@@ -134,9 +131,9 @@ pub(crate) fn reserve(endings: &Endings, selected: &[Target]) -> Result<Vec<Port
         .collect())
 }
 
-fn finish(endings: &Endings, changes: &Watch, port: Port, ending: Ending) {
+fn finish(endings: &Endings, changes: &Watch, port: Port, ended: Ended) {
     if let Some(work) = &endings.lock().unwrap()[port.index()] {
-        let _ = work.set(ending);
+        let _ = work.set(ended);
     }
     changes.changed();
 }
@@ -316,13 +313,22 @@ pub fn listen(
                     endings,
                     link.changes(),
                     target.port,
-                    Ending {
-                        attachment: Some((link.session(), target.generation)),
-                        operation,
-                        ecid: target.ecid.map(|id| format!("{id:016x}")),
-                        log_directory: None,
-                        phase: RestorePhase::Failed,
-                        message: format!("{error:#}"),
+                    Ended {
+                        // The attachment the target is on now, which entering DFU or
+                        // recovery changes.
+                        attachment: Some((
+                            link.session(),
+                            link.status().map_or(target.generation, |status| {
+                                status.ports[target.port.index()].generation
+                            }),
+                        )),
+                        ending: Ending {
+                            operation,
+                            ecid: target.ecid.map(|id| format!("{id:016x}")),
+                            log_directory: None,
+                            phase: RestorePhase::Failed,
+                            message: format!("{error:#}"),
+                        },
                     },
                 );
             }
@@ -568,13 +574,15 @@ fn monitor(link: &Link, running: Running, endings: &Endings) -> Result<()> {
                     endings,
                     changes,
                     target.port,
-                    Ending {
+                    Ended {
                         attachment: None,
-                        operation: job.operation,
-                        log_directory: Some(job.directory.clone()),
-                        ecid: Some(format!("{:016x}", job.ecid)),
-                        phase,
-                        message: job.message.clone(),
+                        ending: Ending {
+                            operation: job.operation,
+                            log_directory: Some(job.directory.clone()),
+                            ecid: Some(format!("{:016x}", job.ecid)),
+                            phase,
+                            message: job.message.clone(),
+                        },
                     },
                 );
             }
@@ -632,6 +640,8 @@ fn select_ports(ports: &[Port], status: &Status) -> Result<Vec<Target>> {
     Ok(selected)
 }
 
+/// The ports to restore, and whether the board's button chose them: those
+/// named, those a client asks for, or those the board's Restore hold selects.
 /// Who asked for a restore.
 #[derive(Clone, Copy)]
 enum Asked {
@@ -1008,18 +1018,23 @@ mod tests {
             &slots,
             &Watch::default(),
             a.port,
-            Ending {
+            Ended {
                 attachment: None,
-                operation: Operation::Revive,
-                ecid: Some("0000000000000011".into()),
-                phase: RestorePhase::Failed,
-                message: "Device disconnected".into(),
-                log_directory: None,
+                ending: Ending {
+                    operation: Operation::Revive,
+                    ecid: Some("0000000000000011".into()),
+                    phase: RestorePhase::Failed,
+                    message: "Device disconnected".into(),
+                    log_directory: None,
+                },
             },
         );
         let second = reserve(&slots, &[a]).unwrap();
         assert!(second[0].get().is_none());
-        assert_eq!(first[0].get().unwrap().message, "Device disconnected");
+        assert_eq!(
+            first[0].get().unwrap().ending.message,
+            "Device disconnected"
+        );
     }
 
     #[test]

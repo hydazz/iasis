@@ -12,7 +12,7 @@ struct FileCommands: Commands {
                 panel.allowedContentTypes = [UTType(filenameExtension: "ipsw") ?? .data]
                 panel.prompt = "Add"
                 if panel.runModal() == .OK, let file = panel.url {
-                    model.perform([.importImage(path: file.path(percentEncoded: false))])
+                    model.importImage(file)
                 }
             }
         }

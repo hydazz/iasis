@@ -1,0 +1,114 @@
+[
+  {
+    "op": "state"
+  },
+  {
+    "op": "watch"
+  },
+  {
+    "op": "plan",
+    "boards": [
+      {
+        "board": "817a23bd502453b4",
+        "session": 3,
+        "targets": [
+          {
+            "port": 2,
+            "generation": 7,
+            "ecid": "0002250e3c04c01e"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "op": "restore",
+    "boards": [
+      {
+        "board": "817a23bd502453b4",
+        "session": 3,
+        "targets": [
+          {
+            "port": 2,
+            "generation": 7,
+            "ecid": "0002250e3c04c01e"
+          }
+        ]
+      }
+    ],
+    "latest": true
+  },
+  {
+    "op": "revive",
+    "boards": [
+      {
+        "board": "817a23bd502453b4",
+        "session": 3,
+        "targets": [
+          {
+            "port": 2,
+            "generation": 7,
+            "ecid": "0002250e3c04c01e"
+          }
+        ]
+      }
+    ],
+    "latest": false
+  },
+  {
+    "op": "dfu",
+    "board": "817a23bd502453b4",
+    "port": 2
+  },
+  {
+    "op": "reboot",
+    "board": "817a23bd502453b4",
+    "port": 2
+  },
+  {
+    "op": "power",
+    "board": "817a23bd502453b4",
+    "port": 2,
+    "on": true
+  },
+  {
+    "op": "rename",
+    "board": "817a23bd502453b4",
+    "name": "Bench A"
+  },
+  {
+    "op": "brightness",
+    "board": "817a23bd502453b4",
+    "percent": 50
+  },
+  {
+    "op": "update",
+    "board": "817a23bd502453b4",
+    "bytes": 518144
+  },
+  {
+    "op": "sharing",
+    "enabled": true
+  },
+  {
+    "op": "download",
+    "model": "MacBookAir10,1",
+    "build": "26B131"
+  },
+  {
+    "op": "releases",
+    "model": "MacBookAir10,1"
+  },
+  {
+    "op": "import",
+    "name": "UniversalMac_27.2.1_26B131_Restore.ipsw",
+    "bytes": 19000000000
+  },
+  {
+    "op": "remove",
+    "image": "26B131-UniversalMac_27.2.1_26B131_Restore.ipsw"
+  },
+  {
+    "op": "catalog"
+  }
+]
