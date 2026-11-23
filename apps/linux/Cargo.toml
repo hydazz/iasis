@@ -1,0 +1,20 @@
+[package]
+name = "iasis-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+adw = { package = "libadwaita", version = "0.9", features = ["v1_7"] }
+async-channel = "2"
+gtk = { package = "gtk4", version = "0.11", features = ["v4_18"] }
+iasis-api.workspace = true
+serde_json = "1.0"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = { version = "0.3", default-features = false, features = ["async-io", "blocking"] }
+
+[[test]]
+name = "smoke"
+harness = false
