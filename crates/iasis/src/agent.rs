@@ -17,7 +17,9 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
-use iasis_api::{BoardView, Operation, Planned, Reply, Request, Selection, State, Target};
+use iasis_api::{
+    BoardView, FirmwareUpdate, Operation, Planned, Reply, Request, Selection, State, Target,
+};
 use iasis_protocol::{Port, PortAction};
 use nusb::DeviceInfo;
 
@@ -58,6 +60,9 @@ struct Attendance {
     link: Mutex<Option<Arc<Link>>>,
     device: Mutex<Option<DeviceInfo>>,
     notice: Mutex<Option<String>>,
+    /// The IasisOS version of a board that runs a build this agent cannot
+    /// talk to.
+    outdated: Mutex<Option<String>>,
     present: AtomicBool,
 }
 
@@ -191,6 +196,7 @@ impl Agent {
     pub fn state(&self) -> State {
         let boards = self.boards.lock().unwrap();
         State {
+            version: env!("CARGO_PKG_VERSION").into(),
             boards: boards
                 .iter()
                 .filter(|(_, board)| board.present.load(Ordering::Relaxed))
@@ -199,6 +205,12 @@ impl Agent {
                     let notice = board.notice.lock().unwrap().clone();
                     match link.as_ref().and_then(|link| link.board_view(&self.store)) {
                         Some(mut view) => {
+                            view.update = update::carried()
+                                .filter(|carried| *carried != view.firmware)
+                                .map(|carried| FirmwareUpdate {
+                                    version: carried.into(),
+                                    required: false,
+                                });
                             let endings = board.endings.lock().unwrap();
                             for (port, ending) in view.ports.iter_mut().zip(endings.iter()) {
                                 if let Some(work) = ending {
@@ -214,10 +226,24 @@ impl Agent {
                             view.notice = notice;
                             view
                         }
-                        None => BoardView::unreadable(
-                            format!("{serial:016x}"),
-                            notice.unwrap_or_else(|| "not attended".into()),
-                        ),
+                        None => {
+                            let mut view = BoardView::unreadable(
+                                format!("{serial:016x}"),
+                                notice.unwrap_or_else(|| "not attended".into()),
+                            );
+                            // A board on another build waits for the one carried here.
+                            if let Some(firmware) = board.outdated.lock().unwrap().clone()
+                                && let Some(carried) = update::carried()
+                            {
+                                view.firmware = firmware;
+                                view.update = Some(FirmwareUpdate {
+                                    version: carried.into(),
+                                    required: true,
+                                });
+                                view.notice = None;
+                            }
+                            view
+                        }
                     }
                 })
                 .collect(),
@@ -448,6 +474,7 @@ impl Agent {
         *board.link.lock().unwrap() = Some(link.clone());
         // Whatever kept an earlier attempt from the board is over.
         *board.notice.lock().unwrap() = None;
+        *board.outdated.lock().unwrap() = None;
         self.changes.changed();
         let result = (|| -> Result<()> {
             loop {
@@ -514,10 +541,19 @@ impl Agent {
                     ..
                 } = attendants.remove(&serial).unwrap();
                 ended.insert(serial, (device, Instant::now()));
-                let message = match thread.join() {
-                    Ok(Ok(())) => String::new(),
-                    Ok(Err(error)) => format!("{error:#}"),
-                    Err(_) => "attendant panicked".into(),
+                let (message, outdated) = match thread.join() {
+                    Ok(Ok(())) => (String::new(), None),
+                    Ok(Err(error)) => (
+                        format!("{error:#}"),
+                        match error.downcast_ref() {
+                            Some(&crate::Error::Firmware {
+                                version: [major, minor, patch],
+                                ..
+                            }) => Some(format!("{major}.{minor}.{patch}")),
+                            _ => None,
+                        },
+                    ),
+                    Err(_) => ("attendant panicked".into(), None),
                 };
                 // Say it again after a session that had been working.
                 if errors.get(&serial) != Some(&message)
@@ -527,6 +563,7 @@ impl Agent {
                 }
                 if let Some(board) = self.boards.lock().unwrap().get(&serial) {
                     *board.notice.lock().unwrap() = Some(message.clone());
+                    *board.outdated.lock().unwrap() = outdated;
                 }
                 errors.insert(serial, message);
                 self.changes.changed();

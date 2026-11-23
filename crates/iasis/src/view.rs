@@ -36,6 +36,7 @@ pub fn board(info: &Info, status: &Status) -> BoardView {
         name: status.settings.name.as_str().to_owned(),
         session: status.host.map(|host| host.id),
         firmware: format!("{major}.{minor}.{patch}"),
+        update: None,
         upstream_mbps: None,
         supply: match status.supply {
             iasis_protocol::Supply::Brick => Supply::Brick,
