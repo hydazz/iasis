@@ -195,11 +195,23 @@ pub(crate) fn prepare_usb(target: u64) -> Result<()> {
     for config in device.configurations() {
         if iasis::topology::public_ncm_control(product, &config).is_some() {
             let value = config.configuration_value();
-            device
-                .set_configuration(value)
-                .wait()
-                .with_context(|| format!("select USB network configuration {value}"))?;
-            return Ok(());
+            return match device.set_configuration(value).wait() {
+                Ok(()) => Ok(()),
+                // Linux changes the configuration of a device only while
+                // nothing has claimed its interfaces.
+                Err(error) if error.kind() == nusb::ErrorKind::Busy => {
+                    let active = device
+                        .active_configuration()
+                        .map(|active| active.configuration_value())
+                        .unwrap_or_default();
+                    bail!(
+                        "USB Ethernet is in configuration {value}, and another program, such as usbmuxd, holds the device in configuration {active}"
+                    )
+                }
+                Err(error) => {
+                    Err(error).with_context(|| format!("select USB network configuration {value}"))
+                }
+            };
         }
     }
 

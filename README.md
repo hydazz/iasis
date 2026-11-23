@@ -121,7 +121,7 @@ iasis sharing off
 
 A directly attached Apple device that offers USB Ethernet can use the host’s internet connection over its charging and restore cable. Sharing follows the host’s routing and resumes when a device restarts. The OLED shows a network symbol while the agent serves at least one port on that board.
 
-On Linux, use a kernel whose `cdc_ncm` driver supports the target’s USB ID. The Debian package gives the agent the USB and network access its gateway needs.
+On Linux, use a kernel whose `cdc_ncm` driver supports the target’s USB ID. The Debian package gives the agent the USB and network access its gateway needs. iPhones and iPads are not served there: usbmuxd 1.1.1, which Debian and Ubuntu ship, holds them in a USB configuration without USB Ethernet.
 
 Setup Assistant can use this connection for Automated Device Enrollment. See the [Mac app guide](app/README.md#usb-internet-sharing) for host permissions.
 
