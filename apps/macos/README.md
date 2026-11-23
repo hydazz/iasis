@@ -2,6 +2,21 @@
 
 Iasis lives in the menu bar and shows what is on every port of every connected board. Opening its window puts it in the Dock with menus of its own; closing the window returns it to the menu bar.
 
+## Install
+
+Iasis needs macOS 26 or later on a Mac with Apple silicon. Download `Iasis-<version>.zip` from the [releases](https://github.com/hydazz/iasis/releases), open it and move Iasis to Applications.
+
+The first time Iasis opens, it starts its agent, `iasisd`, and adds itself to the apps that open at login. macOS notes that Iasis can run in the background and runs the agent whenever you are logged in, whether or not the app is open. Turn off **Open at Login** in Settings > General to open Iasis yourself. Turning Iasis off under Background App Activity in System Settings > General > Login Items & Extensions stops the agent.
+
+To update, replace Iasis in Applications with the new version and open it. It restarts the agent from the new version.
+
+The command-line tools are inside the app. To run `iasis` from a terminal, link it:
+
+```sh
+sudo mkdir -p /usr/local/bin
+sudo ln -sf /Applications/Iasis.app/Contents/Helpers/iasis /usr/local/bin/iasis
+```
+
 ## Menu bar
 
 The cable dims when no board is connected. A ring over its tail shows work under way, and a red mark means a board or port needs attention.
@@ -43,30 +58,14 @@ If a port reports a packet capture permission error, open `Install ChmodBPF.pkg`
 
 ## Build
 
-Building needs Xcode 27. `Iasis.xcodeproj` builds and runs in Xcode on its own. The app talks to whichever `iasisd` is running; start one first, or the menu shows Agent Not Running.
+Building needs Xcode 27. `Iasis.xcodeproj` builds and runs in Xcode on its own. A build run from Xcode carries no agent and leaves login items alone: it talks to whichever `iasisd` is running, or the menu shows Agent Not Running. To run an agent of your own, first turn the installed Iasis off under Background App Activity.
 
 ```sh
 mise run //apps/macos:build     # the app, unsigned
 mise run //apps/macos:test
-mise run //apps/macos:lint      # unused Swift code, package scripts and property lists
-mise run //apps/macos:package   # an unsigned installer in apps/macos/build
+mise run //apps/macos:lint      # unused Swift code and property lists
 ```
 
-An archive embeds `iasisd`, `iasis` and `iasis-gateway` from `target/release` in `Contents/Helpers`. `//apps/macos:package` builds them first; before archiving in Xcode, run `mise run host:build`. They are built for the Mac's own architecture.
+An archive embeds `iasisd`, `iasis` and `iasis-gateway` from `target/release` in `Contents/Helpers`, and the agent's launchd property list, `Config/com.hydaz.Iasis.agent.plist`, in `Contents/Library/LaunchAgents`. Before archiving in Xcode, run `mise run host:build`. They are built for the Mac's own architecture.
 
-Set `TEST_RUNNER_IASIS_LIVE_AGENT=1` when running the tests to check the connection to the local agent.
-
-## Installer
-
-The package installs:
-
-| Installed at                                        | What                                          |
-| --------------------------------------------------- | --------------------------------------------- |
-| `/Applications/Iasis.app`                           | The app and its bundled host tools            |
-| `/Library/LaunchAgents/com.hydaz.Iasis.agent.plist` | Starts `iasisd` at login and keeps it running |
-| `/Library/LaunchAgents/com.hydaz.Iasis.plist`       | Starts the app in the menu bar at login       |
-| `/usr/local/bin/iasis`                              | A link to the `iasis` command inside the app  |
-
-The installer starts both for the user at the console; other users get them at their next login.
-
-The app communicates with `iasisd` over the [agent socket](../crates/api/README.md).
+The app communicates with `iasisd` over the [agent socket](../crates/api/README.md). Set `TEST_RUNNER_IASIS_LIVE_AGENT=1` when running the tests to check the connection to the local agent.

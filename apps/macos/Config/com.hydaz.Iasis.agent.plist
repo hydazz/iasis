@@ -2,25 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>AssociatedBundleIdentifiers</key>
-	<array>
-		<string>com.hydaz.Iasis</string>
-	</array>
-	<key>EnvironmentVariables</key>
-	<dict>
-		<key>PATH</key>
-		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-	</dict>
+	<key>BundleProgram</key>
+	<string>Contents/Helpers/iasisd</string>
 	<key>KeepAlive</key>
 	<true/>
 	<key>Label</key>
 	<string>com.hydaz.Iasis.agent</string>
 	<key>LimitLoadToSessionType</key>
 	<string>Aqua</string>
-	<key>ProgramArguments</key>
-	<array>
-		<string>/Applications/Iasis.app/Contents/Helpers/iasisd</string>
-	</array>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>ThrottleInterval</key>
