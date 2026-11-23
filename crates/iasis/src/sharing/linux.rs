@@ -1,6 +1,40 @@
-use std::{fs, net::Ipv4Addr};
+use std::{fs, net::Ipv4Addr, os::fd::AsRawFd, thread};
 
 use anyhow::{Context, Result};
+use nix::{
+    errno::Errno,
+    sys::socket::{
+        AddressFamily, MsgFlags, NetlinkAddr, SockFlag, SockProtocol, SockType, bind, recv, socket,
+    },
+};
+
+/// Call `changed` whenever a link, an IPv4 address or an IPv4 route changes.
+/// The resolver configuration follows those.
+pub(super) fn follow_network(changed: impl Fn() + Send + 'static) -> Result<()> {
+    let groups =
+        nix::libc::RTMGRP_LINK | nix::libc::RTMGRP_IPV4_IFADDR | nix::libc::RTMGRP_IPV4_ROUTE;
+    let events = socket(
+        AddressFamily::Netlink,
+        SockType::Raw,
+        SockFlag::SOCK_CLOEXEC,
+        SockProtocol::NetlinkRoute,
+    )?;
+    bind(events.as_raw_fd(), &NetlinkAddr::new(0, groups as u32))?;
+    thread::Builder::new()
+        .name("network-changes".into())
+        .spawn(move || {
+            let mut message = [0; 4096];
+            loop {
+                match recv(events.as_raw_fd(), &mut message, MsgFlags::empty()) {
+                    // What changed is read afresh, as it is after an overrun.
+                    Ok(_) | Err(Errno::ENOBUFS) => changed(),
+                    Err(Errno::EINTR) => {}
+                    Err(_) => return,
+                }
+            }
+        })?;
+    Ok(())
+}
 
 pub(super) struct Resolver;
 

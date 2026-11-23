@@ -72,9 +72,9 @@ pub struct UsbDevice {
     #[cfg(target_os = "macos")]
     #[serde(skip)]
     pub macos_attachment: Option<MacAttachment>,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     #[serde(skip)]
-    pub linux_device_address: u8,
+    pub device_address: u8,
 }
 
 #[cfg(target_os = "macos")]
@@ -113,8 +113,8 @@ impl From<DeviceInfo> for UsbDevice {
                 location_id: device.location_id(),
                 registry_entry_id: device.registry_entry_id(),
             }),
-            #[cfg(target_os = "linux")]
-            linux_device_address: device.device_address(),
+            #[cfg(not(target_os = "macos"))]
+            device_address: device.device_address(),
         }
     }
 }
@@ -149,6 +149,26 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    /// The connectors with nothing known to be on them.
+    pub(crate) fn vacant(management: &Topology) -> Self {
+        let mut hub = management.clone();
+        hub.port_chain.pop();
+        Self {
+            upstream_mbps: None,
+            ports: Port::ALL.map(|port| {
+                let mut usb2 = hub.clone();
+                usb2.port_chain.push(port.number());
+                PortDevices {
+                    port,
+                    usb2,
+                    superspeed: Companion::Unavailable,
+                    devices: Vec::new(),
+                }
+            }),
+            hub,
+        }
+    }
+
     /// Read identity information for the mapped Apple devices.
     pub fn query_identities(&mut self) {
         self.query_port_identities(u8::MAX);
@@ -176,11 +196,16 @@ pub fn physical_port(management: &Topology, device: &Topology) -> Result<Option<
         .and_then(|port| Port::try_from(*port).ok()))
 }
 
-/// Read cached USB descriptors and authoritative USB2/SuperSpeed port links.
-/// Missing companion metadata remains visible instead of guessing a hub.
+/// Enumerate the host's USB devices now and place them on the connectors.
 pub fn discover(management: &Topology) -> Result<Snapshot, Error> {
+    locate(management, nusb::list_devices().wait()?.collect())
+}
+
+/// Place USB devices on the connectors from their cached descriptors and
+/// the host's USB2/SuperSpeed port links. Missing companion metadata remains
+/// visible instead of guessing a hub.
+pub fn locate(management: &Topology, devices: Vec<DeviceInfo>) -> Result<Snapshot, Error> {
     hub_path(management)?;
-    let devices: Vec<_> = nusb::list_devices().wait()?.collect();
     #[cfg(target_os = "linux")]
     let ports = linux::ports(management, &devices)?;
     #[cfg(target_os = "macos")]
@@ -383,8 +408,8 @@ mod tests {
             apple: None,
             #[cfg(target_os = "macos")]
             macos_attachment: None,
-            #[cfg(target_os = "linux")]
-            linux_device_address: 1,
+            #[cfg(not(target_os = "macos"))]
+            device_address: 1,
         }
     }
 

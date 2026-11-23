@@ -13,10 +13,12 @@
 
 use core::cell::{Cell, RefCell};
 
-use embassy_futures::select::select;
+use core::future::Future;
+
+use embassy_futures::select::{Either3, select3};
 use embassy_rp::gpio::Input;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex, signal::Signal};
-use embassy_time::{Duration, Timer, with_timeout};
+use embassy_time::{Duration, Instant, Timer, with_timeout};
 use heapless::{Deque, Vec};
 use iasis_pd::apple;
 use iasis_protocol::{I2cFailure, Orientation, PortError};
@@ -69,6 +71,12 @@ type Packet = Vec<u8, 30>;
 pub type Objects = Vec<u32, 7>;
 /// tVDMSenderResponse, with margin for the service pass.
 const DEBUG_REPLY: Duration = Duration::from_millis(60);
+/// A controller that has raised no interrupt for this long is read anyway.
+/// A stuck INT_N then hides an unplugged sink for less than tVBUSOFF.
+const HEALTH: Duration = Duration::from_millis(250);
+/// A controller that has just been set up is first read after this long,
+/// once its comparator shows the line it now measures.
+const FIRST_READ: Duration = Duration::from_millis(5);
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum Tx {
@@ -95,6 +103,8 @@ pub async fn release(bus: &mut Bus) -> Result<(), PortError> {
 pub struct Phy<'a> {
     io: &'a SharedIo,
     channel: usize,
+    /// The controller is alternating Rp between the CC lines.
+    toggling: Cell<bool>,
     toggle: Cell<Option<Orientation>>,
     cc_open: Cell<bool>,
     hard_reset: Cell<bool>,
@@ -110,7 +120,9 @@ pub struct Phy<'a> {
     debug_id: Cell<u8>,
     /// The last vendor message a target sent over a debug SOP.
     debug_reply: Cell<Option<Objects>>,
-    /// Woken after every service pass; each has one waiter.
+    /// When the controller is read if it raises no interrupt first.
+    read_due: Cell<Instant>,
+    /// Each is raised when a service pass changes what its one waiter reads.
     line: Signal<NoopRawMutex, ()>,
     received: Signal<NoopRawMutex, ()>,
     completed: Signal<NoopRawMutex, ()>,
@@ -123,6 +135,7 @@ impl<'a> Phy<'a> {
         Self {
             io,
             channel,
+            toggling: Cell::new(false),
             toggle: Cell::new(None),
             cc_open: Cell::new(false),
             hard_reset: Cell::new(false),
@@ -136,6 +149,7 @@ impl<'a> Phy<'a> {
             resets_received: Cell::new(0),
             debug_id: Cell::new(0),
             debug_reply: Cell::new(None),
+            read_due: Cell::new(Instant::MIN),
             line: Signal::new(),
             received: Signal::new(),
             completed: Signal::new(),
@@ -144,7 +158,14 @@ impl<'a> Phy<'a> {
         }
     }
 
+    /// The controller's interrupts report changes. The state a new setup
+    /// starts from is read once.
+    fn set_up(&self) {
+        self.read_due.set(Instant::now() + FIRST_READ);
+    }
+
     fn forget(&self) {
+        self.toggling.set(false);
         self.toggle.set(None);
         self.cc_open.set(false);
         self.hard_reset.set(false);
@@ -187,7 +208,10 @@ impl<'a> Phy<'a> {
         let mut io = self.io.lock().await;
         let bus = io.port(self.channel).await?;
         release(bus).await?;
-        write(bus, CONTROL2, 0x27).await
+        write(bus, CONTROL2, 0x27).await?;
+        self.toggling.set(true);
+        self.set_up();
+        Ok(())
     }
 
     pub fn toggled(&self) -> Option<Orientation> {
@@ -209,7 +233,9 @@ impl<'a> Phy<'a> {
         write(bus, MEASURE, OPEN_THRESHOLD).await?;
         write(bus, CONTROL0, TX_FLUSH | HOST_CURRENT).await?;
         write(bus, CONTROL1, RECEIVE).await?;
-        write(bus, SWITCHES1, PD_ROLES | line).await
+        write(bus, SWITCHES1, PD_ROLES | line).await?;
+        self.set_up();
+        Ok(())
     }
 
     /// Rd, as opposed to Ra or an open line, at default Rp.
@@ -265,7 +291,7 @@ impl<'a> Phy<'a> {
         self.line.signal(());
     }
 
-    /// Resolves after the next service pass.
+    /// Resolves when the CC line, a counter or a failure has changed.
     pub async fn changed(&self) {
         self.line.wait().await;
     }
@@ -276,30 +302,47 @@ impl<'a> Phy<'a> {
         let bus = io.port(self.channel).await?;
         let mut status = [0; 7];
         bus.read(ADDRESS, STATUS0A, &mut status).await?;
-        let [_, status1a, a, b, status0, mut status1, interrupt] = status;
-        if a & 0x40 != 0 {
-            self.toggle.set(match (status1a >> 3) & 7 {
-                1 => Some(Orientation::Cc1),
-                2 => Some(Orientation::Cc2),
-                _ => None,
-            });
+        let [_, status1a, a, b, mut status0, mut status1, interrupt] = status;
+        let (mut line, mut received, mut completed) = (false, false, false);
+        // The toggle state says where a sink was found, whether or not this
+        // pass read the interrupt that announced it.
+        if self.toggling.get() {
+            match (status1a >> 3) & 7 {
+                1 => self.toggle.set(Some(Orientation::Cc1)),
+                2 => self.toggle.set(Some(Orientation::Cc2)),
+                _ => {}
+            }
+        }
+        // The comparator changed about when its level was read above, and
+        // the read has cleared the interrupt. Read the level it changed to.
+        if interrupt & 0x20 != 0 {
+            status0 = bus.register(ADDRESS, STATUS0).await?;
         }
         if a & 0x01 != 0 {
             self.hard_reset.set(true);
             self.resets_received
                 .set(self.resets_received.get().saturating_add(1));
+            (line, received, completed) = (true, true, true);
         }
         if a & 0x08 != 0 {
             self.hard_sent.set(true);
+            completed = true;
         }
-        if a & 0x04 != 0 {
-            self.sent.set(Some(Tx::Sent));
+        let sent = if a & 0x04 != 0 {
+            Some(Tx::Sent)
         } else if a & 0x10 != 0 {
-            self.sent.set(Some(Tx::Unanswered));
+            Some(Tx::Unanswered)
         } else if interrupt & 0x02 != 0 {
-            self.sent.set(Some(Tx::Collision));
+            Some(Tx::Collision)
+        } else {
+            None
+        };
+        if sent.is_some() {
+            self.sent.set(sent);
+            completed = true;
         }
-        self.cc_open.set(status0 & 0x20 != 0);
+        let open = status0 & 0x20 != 0;
+        line |= self.cc_open.replace(open) != open;
         if b & 0x01 != 0 {
             while status1 & 0x20 == 0 {
                 let mut head = [0; 3];
@@ -328,27 +371,44 @@ impl<'a> Phy<'a> {
                         inbox.pop_front();
                     }
                     let _ = inbox.push_back(packet);
+                    received = true;
                 }
                 status1 = bus.register(ADDRESS, STATUS1).await?;
             }
         }
         drop(io);
-        self.line.signal(());
-        self.received.signal(());
-        self.completed.signal(());
+        self.read_due.set(Instant::now() + HEALTH);
+        if line {
+            self.line.signal(());
+        }
+        if received {
+            self.received.signal(());
+        }
+        if completed {
+            self.completed.signal(());
+        }
         Ok(())
     }
 
-    /// Service on INT_N, or after `idle_ms` without one.
-    pub async fn wait(&self, int: &mut Input<'static>, idle_ms: u64) -> Result<(), PortError> {
-        select(int.wait_for_low(), Timer::after_millis(idle_ms)).await;
-        self.service().await
+    /// Wait for INT_N or for `other`, and service the controller unless
+    /// `other` ended the wait. `other` cannot cut a service pass short:
+    /// reading the interrupt registers clears them.
+    pub async fn wait(
+        &self,
+        int: &mut Input<'static>,
+        other: impl Future<Output = ()>,
+    ) -> Result<(), PortError> {
+        let due = Timer::at(self.read_due.get());
+        match select3(int.wait_for_low(), due, other).await {
+            Either3::Third(()) => Ok(()),
+            _ => self.service().await,
+        }
     }
 
     /// Service the controller for the life of an attachment.
     pub async fn run(&self, int: &mut Input<'static>) -> PortError {
         loop {
-            if let Err(error) = self.wait(int, 20).await {
+            if let Err(error) = self.wait(int, core::future::pending()).await {
                 return error;
             }
         }
@@ -394,6 +454,7 @@ impl<'a> Phy<'a> {
                     // The line was busy. The write stopped before TXON, so
                     // nothing was sent.
                     self.retries.set(self.retries.get().saturating_add(1));
+                    self.line.signal(());
                     self.flush().await?;
                     continue;
                 }
@@ -493,7 +554,9 @@ impl Driver for PdPhy<'_, '_> {
             }
         };
         if result.is_err() {
+            // The port's task publishes the released reservation.
             self.first_offer_mw.set(0);
+            self.phy.line.signal(());
         }
         result
     }
@@ -506,6 +569,7 @@ impl Driver for PdPhy<'_, '_> {
             self.phy
                 .resets_sent
                 .set(self.phy.resets_sent.get().saturating_add(1));
+            self.phy.line.signal(());
         }
         let written = async {
             let mut io = self.phy.io.lock().await;
