@@ -71,10 +71,6 @@ jobs:
           - runner: ubuntu-26.04-arm
             arch: arm64
     runs-on: ${{ matrix.runner }}
-    # The package depends on the glibc and libpcap it is built against, so
-    # Debian 13 sets the oldest system it installs on.
-    container:
-      image: debian:trixie@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6
     timeout-minutes: 45
     permissions:
       contents: write
