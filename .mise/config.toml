@@ -57,6 +57,7 @@ postinstall = "lefthook install"
 "apt:libpcap-dev" = { os = "linux" }
 "apt:libusb-1.0-0" = { os = "linux" }
 "apt:gcc-mingw-w64-x86-64" = { os = "linux" }
+"apt:g++-mingw-w64-x86-64" = { os = "linux" }
 "apt:dpkg-dev" = { os = "linux" }
 "brew:autoconf" = { os = "macos" }
 "brew:automake" = { os = "macos" }
