@@ -25,20 +25,7 @@ struct Settings {
     enabled: bool,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct State {
-    pub enabled: bool,
-    pub problem: Option<String>,
-    pub ports: Vec<PortState>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PortState {
-    pub board: String,
-    pub port: u8,
-    pub active: bool,
-    pub problem: Option<String>,
-}
+use iasis_api::{Sharing as State, SharingPort as PortState};
 
 pub(crate) struct Sharing {
     file: PathBuf,
