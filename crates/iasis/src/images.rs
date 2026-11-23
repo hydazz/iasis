@@ -1150,12 +1150,13 @@ mod tests {
         store.import(name, &mut file, bytes)
     }
 
-    /// What the store directory holds besides its index and lock.
+    /// What the store directory holds besides its index and lock. The
+    /// store's thread may be replacing the index at any moment.
     fn files(dir: &Path) -> Vec<String> {
         let mut names: Vec<String> = fs::read_dir(dir)
             .unwrap()
             .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-            .filter(|name| name != "index.json" && name != "lock")
+            .filter(|name| !["index.json", "index.json.new", "lock"].contains(&name.as_str()))
             .collect();
         names.sort();
         names
@@ -1185,7 +1186,7 @@ mod tests {
                 .import("../Mini.ipsw", &mut &whole[..], whole.len() as u64)
                 .is_err()
         );
-        assert!(files(&dir).is_empty());
+        assert_eq!(files(&dir), Vec::<String>::new());
         assert!(store.snapshot().images.is_empty());
         let added = import(&store, &local).unwrap();
         assert_eq!(files(&dir), ["24A1-Mini.ipsw"]);
