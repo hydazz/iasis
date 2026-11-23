@@ -1,7 +1,5 @@
 //! Apple identity and physical-slot selection across USB re-enumeration.
 
-#[cfg(target_os = "macos")]
-pub(crate) mod configurator;
 pub(crate) mod models;
 mod mux;
 
@@ -19,7 +17,7 @@ pub enum IdentitySource {
     Kis { chip: u16, board: u8 },
     Restored,
     Lockdown,
-    Configurator,
+    Bos,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -46,7 +44,16 @@ impl AppleDevice {
         }
     }
 
-    pub(crate) fn from_usb(vendor: u16, product: u16, serial: Option<&str>) -> Option<Self> {
+    /// The mode an Apple device's descriptors show: the product ID for the
+    /// boot ROM and iBoot, otherwise the functions of its configuration.
+    pub(crate) fn from_usb(
+        vendor: u16,
+        product: u16,
+        serial: Option<&str>,
+        interfaces: &[(u8, u8, u8)],
+    ) -> Option<Self> {
+        const USBMUX: (u8, u8, u8) = (0xff, 0xfe, 0x02);
+        const NCM: (u8, u8, u8) = (0x02, 0x0d, 0x00);
         if vendor != 0x05ac {
             return None;
         }
@@ -55,10 +62,15 @@ impl AppleDevice {
             0xf014 => AppleMode::PortDfu,
             0x1280..=0x1283 => AppleMode::Recovery,
             0x1881 => AppleMode::Kis,
-            0x1290..=0x12af | 0x1901..=0x1905 => AppleMode::Mux,
+            // A booted iPhone or iPad, or a restore OS.
+            _ if interfaces.contains(&USBMUX) => AppleMode::Mux,
+            // Network functions without usbmux: a booted Mac.
+            _ if interfaces.contains(&NCM) => AppleMode::Normal,
+            // An iOS personality whose functions the host has not listed yet.
+            0x1290..=0x12af => AppleMode::Mux,
             _ => return None,
         };
-        let identity = if matches!(mode, AppleMode::Mux | AppleMode::Kis) {
+        let identity = if matches!(mode, AppleMode::Mux | AppleMode::Kis | AppleMode::Normal) {
             Identity::Missing
         } else {
             serial.map(parse_ecid).unwrap_or(Identity::Missing)
@@ -232,11 +244,11 @@ fn matching_ports(snapshot: &Snapshot, ecid: u64) -> Vec<Port> {
         .collect()
 }
 
+/// Name each masked port's target: first from what its descriptors and KIS
+/// say, then over usbmux for a target that still has no ECID.
 pub(crate) fn query(snapshot: &mut Snapshot, mask: u8) {
-    query_mux(snapshot, mask);
     crate::native::identify(snapshot, mask);
-    #[cfg(target_os = "macos")]
-    configurator::query(snapshot, mask);
+    query_mux(snapshot, mask);
 }
 
 fn query_mux(snapshot: &mut Snapshot, mask: u8) {
@@ -247,10 +259,7 @@ fn query_mux(snapshot: &mut Snapshot, mask: u8) {
         .flat_map(|port| &mut port.devices)
         .filter(|device| {
             device.apple.as_ref().is_some_and(|apple| {
-                matches!(
-                    apple.mode,
-                    AppleMode::Mux | AppleMode::Normal | AppleMode::Restored
-                )
+                apple.ecid().is_none() && matches!(apple.mode, AppleMode::Mux | AppleMode::Restored)
             })
         })
         .collect();
@@ -273,7 +282,7 @@ fn query_mux(snapshot: &mut Snapshot, mask: u8) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::{
         Topology,
@@ -299,6 +308,16 @@ mod tests {
         }
     }
 
+    /// What a test device's configuration offers: usbmux for an iOS
+    /// personality, the NCM pair for a booted Mac.
+    pub(crate) fn functions(product: u16) -> &'static [(u8, u8, u8)] {
+        match product {
+            0x1290..=0x12af => &[(0xff, 0xfe, 0x02)],
+            0x1901..=0x1905 => &[(0x02, 0x0d, 0x00), (0x0a, 0x00, 0x01)],
+            _ => &[],
+        }
+    }
+
     pub(super) fn device(pid: u16, ecid: Option<u64>) -> UsbDevice {
         let serial = ecid.map(|ecid| {
             format!("CPID:8103 CPRV:11 CPFM:03 SCEP:01 BDID:22 ECID:{ecid:016X} IBFL:3C")
@@ -313,7 +332,7 @@ mod tests {
             serial_number: serial.clone(),
             product: None,
             speed: Speed::High,
-            apple: AppleDevice::from_usb(0x05ac, pid, serial.as_deref()),
+            apple: AppleDevice::from_usb(0x05ac, pid, serial.as_deref(), functions(pid)),
             #[cfg(target_os = "macos")]
             macos_attachment: None,
             #[cfg(not(target_os = "macos"))]
@@ -399,7 +418,7 @@ mod tests {
             Err(SelectionError::Ambiguous(1))
         ));
         snapshot.ports[1].devices.clear();
-        snapshot.ports[0].devices[0] = device(0x1901, None);
+        snapshot.ports[0].devices[0] = device(0x12ab, None);
         assert_eq!(
             target.observe(9, &snapshot),
             Observation::IdentityMissing {

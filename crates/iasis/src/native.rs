@@ -77,8 +77,10 @@ pub(crate) fn worker_command(
     command
 }
 
-/// Read the identity of each masked port's device that is on Apple Debug USB.
-/// One in DFU answers with its ECID, chip and board; any other has none.
+/// Read what RestoreKit finds of each masked port's unnamed Apple target: the
+/// DFU identity of one on Apple Debug USB over KIS, a booted Mac's ECID from
+/// its BOS descriptor and its model from its release number, and the ECID a
+/// restore OS or an iPhone or iPad carries in its serial.
 pub(crate) fn identify(snapshot: &mut Snapshot, mask: u8) {
     use nusb::MaybeFuture;
     use restorekit::{UsbMode, device};
@@ -91,23 +93,29 @@ pub(crate) fn identify(snapshot: &mut Snapshot, mask: u8) {
         let [target] = slot.devices.as_mut_slice() else {
             continue;
         };
-        if target.topology != slot.usb2 || target.vendor_id != 0x05ac || target.product_id != 0x1881
-        {
+        let kis = target.product_id == 0x1881;
+        if kis {
+            if target.topology != slot.usb2 {
+                continue;
+            }
+            // The answer belongs to this read: a device that has left DFU loses it.
+            if let Some(apple) = &mut target.apple
+                && matches!(
+                    apple.identity,
+                    Identity::Known {
+                        source: IdentitySource::Kis { .. },
+                        ..
+                    }
+                )
+            {
+                apple.mode = AppleMode::Kis;
+                apple.identity = Identity::Missing;
+                apple.model = None;
+            }
+        } else if !target.apple.as_ref().is_some_and(|apple| {
+            apple.ecid().is_none() && matches!(apple.mode, AppleMode::Mux | AppleMode::Normal)
+        }) {
             continue;
-        }
-        // The answer belongs to this read: a device that has left DFU loses it.
-        if let Some(apple) = &mut target.apple
-            && matches!(
-                apple.identity,
-                Identity::Known {
-                    source: IdentitySource::Kis { .. },
-                    ..
-                }
-            )
-        {
-            apple.mode = AppleMode::Kis;
-            apple.identity = Identity::Missing;
-            apple.model = None;
         }
         let attached = attached.get_or_insert_with(|| {
             let devices: Vec<_> = nusb::list_devices()
@@ -129,11 +137,31 @@ pub(crate) fn identify(snapshot: &mut Snapshot, mask: u8) {
         }) else {
             continue;
         };
+        let Some(apple) = &mut target.apple else {
+            continue;
+        };
+        if apple.mode == AppleMode::Normal {
+            if let Some(ecid) = device::read_ecid(info).filter(|&ecid| ecid != 0) {
+                apple.identity = Identity::Known {
+                    ecid,
+                    source: IdentitySource::Bos,
+                };
+            }
+            apple.model = device::model_from_device_version(info.device_version())
+                .map(|model| model.identifier.to_owned());
+            continue;
+        }
         let read = device::from_usb(info);
-        if read.mode == UsbMode::Kis
-            && let Some(ecid) = read.ecid.filter(|&ecid| ecid != 0)
+        let Some(ecid) = read.ecid.filter(|&ecid| ecid != 0) else {
+            continue;
+        };
+        if !kis {
+            apple.identity = Identity::Known {
+                ecid,
+                source: IdentitySource::UsbSerial,
+            };
+        } else if read.mode == UsbMode::Kis
             && let Some(identity) = &read.identity
-            && let Some(apple) = &mut target.apple
         {
             apple.identity = Identity::Known {
                 ecid,
