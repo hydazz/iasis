@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+  "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Iasis</vendor>
+  <vendor_url>https://github.com/hydazz/iasis</vendor_url>
+  <action id="com.hydaz.iasis.control">
+    <description>Use Iasis boards and the devices on them</description>
+    <message>Authentication is required to use Iasis</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <!-- The agent runs as this user and asks about its clients. -->
+    <annotate key="org.freedesktop.policykit.owner">unix-user:iasis</annotate>
+  </action>
+</policyconfig>

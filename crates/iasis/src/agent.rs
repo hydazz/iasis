@@ -643,6 +643,127 @@ fn boards_among(devices: Vec<DeviceInfo>, serial: Option<u64>) -> Vec<DeviceInfo
     boards(devices, UsbIds::default(), serial)
 }
 
+/// Who the agent serves on Linux, decided from each client's credentials as
+/// the kernel took them at connect: root, the agent's own user and group
+/// (`iasis` for the service), and whoever polkit admits, by default the
+/// person signed in at the computer.
+#[cfg(target_os = "linux")]
+mod access {
+    use std::{
+        fs, io,
+        os::{fd::AsRawFd, unix::net::UnixStream},
+        process::{Command, Stdio},
+    };
+
+    use nix::{
+        libc,
+        sys::socket::{getsockopt, sockopt},
+        unistd::{getegid, geteuid},
+    };
+
+    const ACTION: &str = "com.hydaz.iasis.control";
+
+    pub(super) fn admit(stream: &UnixStream) -> Result<(), String> {
+        let peer = getsockopt(stream, sockopt::PeerCredentials)
+            .map_err(|error| format!("reading the client's credentials: {error}"))?;
+        let groups =
+            groups(stream).map_err(|error| format!("reading the client's groups: {error}"))?;
+        let agent = (geteuid().as_raw(), getegid().as_raw());
+        if member(peer.uid(), &groups, agent) || at_the_computer(peer.pid(), peer.uid()) {
+            Ok(())
+        } else {
+            Err("Iasis serves the person signed in at this computer and the iasis group".into())
+        }
+    }
+
+    /// Root, the agent's user, or a member of the agent's group.
+    fn member(uid: u32, groups: &[u32], (agent_uid, agent_gid): (u32, u32)) -> bool {
+        uid == 0 || uid == agent_uid || groups.contains(&agent_gid)
+    }
+
+    /// The client's primary and supplementary groups.
+    fn groups(stream: &UnixStream) -> io::Result<Vec<u32>> {
+        let mut groups: Vec<libc::gid_t> = vec![0; 64];
+        loop {
+            let mut length = (groups.len() * size_of::<libc::gid_t>()) as libc::socklen_t;
+            // SAFETY: the buffer holds `length` bytes, and the kernel writes
+            // at most that many.
+            let result = unsafe {
+                libc::getsockopt(
+                    stream.as_raw_fd(),
+                    libc::SOL_SOCKET,
+                    libc::SO_PEERGROUPS,
+                    groups.as_mut_ptr().cast(),
+                    &mut length,
+                )
+            };
+            let count = length as usize / size_of::<libc::gid_t>();
+            if result == 0 {
+                groups.truncate(count);
+                return Ok(groups);
+            }
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() != Some(libc::ERANGE) || count <= groups.len() {
+                return Err(error);
+            }
+            groups.resize(count, 0);
+        }
+    }
+
+    /// Whether polkit lets the client's process use the agent without asking.
+    fn at_the_computer(pid: i32, uid: u32) -> bool {
+        let Some(start) = start_time(pid) else {
+            return false;
+        };
+        Command::new("pkcheck")
+            .args(["--action-id", ACTION, "--process"])
+            .arg(format!("{pid},{start},{uid}"))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    /// When the process started, in clock ticks since boot, which tells it
+    /// from a later process given the same ID.
+    fn start_time(pid: i32) -> Option<u64> {
+        let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        parse_start_time(&stat)
+    }
+
+    /// Field 22 of `/proc/<pid>/stat`. Field 2, the command name, is in
+    /// parentheses and may hold spaces and parentheses itself.
+    fn parse_start_time(stat: &str) -> Option<u64> {
+        stat.rsplit_once(')')?
+            .1
+            .split_whitespace()
+            .nth(19)?
+            .parse()
+            .ok()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn root_the_agents_user_and_its_group_are_members() {
+            let agent = (971, 971);
+            assert!(member(0, &[], agent));
+            assert!(member(971, &[], agent));
+            assert!(member(1000, &[1000, 971], agent));
+            assert!(!member(1000, &[1000, 27], agent));
+        }
+
+        #[test]
+        fn a_start_time_survives_a_command_name_with_parentheses() {
+            let stat = "4242 (a) (b c) S 1 4242 4242 0 -1 4194560 120 0 0 0 1 0 0 0 20 0 1 0                         987654 12345 67 18446744073709551615";
+            assert_eq!(parse_start_time(stat), Some(987654));
+        }
+    }
+}
+
 #[cfg(unix)]
 mod socket {
     use super::*;
@@ -656,9 +777,10 @@ mod socket {
         },
     };
 
-    /// Listen for clients. Only the agent's user may connect, and on Linux,
-    /// where the agent is a system service, the members of its group: a
-    /// client can erase the targets.
+    /// Listen for clients. A client can erase the targets. On macOS the
+    /// socket is the agent's user's alone. On Linux, where the agent is a
+    /// system service, any local user can connect and the agent serves only
+    /// those `access` admits.
     pub fn serve(agent: Arc<Agent>) -> Result<()> {
         let path = agent.home.socket();
         if let Some(parent) = path.parent() {
@@ -673,7 +795,7 @@ mod socket {
         let listener = UnixListener::bind(&path)
             .with_context(|| format!("listening on {}", path.display()))?;
         let mode = if cfg!(target_os = "linux") {
-            0o660
+            0o666
         } else {
             0o600
         };
@@ -684,6 +806,12 @@ mod socket {
                 for stream in listener.incoming().flatten() {
                     let agent = agent.clone();
                     thread::spawn(move || {
+                        #[cfg(target_os = "linux")]
+                        if let Err(refusal) = access::admit(&stream) {
+                            let mut stream = stream;
+                            let _ = send(&mut stream, &Reply::Error(refusal));
+                            return;
+                        }
                         // A client that goes away ends its own thread.
                         let _ = converse(
                             stream,
@@ -809,11 +937,7 @@ mod socket {
                     Ok(None)
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
-                    bail!(if cfg!(target_os = "linux") {
-                        "the agent is open to the iasis group; join it with `sudo usermod -aG iasis $USER` and log in again"
-                    } else {
-                        "the agent belongs to another user"
-                    })
+                    bail!("the agent belongs to another user")
                 }
                 Err(error) => Err(error).with_context(|| path.display().to_string()),
             }

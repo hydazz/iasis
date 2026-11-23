@@ -39,7 +39,7 @@ system-configuration = "0.8"
 wait-timeout = "0.2"
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
-nix = { version = "0.32", features = ["fs", "net", "poll", "resource", "socket"] }
+nix = { version = "0.32", features = ["fs", "net", "poll", "resource", "socket", "user"] }
 signal-hook = "0.3"
 pcap = "2.5"
 pktkit = { version = "=0.1.12", features = ["dhcp", "l2adapter", "slirp"] }
@@ -54,9 +54,11 @@ license-file = ["../../LICENSE", "0"]
 extended-description = """\
 The iasis command and the iasisd service, which attends every Iasis board, \
 restores the Apple devices on their ports and shares this host's internet \
-connection with them. Members of the iasis group use the service."""
+connection with them. The person signed in at the computer and members of \
+the iasis group use the service."""
 section = "utils"
 depends = "$auto, usbmuxd, systemd | systemd-standalone-sysusers | systemd-sysusers"
+recommends = "polkitd"
 maintainer-scripts = "debian/"
 assets = [
   [
@@ -77,6 +79,11 @@ assets = [
   [
     "debian/70-iasis.rules",
     "usr/lib/udev/rules.d/",
+    "644",
+  ],
+  [
+    "debian/com.hydaz.iasis.policy",
+    "usr/share/polkit-1/actions/",
     "644",
   ],
   [

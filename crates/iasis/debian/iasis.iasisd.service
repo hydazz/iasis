@@ -12,7 +12,8 @@ SupplementaryGroups=iasis-usb
 StateDirectory=iasis
 CacheDirectory=iasis
 RuntimeDirectory=iasis
-RuntimeDirectoryMode=0750
+# Any local user reaches the socket; the agent decides whom it serves.
+RuntimeDirectoryMode=0755
 # The internet gateway brings each target's USB network link up and
 # exchanges its frames.
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
