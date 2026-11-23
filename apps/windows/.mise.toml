@@ -1,0 +1,44 @@
+[tools]
+dotnet = { version = "10", os = ["windows"] }
+"dotnet:wix" = { version = "7.0.1", os = ["windows"] }
+
+[tasks.build]
+description = "Build the Windows app"
+shell = "powershell -NoProfile -ExecutionPolicy Bypass -Command"
+run = "dotnet build Iasis.slnx -c Release"
+
+[tasks.lint]
+description = "Check the Windows app's formatting and analyzers"
+shell = "powershell -NoProfile -ExecutionPolicy Bypass -Command"
+run = "dotnet format Iasis.slnx --verify-no-changes"
+
+[tasks.test]
+description = "Round-trip the agent's example messages and test the app's logic"
+shell = "powershell -NoProfile -ExecutionPolicy Bypass -Command"
+run = "dotnet test Iasis.Tests -c Release"
+
+[tasks.run]
+description = "Run the Windows app against the agent on this machine"
+shell = "powershell -NoProfile -ExecutionPolicy Bypass -Command"
+run = "dotnet run --project Iasis -c Release"
+
+[tasks.package]
+description = "Build the MSI and the tools zip from the app and the cross-built host tools"
+shell = "powershell -NoProfile -ExecutionPolicy Bypass -Command"
+run = '''
+$ErrorActionPreference = 'Stop'
+$version = (Select-String -Path ../../Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+$tools = Resolve-Path ../../target/x86_64-pc-windows-gnu/release
+foreach ($tool in 'iasis.exe', 'iasisd.exe') {
+  if (-not (Test-Path "$tools/$tool")) { throw "$tool is missing; build it on Linux with: mise run windows:tools" }
+}
+Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
+$app = Join-Path $PWD build/app
+dotnet publish Iasis -c Release -p:Version=$version -o $app
+if ($LASTEXITCODE) { exit $LASTEXITCODE }
+wix build Installer/Package.wxs -arch x64 -acceptEula wix7 -d Version=$version -d AppDir=$app -d ToolsDir=$tools -o "build/Iasis-$version-x64.msi"
+if ($LASTEXITCODE) { exit $LASTEXITCODE }
+Remove-Item build/*.wixpdb
+Compress-Archive -Path "$tools/iasis.exe", "$tools/iasisd.exe" -DestinationPath "build/iasis-$version-windows-x64.zip"
+Get-ChildItem build -Filter 'iasis*' -File
+'''
