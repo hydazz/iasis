@@ -740,11 +740,14 @@ fn agent_text(state: &State) -> String {
 /// The board and its ports, a line each.
 fn board_text(board: &BoardView) -> String {
     if board.ports.is_empty() {
-        return format!(
-            "{}  {}\n",
-            board.serial,
-            board.notice.as_deref().unwrap_or("")
-        );
+        let reason = match &board.update {
+            Some(update) if update.required => format!(
+                "IasisOS {} is from another build; update it with `iasis --serial {} update`",
+                board.firmware, board.serial
+            ),
+            _ => board.notice.clone().unwrap_or_default(),
+        };
+        return format!("{}  {reason}\n", board.serial);
     }
     let supply = match (board.supply, board.pool) {
         (Supply::Brick, Some(pool)) => {
@@ -767,6 +770,9 @@ fn board_text(board: &BoardView) -> String {
     let mut text = format!("{id}  {supply}  {host}");
     if let Some(speed) = board.upstream_mbps {
         text.push_str(&format!("  upstream {speed} Mb/s"));
+    }
+    if let Some(update) = &board.update {
+        text.push_str(&format!("  IasisOS {} available", update.version));
     }
     text.push('\n');
     for port in &board.ports {

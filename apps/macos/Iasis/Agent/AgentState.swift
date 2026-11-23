@@ -4,6 +4,8 @@ import Foundation
 /// `crates/api/fixtures` holds the agent's example of every message, which
 /// these models read and write back unchanged.
 nonisolated struct AgentState: Codable, Equatable {
+    /// The agent's release version.
+    var version: String
     var boards: [Board]
     /// A submitting connection's results in target order, each null until it
     /// has one. Absent on other connections.
@@ -23,7 +25,10 @@ nonisolated struct AgentState: Codable, Equatable {
         var serial: String
         var name: String
         var session: UInt32?
+        /// The IasisOS version the board runs; empty while it cannot be read.
         var firmware: String
+        /// The IasisOS the agent carries, when the board runs another.
+        var update: FirmwareUpdate?
         var upstreamMbps: Int?
         var supply: Supply
         /// The power supply's pool for the targets, when there is a supply.
@@ -46,6 +51,14 @@ nonisolated struct AgentState: Codable, Equatable {
         var displayName: String {
             name.isEmpty ? "Iasis" : name
         }
+    }
+
+    /// IasisOS the agent can write to a board.
+    struct FirmwareUpdate: Codable, Equatable {
+        var version: String
+        /// The board runs a build the agent cannot talk to, so it has no
+        /// ports until it takes this one.
+        var required: Bool
     }
 
     /// What powers the targets.
