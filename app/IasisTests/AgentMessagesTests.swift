@@ -45,10 +45,10 @@ struct AgentMessagesTests {
         #expect(try Fixtures.decode(#"{"error":"no such board"}"#) == .error("no such board"))
         let catalog = #"{"catalog":[{"identifier":"iPad13,18","name":"iPad (10th generation)","hardware":[[32816,30]]}]}"#
         #expect(try Fixtures.decode(catalog) == .catalog([.init(identifier: "iPad13,18", name: "iPad (10th generation)")]))
-        let releases = #"{"releases":[{"version":"26.6","build":"25G80","url":"https://updates.cdn-apple.com/a.ipsw","sha256":"00","bytes":3}]}"#
-        #expect(try Fixtures.decode(releases) == .releases([.init(version: "26.6", build: "25G80", bytes: 3)]))
+        let releases = #"{"releases":[{"os":"macOS","version":"26.6","build":"25G80","bytes":3}]}"#
+        #expect(try Fixtures.decode(releases) == .releases([.init(os: "macOS", version: "26.6", build: "25G80", bytes: 3)]))
         let plan = #"{"plan":[{"board":"a0e0","port":2,"offer":{"latest":{"os":"macOS","version":"27.2.1","build":"26B131","bytes":4},"held":null,"problem":null}},{"board":"a0e0","port":3,"offer":null}]}"#
-        let latest = AgentState.Offer.Release(os: "macOS", version: "27.2.1", build: "26B131", bytes: 4)
+        let latest = AgentState.Release(os: "macOS", version: "27.2.1", build: "26B131", bytes: 4)
         #expect(try Fixtures.decode(plan) == .plan([
             .init(board: "a0e0", port: 2, offer: .init(latest: latest)),
             .init(board: "a0e0", port: 3),
@@ -71,7 +71,7 @@ struct AgentMessagesTests {
         (.sharing(enabled: false), #"{"enabled":false,"op":"sharing"}"#),
         (.brightness(board: "a0e0", percent: 30), #"{"board":"a0e0","op":"brightness","percent":30}"#),
         (.rename(board: "a0e0", name: "Bench A"), #"{"board":"a0e0","name":"Bench A","op":"rename"}"#),
-        (.importImage(path: "/tmp/a.ipsw"), #"{"op":"import","path":"\/tmp\/a.ipsw"}"#),
+        (.importImage(name: "a.ipsw", bytes: 3), #"{"bytes":3,"name":"a.ipsw","op":"import"}"#),
         (.remove(image: "a.ipsw"), #"{"image":"a.ipsw","op":"remove"}"#),
         (.download(model: "Macmini9,1", build: "25G80"), #"{"build":"25G80","model":"Macmini9,1","op":"download"}"#),
         (.plan(boards: [.init(board: "a0e0", session: 77, targets: [.init(port: 2, generation: 4)])]), #"{"boards":[{"board":"a0e0","session":77,"targets":[{"generation":4,"port":2}]}],"op":"plan"}"#),

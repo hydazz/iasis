@@ -22,19 +22,17 @@ Select rows and use the toolbar, the Device menu or a row's context menu:
 | Restart   | Each selected device that can be signalled                                            |
 | Revive    | Every selected device, on any number of boards. Repairs the system and keeps the data |
 | Restore   | Every selected device, on any number of boards. Asks first, then erases them          |
+| USB Power | The selected ports, including a port that is off                                      |
 
-Before it asks, Restore checks what Apple signs for each device. Where a downloaded image is older than the newest release, it offers both: download the newest, or use the one downloaded. Otherwise it says what each device gets and how much is to download.
-| USB Power | The selected ports, including a port that is off |
-
-Restore is unavailable while any selected device cannot be restored.
+Before it asks, Restore checks what Apple signs for each device. Where a downloaded image is older than the newest release, it offers both: download the newest, or use the one downloaded. Otherwise it says what each device gets and how much is to download. Restore is unavailable while any selected device cannot be restored.
 
 A board on a power supply shows, beside its name, the power allocated to its ports out of the available charging budget. A bolt with a warning marks a device that took the largest offer the board could make and would use more: with several devices sharing a supply, one with a flat battery may get too little to start.
 
-Each row ends in one mark for its operation: a ring that fills as a download, restore or revive runs, then how it ended. Select a row to inspect its operation step by step, its identity, USB connection and power. Power shows the PD contract or default USB allowance with exact nominal watts in parentheses. The toolbar lets you hide or show the inspector. The bar under the list reports an image download, or why restores are unavailable.
+Each row ends in one mark for its operation: a ring that fills as a download, restore or revive runs, then how it ended. Select a row to inspect its operation step by step, its identity, USB connection and power. Power shows the PD contract or default USB allowance with exact nominal watts in parentheses. The toolbar lets you hide or show the inspector. The bar under the list reports an image download.
 
 ## Settings and Help
 
-In Settings > Boards, rename a board or adjust its lights; the board keeps both when moved to another Mac. Settings > Images lists every restore image Iasis holds or is downloading. Add Image ▸ Download offers, for any model, the releases Apple still signs, such as an older macOS; From File adds an IPSW, as does File ▸ Add Restore Image. Images stay until you remove them. The Finder preference applies to all connected Apple devices. Help ▸ Indicator Lights explains the port and status lights.
+In Settings > Boards, rename a board or adjust its lights; the board keeps both when moved to another Mac. Settings > Images lists every restore image Iasis holds or is downloading. Add Image ▸ Download offers, for any model, the releases Apple still signs, such as an older macOS; From File adds an IPSW, as does File ▸ Add Restore Image, and the list shows it being sent and checked. Images stay until you remove them. The Finder preference applies to all connected Apple devices. Help ▸ Indicator Lights explains the port and status lights.
 
 ### USB internet sharing
 
@@ -72,4 +70,4 @@ The package installs:
 
 The installer starts both for the user at the console; other users get them at their next login.
 
-The app communicates with `iasisd` over the [agent socket](../crates/iasis/README.md).
+The app communicates with `iasisd` over the [agent socket](../crates/api/README.md).

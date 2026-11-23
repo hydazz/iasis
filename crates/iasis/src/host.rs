@@ -889,14 +889,12 @@ impl Link {
         }
     }
 
-    pub(crate) fn board_view(
-        &self,
-        store: &crate::images::Store,
-    ) -> Option<crate::view::BoardView> {
+    pub(crate) fn board_view(&self, store: &crate::images::Store) -> Option<iasis_api::BoardView> {
         let view = self.shared.view.lock().unwrap();
         let (status, snapshot) = view.sample.as_ref()?;
-        let mut board = crate::view::BoardView::new(self.board().info(), status);
-        board.describe_devices(
+        let mut board = crate::view::board(self.board().info(), status);
+        crate::view::describe_devices(
+            &mut board,
             self.board().info().serial,
             status,
             snapshot,
@@ -908,12 +906,12 @@ impl Link {
         let jobs = self.shared.jobs.lock().unwrap();
         for (index, row) in board.ports.iter_mut().enumerate() {
             if let Some(job) = &jobs[index] {
-                row.describe_job(job);
+                crate::view::describe_job(row, job);
             }
             let age_ms = status
                 .uptime_ms
                 .saturating_sub(view.observer.attached_at_ms[index]);
-            row.identify_for(age_ms);
+            crate::view::identify_for(row, age_ms);
         }
         Some(board)
     }
@@ -979,7 +977,6 @@ mod tests {
     use crate::{
         identity::{Identity, IdentitySource},
         topology::{Companion, PortDevices, Speed},
-        view::BoardView,
     };
     use iasis_protocol::{Orientation, PortState};
 
@@ -1069,10 +1066,8 @@ mod tests {
 
     #[test]
     fn a_target_keeps_its_identity_while_its_attachment_lasts() {
-        use crate::{
-            images::{Network, Store},
-            view::PortView,
-        };
+        use crate::images::{Network, Store};
+        use iasis_api::PortView;
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("index.json"), r#"{"images":[],"models":[],"devices":[{"identifier":"iPad13,18","name":"iPad (10th generation)","hardware":[]}]}"#).unwrap();
         let store = Store::open(dir.path(), Network::default(), Arc::default()).unwrap();
@@ -1091,8 +1086,9 @@ mod tests {
             let seen = observe(usb, one);
             status.ports[0].observed = Some(seen);
             status.ports[0].ecid = seen.identity(status.ports[0].ecid);
-            let mut board = BoardView::new(&info, status);
-            board.describe_devices(
+            let mut board = crate::view::board(&info, status);
+            crate::view::describe_devices(
+                &mut board,
                 info.serial,
                 status,
                 usb,

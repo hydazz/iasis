@@ -36,7 +36,7 @@ struct MenuTests {
         submenu.update()
         #expect(submenu.item(withTitle: "Restart")?.isEnabled == true)
         #expect(item.subtitle == "DFU")
-        state.boards[0].ports[1].mode = "mux"
+        state.boards[0].ports[1].mode = .mux
         state.boards[0].ports[1].wrongDfuPort = true
         state.boards[0].ports[1].reboot = false
         await agent.publish(state)
