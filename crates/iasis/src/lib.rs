@@ -70,6 +70,8 @@ pub enum Error {
     Firmware {
         /// The protocol version the board speaks.
         board: u16,
+        /// The IasisOS version the board runs.
+        version: [u16; 3],
     },
 }
 
@@ -369,6 +371,7 @@ impl Board {
         } else {
             Err(Error::Firmware {
                 board: self.protocol,
+                version: self.info.firmware_version,
             })
         }
     }
