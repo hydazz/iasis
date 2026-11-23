@@ -957,6 +957,18 @@ impl Link {
     }
 }
 
+impl Link {
+    /// Give the board's host session up now, for a host that is about to
+    /// exit: the board takes the next host at once.
+    pub fn end(&self) {
+        self.shared.stop.store(true, Ordering::Relaxed);
+        let _ = self
+            .shared
+            .board
+            .host_control(HostControl::End(self.shared.session));
+    }
+}
+
 impl Drop for Link {
     fn drop(&mut self) {
         self.shared.stop.store(true, Ordering::Relaxed);
