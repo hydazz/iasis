@@ -1,3 +1,4 @@
+import ServiceManagement
 import SwiftUI
 
 /// The main window: every port of every board, in a list.
@@ -59,7 +60,15 @@ struct DevicesView: View {
             browser.showsInspector = true
         }
         .overlay {
-            if state == nil {
+            if state == nil, BundledAgent.needsApproval {
+                ContentUnavailableView {
+                    Label("Agent Not Running", systemImage: "bolt.slash")
+                } description: {
+                    Text("Turn Iasis on under Background App Activity in Login Items & Extensions.")
+                } actions: {
+                    Button("Open System Settings") { SMAppService.openSystemSettingsLoginItems() }
+                }
+            } else if state == nil {
                 ContentUnavailableView(
                     "Agent Not Running",
                     systemImage: "bolt.slash",
