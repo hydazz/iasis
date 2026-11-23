@@ -7,8 +7,7 @@ use core_foundation::{
 };
 use io_kit_sys::{
     IOIteratorNext, IOObjectRelease, IORegistryEntryCreateCFProperty, IORegistryEntryGetPath,
-    IORegistryEntryIDMatching, IOServiceGetMatchingService, IOServiceGetMatchingServices,
-    IOServiceMatching, types::io_object_t,
+    IOServiceGetMatchingServices, IOServiceMatching, types::io_object_t,
 };
 
 use super::HostPort;
@@ -23,21 +22,6 @@ impl Drop for Object {
             IOObjectRelease(self.0);
         }
     }
-}
-
-pub(super) fn present(attachment: super::MacAttachment) -> bool {
-    // Registry entry IDs identify an enumeration. A replacement on the same
-    // physical port gets a different ID while retaining the location ID.
-    let matching = unsafe { IORegistryEntryIDMatching(attachment.registry_entry_id) };
-    if matching.is_null() {
-        return false;
-    }
-    let service = unsafe { IOServiceGetMatchingService(0, matching) };
-    if service == 0 {
-        return false;
-    }
-    drop(Object(service));
-    true
 }
 
 pub(super) fn ports() -> io::Result<Vec<HostPort>> {

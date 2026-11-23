@@ -92,13 +92,6 @@ pub struct MacAttachment {
     pub registry_entry_id: u64,
 }
 
-#[cfg(target_os = "macos")]
-impl MacAttachment {
-    pub(crate) fn present(self) -> bool {
-        macos::present(self)
-    }
-}
-
 impl From<DeviceInfo> for UsbDevice {
     fn from(device: DeviceInfo) -> Self {
         Self {
@@ -115,6 +108,10 @@ impl From<DeviceInfo> for UsbDevice {
                 device.vendor_id(),
                 device.product_id(),
                 device.serial_number(),
+                &device
+                    .interfaces()
+                    .map(|i| (i.class(), i.subclass(), i.protocol()))
+                    .collect::<Vec<_>>(),
             ),
             #[cfg(target_os = "macos")]
             macos_attachment: Some(MacAttachment {
