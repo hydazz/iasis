@@ -883,6 +883,7 @@ fn enter_dfu(
                 pending.push((
                     port,
                     generation,
+                    result == protocol::CommandResult::Acknowledged,
                     Attempt::new(board.info().serial, port, &assessment, &snapshot, result),
                 ));
             }
@@ -896,16 +897,18 @@ fn enter_dfu(
     let mut seen = link.changes().count();
     while !pending.is_empty() && Instant::now() < deadline {
         let (status, snapshot) = link.observe()?;
-        pending.retain(|(port, generation, previous)| {
-            // A target can re-attach as it enters DFU. Its ECID, read again
-            // in DFU, is what ties it to the selection; one selected by its
-            // attachment alone has nothing else to be known by.
+        pending.retain(|(port, generation, acknowledged, previous)| {
+            // A target can re-attach as it enters DFU, as a Mac does when it
+            // restarts into it. A selected ECID, read again in DFU, ties the
+            // new attachment to the selection. A target selected by its
+            // attachment alone is followed only after acknowledging the
+            // command it is restarting for; its ECID in DFU pins it from then.
             let pinned = selected
                 .iter()
                 .find(|chosen| chosen.port == *port)
                 .and_then(|chosen| chosen.ecid);
             let current = status.ports[port.index()].generation;
-            if current != *generation && pinned.is_none() {
+            if current != *generation && pinned.is_none() && !acknowledged {
                 eprintln!(
                     "port {}: attachment changed during DFU entry",
                     port.number()
@@ -962,7 +965,7 @@ fn enter_dfu(
             seen = link.changes().wait(seen, Some(again.min(deadline)));
         }
     }
-    for (port, _, _) in pending {
+    for (port, _, _, _) in pending {
         eprintln!(
             "port {}: no verified DFU identity before deadline",
             port.number()
