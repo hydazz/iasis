@@ -28,6 +28,6 @@ Only the service touches the boards and targets directly. Its udev rule gives th
 - an Iasis board's management interface, and the board's RP2350 boot ROM on its hub's management port
 - Apple devices in DFU, recovery, Apple Debug USB and the restore service, attached below an Iasis hub
 
-Other USB devices are left alone, and the system usbmuxd keeps the Apple devices it serves. The service has `CAP_NET_ADMIN` and `CAP_NET_RAW` for USB Internet Sharing; with NetworkManager running, the gateway takes each target's USB network interface out of NetworkManager's hands and leaves every other interface to it.
+Other USB devices are left alone, and the system usbmuxd keeps the Apple devices it serves. The service has `CAP_NET_ADMIN` and `CAP_NET_RAW` for USB Internet Sharing. The same rules mark those targets' `cdc_ncm` network interfaces unmanaged, so NetworkManager neither configures them nor runs DHCP on them; it keeps every other interface.
 
 Removing the package keeps the images; purging it deletes `/var/lib/iasis` and `/var/cache/iasis`.
