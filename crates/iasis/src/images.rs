@@ -901,7 +901,7 @@ impl Store {
     }
 
     /// The chip and board a model's images are filed under: its own, or the
-    /// catalog's for the product type Configurator reads.
+    /// catalog's for its product type.
     pub(crate) fn hardware_for(&self, model: &DeviceModel) -> Result<(u32, u32)> {
         if let Some(hardware) = model.hardware() {
             return Ok(hardware);
