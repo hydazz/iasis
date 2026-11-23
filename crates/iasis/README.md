@@ -6,7 +6,7 @@
 
 ## Debian package
 
-`mise run deb` builds `target/debian/iasis_<version>_<arch>.deb` on and for the Linux machine it runs on. Releases build it on Debian 13 for amd64 and arm64; it installs on Debian 13, Ubuntu 24.04 and later.
+`mise run deb` builds `target/debian/iasis_<version>_<arch>.deb` on and for the Linux machine it runs on. Releases publish it for amd64 and arm64; it supports Debian 13 and Ubuntu 26.04.
 
 ```sh
 sudo apt install ./iasis_0.1.0-1_amd64.deb
