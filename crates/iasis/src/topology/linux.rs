@@ -3,11 +3,9 @@ use std::{fs, io, path::Path};
 use super::HostPort;
 use crate::Topology;
 
+/// The management hub's upstream port links and every hub's Container ID.
 #[cfg(target_os = "linux")]
-pub(super) fn ports(
-    management: &Topology,
-    devices: &[nusb::DeviceInfo],
-) -> io::Result<Vec<HostPort>> {
+pub(super) fn host(management: &Topology, devices: &[nusb::DeviceInfo]) -> io::Result<super::Host> {
     let device = devices
         .iter()
         .find(|device| {
@@ -23,51 +21,55 @@ pub(super) fn ports(
         .sysfs_path()
         .parent()
         .ok_or_else(|| io::Error::other("management device has no parent hub"))?;
-    read_hub_ports(hub)
+    // Linux 6.4 and later expose the BOS read at enumeration.
+    let containers = devices
+        .iter()
+        .filter(|device| device.class() == 0x09)
+        .filter_map(|device| {
+            let bos = fs::read(device.sysfs_path().join("bos_descriptors")).ok()?;
+            let location = Topology {
+                bus: device.bus_id().to_owned(),
+                port_chain: device.port_chain().to_vec(),
+            };
+            Some((location, container_id(&bos)?))
+        })
+        .collect();
+    Ok(super::Host {
+        ports: upstream_ports(hub)?,
+        containers,
+    })
 }
 
-fn read_hub_ports(hub: &Path) -> io::Result<Vec<HostPort>> {
-    let name = hub
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| io::Error::other("invalid sysfs hub path"))?;
-    let mut ports = Vec::new();
-    match fs::canonicalize(hub.join("port")) {
-        Ok(path) => add_port(&mut ports, &path)?,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+/// The Container ID in a BOS descriptor set (USB 3.2 §9.6.2.3).
+fn container_id(bos: &[u8]) -> Option<[u8; 16]> {
+    let [5, 0x0f, low, high, ..] = *bos else {
+        return None;
+    };
+    let mut capabilities = bos.get(5..usize::from(u16::from_le_bytes([low, high])))?;
+    while let [length, 0x10, kind, ..] = *capabilities {
+        let (capability, rest) = capabilities.split_at_checked(usize::from(length).max(3))?;
+        if kind == 0x04 {
+            let id: [u8; 16] = capability.get(4..)?.try_into().ok()?;
+            return (id != [0; 16]).then_some(id);
+        }
+        capabilities = rest;
+    }
+    None
+}
+
+/// The port a hub is attached to and the host's companion for it.
+fn upstream_ports(hub: &Path) -> io::Result<Vec<HostPort>> {
+    let port = match fs::canonicalize(hub.join("port")) {
+        Ok(path) => read_port(&path)?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(error),
-    }
-    for entry in fs::read_dir(hub)? {
-        let path = entry?.path();
-        if !path
-            .file_name()
-            .is_some_and(|entry| entry.to_string_lossy().starts_with(&format!("{name}:")))
-        {
-            continue;
-        }
-        for entry in fs::read_dir(path)? {
-            let path = entry?.path();
-            if !path
-                .file_name()
-                .is_some_and(|entry| entry.to_string_lossy().starts_with(&format!("{name}-port")))
-            {
-                continue;
-            }
-            add_port(&mut ports, &path)?;
-        }
-    }
-    ports.sort_by(|a, b| a.path.cmp(&b.path));
-    ports.dedup_by(|a, b| a.path == b.path);
-    Ok(ports)
-}
-
-fn add_port(ports: &mut Vec<HostPort>, path: &Path) -> io::Result<()> {
-    let source = read_port(path)?;
-    if let Some(peer) = &source.peer {
+    };
+    let mut ports = Vec::new();
+    if let Some(peer) = &port.peer {
         ports.push(read_port(Path::new(peer))?);
     }
-    ports.push(source);
-    Ok(())
+    ports.push(port);
+    Ok(ports)
 }
 
 fn read_port(path: &Path) -> io::Result<HostPort> {
@@ -263,6 +265,32 @@ mod tests {
         assert_eq!(control(6, 2), None); // endpoint uses bulk instead of interrupt
     }
 
+    fn hex(text: &str) -> Vec<u8> {
+        (0..text.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&text[i..i + 2], 16).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn reads_the_container_id_both_usb7206_functions_report() {
+        // Captured from two boards on one Linux host: USB 2 function, then
+        // SuperSpeed function, of each.
+        let ids = [
+            "050f2a00030710021ea200000a1003000e00010ae70014100400000000000000002e280f16030a000602",
+            "050f4900050710021ea200000a1003000e00010ae7001c100a00230000000011000030000500b000050031400a00b1400a0014100400000000000000002e280f16030a00060203100b",
+            "050f2a00030710021ea200000a1003000e00010ae70014100400000000000000002e280f16030a000502",
+            "050f4900050710021ea200000a1003000e00010ae7001c100a00230000000011000030000500b000050031400a00b1400a0014100400000000000000002e280f16030a00050203100b",
+        ]
+        .map(|bos| container_id(&hex(bos)).unwrap());
+        assert_eq!(ids[0], ids[1]);
+        assert_eq!(ids[2], ids[3]);
+        assert_ne!(ids[0], ids[2]);
+        // The USB2 Controller Hub function reports no Container ID.
+        assert_eq!(container_id(&hex("050f0c00010710021ea20000")), None);
+        assert_eq!(container_id(&hex("050f0c00010010021ea20000")), None);
+    }
+
     #[test]
     fn linux_attachment_requires_both_the_enumeration_and_port_path() {
         let id = linux_usb_id(2, 13, &[1, 3]).unwrap();
@@ -348,46 +376,33 @@ mod tests {
     }
 
     #[test]
-    fn reads_actual_sysfs_directory_and_reciprocal_symlink_shape() {
+    fn reads_the_reciprocal_links_of_a_hubs_upstream_port() {
         use std::os::unix::fs::symlink;
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
         let hub = root.join("1-3");
-        let usb2 = hub.join("1-3:1.0/1-3-port2");
-        let usb3 = root.join("2-7/2-7:1.0/2-7-port2");
-        fs::create_dir_all(&usb2).unwrap();
-        fs::create_dir_all(&usb3).unwrap();
-        let host2 = root.join("usb1-port3");
-        let host3 = root.join("usb2-port7");
-        fs::create_dir(&host2).unwrap();
-        fs::create_dir(&host3).unwrap();
+        let host2 = root.join("usb1/1-0:1.0/usb1-port3");
+        let host3 = root.join("usb2/2-0:1.0/usb2-port7");
+        for path in [&hub, &host2, &host3] {
+            fs::create_dir_all(path).unwrap();
+        }
         symlink(&host2, hub.join("port")).unwrap();
         symlink(&host3, host2.join("peer")).unwrap();
         symlink(&host2, host3.join("peer")).unwrap();
-        symlink(&usb3, usb2.join("peer")).unwrap();
-        symlink(&usb2, usb3.join("peer")).unwrap();
-        let ports = read_hub_ports(&hub).unwrap();
+        let ports = upstream_ports(&hub).unwrap();
         assert_eq!(
-            super::super::companion(&parse_port_name("usb1-port3").unwrap(), &ports, None),
+            super::super::companion(&parse_port_name("usb1-port3").unwrap(), &ports),
             super::super::Companion::Mapped {
                 topology: parse_port_name("usb2-port7").unwrap()
             }
         );
+        fs::remove_file(host2.join("peer")).unwrap();
         assert_eq!(
             super::super::companion(
-                &Topology {
-                    bus: "001".into(),
-                    port_chain: vec![3, 2]
-                },
-                &ports,
-                None
+                &parse_port_name("usb1-port3").unwrap(),
+                &upstream_ports(&hub).unwrap()
             ),
-            super::super::Companion::Mapped {
-                topology: Topology {
-                    bus: "002".into(),
-                    port_chain: vec![7, 2]
-                }
-            }
+            super::super::Companion::Unavailable
         );
     }
 }
