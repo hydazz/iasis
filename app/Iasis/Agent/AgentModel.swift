@@ -9,6 +9,8 @@ final class AgentModel {
     private(set) var state: AgentState?
     /// Keep the titles under the pointer until AppKit finishes tracking the menu.
     private(set) var menuSnapshot: AgentState?
+    /// An archive on its way into the agent's store.
+    private(set) var importing: Importing?
     private var menuRefreshPending = false
     private let agent: any AgentService
     private var watching: Task<Void, Never>?
@@ -57,6 +59,24 @@ final class AgentModel {
         }
     }
 
+    /// Send an archive to the agent's store, unless another is on its way.
+    func importImage(_ file: URL) {
+        guard importing == nil, let bytes = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
+            return
+        }
+        importing = Importing(name: file.lastPathComponent, bytes: Int64(bytes), sent: 0)
+        Task {
+            do {
+                try await agent.importImage(file) { sent in
+                    Task { @MainActor in self.importing?.sent = sent }
+                }
+            } catch {
+                report(error)
+            }
+            importing = nil
+        }
+    }
+
     func catalog() async throws -> [AgentState.CatalogModel] {
         try await agent.catalog()
     }
@@ -84,6 +104,16 @@ final class AgentModel {
         } catch {
             report(error)
             return false
+        }
+    }
+
+    struct Importing: Equatable {
+        var name: String
+        var bytes: Int64
+        var sent: Int64
+
+        var fraction: Double {
+            bytes > 0 ? Double(sent) / Double(bytes) : 0
         }
     }
 

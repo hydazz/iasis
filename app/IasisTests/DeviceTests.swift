@@ -151,7 +151,7 @@ struct DeviceTests {
         var confirmation = try #require(RestoreConfirmation(state.devices.filter { [2, 4].contains($0.port.number) }))
         let board = "a0e012192cdfdb67"
         let release = { (version: String, build: String) in
-            AgentState.Offer.Release(os: "macOS", version: version, build: build, bytes: 25_600_000_000)
+            AgentState.Release(os: "macOS", version: version, build: build, bytes: 25_600_000_000)
         }
         let newest = release("27.2.1", "26B131")
         let older = release("26.6", "25G80")

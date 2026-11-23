@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.6", features = ["derive"] }
+iasis-api.workspace = true
 iasis-protocol.workspace = true
 iasis-pd.workspace = true
 indicatif = { version = "0.18", default-features = false, features = ["unicode-width"] }
@@ -35,6 +36,7 @@ directories = "6.0.0"
 core-foundation = "0.10"
 io-kit-sys = "0.5"
 system-configuration = "0.8"
+wait-timeout = "0.2"
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 nix = { version = "0.32", features = ["fs", "net", "poll", "resource"] }

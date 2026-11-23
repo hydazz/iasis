@@ -12,7 +12,7 @@ enum MenuBarStatus: String, CaseIterable {
             return
         }
         let ports = state.boards.lazy.flatMap(\.ports)
-        if state.boards.contains(where: { $0.notice != nil }) || ports.contains(where: { $0.light.hue == "red" }) {
+        if state.boards.contains(where: { $0.notice != nil }) || ports.contains(where: { $0.light.hue == .red }) {
             self = .fault
         } else if state.images.fetch != nil || ports.contains(where: \.light.pulse) {
             self = .busy

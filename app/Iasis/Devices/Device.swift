@@ -84,8 +84,8 @@ struct Device: Identifiable, Equatable {
             return Activity(result.phase, operation: result.operation)
         }
         switch port.mode {
-        case "dfu", "kis_dfu": return Activity("DFU", .none)
-        case "recovery": return Activity("Recovery", .none)
+        case .dfu, .kisDfu: return Activity("DFU", .none)
+        case .recovery: return Activity("Recovery", .none)
         default: return .idle
         }
     }
@@ -315,7 +315,7 @@ struct RestoreConfirmation: Equatable {
         let place = "\(device.boardTitle), Port \(device.port.number): \(device.name)"
         // A device the agent has not identified gets its image once in DFU.
         guard let offer = offer(for: device) else { return place }
-        let size = { (release: AgentState.Offer.Release) in release.bytes.formatted(.byteCount(style: .file)) }
+        let size = { (release: AgentState.Release) in release.bytes.formatted(.byteCount(style: .file)) }
         switch (offer.held, offer.latest) {
         case let (held?, latest?) where offer.newer != nil:
             return "\(place) · \(held.title) downloaded, \(latest.title) available (\(size(latest)))"

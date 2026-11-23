@@ -6,12 +6,12 @@ use std::{
     path::Path,
     process::{Command, Stdio},
     sync::{LazyLock, Mutex},
-    thread,
     time::{Duration, Instant},
 };
 
 use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value};
+use wait_timeout::ChildExt;
 
 use super::{AppleMode, Identity, IdentitySource};
 use crate::topology::{MacAttachment, Snapshot};
@@ -108,16 +108,11 @@ fn run(command: &mut Command, deadline: Instant) -> Option<Reply> {
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-        }
+    let left = deadline.saturating_duration_since(Instant::now());
+    let Ok(Some(status)) = child.wait_timeout(left) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
     };
     if file.metadata().ok()?.len() > 1024 * 1024 {
         return None;
