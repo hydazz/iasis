@@ -24,7 +24,7 @@ _.path = ["/Applications/KiCad/KiCad.app/Contents/MacOS"]
 UV_PYTHON = "python"
 
 [monorepo]
-config_roots = ["app", "hardware/case", "hardware/boards/*"]
+config_roots = ["apps/macos", "hardware/case", "hardware/boards/*"]
 
 [hooks]
 postinstall = "lefthook install"

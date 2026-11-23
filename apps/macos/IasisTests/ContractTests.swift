@@ -7,7 +7,7 @@ import Testing
 struct ContractTests {
     private static let fixtures = URL(filePath: #filePath)
         .deletingLastPathComponent()
-        .appending(path: "../../crates/api/fixtures")
+        .appending(path: "../../../crates/api/fixtures")
         .standardized
 
     @Test func theStateRoundTrips() throws {

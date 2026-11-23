@@ -28,7 +28,7 @@ fp-info-cache
 /build/
 
 # Xcode
-/app/build/
+/apps/macos/build/
 xcuserdata/
 
 # Rust

@@ -46,13 +46,13 @@ If a port reports a packet capture permission error, open `Install ChmodBPF.pkg`
 Building needs Xcode 27. `Iasis.xcodeproj` builds and runs in Xcode on its own. The app talks to whichever `iasisd` is running; start one first, or the menu shows Agent Not Running.
 
 ```sh
-mise run //app:build     # the app, unsigned
-mise run //app:test
-mise run //app:lint      # unused Swift code, package scripts and property lists
-mise run //app:package   # an unsigned installer in app/build
+mise run //apps/macos:build     # the app, unsigned
+mise run //apps/macos:test
+mise run //apps/macos:lint      # unused Swift code, package scripts and property lists
+mise run //apps/macos:package   # an unsigned installer in apps/macos/build
 ```
 
-An archive embeds `iasisd`, `iasis` and `iasis-gateway` from `target/release` in `Contents/Helpers`. `//app:package` builds them first; before archiving in Xcode, run `mise run host:build`. They are built for the Mac's own architecture.
+An archive embeds `iasisd`, `iasis` and `iasis-gateway` from `target/release` in `Contents/Helpers`. `//apps/macos:package` builds them first; before archiving in Xcode, run `mise run host:build`. They are built for the Mac's own architecture.
 
 Set `TEST_RUNNER_IASIS_LIVE_AGENT=1` when running the tests to check the connection to the local agent.
 
