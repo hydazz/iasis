@@ -43,6 +43,16 @@ impl Speed {
     fn is_superspeed(self) -> bool {
         matches!(self, Self::Super | Self::SuperPlus)
     }
+
+    fn mbps(self) -> Option<u16> {
+        match self {
+            Self::SuperPlus => Some(10000),
+            Self::Super => Some(5000),
+            Self::High => Some(480),
+            Self::Full => Some(12),
+            _ => None,
+        }
+    }
 }
 
 impl From<Option<nusb::Speed>> for Speed {
@@ -123,9 +133,10 @@ pub enum Companion {
     Mapped {
         topology: Topology,
     },
-    /// The host has no reciprocal companion-port relationship.
+    /// The board hub's SuperSpeed function is not enumerated, or nothing the
+    /// host reports identifies it.
     Unavailable,
-    /// The host records disagree. No SuperSpeed device is assigned.
+    /// The host's evidence disagrees. No SuperSpeed device is assigned.
     Ambiguous,
 }
 
@@ -199,18 +210,22 @@ pub fn discover(management: &Topology) -> Result<Snapshot, Error> {
     locate(management, nusb::list_devices().wait()?.collect())
 }
 
-/// Place USB devices on the connectors from their cached descriptors and
-/// the host's USB2/SuperSpeed port links. Missing companion metadata remains
-/// visible instead of guessing a hub.
+/// Place USB devices on the connectors from their cached descriptors and what
+/// the host reports about its ports and hubs. SuperSpeed locations stay
+/// unassigned unless that evidence identifies the board hub's SuperSpeed
+/// function without contradiction.
 pub fn locate(management: &Topology, devices: Vec<DeviceInfo>) -> Result<Snapshot, Error> {
     hub_path(management)?;
     #[cfg(target_os = "linux")]
-    let ports = linux::ports(management, &devices)?;
+    let host = linux::host(management, &devices)?;
     #[cfg(target_os = "macos")]
-    let ports = macos::ports()?;
+    let host = Host {
+        ports: macos::ports()?,
+        containers: Vec::new(),
+    };
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    let ports = Vec::new();
-    group_devices(management, devices.into_iter().map(UsbDevice::from), &ports)
+    let host = Host::default();
+    group_devices(management, devices.into_iter().map(UsbDevice::from), &host)
 }
 
 fn hub_path(management: &Topology) -> Result<&[u8], Error> {
@@ -224,17 +239,40 @@ fn hub_path(management: &Topology) -> Result<&[u8], Error> {
     }
 }
 
-#[derive(Debug)]
+/// The board's Microchip USB7206: its USB 2 and SuperSpeed hub functions.
+const USB2_HUB: (u16, u16) = (0x0424, 0x4206);
+const SUPERSPEED_HUB: (u16, u16) = (0x0424, 0x7206);
+
+/// What the host reports about its USB ports and hubs.
+#[derive(Debug, Default)]
+struct Host {
+    /// Ports with the host's own USB 2/SuperSpeed companion links.
+    ports: Vec<HostPort>,
+    /// Hub Container IDs from their BOS descriptors.
+    containers: Vec<(Topology, [u8; 16])>,
+}
+
+impl Host {
+    fn container(&self, device: &Topology) -> Option<&[u8; 16]> {
+        self.containers
+            .iter()
+            .find(|(location, _)| location == device)
+            .map(|(_, id)| id)
+    }
+}
+
+#[derive(Clone, Debug)]
 struct HostPort {
     path: String,
     topology: Topology,
     peer: Option<String>,
 }
 
-fn companion(usb2: &Topology, records: &[HostPort], wired: Option<&Topology>) -> Companion {
+/// The host's reciprocal companion link for the port at `port`.
+fn companion(port: &Topology, records: &[HostPort]) -> Companion {
     let candidates: Vec<_> = records
         .iter()
-        .filter(|port| port.topology == *usb2)
+        .filter(|record| record.topology == *port)
         .collect();
     let [source] = candidates.as_slice() else {
         return if candidates.is_empty() {
@@ -243,54 +281,68 @@ fn companion(usb2: &Topology, records: &[HostPort], wired: Option<&Topology>) ->
             Companion::Ambiguous
         };
     };
+    let Some(path) = &source.peer else {
+        return Companion::Unavailable;
+    };
     let peers: Vec<_> = records
         .iter()
-        .filter(|port| match &source.peer {
-            Some(path) => port.path == *path,
-            None => wired == Some(&port.topology),
-        })
+        .filter(|record| record.path == *path)
         .collect();
-    let [peer] = peers.as_slice() else {
-        return if peers.is_empty() {
-            Companion::Unavailable
-        } else {
-            Companion::Ambiguous
-        };
-    };
-    let consistent = match &source.peer {
-        Some(_) => peer.peer.as_ref() == Some(&source.path),
-        None => peer.peer.is_none(),
-    };
-    if !consistent || peer.topology == *usb2 || wired.is_some_and(|port| port != &peer.topology) {
-        return Companion::Ambiguous;
-    }
-    Companion::Mapped {
-        topology: peer.topology.clone(),
+    match peers.as_slice() {
+        [] => Companion::Unavailable,
+        [peer] if peer.peer.as_ref() == Some(&source.path) && peer.topology != *port => {
+            Companion::Mapped {
+                topology: peer.topology.clone(),
+            }
+        }
+        _ => Companion::Ambiguous,
     }
 }
 
-fn upstream_hub<'a>(
-    hub: &Topology,
+/// The SuperSpeed function of the board's hub, from the host's companion link
+/// for the hub's upstream port or from the Container ID both functions of a
+/// USB 3 hub report (USB 3.2 §11.1). `Ok(None)`: the board is on USB 2 only.
+fn superspeed_hub<'a>(
+    usb2: &UsbDevice,
     devices: &'a [UsbDevice],
-    records: &[HostPort],
-) -> Option<&'a UsbDevice> {
-    let usb2 = devices.iter().find(|d| {
-        &d.topology == hub
-            && (d.vendor_id, d.product_id) == (0x0424, 0x4206)
-            && !d.speed.is_superspeed()
-    })?;
-    let is_usb3_hub = |d: &UsbDevice| (d.vendor_id, d.product_id) == (0x0424, 0x7206);
-    match companion(hub, records, None) {
-        Companion::Mapped { topology } => {
-            if let Some(peer) = devices.iter().find(|d| d.topology == topology) {
-                return (is_usb3_hub(peer) && peer.speed.is_superspeed()).then_some(peer);
+    host: &Host,
+) -> Result<Option<&'a UsbDevice>, Companion> {
+    let linked = match companion(&usb2.topology, &host.ports) {
+        Companion::Mapped { topology } => Some(devices.iter().find(|d| d.topology == topology)),
+        Companion::Unavailable => None,
+        Companion::Ambiguous => return Err(Companion::Ambiguous),
+    };
+    let shared = match host.container(&usb2.topology) {
+        Some(id) => {
+            let (superspeed, others): (Vec<_>, Vec<_>) = devices
+                .iter()
+                .filter(|d| d.topology != usb2.topology && host.container(&d.topology) == Some(id))
+                .partition(|d| d.speed.is_superspeed());
+            // A second USB 2 hub with this ID would make any pairing a guess.
+            match (superspeed.as_slice(), others.as_slice()) {
+                ([], []) => Some(None),
+                ([function], []) => Some(Some(*function)),
+                _ => return Err(Companion::Ambiguous),
             }
         }
-        // An unpaired USB7206C could be this board's faster function.
-        Companion::Unavailable if !devices.iter().any(is_usb3_hub) => {}
-        _ => return None,
+        None => None,
+    };
+    let is_superspeed_hub =
+        |d: &UsbDevice| (d.vendor_id, d.product_id) == SUPERSPEED_HUB && d.speed.is_superspeed();
+    let found = match (linked, shared) {
+        (Some(a), Some(b)) if a.map(|d| &d.topology) == b.map(|d| &d.topology) => a,
+        (Some(found), None) | (None, Some(found)) => found,
+        (Some(_), Some(_)) => return Err(Companion::Ambiguous),
+        // Without evidence, the board is on USB 2 only when no such hub is.
+        (None, None) if devices.iter().any(is_superspeed_hub) => {
+            return Err(Companion::Unavailable);
+        }
+        (None, None) => None,
+    };
+    match found {
+        Some(hub) if !is_superspeed_hub(hub) => Err(Companion::Ambiguous),
+        found => Ok(found),
     }
-    Some(usb2)
 }
 
 fn below(device: &Topology, connector: &Topology) -> bool {
@@ -302,49 +354,44 @@ fn below(device: &Topology, connector: &Topology) -> bool {
 fn group_devices(
     management: &Topology,
     devices: impl IntoIterator<Item = UsbDevice>,
-    records: &[HostPort],
+    host: &Host,
 ) -> Result<Snapshot, Error> {
     let hub = Topology {
         bus: management.bus.clone(),
         port_chain: hub_path(management)?.to_vec(),
     };
     let devices: Vec<_> = devices.into_iter().collect();
-    let upstream = upstream_hub(&hub, &devices, records);
-    let upstream_mbps = upstream.and_then(|device| match device.speed {
-        Speed::SuperPlus => Some(10000),
-        Speed::Super => Some(5000),
-        Speed::High => Some(480),
-        Speed::Full => Some(12),
-        _ => None,
+    let usb2 = devices.iter().find(|d| {
+        d.topology == hub && (d.vendor_id, d.product_id) == USB2_HUB && !d.speed.is_superspeed()
     });
-    let superspeed = upstream.filter(|d| d.speed.is_superspeed());
+    let superspeed = match usb2 {
+        Some(usb2) => superspeed_hub(usb2, &devices, host),
+        None => Err(Companion::Unavailable),
+    };
+    let upstream_mbps = match superspeed {
+        Ok(found) => found.or(usb2).and_then(|d| d.speed.mbps()),
+        Err(_) => None,
+    };
+    // A USB 3 hub numbers each connector's USB 2 and SuperSpeed ports alike.
+    let superspeed = superspeed.map(|found| found.map(|d| d.topology.clone()));
     let mut ports = Port::ALL.map(|port| {
         let mut usb2 = hub.clone();
         usb2.port_chain.push(port.number());
-        let wired = superspeed.map(|device| {
-            let mut hub = device.topology.clone();
-            hub.port_chain.push(port.number());
-            hub
-        });
         PortDevices {
             port,
-            superspeed: companion(&usb2, records, wired.as_ref()),
+            superspeed: match &superspeed {
+                Ok(Some(hub)) => {
+                    let mut topology = hub.clone();
+                    topology.port_chain.push(port.number());
+                    Companion::Mapped { topology }
+                }
+                Ok(None) => Companion::Unavailable,
+                Err(state) => state.clone(),
+            },
             usb2,
             devices: Vec::new(),
         }
     });
-    // No two physical connectors may claim the same companion path.
-    for a in 0..PORT_COUNT {
-        for b in a + 1..PORT_COUNT {
-            if let (Companion::Mapped { topology: left }, Companion::Mapped { topology: right }) =
-                (&ports[a].superspeed, &ports[b].superspeed)
-                && left == right
-            {
-                ports[a].superspeed = Companion::Ambiguous;
-                ports[b].superspeed = Companion::Ambiguous;
-            }
-        }
-    }
     for device in devices {
         let matches: Vec<_> = ports.iter().enumerate().filter(|(_, port)| {
             let usb2 = !device.speed.is_superspeed() && below(&device.topology, &port.usb2);
@@ -380,21 +427,6 @@ mod tests {
         }
     }
 
-    fn pair() -> [HostPort; 2] {
-        [
-            HostPort {
-                path: "usb2".into(),
-                topology: location("1", &[4, 2]),
-                peer: Some("usb3".into()),
-            },
-            HostPort {
-                path: "usb3".into(),
-                topology: location("2", &[7, 2]),
-                peer: Some("usb2".into()),
-            },
-        ]
-    }
-
     fn device(bus: &str, chain: &[u8], speed: Speed) -> UsbDevice {
         UsbDevice {
             topology: location(bus, chain),
@@ -409,6 +441,16 @@ mod tests {
             #[cfg(not(target_os = "macos"))]
             device_address: 1,
         }
+    }
+
+    fn hub(bus: &str, chain: &[u8], speed: Speed) -> UsbDevice {
+        let mut hub = device(bus, chain, speed);
+        (hub.vendor_id, hub.product_id) = if speed.is_superspeed() {
+            SUPERSPEED_HUB
+        } else {
+            USB2_HUB
+        };
+        hub
     }
 
     #[test]
@@ -457,94 +499,111 @@ mod tests {
     }
 
     #[test]
-    fn superspeed_uses_reciprocal_os_links_not_similar_paths() {
-        let snapshot = group_devices(
-            &location("1", &[4, 6]),
-            [
-                device("2", &[7, 2], Speed::Super),
-                device("2", &[7, 2, 3], Speed::SuperPlus),
-                device("2", &[7, 2, 4], Speed::Unknown),
-                device("1", &[4, 2], Speed::High),
-                device("1", &[4, 2], Speed::Super),
-                device("2", &[4, 2], Speed::Super),
-                device("2", &[7, 1], Speed::Super),
+    fn container_ids_pair_each_boards_hub_functions_across_host_controllers() {
+        // Linux on a host whose USB-C ports carry USB 2 and USB 3 on separate
+        // controllers: no companion links, two boards, both on SuperSpeed.
+        let (a, b) = ([1; 16], [2; 16]);
+        let mut host = Host {
+            ports: Vec::new(),
+            containers: vec![
+                (location("003", &[1]), a),
+                (location("002", &[3]), a),
+                (location("003", &[3]), b),
+                (location("002", &[1]), b),
             ],
-            &pair(),
-        )
-        .unwrap();
-        assert_eq!(snapshot.ports[1].devices.len(), 4);
-        assert!(snapshot.ports[0].devices.is_empty());
-        assert_eq!(snapshot.ports[0].superspeed, Companion::Unavailable);
+        };
+        let devices = [
+            hub("003", &[1], Speed::High),
+            hub("002", &[3], Speed::SuperPlus),
+            hub("003", &[3], Speed::High),
+            hub("002", &[1], Speed::SuperPlus),
+            device("002", &[3, 1], Speed::SuperPlus),
+            device("002", &[1, 2], Speed::SuperPlus),
+        ];
+        let place = |management: &Topology, host: &Host| {
+            group_devices(management, devices.clone(), host).unwrap()
+        };
+        let first = place(&location("003", &[1, 6]), &host);
+        assert_eq!(first.upstream_mbps, Some(10000));
+        assert_eq!(first.ports[0].devices[0].topology, location("002", &[3, 1]));
+        assert!(first.ports[1].devices.is_empty());
+        let second = place(&location("003", &[3, 6]), &host);
+        assert_eq!(
+            second.ports[1].devices[0].topology,
+            location("002", &[1, 2])
+        );
+        assert!(second.ports[0].devices.is_empty());
+
+        // The host's own link must agree with the Container ID.
+        host.ports = vec![
+            HostPort {
+                path: "usb3-port1".into(),
+                topology: location("003", &[1]),
+                peer: Some("usb2-port1".into()),
+            },
+            HostPort {
+                path: "usb2-port1".into(),
+                topology: location("002", &[1]),
+                peer: Some("usb3-port1".into()),
+            },
+        ];
+        let conflict = place(&location("003", &[1, 6]), &host);
+        assert_eq!(conflict.ports[0].superspeed, Companion::Ambiguous);
+        assert_eq!(conflict.upstream_mbps, None);
+        host.ports.clear();
+
+        // Two USB 2 functions reporting one ID cannot be told apart.
+        host.containers[2].1 = a;
+        assert_eq!(
+            place(&location("003", &[1, 6]), &host).ports[0].superspeed,
+            Companion::Ambiguous
+        );
     }
 
     #[test]
-    fn verified_hub_functions_pair_downstream_ports_without_apple_peer_properties() {
-        let [mut host2, mut host3] = pair();
-        host2.topology = location("00", &[1]);
-        host3.topology = location("00", &[2]);
-        let mut records = vec![host2, host3];
-        for root in [1, 2] {
-            records.push(HostPort {
-                path: format!("hub-{root}/port-1"),
-                topology: location("00", &[root, 1]),
-                peer: None,
-            });
-        }
-        let mut usb2 = device("00", &[1], Speed::High);
-        (usb2.vendor_id, usb2.product_id) = (0x0424, 0x4206);
-        let mut usb3 = device("00", &[2], Speed::SuperPlus);
-        (usb3.vendor_id, usb3.product_id) = (0x0424, 0x7206);
-        let target = device("00", &[2, 1], Speed::SuperPlus);
-        let management = location("00", &[1, 6]);
-        let discover = |ss: &UsbDevice, records: &[HostPort]| {
-            group_devices(
-                &management,
-                [usb2.clone(), ss.clone(), target.clone()],
-                records,
-            )
-            .unwrap()
+    fn a_host_link_pairs_hub_functions_without_container_ids() {
+        // macOS records companions for root ports but not hub ports.
+        let host = Host {
+            ports: vec![
+                HostPort {
+                    path: "root-1".into(),
+                    topology: location("00", &[1]),
+                    peer: Some("root-2".into()),
+                },
+                HostPort {
+                    path: "root-2".into(),
+                    topology: location("00", &[2]),
+                    peer: Some("root-1".into()),
+                },
+            ],
+            containers: Vec::new(),
         };
-        let snapshot = discover(&usb3, &records);
+        let management = location("00", &[1, 6]);
+        let target = device("00", &[2, 1], Speed::SuperPlus);
+        let mut usb3 = hub("00", &[2], Speed::SuperPlus);
+        let place = |devices: Vec<UsbDevice>, host: &Host| {
+            group_devices(&management, devices, host).unwrap()
+        };
+        let usb2 = hub("00", &[1], Speed::High);
+        let snapshot = place(vec![usb2.clone(), usb3.clone(), target.clone()], &host);
         assert_eq!(snapshot.ports[0].devices.len(), 1);
         assert_eq!(snapshot.upstream_mbps, Some(10000));
-        usb3.speed = Speed::Super;
-        assert_eq!(discover(&usb3, &records).upstream_mbps, Some(5000));
-        let usb2_only =
-            group_devices(&management, [usb2.clone(), target.clone()], &records).unwrap();
+        // An empty companion port: the board is on USB 2 only.
+        let usb2_only = place(vec![usb2.clone(), target.clone()], &host);
         assert_eq!(usb2_only.upstream_mbps, Some(480));
-        assert_eq!(discover(&usb3, &records[1..]).upstream_mbps, None);
+        assert_eq!(usb2_only.ports[0].superspeed, Companion::Unavailable);
+        // A one-way link, or another device at the companion port, maps nothing.
+        let one_way = Host {
+            ports: vec![host.ports[0].clone()],
+            containers: Vec::new(),
+        };
         assert_eq!(
-            discover(&usb3, &records).ports[1].superspeed,
+            place(vec![usb2.clone(), usb3.clone(), target.clone()], &one_way).ports[0].superspeed,
             Companion::Unavailable
         );
-        assert!(discover(&usb3, &records[1..]).ports[0].devices.is_empty());
         usb3.product_id = 0x1234;
-        assert_eq!(discover(&usb3, &records).upstream_mbps, None);
-        assert!(discover(&usb3, &records).ports[0].devices.is_empty());
-        usb3.product_id = 0x7206;
-        records[3].peer = Some("other connector".into());
-        assert_eq!(
-            discover(&usb3, &records).ports[0].superspeed,
-            Companion::Ambiguous
-        );
-    }
-
-    #[test]
-    fn conflicting_or_one_way_links_do_not_map() {
-        let mut records = pair();
-        records[1].peer = Some("another board".into());
-        assert_eq!(
-            companion(&location("1", &[4, 2]), &records, None),
-            Companion::Ambiguous
-        );
-        records[1].peer = None;
-        assert_eq!(
-            companion(&location("1", &[4, 2]), &records, None),
-            Companion::Ambiguous
-        );
-        assert_eq!(
-            companion(&location("1", &[4, 2]), &records[..1], None),
-            Companion::Unavailable
-        );
+        let other = place(vec![usb2, usb3, target], &host);
+        assert_eq!(other.ports[0].superspeed, Companion::Ambiguous);
+        assert!(other.ports[0].devices.is_empty());
     }
 }
