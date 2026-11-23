@@ -36,7 +36,7 @@ mise run deps
 mise run host:build
 ```
 
-The host tools are `target/release/iasis` for board control and `target/release/iasisd`, the [host agent](#host-agent). Keep `iasis-gateway` beside both. The agent needs read/write access to the management USB device.
+The host tools are `target/release/iasis` for board control and `target/release/iasisd`, the [host agent](#host-agent). Keep `iasis-gateway` beside both. The agent needs read/write access to the management USB device. On Linux, the [Debian package](crates/iasis/README.md#debian-package) installs them with that access.
 
 The build compiles the restore engine's C libraries from source. Install their build tools first: on macOS, the Xcode command line tools and `brew install autoconf automake libtool pkg-config cmake openssl`; on Debian or Ubuntu, `build-essential git autoconf automake libtool pkg-config cmake libssl-dev libcurl4-openssl-dev zlib1g-dev libpcap-dev`.
 
@@ -105,11 +105,9 @@ While the agent is running:
 - It runs the restores that a board's button or a client asks for.
 - On Linux and macOS, it can share an internet connection with attached devices over USB.
 
-The status light is green and the OLED shows a USB symbol while a host is attached. One host holds a board at a time. The `iasis` commands work alongside the agent, and `iasis restore` and `iasis images` use it when running. Other clients use its [local socket](crates/iasis/README.md).
+The status light is green and the OLED shows a USB symbol while a host is attached. One host holds a board at a time. With the agent running, every `iasis` command except `status` and `ports` goes through it. Other clients use its [local socket](crates/api/README.md).
 
-On macOS, the [menu bar app](app/README.md) shows the same boards and ports, sends the same actions, and its installer starts the agent at login.
-
-To run it in the background for your login session, prefix the command with `systemd-run --user --unit=iasisd --` on Linux or `launchctl submit -l local.iasisd --` on macOS. For automatic startup at login, use absolute paths in a systemd user service's `ExecStart` or a user LaunchAgent's `ProgramArguments` in `~/Library/LaunchAgents/` with `RunAtLoad` enabled.
+On Linux, the [Debian package](crates/iasis/README.md#debian-package) runs the agent at boot, and members of the `iasis` group use it. On macOS, the [menu bar app](app/README.md) shows the same boards and ports, sends the same actions, and its installer starts the agent at login. To run your own build in the background, prefix the command with `launchctl submit -l local.iasisd --`.
 
 ### USB Internet Sharing
 
@@ -123,11 +121,7 @@ iasis sharing off
 
 A directly attached Apple device that offers USB Ethernet can use the host’s internet connection over its charging and restore cable. Sharing follows the host’s routing and resumes when a device restarts. The OLED shows a network symbol while the agent serves at least one port on that board.
 
-On Linux, install libpcap and use a kernel whose `cdc_ncm` driver supports the target’s USB ID. The gateway needs read/write access to the target USB device to select its network configuration. Grant the installed gateway permission to bring up the USB interface and exchange Ethernet frames.
-
-```sh
-sudo setcap cap_net_admin,cap_net_raw=ep /path/to/iasis-gateway
-```
+On Linux, use a kernel whose `cdc_ncm` driver supports the target’s USB ID. The Debian package gives the agent the USB and network access its gateway needs.
 
 Setup Assistant can use this connection for Automated Device Enrollment. See the [Mac app guide](app/README.md#usb-internet-sharing) for host permissions.
 
@@ -154,13 +148,13 @@ target/release/iasis images add /path/to/UniversalMac.ipsw
 target/release/iasis images remove UniversalMac_27.2.1_26B131_Restore.ipsw
 ```
 
-An image stays until it is removed. Removing one that is still downloading stops the download. An image added from a file is never taken for an unsigned one, since the catalog may not list it. Images live in the cache directory: `~/Library/Caches/iasis` on macOS and `$XDG_CACHE_HOME/iasis` on Linux. A Mac image is about 26 GB and an iPad image about 11 GB.
+An image stays until it is removed. Removing one that is still downloading stops the download. An image added from a file is never taken for an unsigned one, since the catalog may not list it. Images live in the agent's cache directory: `~/Library/Caches/iasis` on macOS and `/var/cache/iasis` on Linux. `images add` sends the archive to the agent, which keeps it once every member's checksum matches. A Mac image is about 26 GB and an iPad image about 11 GB.
 
 While an image is being fetched for a target, its port pulses purple, the OLED labels it `IMG`, and `iasis` shows the percentage.
 
 ### Restore
 
-Restores are built into the host tools through [RestoreKit](https://github.com/fcjr/restorekit), for targets in ordinary DFU and Apple Debug USB DFU. On Linux the user running them needs read/write access to the target's USB device across mode changes. Iasis uses the system usbmuxd when present. Otherwise it starts a private multiplexer that its restores share.
+Restores are built into the host tools through [RestoreKit](https://github.com/fcjr/restorekit), for targets in ordinary DFU and Apple Debug USB DFU. On Linux they go through the system usbmuxd.
 
 ```sh
 target/release/iasis --serial 0123456789abcdef restore --ports 1,2,3,4,5 --erase
@@ -219,7 +213,7 @@ A revived Mac can start in recoveryOS and ask for an administrator's password be
 
 ## IasisOS and protocol
 
-[Build, flash and recover IasisOS](crates/firmware/README.md) through the same host USB connection. The [protocol README](crates/protocol/README.md) describes the management interface for host applications.
+`iasis --board "Bench A" update` writes the IasisOS that the host tools carry, so a board and its host run the same release. The board leaves USB for a few seconds and its ports lose power. [Build, update and recover IasisOS](crates/firmware/README.md) through the same host USB connection. The [protocol README](crates/protocol/README.md) describes the management interface for host applications.
 
 ## License
 
