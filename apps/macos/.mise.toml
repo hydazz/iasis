@@ -1,7 +1,6 @@
 [tools]
 periphery = "3.8.0"
 swiftformat = "0.64.7"
-shellcheck = "0.11.0"
 
 [tasks.format]
 run = "swiftformat Iasis IasisTests"
@@ -33,14 +32,11 @@ periphery scan \
   CODE_SIGNING_ALLOWED=NO
 """
 
-[tasks.shell-lint]
-run = "shellcheck packaging/scripts/*"
-
 [tasks.plist-lint]
-run = "plutil -lint Config/*.plist packaging/root/Library/LaunchAgents/*.plist"
+run = "plutil -lint Config/*.plist"
 
 [tasks.lint]
-depends = [":shell-lint", ":plist-lint", ":periphery"]
+depends = [":plist-lint", ":periphery"]
 
 [tasks.test]
 run = """
@@ -50,30 +46,3 @@ xcodebuild test \
   -destination 'platform=macOS' \
   CODE_SIGNING_ALLOWED=NO
 """
-
-[tasks.package]
-description = "Unsigned .pkg"
-depends = ["//:host:build"]
-run = [
-  """
-xcodebuild archive \
-  -project Iasis.xcodeproj \
-  -scheme Iasis \
-  -destination 'generic/platform=macOS' \
-  -archivePath build/Iasis.xcarchive \
-  ARCHS=arm64 \
-  CODE_SIGNING_ALLOWED=NO
-""",
-  "rm -rf build/payload",
-  "ditto --norsrc packaging/root build/payload",
-  "ditto --norsrc build/Iasis.xcarchive/Products/Applications/Iasis.app build/payload/Applications/Iasis.app",
-  """
-pkgbuild \
-  --root build/payload \
-  --scripts packaging/scripts \
-  --identifier com.hydaz.Iasis \
-  --version "$(/usr/libexec/PlistBuddy -c 'Print :ApplicationProperties:CFBundleShortVersionString' build/Iasis.xcarchive/Info.plist)" \
-  --install-location / \
-  build/Iasis.pkg
-""",
-]

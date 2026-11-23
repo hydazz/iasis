@@ -121,7 +121,6 @@ jobs:
       APP_NAME: Iasis
       PROJECT: apps/macos/Iasis.xcodeproj
       SCHEME: Iasis
-      PKG_SIGNING_IDENTITY: "Developer ID Installer: Woodleigh School (SMLKBTR495)"
 
     steps:
       - name: Checkout release
@@ -130,7 +129,6 @@ jobs:
           persist-credentials: false
 
       - name: Import Developer ID Application certificate
-        id: application-certificate
         uses: apple-actions/import-codesign-certs@288b8ec97b82c66b6f2a6baaf7acc8dfbcbe331c # v7.2.0
         with:
           p12-file-base64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_P12_BASE64 }}
@@ -140,12 +138,10 @@ jobs:
         run: xcodebuild -version
 
       - name: Validate release version
-        id: release
         run: |
           VERSION="${RELEASE_TAG#v}"
           grep -Fqx "MARKETING_VERSION = ${VERSION} // x-release-please-version" apps/macos/Config/Version.xcconfig
           grep -Fqx "version = \"${VERSION}\"" Cargo.toml
-          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
 
       - name: Setup Mise
         uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
@@ -181,53 +177,36 @@ jobs:
             -exportPath "${RUNNER_TEMP}/export" \
             -exportOptionsPlist apps/macos/Config/ExportOptions.plist
 
-      - name: Import Developer ID Installer certificate
-        uses: apple-actions/import-codesign-certs@288b8ec97b82c66b6f2a6baaf7acc8dfbcbe331c # v7.2.0
-        with:
-          create-keychain: false
-          keychain-password: ${{ steps.application-certificate.outputs.keychain-password }}
-          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_P12_BASE64 }}
-          p12-password: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
-
-      - name: Stage package payload
-        run: |
-          codesign --verify --deep --strict "${RUNNER_TEMP}/export/${APP_NAME}.app"
-          ditto --norsrc apps/macos/packaging/root "${RUNNER_TEMP}/payload"
-          ditto --norsrc "${RUNNER_TEMP}/export/${APP_NAME}.app" \
-            "${RUNNER_TEMP}/payload/Applications/${APP_NAME}.app"
-
-      - name: Build package
-        id: package
-        uses: woodleighschool/.github/actions/apple-pkg@583bc37748899a9154880b1c538b15cf46b5b05d # apple-pkg-v1.0.0
-        with:
-          payload-root: ${{ runner.temp }}/payload
-          scripts: apps/macos/packaging/scripts
-          identifier: com.hydaz.Iasis
-          version: ${{ steps.release.outputs.version }}
-          signing-identity: ${{ env.PKG_SIGNING_IDENTITY }}
-          output: dist/${{ env.APP_NAME }}-${{ steps.release.outputs.version }}.pkg
-
-      - name: Notarize package
+      - name: Notarize app
         uses: woodleighschool/.github/actions/apple-notarize@a85ca6bcf210fe5e22e50da1d832f211c2b44605 # apple-notarize-v2.0.0
         with:
-          product-path: ${{ steps.package.outputs.path }}
+          product-path: ${{ runner.temp }}/export/${{ env.APP_NAME }}.app
           issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
           api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
           api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
 
-      - name: Verify package
-        env:
-          PKG_PATH: ${{ steps.package.outputs.path }}
+      - name: Verify app
         run: |
-          pkgutil --check-signature "${PKG_PATH}"
-          spctl --assess --type install --verbose=2 "${PKG_PATH}"
+          APP_PATH="${RUNNER_TEMP}/export/${APP_NAME}.app"
+
+          codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
+          spctl --assess --type execute --verbose=2 "${APP_PATH}"
+
+      - name: Create ZIP
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+
+          mkdir -p dist
+          ditto -c -k --keepParent \
+            "${RUNNER_TEMP}/export/${APP_NAME}.app" \
+            "dist/${APP_NAME}-${VERSION}.zip"
 
       - name: Upload release asset
         env:
           GH_TOKEN: ${{ github.token }}
-          PKG_PATH: ${{ steps.package.outputs.path }}
         run: |
+          VERSION="${RELEASE_TAG#v}"
           gh release upload \
             "${RELEASE_TAG}" \
-            "${PKG_PATH}" \
+            "dist/${APP_NAME}-${VERSION}.zip" \
             --clobber
