@@ -1,0 +1,14 @@
+[package]
+name = "iasis-api"
+description = "The messages between the Iasis agent and its clients"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+iasis-protocol.workspace = true
+serde = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+serde_json = "1.0"

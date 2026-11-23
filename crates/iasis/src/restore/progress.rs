@@ -1,6 +1,6 @@
 //! Whole-job progress from the restore workers' stage-local counters.
 
-use serde::{Deserialize, Serialize};
+use iasis_api::Progress;
 
 /// The restore worker's milestones in order, each with its share of the job
 /// in percent.
@@ -11,27 +11,24 @@ const MILESTONES: [(&str, u8, u8); 4] = [
     ("Verifying Filesystem", 80, 95),
 ];
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Progress {
-    /// What the worker is doing now.
-    pub name: String,
-    /// Overall restore progress.
-    pub percent: u8,
-    /// The job's steps in order, as far as the worker has named them.
-    pub steps: Vec<String>,
-    /// The step under way. The steps before it are done.
-    pub step: usize,
+/// A job's progress, followed through what its worker reports.
+pub(super) trait Stages: Sized {
+    fn starting() -> Self;
+    fn complete(&mut self);
+    fn advance(&mut self, name: &str, percent: f64);
+    /// A worker's step record: the restore step ID and its fraction done.
+    fn worker_step(&mut self, fields: &str) -> Option<()>;
 }
 
-impl Progress {
-    pub(super) fn starting() -> Self {
+impl Stages for Progress {
+    fn starting() -> Self {
         Self {
             name: "Starting".into(),
             ..Self::default()
         }
     }
 
-    pub(super) fn complete(&mut self) {
+    fn complete(&mut self) {
         self.name = "Complete".into();
         self.percent = 100;
         self.step = self.steps.len();
@@ -43,8 +40,7 @@ impl Progress {
         self.percent = self.percent.max((percent as u8).min(99));
     }
 
-    /// A worker's step record: the restore step ID and its fraction done.
-    pub(super) fn worker_step(&mut self, fields: &str) -> Option<()> {
+    fn worker_step(&mut self, fields: &str) -> Option<()> {
         let mut fields = fields.split_whitespace();
         let id: u32 = fields.next()?.parse().ok()?;
         let fraction: f64 = fields.next()?.parse().ok()?;
@@ -77,12 +73,6 @@ impl Progress {
         };
         self.advance(name, 0.0);
         Some(())
-    }
-}
-
-impl std::fmt::Display for Progress {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}%  {}", self.percent, self.name)
     }
 }
 

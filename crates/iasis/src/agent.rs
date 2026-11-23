@@ -17,23 +17,22 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
+use iasis_api::{BoardView, Operation, Planned, Reply, Request, Selection, State, Target};
 use iasis_protocol::{Port, PortAction};
 use nusb::DeviceInfo;
-use serde::{Deserialize, Serialize};
 
 use crate::{
     Board, UsbIds,
-    batch::{self, Ending, Endings, Images, PortWork, Requests, Submission},
+    batch::{self, Endings, Images, PortWork, Requests, Submission},
     boards,
     home::Home,
     host::{Jobs, Link},
     identity::models::Models,
-    images::{Network, Snapshot, Store},
+    images::{Network, Store},
     inventory::Inventory,
     parse_serial,
-    restore::{Operation, RestoreEngine},
-    update,
-    view::BoardView,
+    restore::RestoreEngine,
+    update, view,
     watch::Watch,
 };
 
@@ -48,182 +47,6 @@ pub struct Options {
     pub serial: Option<u64>,
     /// Worker logs and scratch directories; the cache directory by default.
     pub logs: Option<PathBuf>,
-}
-
-/// Everything the agent knows, for a client to show.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct State {
-    pub boards: Vec<BoardView>,
-    /// A submitting connection's watch receives its worker results in target order.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub submitted: Vec<Option<Ending>>,
-    pub images: Snapshot,
-    pub sharing: crate::sharing::State,
-}
-
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-pub struct Target {
-    pub port: Port,
-    pub generation: u32,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        with = "optional_ecid"
-    )]
-    pub ecid: Option<u64>,
-}
-
-mod optional_ecid {
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S: Serializer>(id: &Option<u64>, serializer: S) -> Result<S::Ok, S::Error> {
-        match id {
-            Some(id) => serializer.serialize_str(&format!("{id:016x}")),
-            None => serializer.serialize_none(),
-        }
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Option<u64>, D::Error> {
-        Option::<String>::deserialize(deserializer)?
-            .map(|text| {
-                super::parse_serial(&text)
-                    .ok()
-                    .filter(|id| *id != 0)
-                    .ok_or_else(|| {
-                        serde::de::Error::custom("expected a nonzero 16-digit hexadecimal ECID")
-                    })
-            })
-            .transpose()
-    }
-}
-
-/// The targets selected on one board, in the session the client saw.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Selection {
-    pub board: String,
-    pub session: u32,
-    pub targets: Vec<Target>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
-pub enum Request {
-    /// Reply with the state once.
-    State,
-    /// Reply with the state now and again whenever it changes.
-    Watch,
-    /// Reply with what a restore would install on each of these targets.
-    Plan {
-        boards: Vec<Selection>,
-    },
-    /// Erase and restore the selected targets, on any number of boards. The
-    /// client has asked its user to confirm. Each target gets the newest
-    /// image in the store that Apple still signs, or with `latest` the
-    /// newest release Apple signs, fetched first if the store lacks it.
-    Restore {
-        boards: Vec<Selection>,
-        latest: bool,
-    },
-    /// Repair the selected targets from the images a restore would install
-    /// and keep their data, otherwise as `Restore`.
-    Revive {
-        boards: Vec<Selection>,
-        latest: bool,
-    },
-    Dfu {
-        board: String,
-        port: u8,
-    },
-    Reboot {
-        board: String,
-        port: u8,
-    },
-    Power {
-        board: String,
-        port: u8,
-        on: bool,
-    },
-    Rename {
-        board: String,
-        name: String,
-    },
-    Brightness {
-        board: String,
-        percent: u8,
-    },
-    /// Declare the remaining current of a legacy USB-A host port, including
-    /// the board; zero clears it.
-    HostBudget {
-        board: String,
-        milliamps: u16,
-    },
-    /// Write IasisOS to a board: the image these tools carry, or the UF2 file
-    /// of `bytes` bytes that follows the request.
-    Update {
-        board: String,
-        bytes: Option<u64>,
-    },
-    /// Share a host network connection with attached USB devices.
-    Sharing {
-        enabled: bool,
-    },
-    /// Fetch a release Apple signs for a model into the store: the newest,
-    /// or the one of this `build`.
-    Download {
-        model: String,
-        build: Option<String>,
-    },
-    /// Reply with the releases Apple signs for a model, newest first.
-    Releases {
-        model: String,
-    },
-    /// Check the IPSW archive of `bytes` bytes that follows the request and
-    /// keep it in the store as `name`.
-    Import {
-        name: String,
-        bytes: u64,
-    },
-    /// Delete an image, or give up one still to come, by its `id`.
-    Remove {
-        image: String,
-    },
-    /// Reply with every device model the catalog lists.
-    Catalog,
-}
-
-impl Request {
-    /// The bytes that follow the request line on the connection.
-    pub fn payload(&self) -> u64 {
-        match self {
-            Self::Import { bytes, .. }
-            | Self::Update {
-                bytes: Some(bytes), ..
-            } => *bytes,
-            _ => 0,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Reply {
-    Ok,
-    Error(String),
-    State(Box<State>),
-    Catalog(Vec<crate::images::Device>),
-    Releases(Vec<crate::images::Firmware>),
-    Plan(Vec<Planned>),
-}
-
-/// What a restore would install on one target.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Planned {
-    pub board: String,
-    pub port: u8,
-    /// Absent while the target's model is not known, which DFU settles.
-    pub offer: Option<crate::images::Offer>,
 }
 
 /// A board the agent has seen. Its jobs outlive each session with it.
@@ -379,8 +202,8 @@ impl Agent {
                             let endings = board.endings.lock().unwrap();
                             for (port, ending) in view.ports.iter_mut().zip(endings.iter()) {
                                 if let Some(work) = ending {
-                                    if let Some(result) = work.get() {
-                                        port.attach_result(view.session, result);
+                                    if let Some(ended) = work.get() {
+                                        view::attach_result(port, view.session, ended);
                                     } else {
                                         port.restore = false;
                                         port.reboot = false;
@@ -899,7 +722,10 @@ mod socket {
         let mut seen = changes.count();
         while !gone.load(Ordering::Relaxed) {
             let mut state = snapshot();
-            state.submitted = submitted.iter().map(|work| work.get().cloned()).collect();
+            state.submitted = submitted
+                .iter()
+                .map(|work| work.get().map(|ended| ended.ending.clone()))
+                .collect();
             let finished = !submitted.is_empty() && state.submitted.iter().all(Option::is_some);
             let frame = serde_json::to_vec(&Reply::State(Box::new(state)))?;
             if frame != last {
@@ -1036,13 +862,16 @@ mod socket {
             ecid: None,
         }];
         let submitted = batch::reserve(&slots, &selection).unwrap();
-        let result = Ending {
-            attachment: None,
+        let result = iasis_api::Ending {
             operation: Operation::Restore,
             ecid: Some("000000000000002a".into()),
             phase: RestorePhase::Failed,
             message: "Restore worker lost the device".into(),
             log_directory: None,
+        };
+        let ended = |ending| batch::Ended {
+            attachment: None,
+            ending,
         };
         let mut frame = 0;
         let (changes, gone) = (Watch::default(), AtomicBool::new(false));
@@ -1061,15 +890,15 @@ mod socket {
                     slots.lock().unwrap()[0]
                         .as_ref()
                         .unwrap()
-                        .set(result.clone())
+                        .set(ended(result.clone()))
                         .unwrap();
                     // A later job can finish before the client reads its first result.
                     let next = batch::reserve(&slots, &selection).unwrap();
                     next[0]
-                        .set(Ending {
+                        .set(ended(iasis_api::Ending {
                             phase: RestorePhase::Reported,
                             ..result.clone()
-                        })
+                        }))
                         .unwrap();
                 }
                 _ => panic!("watch continued past the terminal result"),

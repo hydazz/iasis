@@ -161,15 +161,15 @@ private struct StepLabel: View {
 private extension AgentState.Port {
     var modeTitle: String? {
         switch mode {
-        case "dfu": "DFU"
-        case "kis_dfu": "DFU over Debug USB"
-        case "recovery": "Recovery"
-        case "kis": "Debug USB"
-        case "port_dfu": "Port DFU"
-        case "restored": "Restore Service"
-        case "normal": "Started Up"
-        case "mux": "System"
-        default: mode
+        case .dfu: "DFU"
+        case .kisDfu: "DFU over Debug USB"
+        case .recovery: "Recovery"
+        case .kis: "Debug USB"
+        case .portDfu: "Port DFU"
+        case .restored: "Restore Service"
+        case .normal: "Started Up"
+        case .mux: "System"
+        case nil: nil
         }
     }
 }

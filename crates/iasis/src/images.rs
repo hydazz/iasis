@@ -18,6 +18,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
+use iasis_api::{CatalogModel, Fetch, Images, Offer, Release};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -361,63 +362,6 @@ struct Download {
     error: Option<String>,
 }
 
-/// A download under way.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Fetch {
-    /// The image it becomes.
-    pub id: String,
-    pub version: String,
-    pub build: String,
-    pub bytes: u64,
-    pub done: u64,
-}
-
-/// The store's archives, for a client to show: those it holds and those it
-/// is still to fetch.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct Snapshot {
-    pub images: Vec<ImageView>,
-    pub fetch: Option<Fetch>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ImageView {
-    /// The store's name for the archive, which requests use.
-    pub id: String,
-    /// The system it installs, as Apple names it.
-    pub os: String,
-    pub version: String,
-    pub build: String,
-    pub bytes: u64,
-    /// The models it restores, by name.
-    pub models: Vec<String>,
-    /// The archive is in the store.
-    pub ready: bool,
-    /// Why it could not be fetched.
-    pub error: Option<String>,
-}
-
-/// A system release, as an image in the store or as the catalog lists it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Release {
-    pub os: String,
-    pub version: String,
-    pub build: String,
-    pub bytes: u64,
-}
-
-/// What a restore of one device can install.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Offer {
-    /// The newest release Apple signs for the device.
-    pub latest: Option<Release>,
-    /// The newest image in the store that restores it, left out when the
-    /// catalog shows Apple no longer signs it.
-    pub held: Option<Release>,
-    /// Why the catalog could not say what Apple signs.
-    pub problem: Option<String>,
-}
-
 /// The system a product type runs, for the families the store keeps.
 fn system(product_type: &str) -> Option<&'static str> {
     let families = [
@@ -755,7 +699,7 @@ impl Store {
         Ok(store)
     }
 
-    pub fn snapshot(&self) -> Snapshot {
+    pub fn snapshot(&self) -> Images {
         let state = self.0.lock();
         let name = |identifier: &str| {
             let device = state
@@ -778,7 +722,7 @@ impl Store {
                 build,
                 bytes,
             } = image.describe();
-            ImageView {
+            iasis_api::Image {
                 id: image.id().into(),
                 os,
                 version,
@@ -789,7 +733,7 @@ impl Store {
                 error: None,
             }
         });
-        let coming = state.downloads.iter().map(|download| ImageView {
+        let coming = state.downloads.iter().map(|download| iasis_api::Image {
             id: download.firmware.name().into(),
             os: system(&download.identifier).unwrap_or_default().into(),
             version: download.firmware.version.clone(),
@@ -799,7 +743,7 @@ impl Store {
             ready: false,
             error: download.error.clone(),
         });
-        Snapshot {
+        Images {
             images: held.chain(coming).collect(),
             fetch: state.fetch.clone(),
         }
@@ -826,13 +770,18 @@ impl Store {
     }
 
     /// Every model the catalog lists.
-    pub fn catalog(&self) -> Result<Vec<Device>> {
-        let saved = self.0.lock().saved.devices.clone();
-        if saved.is_empty() {
-            self.0.devices()
-        } else {
-            Ok(saved)
+    pub fn catalog(&self) -> Result<Vec<CatalogModel>> {
+        let mut devices = self.0.lock().saved.devices.clone();
+        if devices.is_empty() {
+            devices = self.0.devices()?;
         }
+        Ok(devices
+            .into_iter()
+            .map(|device| CatalogModel {
+                identifier: device.identifier,
+                name: device.name,
+            })
+            .collect())
     }
 
     /// The catalog's entry for a model, from a fresh list when the saved one
@@ -854,9 +803,19 @@ impl Store {
 
     /// The releases Apple signs for a model, newest first. A listing serves
     /// for a while, so that what a restore was offered is what it gets.
-    pub fn releases(&self, identifier: &str) -> Result<Vec<Firmware>> {
+    pub fn releases(&self, identifier: &str) -> Result<Vec<Release>> {
         let device = self.device(identifier)?;
-        self.signed(&device.identifier)
+        let os = system(&device.identifier).unwrap_or_default();
+        Ok(self
+            .signed(&device.identifier)?
+            .into_iter()
+            .map(|firmware| Release {
+                os: os.into(),
+                version: firmware.version,
+                build: firmware.build,
+                bytes: firmware.bytes,
+            })
+            .collect())
     }
 
     fn signed(&self, identifier: &str) -> Result<Vec<Firmware>> {

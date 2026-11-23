@@ -38,7 +38,7 @@ struct PortBadge: View {
     let light: AgentState.Light
 
     var body: some View {
-        Image(systemName: light.hue == "off" ? "\(number).circle" : "\(number).circle.fill")
+        Image(systemName: light.hue == .off ? "\(number).circle" : "\(number).circle.fill")
             .imageScale(.large)
             .foregroundStyle(light.style)
             .symbolEffect(.pulse, options: .repeating, isActive: light.pulse)
@@ -148,13 +148,13 @@ struct ActivityMark: View {
 extension AgentState.Light {
     var style: AnyShapeStyle {
         switch hue {
-        case "red": AnyShapeStyle(.red)
-        case "green": AnyShapeStyle(.green)
-        case "blue": AnyShapeStyle(.blue)
-        case "amber": AnyShapeStyle(.orange)
-        case "purple": AnyShapeStyle(.purple)
-        case "white": AnyShapeStyle(.secondary)
-        default: AnyShapeStyle(.tertiary)
+        case .red: AnyShapeStyle(.red)
+        case .green: AnyShapeStyle(.green)
+        case .blue: AnyShapeStyle(.blue)
+        case .amber: AnyShapeStyle(.orange)
+        case .purple: AnyShapeStyle(.purple)
+        case .white: AnyShapeStyle(.secondary)
+        case .off: AnyShapeStyle(.tertiary)
         }
     }
 }

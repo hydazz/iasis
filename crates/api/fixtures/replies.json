@@ -1,0 +1,52 @@
+[
+  "ok",
+  {
+    "error": "the board has reconnected"
+  },
+  {
+    "catalog": [
+      {
+        "identifier": "MacBookAir10,1",
+        "name": "MacBook Air (M1, 2020)"
+      }
+    ]
+  },
+  {
+    "releases": [
+      {
+        "os": "macOS",
+        "version": "27.2.1",
+        "build": "26B131",
+        "bytes": 19000000000
+      }
+    ]
+  },
+  {
+    "plan": [
+      {
+        "board": "817a23bd502453b4",
+        "port": 2,
+        "offer": {
+          "latest": {
+            "os": "macOS",
+            "version": "27.2.1",
+            "build": "26B131",
+            "bytes": 19000000000
+          },
+          "held": {
+            "os": "macOS",
+            "version": "27.1",
+            "build": "26A100",
+            "bytes": 19000000000
+          },
+          "problem": "the catalog did not answer"
+        }
+      },
+      {
+        "board": "817a23bd502453b4",
+        "port": 3,
+        "offer": null
+      }
+    ]
+  }
+]
