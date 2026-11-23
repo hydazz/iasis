@@ -1057,7 +1057,6 @@ impl Port<'_> {
             return Ok(());
         }
 
-        // The sink is in standby until PS_RDY, so the new limit applies at once.
         {
             let mut io = self.io.lock().await;
             if target.millivolts > 5000 {
@@ -1098,13 +1097,26 @@ impl Port<'_> {
                 Settling::Waiting => {}
             }
         }
+        // After a fall the larger limit holds through PS_RDY and SINK_SETTLE,
+        // as for a same-voltage reduction.
+        let old = self.enforced.get();
+        let keep_ma = if target.millivolts < from_mv {
+            old.limit_ma.max(target.limit_ma)
+        } else {
+            target.limit_ma
+        };
         let mut io = self.io.lock().await;
-        stage::settled(io.port(self.index).await?, target.limit_ma).await?;
+        stage::settled(io.port(self.index).await?, keep_ma).await?;
         if target.millivolts == 5000 {
             io.high_voltage(self.index, false).await?;
         }
-        self.lowering.set(None);
-        self.enforced.set(target);
+        if keep_ma > target.limit_ma {
+            self.lowering
+                .set(Some((Instant::now() + SINK_SETTLE, target)));
+        } else {
+            self.lowering.set(None);
+            self.enforced.set(target);
+        }
         Ok(())
     }
 

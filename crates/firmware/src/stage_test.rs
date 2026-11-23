@@ -95,6 +95,26 @@ fn downshift_increases_the_output_limit_only_after_voltage_confirmation() {
 }
 
 #[test]
+fn a_falling_transition_keeps_the_old_limit_through_the_slew() {
+    let mut bus = bus::Bus::default();
+    run(async {
+        stage::off(&mut bus).await.unwrap();
+        stage::five_volts(&mut bus).await.unwrap();
+        stage::set_contract(&mut bus, 20_000, 3000).await.unwrap();
+        stage::settled(&mut bus, 3000).await.unwrap();
+        assert_eq!(bus.registers[2], 0x80 | 65);
+
+        // A charging sink at 20 V / 3 A asked to move to 15 V / 2.23 A.
+        stage::set_contract(&mut bus, 15_000, 2230).await.unwrap();
+        assert_eq!(bus.registers[2], 0x80 | 65);
+        stage::settled(&mut bus, 3000).await.unwrap();
+        assert_eq!(bus.registers[2], 0x80 | 65);
+        stage::set_limit(&mut bus, 2230).await.unwrap();
+        assert_eq!(bus.registers[2], 0x80 | 50); // 2.5 A once the sink has settled.
+    });
+}
+
+#[test]
 fn converter_faults_report_the_register_values_that_tripped_the_guard() {
     use iasis_protocol::PortError;
     let mut bus = bus::Bus::default();
