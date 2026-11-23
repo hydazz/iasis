@@ -163,7 +163,7 @@ pub(crate) fn describe_devices(
     }
 }
 
-/// USB enumeration and a first Configurator lookup can take several seconds.
+/// USB enumeration and a first identity read can take several seconds.
 /// An attachment that stays silent can still acquire a name later.
 pub(crate) fn identify_for(row: &mut PortView, attachment_age_ms: u64) {
     row.identifying = row.enabled
