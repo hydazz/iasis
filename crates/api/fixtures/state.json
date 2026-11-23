@@ -1,10 +1,15 @@
 {
+  "version": "0.2.0",
   "boards": [
     {
       "serial": "817a23bd502453b4",
       "name": "Bench A",
       "session": 3,
       "firmware": "0.1.0",
+      "update": {
+        "version": "0.2.0",
+        "required": false
+      },
       "upstream_mbps": 10000,
       "supply": "brick",
       "pool": {
@@ -235,6 +240,7 @@
       "name": "Bench B",
       "session": 1,
       "firmware": "0.1.0",
+      "update": null,
       "upstream_mbps": null,
       "supply": "host",
       "pool": null,
@@ -503,6 +509,7 @@
       "name": "",
       "session": null,
       "firmware": "",
+      "update": null,
       "upstream_mbps": null,
       "supply": "off",
       "pool": null,
@@ -512,6 +519,25 @@
       "settings_busy": false,
       "ports": [],
       "notice": "not attended"
+    },
+    {
+      "serial": "5c19e0f2a7d4b368",
+      "name": "",
+      "session": null,
+      "firmware": "0.1.0",
+      "update": {
+        "version": "0.2.0",
+        "required": true
+      },
+      "upstream_mbps": null,
+      "supply": "off",
+      "pool": null,
+      "host": false,
+      "restores": false,
+      "brightness": 0,
+      "settings_busy": false,
+      "ports": [],
+      "notice": null
     }
   ],
   "submitted": [
