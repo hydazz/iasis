@@ -30,5 +30,20 @@ fn main() -> Result<()> {
         serial: arguments.serial,
         logs: arguments.logs,
     };
-    Agent::new(&options)?.run(&options)
+    let agent = Agent::new(&options)?;
+    // A stopped agent gives its boards up rather than leaving each to wait
+    // out the session lease before the next host.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        use signal_hook::consts::{SIGINT, SIGTERM};
+        let mut signals = signal_hook::iterator::Signals::new([SIGTERM, SIGINT])?;
+        let agent = agent.clone();
+        std::thread::spawn(move || {
+            if signals.forever().next().is_some() {
+                agent.release();
+                std::process::exit(0);
+            }
+        });
+    }
+    agent.run(&options)
 }
