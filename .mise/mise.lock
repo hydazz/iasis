@@ -2,6 +2,11 @@
 
 lockfile_version = 4
 
+[[tools."cargo:cargo-deb"]]
+version = "3.8.0"
+backend = "cargo:cargo-deb"
+specifiers = ["3.8.0"]
+
 [[tools."github:raspberrypi/pico-sdk-tools"]]
 version = "2.3.1-0"
 backend = "github:raspberrypi/pico-sdk-tools"

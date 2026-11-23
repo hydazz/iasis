@@ -2,29 +2,19 @@
 
 IasisOS is the firmware on the board's RP2354. It controls port power, USB-C attachment, Apple DFU signalling, the button, LEDs and optional OLED. Restore data passes directly through the USB hub between the host and targets.
 
-## Build and flash
+## Build and update
 
 From the repository root:
 
 ```sh
 mise install
-mise run firmware:build
 mise run host:build
+target/release/iasis --serial <board-serial> update
 ```
 
-`mise install` provides Raspberry Pi's [picotool](https://github.com/raspberrypi/picotool). Use it to flash the ELF through the host USB connection:
+`mise run host:build` builds IasisOS and the host tools that carry it, and `update` writes that image; `update path/to/IasisOS.uf2` writes another. The board restarts into its RP2350 boot ROM, which takes the image, and returns as the new IasisOS. The host writes only the ROM that answers with the board's chip ID from its hub's management port. `mise run firmware:uf2` builds `IasisOS.uf2` alone, the form each release carries.
 
-```sh
-target/release/iasis --serial <board-serial> bootloader
-picotool info
-picotool load -v -x target/thumbv8m.main-none-eabihf/release/iasis-firmware -t elf
-```
-
-`mise run firmware:uf2` converts the ELF to `IasisOS.uf2` beside it, the form each release carries; `picotool load` takes either.
-
-Check that `picotool info` finds the intended board before loading. With multiple ROM devices attached, select it using picotool's bus/address options.
-
-A board with blank flash enumerates as the ROM updater when an external host is connected: skip the `bootloader` command and load the ELF. For a failed application, connect an external host, hold BOOTSEL, press and release RESET, then release BOOTSEL. Both buttons are under the lid. Flashing replaces the application; an interrupted write can be recovered with the same sequence. SWD provides independent access.
+A board with blank flash enumerates as its boot ROM when an external host is connected, and `update` writes it the same way. For a failed application, connect an external host, hold BOOTSEL, press and release RESET, then release BOOTSEL. Both buttons are under the lid. An interrupted write can be recovered with the same sequence. SWD provides independent access.
 
 Development USB IDs are `1209:0001`. Set `IASIS_USB_VID` and `IASIS_USB_PID` as hexadecimal build variables to override them, and use matching CLI `--vid`/`--pid` arguments.
 
