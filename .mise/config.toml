@@ -11,6 +11,7 @@ oxfmt = "0.75.0"
 node = "26.13.1"
 "npm:pyright" = "1.1.414"
 "github:raspberrypi/pico-sdk-tools" = { version = "2.3.1-0", matching = "picotool" }
+"cargo:cargo-deb" = "3.8.0"
 
 [settings]
 experimental = true
@@ -71,7 +72,14 @@ depends = ["rust:fmt-check", "python:fmt-check"]
 run = ["mise fmt --check", "oxfmt --check"]
 
 [tasks."host:build"]
+depends = ["firmware:build"]
+env = { IASIS_OS_UF2 = "{{config_root}}/target/thumbv8m.main-none-eabihf/release/IasisOS.uf2" }
 run = "cargo build --locked --release -p iasis"
+
+[tasks.deb]
+depends = ["firmware:build"]
+env = { IASIS_OS_UF2 = "{{config_root}}/target/thumbv8m.main-none-eabihf/release/IasisOS.uf2" }
+run = "cargo deb --locked -p iasis"
 
 [tasks."firmware:build"]
 run = [
