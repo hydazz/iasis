@@ -233,8 +233,6 @@ fn matching_ports(snapshot: &Snapshot, ecid: u64) -> Vec<Port> {
 }
 
 pub(crate) fn query(snapshot: &mut Snapshot, mask: u8) {
-    #[cfg(target_os = "linux")]
-    crate::native::mux::prepare_ios_identity(snapshot, mask);
     query_mux(snapshot, mask);
     crate::native::identify(snapshot, mask);
     #[cfg(target_os = "macos")]
