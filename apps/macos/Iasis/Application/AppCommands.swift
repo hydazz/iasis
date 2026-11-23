@@ -42,6 +42,34 @@ private struct DeviceMenuItems: View {
     }
 }
 
+/// The Board menu: each board's own actions.
+struct BoardCommands: Commands {
+    let model: AgentModel
+
+    var body: some Commands {
+        CommandMenu("Board") {
+            BoardMenuItems(model: model)
+        }
+    }
+}
+
+struct BoardMenuItems: View {
+    let model: AgentModel
+
+    var body: some View {
+        if let state = model.state, !state.boards.isEmpty {
+            ForEach(state.boards) { board in
+                Section(state.title(for: board)) {
+                    Button("Update IasisOS") { model.updateFirmware(of: board.serial) }
+                        .disabled(board.update == nil || model.updating.contains(board.serial))
+                }
+            }
+        } else {
+            Text(model.state == nil ? "Agent Not Running" : "No Boards Connected")
+        }
+    }
+}
+
 /// Help explains the lights, which are the board's own interface.
 struct HelpCommands: Commands {
     @Environment(\.openWindow) private var openWindow
