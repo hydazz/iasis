@@ -39,7 +39,7 @@ system-configuration = "0.8"
 wait-timeout = "0.2"
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
-nix = { version = "0.32", features = ["fs", "net", "poll", "resource"] }
+nix = { version = "0.32", features = ["fs", "net", "poll", "resource", "socket"] }
 pcap = "2.5"
 pktkit = { version = "=0.1.12", features = ["dhcp", "l2adapter", "slirp"] }
 
