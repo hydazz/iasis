@@ -63,6 +63,8 @@ nonisolated struct AgentState: Decodable, Equatable {
         var reboot: Bool
         var restore: Bool
         var enabled: Bool
+        /// Percent of the restore image fetched, while the port waits for one.
+        var fetch: UInt8?
         var stage: Stage?
         var result: Ending?
 
@@ -122,9 +124,14 @@ nonisolated struct AgentState: Decodable, Equatable {
         var phase: RestorePhase
     }
 
+    /// What a job's worker is doing: its step among the job's steps, and
+    /// how far along the whole job is.
     struct Stage: Decodable, Equatable {
         var name: String
-        var percent: UInt8?
+        var percent: UInt8
+        var steps: [String]
+        /// The step under way. The steps before it are done.
+        var step: Int
     }
 
     struct Light: Decodable, Equatable {
@@ -159,48 +166,102 @@ nonisolated struct AgentState: Decodable, Equatable {
         var message: String
     }
 
+    /// The store's archives: those it holds and those it is still to fetch.
     struct ImageStore: Decodable, Equatable {
         var images: [Image]
-        var models: [Model]
         var fetch: Fetch?
-    }
 
-    struct Image: Decodable, Equatable, Identifiable {
-        var productVersion: String
-        var buildVersion: String
-        var bytes: Int64
-        var productTypes: [String]
-        /// Fetched for a model, as opposed to added from a file.
-        var fetched: Bool
-
-        var id: String {
-            buildVersion
+        /// The image being downloaded.
+        var fetching: Image? {
+            images.first { $0.id == fetch?.id }
         }
     }
 
-    /// A model whose newest image the agent keeps.
-    struct Model: Decodable, Equatable, Identifiable {
+    /// One IPSW archive, in the store or wanted there.
+    struct Image: Decodable, Equatable, Identifiable {
+        /// The store's name for the archive, which requests use.
+        var id: String
+        /// The system it installs, as Apple names it.
+        var os: String
+        var version: String
+        var build: String
+        var bytes: Int64
+        /// The models it restores, by name.
+        var models: [String]
+        /// The archive is in the store.
+        var ready: Bool
+        var error: String?
+
+        var title: String {
+            os.isEmpty ? version : "\(os) \(version)"
+        }
+    }
+
+    /// What a restore would install on one target.
+    struct Planned: Decodable, Equatable {
+        var board: String
+        var port: Int
+        /// Absent while the agent does not know the target's model.
+        var offer: Offer?
+    }
+
+    /// What a restore of one device can install.
+    struct Offer: Decodable, Equatable {
+        struct Release: Decodable, Equatable {
+            var os: String
+            var version: String
+            var build: String
+            var bytes: Int64
+
+            var title: String {
+                os.isEmpty ? version : "\(os) \(version)"
+            }
+        }
+
+        /// The newest release Apple signs for the device.
+        var latest: Release?
+        /// The newest image in the store that restores it and that Apple
+        /// still signs.
+        var held: Release?
+        /// Why the catalog could not say what Apple signs.
+        var problem: String?
+
+        /// The newest release, when the image in the store is an older one.
+        var newer: Release? {
+            guard let held, let latest else { return nil }
+            let version = held.version.compare(latest.version, options: .numeric)
+            let older = version == .orderedSame
+                ? held.build.compare(latest.build, options: .numeric) == .orderedAscending
+                : version == .orderedAscending
+            return older ? latest : nil
+        }
+    }
+
+    /// A release Apple signs for a model.
+    struct Release: Decodable, Equatable, Identifiable {
+        var version: String
+        var build: String
+        var bytes: Int64
+
+        var id: String {
+            build
+        }
+    }
+
+    /// A device model the catalog lists.
+    struct CatalogModel: Decodable, Equatable, Identifiable {
         var identifier: String
         var name: String
-        var latest: Release?
-        var error: String?
-        var ready: Bool
 
         var id: String {
             identifier
         }
     }
 
-    struct Release: Decodable, Equatable {
-        var version: String
-        var build: String
-        var bytes: Int64
-    }
-
     /// A download under way.
     struct Fetch: Decodable, Equatable {
-        var version: String
-        var build: String
+        /// The image it becomes.
+        var id: String
         var bytes: Int64
         var done: Int64
 

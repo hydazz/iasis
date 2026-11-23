@@ -23,15 +23,21 @@ use serde::{Deserialize, Serialize};
 use crate::{
     Board, UsbIds,
     batch::{self, Ending, Endings, Images, PortWork, Requests, Submission},
-    discover,
+    boards,
     home::Home,
     host::{Jobs, Link},
     identity::models::Models,
     images::{Network, Snapshot, Store},
+    inventory::Inventory,
     parse_serial,
     restore::{Operation, RestoreEngine},
     view::BoardView,
+    watch::Watch,
 };
+
+/// A board whose session could not be taken is tried again this often
+/// while it stays attached.
+const RETRY: Duration = Duration::from_secs(2);
 
 pub struct Options {
     /// Attend one board instead of every board.
@@ -104,15 +110,23 @@ pub enum Request {
     State,
     /// Reply with the state now and again whenever it changes.
     Watch,
+    /// Reply with what a restore would install on each of these targets.
+    Plan {
+        boards: Vec<Selection>,
+    },
     /// Erase and restore the selected targets, on any number of boards. The
-    /// client has asked its user to confirm.
+    /// client has asked its user to confirm. Each target gets the newest
+    /// image in the store that Apple still signs, or with `latest` the
+    /// newest release Apple signs, fetched first if the store lacks it.
     Restore {
         boards: Vec<Selection>,
+        latest: bool,
     },
     /// Repair the selected targets from the images a restore would install
     /// and keep their data, otherwise as `Restore`.
     Revive {
         boards: Vec<Selection>,
+        latest: bool,
     },
     Dfu {
         board: String,
@@ -139,23 +153,26 @@ pub enum Request {
     Sharing {
         enabled: bool,
     },
-    /// Keep the newest image for a model.
-    Keep {
+    /// Fetch a release Apple signs for a model into the store: the newest,
+    /// or the one of this `build`.
+    Download {
         model: String,
+        build: Option<String>,
     },
-    Forget {
+    /// Reply with the releases Apple signs for a model, newest first.
+    Releases {
         model: String,
     },
     /// Copy a local archive into the store.
     Import {
         path: PathBuf,
     },
-    /// Delete an image by its build.
+    /// Delete an image, or give up one still to come, by its `id`.
     Remove {
-        build: String,
+        image: String,
     },
-    /// Ask the catalog for newer releases now.
-    Refresh,
+    /// Reply with every device model the catalog lists.
+    Catalog,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -164,6 +181,18 @@ pub enum Reply {
     Ok,
     Error(String),
     State(Box<State>),
+    Catalog(Vec<crate::images::Device>),
+    Releases(Vec<crate::images::Firmware>),
+    Plan(Vec<Planned>),
+}
+
+/// What a restore would install on one target.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Planned {
+    pub board: String,
+    pub port: u8,
+    /// Absent while the target's model is not known, which DFU settles.
+    pub offer: Option<crate::images::Offer>,
 }
 
 /// A board the agent has seen. Its jobs outlive each session with it.
@@ -180,11 +209,15 @@ struct Attendance {
 
 impl Attendance {
     /// Take the board's management interface for one command. The session
-    /// goes on beside it.
+    /// goes on beside it, and says when the command has had its effect.
     fn control(&self) -> Result<Board> {
         let device = self.device.lock().unwrap().clone();
-        Board::open(&device.context("the board is not attended")?)
-            .context("another tool is controlling the board")
+        let board = Board::open(&device.context("the board is not attended")?)
+            .context("another tool is controlling the board")?;
+        Ok(match &*self.link.lock().unwrap() {
+            Some(link) => board.notified(link.notice()),
+            None => board,
+        })
     }
 }
 
@@ -195,6 +228,10 @@ pub struct Agent {
     models: Arc<Models>,
     engine: RestoreEngine,
     boards: Mutex<BTreeMap<u64, Arc<Attendance>>>,
+    inventory: Arc<Inventory>,
+    /// Advances whenever anything a client is shown, or a worker waits on,
+    /// changes.
+    changes: Arc<Watch>,
 }
 
 fn restore_targets(status: &iasis_protocol::Status, selected: &[Target]) -> Result<Vec<Target>> {
@@ -232,7 +269,9 @@ fn submit(
     board: &Attendance,
     session: u32,
     targets: Vec<Target>,
+    latest: bool,
     operation: Operation,
+    changes: &Watch,
 ) -> Result<Vec<PortWork>> {
     let (accepted, receipt) = std::sync::mpsc::sync_channel(0);
     let ports: Vec<Port> = targets.iter().map(|target| target.port).collect();
@@ -244,11 +283,13 @@ fn submit(
         *slot = Some(Submission {
             session,
             targets,
+            latest,
             operation,
             accepted,
         });
         work
     };
+    changes.changed();
     // A busy attendant cannot launch a timed-out request. The rendezvous
     // succeeds only while this client is still waiting for acceptance.
     let result = receipt.recv_timeout(Duration::from_secs(2));
@@ -258,6 +299,7 @@ fn submit(
         for port in ports {
             slots[port.index()] = None;
         }
+        changes.changed();
     }
     result
         .context("the board did not accept the restore request")?
@@ -272,12 +314,22 @@ impl Agent {
             .logs
             .clone()
             .unwrap_or_else(|| home.cache.join("restores"));
+        let changes = Arc::<Watch>::default();
         Ok(Arc::new(Self {
-            store: Store::open(home.cache.join("images"), Network::default())?,
+            store: Store::open(
+                home.cache.join("images"),
+                Network::default(),
+                changes.clone(),
+            )?,
             models: Arc::new(Models::open(home.cache.join("device-models.json"))),
-            engine: RestoreEngine::for_host(logs),
+            engine: RestoreEngine::for_host(logs, changes.clone()),
             boards: Mutex::default(),
-            sharing: crate::sharing::Sharing::open(home.state.join("usb-sharing.json")),
+            sharing: crate::sharing::Sharing::open(
+                home.state.join("usb-sharing.json"),
+                changes.clone(),
+            ),
+            inventory: Inventory::follow(changes.clone())?,
+            changes,
             home,
         }))
     }
@@ -352,7 +404,34 @@ impl Agent {
     /// Hand a client's restore request to each board's attendant. Every
     /// selection is checked before any board is asked, so a stale one
     /// starts nothing.
-    fn restore(&self, selections: &[Selection], operation: Operation) -> Result<Vec<PortWork>> {
+    /// What the store and the catalog offer each target. A target whose
+    /// model this host has not learned has no offer until it is in DFU.
+    fn plan(&self, selections: &[Selection]) -> Result<Vec<Planned>> {
+        let mut planned = Vec::new();
+        for selection in selections {
+            let (_, link) = self.board(&selection.board)?;
+            let status = link.status().context("the board has not been read yet")?;
+            for target in &selection.targets {
+                let ecid = target.ecid.or(status.ports[target.port.index()].ecid);
+                let hardware = ecid
+                    .and_then(|ecid| self.models.model(ecid))
+                    .and_then(|model| self.store.hardware_for(&model).ok());
+                planned.push(Planned {
+                    board: selection.board.clone(),
+                    port: target.port.number(),
+                    offer: hardware.map(|(chip, board)| self.store.offer(chip, board)),
+                });
+            }
+        }
+        Ok(planned)
+    }
+
+    fn restore(
+        &self,
+        selections: &[Selection],
+        latest: bool,
+        operation: Operation,
+    ) -> Result<Vec<PortWork>> {
         ensure!(!selections.is_empty(), "no ports selected");
         let mut checked = Vec::new();
         for selection in selections {
@@ -373,7 +452,14 @@ impl Agent {
         }
         let mut work = Vec::new();
         for (board, session, targets) in checked {
-            work.extend(submit(&board, session, targets, operation)?);
+            work.extend(submit(
+                &board,
+                session,
+                targets,
+                latest,
+                operation,
+                &self.changes,
+            )?);
         }
         Ok(work)
     }
@@ -383,11 +469,29 @@ impl Agent {
             Request::State | Request::Watch => {
                 return Reply::State(Box::new(self.state()));
             }
-            Request::Restore { boards } => self
-                .restore(&boards, Operation::Restore)
+            Request::Catalog => {
+                return match self.store.catalog() {
+                    Ok(devices) => Reply::Catalog(devices),
+                    Err(error) => Reply::Error(format!("{error:#}")),
+                };
+            }
+            Request::Releases { model } => {
+                return match self.store.releases(&model) {
+                    Ok(releases) => Reply::Releases(releases),
+                    Err(error) => Reply::Error(format!("{error:#}")),
+                };
+            }
+            Request::Plan { boards } => {
+                return match self.plan(&boards) {
+                    Ok(planned) => Reply::Plan(planned),
+                    Err(error) => Reply::Error(format!("{error:#}")),
+                };
+            }
+            Request::Restore { boards, latest } => self
+                .restore(&boards, latest, Operation::Restore)
                 .map(|work| *submitted = work),
-            Request::Revive { boards } => self
-                .restore(&boards, Operation::Revive)
+            Request::Revive { boards, latest } => self
+                .restore(&boards, latest, Operation::Revive)
                 .map(|work| *submitted = work),
             Request::Dfu { board, port } => self.command(&board, port, PortAction::Dfu),
             Request::Reboot { board, port } => self.command(&board, port, PortAction::Reboot),
@@ -406,16 +510,13 @@ impl Agent {
             Request::Rename { board, name } => self
                 .board(&board)
                 .and_then(|(board, _)| Ok(board.control()?.rename(&name)?)),
-            Request::Keep { model } => self.store.want(&model),
-            Request::Forget { model } => self.store.forget(&model),
+            Request::Download { model, build } => self.store.download(&model, build.as_deref()),
             Request::Import { path } => self.store.import(&path).map(|_| ()),
-            Request::Remove { build } => self.store.remove(&build),
+            Request::Remove { image } => self.store.remove(&image),
             Request::Sharing { enabled } => self.sharing.configure(enabled),
-            Request::Refresh => {
-                self.store.refresh();
-                Ok(())
-            }
         };
+        // Whatever the request did, a watching client looks again.
+        self.changes.changed();
         match result {
             Ok(()) => Reply::Ok,
             Err(error) => Reply::Error(format!("{error:#}")),
@@ -429,12 +530,14 @@ impl Agent {
             board.jobs.clone(),
             self.models.clone(),
             &self.engine,
+            self.inventory.clone(),
         )?);
         println!("Board {:016x}: attending", link.board().info().serial);
         *board.device.lock().unwrap() = Some(device.clone());
         *board.link.lock().unwrap() = Some(link.clone());
         // Whatever kept an earlier attempt from the board is over.
         *board.notice.lock().unwrap() = None;
+        self.changes.changed();
         let result = (|| -> Result<()> {
             loop {
                 let outcome = batch::listen(
@@ -446,9 +549,11 @@ impl Agent {
                     &board.endings,
                 )?;
                 *board.notice.lock().unwrap() = outcome;
+                self.changes.changed();
             }
         })();
         *board.link.lock().unwrap() = None;
+        self.changes.changed();
         result
     }
 
@@ -478,17 +583,27 @@ impl Agent {
                     })
                 })?;
         }
-        let mut attendants: BTreeMap<u64, (JoinHandle<Result<()>>, Instant)> = BTreeMap::new();
+        let mut attendants: BTreeMap<u64, Attendant> = BTreeMap::new();
         let mut errors: BTreeMap<u64, String> = BTreeMap::new();
+        // The enumeration each board's last attendant held, and when it ended.
+        let mut ended: BTreeMap<u64, (nusb::DeviceId, Instant)> = BTreeMap::new();
         loop {
+            let seen = self.changes.count();
+            let mut wake: Option<Instant> = None;
             let finished: Vec<u64> = attendants
                 .iter()
-                .filter(|(_, (attendant, _))| attendant.is_finished())
+                .filter(|(_, attendant)| attendant.done.load(Ordering::Acquire))
                 .map(|(serial, _)| *serial)
                 .collect();
             for serial in finished {
-                let (attendant, started) = attendants.remove(&serial).unwrap();
-                let message = match attendant.join() {
+                let Attendant {
+                    thread,
+                    started,
+                    device,
+                    ..
+                } = attendants.remove(&serial).unwrap();
+                ended.insert(serial, (device, Instant::now()));
+                let message = match thread.join() {
                     Ok(Ok(())) => String::new(),
                     Ok(Err(error)) => format!("{error:#}"),
                     Err(_) => "attendant panicked".into(),
@@ -503,33 +618,81 @@ impl Agent {
                     *board.notice.lock().unwrap() = Some(message.clone());
                 }
                 errors.insert(serial, message);
+                self.changes.changed();
             }
-            match discover(UsbIds::default(), options.serial) {
-                Ok(devices) => {
-                    let mut boards = self.boards.lock().unwrap();
-                    for board in boards.values() {
-                        board.present.store(false, Ordering::Relaxed);
-                    }
-                    for device in devices {
-                        let Some(serial) =
-                            device.serial_number().and_then(|s| parse_serial(s).ok())
-                        else {
-                            continue;
-                        };
-                        let board = boards.entry(serial).or_default().clone();
-                        board.present.store(true, Ordering::Relaxed);
-                        attendants.entry(serial).or_insert_with(|| {
-                            let agent = self.clone();
-                            let attendant = thread::spawn(move || agent.attend(&device, &board));
-                            (attendant, Instant::now())
-                        });
-                    }
+            let mut boards = self.boards.lock().unwrap();
+            let was: Vec<bool> = boards
+                .values()
+                .map(|board| board.present.swap(false, Ordering::Relaxed))
+                .collect();
+            for device in boards_among(self.inventory.devices(), options.serial) {
+                let Some(serial) = device.serial_number().and_then(|s| parse_serial(s).ok()) else {
+                    continue;
+                };
+                let board = boards.entry(serial).or_default().clone();
+                board.present.store(true, Ordering::Relaxed);
+                if attendants.contains_key(&serial) {
+                    continue;
                 }
-                Err(error) => eprintln!("USB enumeration: {error}"),
+                // A board that has just enumerated is attended at once. The
+                // one an attendant gave up on is tried again after a while.
+                if let Some((id, at)) = ended.get(&serial)
+                    && *id == device.id()
+                    && at.elapsed() < RETRY
+                {
+                    let retry = *at + RETRY;
+                    wake = Some(wake.map_or(retry, |wake| wake.min(retry)));
+                    continue;
+                }
+                let agent = self.clone();
+                let id = device.id();
+                let done = Arc::new(AtomicBool::new(false));
+                let thread = thread::spawn({
+                    let done = done.clone();
+                    move || {
+                        let result = agent.attend(&device, &board);
+                        // Marked before the loop above is woken to collect it.
+                        done.store(true, Ordering::Release);
+                        agent.changes.changed();
+                        result
+                    }
+                });
+                attendants.insert(
+                    serial,
+                    Attendant {
+                        thread,
+                        started: Instant::now(),
+                        device: id,
+                        done,
+                    },
+                );
             }
-            thread::sleep(Duration::from_millis(500));
+            let now: Vec<bool> = boards
+                .values()
+                .map(|board| board.present.load(Ordering::Relaxed))
+                .collect();
+            drop(boards);
+            if was != now {
+                self.changes.changed();
+            }
+            self.changes.wait(seen, wake);
         }
     }
+}
+
+/// The thread holding one board's session.
+struct Attendant {
+    thread: JoinHandle<Result<()>>,
+    started: Instant,
+    /// The enumeration of the board it attends.
+    device: nusb::DeviceId,
+    /// Set as its last act, so the agent's loop never waits on an attendant
+    /// that has already said it ended.
+    done: Arc<AtomicBool>,
+}
+
+fn boards_among(devices: Vec<DeviceInfo>, serial: Option<u64>) -> Vec<DeviceInfo> {
+    boards(devices, UsbIds::default(), serial)
 }
 
 #[cfg(unix)]
@@ -537,7 +700,8 @@ mod socket {
     use super::*;
     use std::{
         fs,
-        io::{BufRead, BufReader, Write},
+        io::{BufRead, BufReader, Read, Write},
+        net::Shutdown,
         os::unix::{
             fs::PermissionsExt,
             net::{UnixListener, UnixStream},
@@ -567,7 +731,12 @@ mod socket {
                     let agent = agent.clone();
                     thread::spawn(move || {
                         // A client that goes away ends its own thread.
-                        let _ = converse(&agent, stream);
+                        let _ = converse(
+                            stream,
+                            &agent.changes,
+                            |request, submitted| agent.handle(request, submitted),
+                            || agent.state(),
+                        );
                     });
                 }
             })?;
@@ -581,37 +750,60 @@ mod socket {
         Ok(())
     }
 
-    fn converse(agent: &Agent, mut stream: UnixStream) -> Result<()> {
-        let reader = BufReader::new(stream.try_clone()?);
+    /// Answer a client's requests. One that asks to watch is sent the
+    /// state as it changes for as long as it stays.
+    fn converse(
+        mut stream: UnixStream,
+        changes: &Watch,
+        mut handle: impl FnMut(Request, &mut Vec<PortWork>) -> Reply,
+        state: impl Fn() -> State + Sync,
+    ) -> Result<()> {
+        let mut reader = BufReader::new(stream.try_clone()?);
         let mut submitted = Vec::new();
-        for line in reader.lines() {
-            let line = line?;
-            let request = match serde_json::from_str::<Request>(&line) {
-                Ok(request) => request,
-                Err(error) => {
-                    send(
-                        &mut stream,
-                        &Reply::Error(format!("unreadable request: {error}")),
-                    )?;
-                    continue;
-                }
-            };
-            if !matches!(request, Request::Watch) {
-                send(&mut stream, &agent.handle(request, &mut submitted))?;
-                continue;
+        let mut line = String::new();
+        loop {
+            line.clear();
+            if reader.read_line(&mut line)? == 0 {
+                return Ok(());
             }
-            return watch(&mut stream, &submitted, || agent.state());
+            match serde_json::from_str::<Request>(&line) {
+                Ok(Request::Watch) => break,
+                Ok(request) => send(&mut stream, &handle(request, &mut submitted))?,
+                Err(error) => send(
+                    &mut stream,
+                    &Reply::Error(format!("unreadable request: {error}")),
+                )?,
+            }
         }
-        Ok(())
+        // A watching client sends nothing more, so this thread's read ends
+        // when the client leaves. The state is written beside it.
+        let gone = AtomicBool::new(false);
+        thread::scope(|scope| {
+            let writer = scope.spawn(|| {
+                let result = watch(&mut stream, &submitted, changes, &gone, &state);
+                let _ = stream.shutdown(Shutdown::Both);
+                result
+            });
+            let mut rest = [0; 256];
+            while matches!(reader.get_mut().read(&mut rest), Ok(1..)) {}
+            gone.store(true, Ordering::Relaxed);
+            changes.changed();
+            writer.join().unwrap_or(Ok(()))
+        })
     }
 
+    /// Send the state now and again whenever it changes, until the work the
+    /// client submitted has ended or the client has gone.
     fn watch(
         stream: &mut UnixStream,
         submitted: &[PortWork],
+        changes: &Watch,
+        gone: &AtomicBool,
         mut snapshot: impl FnMut() -> State,
     ) -> Result<()> {
         let mut last = Vec::new();
-        loop {
+        let mut seen = changes.count();
+        while !gone.load(Ordering::Relaxed) {
             let mut state = snapshot();
             state.submitted = submitted.iter().map(|work| work.get().cloned()).collect();
             let finished = !submitted.is_empty() && state.submitted.iter().all(Option::is_some);
@@ -622,10 +814,11 @@ mod socket {
                 last = frame;
             }
             if finished {
-                return Ok(());
+                break;
             }
-            thread::sleep(Duration::from_millis(250));
+            seen = changes.wait(seen, None);
         }
+        Ok(())
     }
 
     /// A connection to the running agent.
@@ -663,7 +856,7 @@ mod socket {
             match self.ask(&Request::State)? {
                 Reply::State(state) => Ok(*state),
                 Reply::Error(error) => bail!(error),
-                Reply::Ok => bail!("the agent sent no state"),
+                _ => bail!("the agent sent no state"),
             }
         }
 
@@ -697,9 +890,12 @@ mod socket {
             log_directory: None,
         };
         let mut frame = 0;
-        watch(&mut server, &submitted, || {
+        let (changes, gone) = (Watch::default(), AtomicBool::new(false));
+        watch(&mut server, &submitted, &changes, &gone, || {
             let mut state = State::default();
             frame += 1;
+            // Each frame changes what the next one shows.
+            changes.changed();
             match frame {
                 1 => state.boards.push(BoardView::unreadable(
                     "0000000000000001".into(),
@@ -743,6 +939,36 @@ mod socket {
         let finished = receive();
         assert!(finished.boards.is_empty());
         assert_eq!(finished.submitted, [Some(result)]);
+    }
+
+    #[test]
+    fn a_watch_ends_when_its_client_leaves_an_unchanging_agent() {
+        let (server, client) = UnixStream::pair().unwrap();
+        let changes = Arc::new(Watch::default());
+        let (ended, end) = std::sync::mpsc::channel();
+        let serving = {
+            let changes = changes.clone();
+            thread::spawn(move || {
+                let result = converse(server, &changes, |_, _| Reply::Ok, State::default);
+                let _ = ended.send(());
+                result
+            })
+        };
+        let mut client = Client {
+            reader: BufReader::new(client),
+        };
+        assert!(matches!(
+            client.ask(&Request::Watch).unwrap(),
+            Reply::State(_)
+        ));
+        // Nothing changes, so only the closed socket can end the watch.
+        let before = changes.count();
+        assert!(end.recv_timeout(Duration::from_millis(200)).is_err());
+        assert_eq!(changes.count(), before);
+        drop(client);
+        end.recv_timeout(Duration::from_secs(5))
+            .expect("the watch outlived its client");
+        serving.join().unwrap().unwrap();
     }
 }
 

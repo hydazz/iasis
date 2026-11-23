@@ -44,4 +44,10 @@ impl Home {
     pub fn socket(&self) -> PathBuf {
         self.runtime.join("agent.sock")
     }
+
+    /// The locks and log of the USB multiplexer the host tools serve, and its
+    /// socket where it has one.
+    pub fn mux(&self) -> PathBuf {
+        self.runtime.join("usb")
+    }
 }

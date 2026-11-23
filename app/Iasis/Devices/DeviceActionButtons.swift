@@ -39,4 +39,51 @@ enum DeviceSymbol {
     static let revive = "cross.case"
     static let restore = "arrow.counterclockwise"
     static let lan = "rectangle.connected.to.line.below"
+    static let download = "arrow.down.circle"
+
+    /// The symbol for images of a system, by the name the agent gives it.
+    static func system(_ name: String) -> String {
+        switch name {
+        case "macOS": "laptopcomputer"
+        case "iPadOS": "ipad"
+        case "iOS": "iphone"
+        case "tvOS": "appletv"
+        case "watchOS": "applewatch"
+        case "visionOS": "vision.pro"
+        case "HomePod Software": "homepod"
+        default: "doc.zipper"
+        }
+    }
+
+    /// The symbol for a device of this name.
+    static func kind(of name: String) -> String {
+        let name = name.lowercased()
+        let kinds = [
+            ("ipad", "ipad"),
+            ("iphone", "iphone"),
+            ("macbook", "laptopcomputer"),
+            ("mac mini", "macmini"),
+            ("mac studio", "macstudio"),
+            ("mac pro", "macpro.gen3"),
+            ("imac", "desktopcomputer"),
+            ("mac", "desktopcomputer"),
+            ("homepod mini", "homepodmini"),
+            ("homepod", "homepod"),
+            ("audioaccessory", "homepod"),
+            ("apple tv", "appletv"),
+            ("appletv", "appletv"),
+            ("apple watch", "applewatch"),
+            ("apple vision", "vision.pro"),
+        ]
+        return kinds.first { name.hasPrefix($0.0) }?.1 ?? "questionmark"
+    }
+}
+
+extension AgentState.Operation {
+    var symbol: String {
+        switch self {
+        case .restore: DeviceSymbol.restore
+        case .revive: DeviceSymbol.revive
+        }
+    }
 }

@@ -107,14 +107,14 @@ impl Models {
         }
     }
 
+    /// What this host has learned of the device's model.
+    pub(crate) fn model(&self, ecid: u64) -> Option<DeviceModel> {
+        let entries = self.entries.lock().unwrap();
+        entries.get(&format!("{ecid:016x}")).cloned()
+    }
+
     pub(crate) fn name(&self, ecid: u64, store: &Store) -> Option<String> {
-        let model = self
-            .entries
-            .lock()
-            .unwrap()
-            .get(&format!("{ecid:016x}"))
-            .cloned()?;
-        model.name(store)
+        self.model(ecid)?.name(store)
     }
 
     pub(crate) fn remember(&self, ecid: u64, device: &UsbDevice) {

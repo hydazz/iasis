@@ -5,19 +5,45 @@ use std::{
     io::{BufRead, BufReader, Read},
     net::Ipv4Addr,
     process::{Child, Command, Stdio},
-    sync::{Arc, mpsc},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+        mpsc,
+    },
     thread,
     time::{Duration, Instant},
 };
 
 #[cfg(target_os = "linux")]
-use super::linux::Resolver;
+use super::linux::{Resolver, follow_network};
 #[cfg(target_os = "macos")]
-use super::macos::Resolver;
+use super::macos::{Resolver, follow_network};
 use anyhow::{Context, Result, bail, ensure};
 
 use super::{PortState, Sharing};
-use crate::{host::Link, topology};
+use crate::{host::Link, topology, watch::Watch};
+
+/// A gateway says when it is ready. It is asked this often whether it has
+/// exited.
+const CHILD_HEALTH: Duration = Duration::from_secs(1);
+/// The host says when its networks change. While gateways are wanted they
+/// are read again this often regardless, for a change it did not announce.
+const REFRESH: Duration = Duration::from_secs(30);
+/// A gateway that failed, and networks that could not be read, are tried
+/// again after this long.
+const RETRY: Duration = Duration::from_secs(5);
+
+/// A board, its port and the host's id for the target's USB device.
+type Target = (u64, u8, u64);
+
+/// What the gateways are built from, and what it was read for.
+struct Inputs {
+    network_version: u64,
+    targets: Vec<Target>,
+    read: Instant,
+    network: Network,
+    interfaces: BTreeMap<u64, String>,
+}
 
 struct Network {
     dns: Ipv4Addr,
@@ -108,7 +134,7 @@ enum Progress {
 }
 
 impl Worker {
-    fn start(gateway: &Gateway) -> Result<Self> {
+    fn start(gateway: &Gateway, changes: &Arc<Watch>) -> Result<Self> {
         let executable = std::env::current_exe()?.with_file_name("iasis-gateway");
         let mut cmd = Command::new(&executable);
         match gateway {
@@ -138,12 +164,14 @@ impl Worker {
         let phase = match gateway {
             Gateway::Serve { .. } => {
                 let (tx, rx) = mpsc::channel();
+                let changes = changes.clone();
                 thread::spawn(move || {
                     let mut line = String::new();
                     if BufReader::new(stdout).read_line(&mut line).is_ok()
                         && line.trim_end() == "READY"
                     {
                         let _ = tx.send(());
+                        changes.changed();
                     }
                 });
                 Phase::Starting(rx)
@@ -217,8 +245,8 @@ enum Service {
 }
 
 impl Service {
-    fn start(gateway: &Gateway) -> Self {
-        match Worker::start(gateway) {
+    fn start(gateway: &Gateway, changes: &Arc<Watch>) -> Self {
+        match Worker::start(gateway, changes) {
             Ok(worker) => Self::Running(worker),
             Err(e) => Self::retry(Some(format!("{e:#}"))),
         }
@@ -226,7 +254,7 @@ impl Service {
 
     fn retry(problem: Option<String>) -> Self {
         Self::Retry {
-            at: Instant::now() + Duration::from_secs(5),
+            at: Instant::now() + RETRY,
             problem,
         }
     }
@@ -238,14 +266,24 @@ pub(super) struct PortGateway {
 }
 
 impl PortGateway {
-    fn start(gateway: Gateway) -> Self {
-        let service = Service::start(&gateway);
+    fn start(gateway: Gateway, changes: &Arc<Watch>) -> Self {
+        let service = Service::start(&gateway, changes);
         Self { gateway, service }
     }
 
-    fn status(&mut self) -> (bool, Option<String>) {
+    /// When the gateway next needs looking at with nothing announced.
+    fn due(&self) -> Option<Instant> {
+        match &self.service {
+            Service::Running(_) => Some(Instant::now() + CHILD_HEALTH),
+            Service::Retry { at, .. } => Some(*at),
+            #[cfg(target_os = "linux")]
+            Service::Unsupported => None,
+        }
+    }
+
+    fn status(&mut self, changes: &Arc<Watch>) -> (bool, Option<String>) {
         if matches!(self.service, Service::Retry { at, .. } if Instant::now() >= at) {
-            self.service = Service::start(&self.gateway);
+            self.service = Service::start(&self.gateway, changes);
         }
         if let Service::Running(worker) = &mut self.service {
             self.service = match worker.poll() {
@@ -269,28 +307,26 @@ pub(super) type Gateways = BTreeMap<(u64, u8), PortGateway>;
 
 fn reconcile(
     gateways: &mut Gateways,
-    boards: &[(u64, Arc<Link>)],
+    targets: &[Target],
     network: &Network,
     interfaces: &BTreeMap<u64, String>,
+    changes: &Arc<Watch>,
 ) -> Result<Vec<PortState>> {
     let mut desired = BTreeMap::new();
-    for (serial, link) in boards {
-        for (port, device_id) in link.sharing_targets() {
-            let port = port.number();
-            let gateway = match interfaces.get(&device_id) {
-                Some(interface) => Gateway::Serve {
-                    interface: interface.clone(),
-                    device_id,
-                    dns: network.dns,
-                    subnet: network.subnet(port)?,
-                },
-                #[cfg(target_os = "linux")]
-                None => Gateway::Prepare(device_id),
-                #[cfg(target_os = "macos")]
-                None => continue,
-            };
-            desired.insert((*serial, port), gateway);
-        }
+    for &(serial, port, device_id) in targets {
+        let gateway = match interfaces.get(&device_id) {
+            Some(interface) => Gateway::Serve {
+                interface: interface.clone(),
+                device_id,
+                dns: network.dns,
+                subnet: network.subnet(port)?,
+            },
+            #[cfg(target_os = "linux")]
+            None => Gateway::Prepare(device_id),
+            #[cfg(target_os = "macos")]
+            None => continue,
+        };
+        desired.insert((serial, port), gateway);
     }
     // Release old captures before a reused interface name starts serving a new attachment.
     gateways.retain(|key, value| desired.get(key) == Some(&value.gateway));
@@ -299,8 +335,8 @@ fn reconcile(
         .map(|((serial, port), gateway)| {
             let entry = gateways
                 .entry((serial, port))
-                .or_insert_with(|| PortGateway::start(gateway));
-            let (active, problem) = entry.status();
+                .or_insert_with(|| PortGateway::start(gateway, changes));
+            let (active, problem) = entry.status(changes);
             PortState {
                 board: format!("{serial:016x}"),
                 port,
@@ -312,37 +348,93 @@ fn reconcile(
 }
 
 impl Sharing {
+    /// Keep a gateway on every target that wants one. The host's networks
+    /// and interfaces are read when the host announces a change to them or
+    /// the targets change; a gateway is looked at when it or a deadline
+    /// says so. With sharing off, nothing here runs until it is turned on.
     pub fn run(&self, attended: impl Fn() -> Vec<(u64, Arc<Link>)>) {
         let mut resolver = Resolver::new();
+        let network_version = Arc::new(AtomicU64::new(0));
+        let announce = {
+            let (version, changes) = (network_version.clone(), self.changes.clone());
+            move || {
+                version.fetch_add(1, Ordering::Relaxed);
+                changes.changed();
+            }
+        };
+        if let Err(error) = follow_network(announce) {
+            eprintln!("Sharing: host networks are read every {REFRESH:?}: {error:#}");
+        }
+        let mut inputs: Option<Inputs> = None;
         loop {
+            let seen = self.changes.count();
             let boards = attended();
+            let targets: Vec<Target> = boards
+                .iter()
+                .flat_map(|(serial, link)| {
+                    link.sharing_targets()
+                        .into_iter()
+                        .map(|(port, device)| (*serial, port.number(), device))
+                })
+                .collect();
             let mut runtime = self.inner.lock().unwrap();
             let super::Runtime { state, gateways } = &mut *runtime;
-            let result = if state.enabled {
-                (|| {
-                    let network = Network::read(&mut resolver)?;
-                    reconcile(gateways, &boards, &network, &topology::ncm_interfaces()?)
-                })()
-            } else {
+            let mut due = None;
+            let result = if !state.enabled || targets.is_empty() {
+                inputs = None;
+                gateways.clear();
                 Ok(Vec::new())
+            } else {
+                (|| {
+                    let version = network_version.load(Ordering::Relaxed);
+                    let current = inputs.take().filter(|inputs| {
+                        inputs.network_version == version
+                            && inputs.targets == targets
+                            && inputs.read.elapsed() < REFRESH
+                    });
+                    let current = match current {
+                        Some(current) => current,
+                        None => Inputs {
+                            network_version: version,
+                            targets: targets.clone(),
+                            read: Instant::now(),
+                            network: Network::read(&mut resolver)?,
+                            interfaces: topology::ncm_interfaces()?,
+                        },
+                    };
+                    let current = inputs.insert(current);
+                    due = Some(current.read + REFRESH);
+                    reconcile(
+                        gateways,
+                        &targets,
+                        &current.network,
+                        &current.interfaces,
+                        &self.changes,
+                    )
+                })()
             };
+            let before = (state.problem.take(), std::mem::take(&mut state.ports));
             match result {
-                Ok(ports) => {
-                    state.ports = ports;
-                    state.problem = None;
-                }
+                Ok(ports) => state.ports = ports,
                 Err(error) => {
                     gateways.clear();
-                    state.ports.clear();
                     state.problem = Some(format!("{error:#}"));
+                    due = Some(Instant::now() + RETRY);
                 }
             }
+            for at in gateways.values().filter_map(PortGateway::due) {
+                due = Some(due.map_or(at, |due| due.min(at)));
+            }
+            let moved = before != (state.problem.clone(), state.ports.clone());
             for (serial, link) in &boards {
                 let board = format!("{serial:016x}");
                 link.set_internet_sharing(state.ports.iter().any(|p| p.active && p.board == board));
             }
             drop(runtime);
-            thread::sleep(Duration::from_millis(500));
+            if moved {
+                self.changes.changed();
+            }
+            self.changes.wait(seen, due);
         }
     }
 }
@@ -377,12 +469,12 @@ mod tests {
     fn sharing_preference_survives_restart() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sharing.json");
-        let sharing = Sharing::open(path.clone());
+        let sharing = Sharing::open(path.clone(), Arc::default());
         assert!(!sharing.state().enabled);
         sharing.configure(true).unwrap();
-        let restored = Sharing::open(path.clone());
+        let restored = Sharing::open(path.clone(), Arc::default());
         assert!(restored.state().enabled);
         restored.configure(false).unwrap();
-        assert!(!Sharing::open(path).state().enabled);
+        assert!(!Sharing::open(path, Arc::default()).state().enabled);
     }
 }

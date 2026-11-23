@@ -50,24 +50,7 @@ struct Device: Identifiable, Equatable {
     }
 
     var symbol: String? {
-        guard port.occupied else { return nil }
-        let name = (port.device ?? "").lowercased()
-        let kinds = [
-            ("ipad", "ipad"),
-            ("iphone", "iphone"),
-            ("macbook", "laptopcomputer"),
-            ("mac mini", "macmini"),
-            ("mac studio", "macstudio"),
-            ("mac pro", "macpro.gen3"),
-            ("imac", "desktopcomputer"),
-            ("mac", "desktopcomputer"),
-            ("homepod mini", "homepodmini"),
-            ("homepod", "homepod"),
-            ("audioaccessory", "homepod"),
-            ("apple tv", "appletv"),
-            ("appletv", "appletv"),
-        ]
-        return kinds.first { name.hasPrefix($0.0) }?.1 ?? "questionmark"
+        port.occupied ? DeviceSymbol.kind(of: port.device ?? "") : nil
     }
 
     var activity: Activity {
@@ -75,12 +58,18 @@ struct Device: Identifiable, Equatable {
             return Activity(fault, .failed)
         }
         guard port.occupied, port.enabled else { return .idle }
-        if let stage = port.stage {
-            let fraction = stage.percent.map { Double($0) / 100 }
-            return Activity(stage.percent.map { "\(stage.name) \($0)%" } ?? stage.name, .working(fraction))
+        if let percent = port.fetch {
+            return Activity("Downloading Image \(percent)%", .working(Double(percent) / 100), symbol: DeviceSymbol.download)
         }
         if let job = port.job {
-            return Activity(job.phase, operation: job.operation)
+            guard let stage = port.stage else {
+                return Activity(job.phase, operation: job.operation)
+            }
+            return Activity(
+                "\(job.operation.title) \(stage.percent)% (\(stage.name))",
+                .working(Double(stage.percent) / 100),
+                symbol: "\(job.operation.symbol).circle"
+            )
         }
         switch port.request {
         case .enteringDfu: return Activity("Entering DFU", .working(nil))
@@ -101,9 +90,69 @@ struct Device: Identifiable, Equatable {
         }
     }
 
+    /// The operation on the port: one under way, or else how the last ended.
+    var operation: OperationStatus? {
+        guard port.fault == nil, port.occupied, port.enabled else { return nil }
+        let activity = activity
+        if let job = port.job, job.phase == .preparing || job.phase == .running {
+            var status = OperationStatus(title: job.operation.title, symbol: job.operation.symbol, mark: activity.mark)
+            if port.fetch != nil {
+                status.steps = [.init(name: "Downloading Image", state: .active)]
+            } else if let stage = port.stage {
+                status.steps = stage.steps.enumerated().map { index, name in
+                    .init(name: name, state: index < stage.step ? .done : index == stage.step ? .active : .pending)
+                }
+                // Firmware transfers interleave with the steps and belong to none.
+                status.detail = stage.steps.contains(stage.name) ? nil : stage.name
+            } else {
+                status.detail = activity.text
+            }
+            return status
+        }
+        if let request = port.request {
+            let symbol = request == .restarting ? DeviceSymbol.restart : DeviceSymbol.dfu
+            return OperationStatus(title: activity.text, symbol: symbol, mark: activity.mark)
+        }
+        if let result = port.result {
+            let ending = Activity(result.phase, operation: result.operation)
+            return OperationStatus(
+                title: ending.text,
+                symbol: result.operation.symbol,
+                mark: ending.mark,
+                detail: result.message,
+                logDirectory: result.logDirectory
+            )
+        }
+        if let job = port.job {
+            return OperationStatus(title: activity.text, symbol: job.operation.symbol, mark: activity.mark)
+        }
+        return nil
+    }
+
     var restoreTarget: RestoreTarget {
         RestoreTarget(port: port.number, generation: port.generation, ecid: port.ecid)
     }
+}
+
+/// A port's operation as the inspector lays it out: what it is, how it
+/// stands and the steps it goes through.
+struct OperationStatus: Equatable {
+    struct Step: Equatable {
+        enum State {
+            case done, active, pending
+        }
+
+        let name: String
+        let state: State
+    }
+
+    let title: String
+    let symbol: String
+    let mark: Activity.Mark
+    /// What is happening when no step says it, or how the operation ended.
+    var detail: String?
+    var steps: [Step] = []
+    var logDirectory: String?
 }
 
 /// What a port is doing, in words and as one mark.
@@ -122,6 +171,8 @@ struct Activity: Equatable {
 
     let text: String
     let mark: Mark
+    /// The work under way, in a ring that fills as it runs.
+    let symbol: String
 
     init(_ phase: AgentState.RestorePhase, operation: AgentState.Operation) {
         switch phase {
@@ -133,9 +184,10 @@ struct Activity: Equatable {
         }
     }
 
-    init(_ text: String, _ mark: Mark) {
+    init(_ text: String, _ mark: Mark, symbol: String = "circle") {
         self.text = text
         self.mark = mark
+        self.symbol = symbol
     }
 }
 
@@ -179,21 +231,29 @@ struct DeviceActions: Equatable {
         dfu = devices.filter(\.port.dfu).map { .dfu(board: $0.serial, port: $0.port.number) }
         restart = devices.filter(\.port.reboot).map { .reboot(board: $0.serial, port: $0.port.number) }
         restore = RestoreConfirmation(devices)
-        if case let .restore(boards)? = restore?.request {
-            revive = .revive(boards: boards)
-        }
+        revive = restore.map { .revive(boards: $0.boards, latest: false) }
     }
 }
 
 /// An erase the user is asked to confirm: the attachments as shown, on any
-/// number of boards.
+/// number of boards, and what the agent says each would be restored with.
 struct RestoreConfirmation: Equatable {
-    let title: String
-    let message: String
-    let request: AgentRequest
+    /// One way to go on: its button and the request that makes.
+    struct Choice: Equatable, Identifiable {
+        let title: String
+        let request: AgentRequest
+
+        var id: String {
+            title
+        }
+    }
+
+    let devices: [Device]
+    let boards: [RestoreSelection]
+    var planned: [AgentState.Planned] = []
 
     init?(_ devices: [Device]) {
-        guard let first = devices.first,
+        guard !devices.isEmpty,
               devices.allSatisfy({ $0.port.occupied && $0.port.restore && $0.session != nil })
         else { return nil }
         var boards: [RestoreSelection] = []
@@ -205,12 +265,67 @@ struct RestoreConfirmation: Equatable {
                 boards.append(RestoreSelection(board: device.serial, session: session, targets: [device.restoreTarget]))
             }
         }
-        let single = devices.count == 1
-        title = single ? "Restore \(first.shortName)?" : "Restore \(devices.count) Devices?"
-        let erased = "All data on \(single ? "this device" : "these devices") will be erased and the system software reinstalled."
-        let list = devices.map { "\($0.boardTitle), Port \($0.port.number): \($0.name)" }
-        message = ([erased, ""] + list).joined(separator: "\n")
-        request = .restore(boards: boards)
+        self.devices = devices
+        self.boards = boards
+    }
+
+    var title: String {
+        let subject = devices.count == 1 ? devices[0].shortName : "\(devices.count) Devices"
+        return blocked ? "Cannot Restore \(subject)" : "Restore \(subject)?"
+    }
+
+    var message: String {
+        let erased = "All data on \(devices.count == 1 ? "this device" : "these devices") will be erased and the system software reinstalled."
+        return ([erased, ""] + devices.map(line)).joined(separator: "\n")
+    }
+
+    /// Where an image in the store is older than the newest release, the
+    /// choice between them. Otherwise the one way to go on, or none when a
+    /// device has nothing to be restored with.
+    var choices: [Choice] {
+        guard !blocked else { return [] }
+        let newer = devices.compactMap(offer).filter { $0.newer != nil }
+        guard !newer.isEmpty else {
+            return [Choice(title: "Restore", request: .restore(boards: boards, latest: false))]
+        }
+        let latest = Set(newer.compactMap(\.latest?.title))
+        let held = Set(newer.compactMap(\.held?.title))
+        return [
+            Choice(
+                title: latest.count == 1 ? "Download \(latest.first ?? "")" : "Download Latest",
+                request: .restore(boards: boards, latest: true)
+            ),
+            Choice(
+                title: held.count == 1 ? "Use \(held.first ?? "")" : "Use Downloaded",
+                request: .restore(boards: boards, latest: false)
+            ),
+        ]
+    }
+
+    private func offer(for device: Device) -> AgentState.Offer? {
+        planned.first { $0.board == device.serial && $0.port == device.port.number }?.offer
+    }
+
+    /// A device has no image in the store and the catalog offers none.
+    private var blocked: Bool {
+        devices.compactMap(offer).contains { $0.held == nil && $0.latest == nil }
+    }
+
+    private func line(for device: Device) -> String {
+        let place = "\(device.boardTitle), Port \(device.port.number): \(device.name)"
+        // A device the agent has not identified gets its image once in DFU.
+        guard let offer = offer(for: device) else { return place }
+        let size = { (release: AgentState.Offer.Release) in release.bytes.formatted(.byteCount(style: .file)) }
+        switch (offer.held, offer.latest) {
+        case let (held?, latest?) where offer.newer != nil:
+            return "\(place) · \(held.title) downloaded, \(latest.title) available (\(size(latest)))"
+        case let (held?, latest):
+            return "\(place) · \(held.title)\(latest == nil ? ", newer releases not checked" : "")"
+        case let (nil, latest?):
+            return "\(place) · \(latest.title), \(size(latest)) to download"
+        case (nil, nil):
+            return "\(place) · \(offer.problem ?? "No image restores this device")"
+        }
     }
 }
 

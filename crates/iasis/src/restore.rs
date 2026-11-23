@@ -14,7 +14,7 @@ use std::{
 use anyhow::{Context, Result, ensure};
 use iasis_protocol::AppleMode;
 
-use crate::identity::models::DeviceModel;
+use crate::{identity::models::DeviceModel, watch::Watch};
 use serde::{Deserialize, Serialize};
 
 mod integrity;
@@ -342,12 +342,17 @@ pub struct RestoreEngine {
     program: PathBuf,
     logs_root: PathBuf,
     active: Arc<Mutex<HashSet<u64>>>,
+    /// Advances whenever a job's status changes.
+    changes: Arc<Watch>,
 }
 
 impl RestoreEngine {
-    pub fn for_host(logs_root: impl Into<PathBuf>) -> Self {
-        // An executable that cannot name itself fails each worker's start.
-        Self::with(crate::native::program().unwrap_or_default(), logs_root)
+    pub fn for_host(logs_root: impl Into<PathBuf>, changes: Arc<Watch>) -> Self {
+        Self {
+            changes,
+            // An executable that cannot name itself fails each worker's start.
+            ..Self::with(crate::native::program().unwrap_or_default(), logs_root)
+        }
     }
 
     fn with(program: PathBuf, logs_root: impl Into<PathBuf>) -> Self {
@@ -355,14 +360,13 @@ impl RestoreEngine {
             program,
             logs_root: logs_root.into(),
             active: Arc::default(),
+            changes: Arc::default(),
         }
     }
 
-    /// Whether the host restores a target found in this USB mode. Restores
-    /// run from macOS and Linux.
+    /// Whether the host restores a target found in this USB mode.
     pub fn restores(&self, mode: AppleMode) -> bool {
-        cfg!(any(target_os = "macos", target_os = "linux"))
-            && matches!(mode, AppleMode::Dfu | AppleMode::KisDfu)
+        matches!(mode, AppleMode::Dfu | AppleMode::KisDfu)
     }
 
     /// Start a deliberately selected erase batch. The caller must establish
@@ -446,18 +450,20 @@ impl RestoreEngine {
             }));
             let worker_status = Arc::clone(&status);
             let active = Arc::clone(&self.active);
+            let changes = Arc::clone(&self.changes);
             let spawn = thread::Builder::new()
                 .name(format!("restore-{ecid:x}"))
                 .spawn(move || {
-                    let result = image
-                        .check_unchanged()
-                        .and_then(|()| run_worker(command, &worker_status, stdout, stderr));
+                    let result = image.check_unchanged().and_then(|()| {
+                        run_worker(command, &worker_status, stdout, stderr, &changes)
+                    });
                     if let Err(error) = result {
                         let mut status = worker_status.lock().unwrap();
                         status.state = RestoreState::Failed;
                         status.message = format!("{error:#}");
                     }
                     active.lock().unwrap().remove(&ecid);
+                    changes.changed();
                 });
             if let Err(error) = spawn {
                 self.active.lock().unwrap().remove(&ecid);
@@ -495,6 +501,7 @@ fn run_worker(
     status: &Arc<Mutex<RestoreStatus>>,
     stdout_log: File,
     stderr_log: File,
+    changes: &Watch,
 ) -> Result<()> {
     let mut child = command
         .spawn()
@@ -504,11 +511,12 @@ fn run_worker(
         status.pid = Some(child.id());
         status.state = RestoreState::Running;
     }
+    changes.changed();
     let stdout = child.stdout.take().context("worker stdout missing")?;
     let stderr = child.stderr.take().context("worker stderr missing")?;
     let (outcome, stdout_result, stderr_result) = thread::scope(|scope| {
-        let out = scope.spawn(|| drain(stdout, stdout_log, status, true));
-        let err = scope.spawn(|| drain(stderr, stderr_log, status, false));
+        let out = scope.spawn(|| drain(stdout, stdout_log, status, true, changes));
+        let err = scope.spawn(|| drain(stderr, stderr_log, status, false, changes));
         let outcome = child.wait();
         (outcome, out.join(), err.join())
     });
@@ -549,6 +557,7 @@ fn drain(
     mut log: File,
     status: &Mutex<RestoreStatus>,
     stdout: bool,
+    changes: &Watch,
 ) -> io::Result<bool> {
     let mut input = BufReader::new(input);
     let mut line = Vec::new();
@@ -567,6 +576,7 @@ fn drain(
         let text = String::from_utf8_lossy(&line);
         let text = text.trim();
         let mut status = status.lock().unwrap();
+        let before = (status.progress.clone(), status.message.clone());
         if stdout {
             reported |= text == crate::native::COMPLETE;
             if let Some(fields) = text.strip_prefix(crate::native::STEP) {
@@ -574,6 +584,11 @@ fn drain(
             }
         } else if !text.is_empty() {
             status.message = text.chars().take(512).collect();
+        }
+        let moved = (&status.progress, &status.message) != (&before.0, &before.1);
+        drop(status);
+        if moved {
+            changes.changed();
         }
     }
     if let Some(error) = write_error {
@@ -1006,6 +1021,7 @@ esac
                 &status,
                 tempfile::tempfile().unwrap(),
                 tempfile::tempfile().unwrap(),
+                &Watch::default(),
             )
             .unwrap();
             let status = status.lock().unwrap();

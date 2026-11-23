@@ -7,14 +7,17 @@ pub mod home;
 pub mod host;
 pub mod identity;
 pub mod images;
+pub mod inventory;
 pub mod native;
 pub mod progress;
 pub mod restore;
 pub mod sharing;
 pub mod topology;
 pub mod view;
+pub mod watch;
 
 use std::{
+    sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
 };
@@ -24,13 +27,15 @@ use iasis_protocol::{
     PortCommand, Status,
 };
 use nusb::{
-    DeviceInfo, Interface, MaybeFuture,
-    transfer::{ControlIn, ControlOut, ControlType, Recipient},
+    DeviceInfo, Endpoint, Interface, MaybeFuture,
+    transfer::{Buffer, ControlIn, ControlOut, ControlType, In, Interrupt, Recipient},
 };
 use serde::{Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
 const TIMEOUT: Duration = Duration::from_secs(2);
+/// A client without the board's announcements looks again this often.
+const UNANNOUNCED: Duration = Duration::from_millis(20);
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -92,9 +97,14 @@ pub struct Topology {
     pub port_chain: Vec<u8>,
 }
 
-pub fn discover(ids: UsbIds, serial: Option<u64>) -> Result<Vec<DeviceInfo>, Error> {
-    Ok(nusb::list_devices()
-        .wait()?
+/// The Iasis boards among `devices`: every one, or the one with `serial`.
+pub fn boards(
+    devices: impl IntoIterator<Item = DeviceInfo>,
+    ids: UsbIds,
+    serial: Option<u64>,
+) -> Vec<DeviceInfo> {
+    devices
+        .into_iter()
         .filter(|device| {
             device.vendor_id() == ids.vendor
                 && device.product_id() == ids.product
@@ -103,57 +113,247 @@ pub fn discover(ids: UsbIds, serial: Option<u64>) -> Result<Vec<DeviceInfo>, Err
                     device.serial_number().and_then(|s| parse_serial(s).ok()) == Some(serial)
                 })
         })
-        .collect())
+        .collect()
 }
+
+pub fn discover(ids: UsbIds, serial: Option<u64>) -> Result<Vec<DeviceInfo>, Error> {
+    Ok(boards(nusb::list_devices().wait()?, ids, serial))
+}
+
+/// The board's announcements that its status has changed. One client holds
+/// them at a time; any client can read the status they announce.
+pub struct Events {
+    endpoint: Endpoint<Interrupt, In>,
+    _interface: Interface,
+}
+
+impl Events {
+    fn claim(device: &nusb::Device) -> Result<Self, Error> {
+        let interface = device.claim_interface(protocol::EVENT_INTERFACE).wait()?;
+        let endpoint = interface.endpoint::<Interrupt, In>(protocol::EVENT_ENDPOINT)?;
+        let mut events = Self {
+            endpoint,
+            _interface: interface,
+        };
+        events.listen();
+        Ok(events)
+    }
+
+    fn listen(&mut self) {
+        if self.endpoint.pending() == 0 {
+            let packet = self.endpoint.max_packet_size();
+            self.endpoint.submit(Buffer::new(packet));
+        }
+    }
+
+    /// The next announced status revision, or `None` once `timeout` has
+    /// passed without one.
+    pub fn next(&mut self, timeout: Duration) -> Result<Option<u32>, Error> {
+        self.listen();
+        let Some(done) = self.endpoint.wait_next_complete(timeout) else {
+            return Ok(None);
+        };
+        done.status?;
+        let revision = done
+            .buffer
+            .first_chunk::<{ protocol::EVENT_SIZE }>()
+            .ok_or(Error::Protocol(protocol::DecodeError::Payload))?;
+        Ok(Some(u32::from_le_bytes(*revision)))
+    }
+}
+
+/// Waits for the board's status to move past a revision, until a deadline.
+pub type Notice = Arc<dyn Fn(u32, Instant) + Send + Sync>;
 
 #[derive(Clone)]
 pub struct Board {
-    connection: Connection,
+    device: nusb::Device,
+    access: Access,
     info: Info,
     /// The protocol version the firmware speaks.
     protocol: u16,
     topology: Topology,
+    notice: Option<Notice>,
+    events: Arc<Mutex<Option<Events>>>,
 }
 
 #[derive(Clone)]
-enum Connection {
-    Control(Interface),
-    Listener(nusb::Device),
-    Observer(nusb::Device),
+enum Access {
+    Control(Claimed),
+    Listener(Shared),
+    Observer(Shared),
+}
+
+/// The claimed management interface.
+#[cfg(not(windows))]
+type Claimed = Interface;
+/// What carries a control transfer without the exclusive claim.
+#[cfg(not(windows))]
+type Shared = nusb::Device;
+#[cfg(windows)]
+type Claimed = Arc<winusb::Claim>;
+#[cfg(windows)]
+type Shared = Arc<winusb::Claim>;
+
+#[cfg(not(windows))]
+fn claim(device: &DeviceInfo) -> Result<(nusb::Device, Claimed), Error> {
+    let handle = device.open().wait()?;
+    let interface = handle.claim_interface(protocol::INTERFACE).wait()?;
+    Ok((handle, interface))
+}
+
+#[cfg(not(windows))]
+fn share(device: &DeviceInfo) -> Result<(nusb::Device, Shared), Error> {
+    let handle = device.open().wait()?;
+    Ok((handle.clone(), handle))
+}
+
+// On Windows the shared board is the claimed one.
+#[cfg(windows)]
+use winusb::{claim, claim as share};
+
+/// WinUSB opens each USB function once per process and has no device-level
+/// control transfers. Every board this process opens shares one claim of the
+/// management interface, released with the last, so a process that holds the
+/// board keeps others from it.
+#[cfg(windows)]
+mod winusb {
+    use std::sync::{Arc, Mutex, Weak};
+
+    use iasis_protocol as protocol;
+    use nusb::{
+        DeviceInfo, Interface, MaybeFuture,
+        transfer::{ControlIn, ControlOut, TransferError},
+    };
+
+    use crate::Error;
+
+    pub(crate) struct Claim {
+        device: nusb::Device,
+        interface: Interface,
+    }
+
+    impl Claim {
+        pub(crate) fn control_in(
+            &self,
+            data: ControlIn,
+            timeout: std::time::Duration,
+        ) -> impl MaybeFuture<Output = Result<Vec<u8>, TransferError>> {
+            self.interface.control_in(data, timeout)
+        }
+
+        pub(crate) fn control_out(
+            &self,
+            data: ControlOut,
+            timeout: std::time::Duration,
+        ) -> impl MaybeFuture<Output = Result<(), TransferError>> {
+            self.interface.control_out(data, timeout)
+        }
+    }
+
+    pub(crate) fn claim(device: &DeviceInfo) -> Result<(nusb::Device, Arc<Claim>), Error> {
+        static CLAIMS: Mutex<Vec<(nusb::DeviceId, Weak<Claim>)>> = Mutex::new(Vec::new());
+        let mut claims = CLAIMS.lock().unwrap();
+        claims.retain(|(_, claim)| claim.strong_count() > 0);
+        if let Some(claim) = claims
+            .iter()
+            .find(|(id, _)| *id == device.id())
+            .and_then(|(_, claim)| claim.upgrade())
+        {
+            return Ok((claim.device.clone(), claim));
+        }
+        let handle = device.open().wait()?;
+        let interface = handle.claim_interface(protocol::INTERFACE).wait()?;
+        let claim = Arc::new(Claim {
+            device: handle.clone(),
+            interface,
+        });
+        claims.push((device.id(), Arc::downgrade(&claim)));
+        Ok((handle, claim))
+    }
 }
 
 impl Board {
     /// Claim the management interface for power, port commands and firmware updates.
     pub fn open(device: &DeviceInfo) -> Result<Self, Error> {
-        let interface = device
-            .open()
-            .wait()?
-            .claim_interface(protocol::INTERFACE)
-            .wait()?;
-        Self::from_connection(device, Connection::Control(interface))
+        let (handle, claimed) = claim(device)?;
+        Self::connect(device, handle, Access::Control(claimed))
     }
 
     /// Read board status without claiming the management interface.
     pub fn observe(device: &DeviceInfo) -> Result<Self, Error> {
-        Self::from_connection(device, Connection::Observer(device.open().wait()?))
+        let (handle, shared) = share(device)?;
+        Self::connect(device, handle, Access::Observer(shared))
     }
 
     /// Read status and hold the host session alongside direct clients.
     pub fn listen(device: &DeviceInfo) -> Result<Self, Error> {
-        Self::from_connection(device, Connection::Listener(device.open().wait()?))
+        let (handle, shared) = share(device)?;
+        Self::connect(device, handle, Access::Listener(shared))
     }
 
-    fn from_connection(device: &DeviceInfo, connection: Connection) -> Result<Self, Error> {
-        let (protocol, info) = read(&connection, protocol::GET_INFO)?;
+    fn connect(device: &DeviceInfo, handle: nusb::Device, access: Access) -> Result<Self, Error> {
+        let (protocol, info) = read(&access, protocol::GET_INFO)?;
         Ok(Self {
-            connection,
+            device: handle,
+            access,
             info,
             protocol,
             topology: Topology {
                 bus: device.bus_id().to_owned(),
                 port_chain: device.port_chain().to_vec(),
             },
+            notice: None,
+            events: Arc::default(),
         })
+    }
+
+    /// Take the board's announcements for the life of the returned value.
+    pub fn events(&self) -> Result<Events, Error> {
+        self.current()?;
+        Events::claim(&self.device)
+    }
+
+    /// Learn of status changes from the holder of the board's announcements.
+    pub fn notified(mut self, notice: Notice) -> Self {
+        self.notice = Some(notice);
+        self
+    }
+
+    /// Start listening before an action whose effect is waited for. The
+    /// announcements are held only while such a wait lasts, so a listener
+    /// that wants them for longer finds them free.
+    fn expect_change(&self) {
+        if self.notice.is_some() {
+            return;
+        }
+        let mut events = self.events.lock().unwrap();
+        match events.as_mut() {
+            Some(events) => events.listen(),
+            None => *events = Events::claim(&self.device).ok(),
+        }
+    }
+
+    /// Wait for a status newer than `revision`, until `deadline`. The
+    /// status may or may not have changed when this returns: without the
+    /// announcements, which another client may hold, the wait is short and
+    /// the caller reads the board again.
+    fn changed_after(&self, revision: u32, deadline: Instant) {
+        if let Some(notice) = &self.notice {
+            return notice(revision, deadline);
+        }
+        self.expect_change();
+        let left = deadline.saturating_duration_since(Instant::now());
+        let mut events = self.events.lock().unwrap();
+        let announced = events
+            .as_mut()
+            .is_some_and(|events| events.next(left).is_ok());
+        if !announced {
+            // Announcements that failed are claimed afresh by the next wait.
+            *events = None;
+            drop(events);
+            thread::sleep(left.min(UNANNOUNCED));
+        }
     }
 
     pub fn info(&self) -> &Info {
@@ -178,7 +378,7 @@ impl Board {
 
     pub fn status(&self) -> Result<Status, Error> {
         self.current()?;
-        Ok(read(&self.connection, protocol::GET_STATUS)?.1)
+        Ok(read(&self.access, protocol::GET_STATUS)?.1)
     }
 
     /// Declare the remaining legacy host budget, including Iasis itself.
@@ -267,6 +467,7 @@ impl Board {
         }
         // Enable and disable address the port; other actions one attachment.
         let attachment = !matches!(action, PortAction::Enable | PortAction::Disable);
+        self.expect_change();
         let before = self.status()?.ports[port.index()];
         if attachment && before.generation != generation {
             return Err(Error::Command(CommandError::StaleAttachment));
@@ -281,7 +482,8 @@ impl Board {
         self.write(protocol::PORT_COMMAND, &command)?;
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            let status = self.status()?.ports[port.index()];
+            let board = self.status()?;
+            let status = board.ports[port.index()];
             if status.command_id == command.id {
                 match status.command_result {
                     CommandResult::Failed(error) => return Err(Error::Command(error)),
@@ -301,9 +503,11 @@ impl Board {
                 return Err(Error::Command(CommandError::StaleAttachment));
             }
             if Instant::now() >= deadline {
+                // The announcements go back to whoever listens for longer.
+                *self.events.lock().unwrap() = None;
                 return Err(Error::CommandTimeout);
             }
-            thread::sleep(Duration::from_millis(20));
+            self.changed_after(board.revision, deadline);
         }
     }
 
@@ -335,22 +539,22 @@ impl Board {
             index: protocol::INTERFACE.into(),
             data,
         };
-        match &self.connection {
-            Connection::Control(interface) => interface.control_out(transfer, TIMEOUT).wait()?,
-            Connection::Listener(device) => match request {
+        match &self.access {
+            Access::Control(interface) => interface.control_out(transfer, TIMEOUT).wait()?,
+            Access::Listener(shared) => match request {
                 protocol::HOST_REPORT | protocol::HOST_CONTROL => {
-                    device.control_out(transfer, TIMEOUT).wait()?
+                    shared.control_out(transfer, TIMEOUT).wait()?
                 }
                 _ => return Err(Error::ExclusiveControlRequired),
             },
-            Connection::Observer(_) => return Err(Error::ReadOnly),
+            Access::Observer(_) => return Err(Error::ReadOnly),
         }
         Ok(())
     }
 }
 
 /// Read a frame with the protocol version its sender speaks.
-fn read<T: DeserializeOwned>(connection: &Connection, request: u8) -> Result<(u16, T), Error> {
+fn read<T: DeserializeOwned>(access: &Access, request: u8) -> Result<(u16, T), Error> {
     let request = ControlIn {
         control_type: ControlType::Vendor,
         recipient: Recipient::Interface,
@@ -360,10 +564,10 @@ fn read<T: DeserializeOwned>(connection: &Connection, request: u8) -> Result<(u1
         length: protocol::MAX_PACKET as u16,
     };
     let ask = || -> Result<(u16, T), Error> {
-        let data = match connection {
-            Connection::Control(interface) => interface.control_in(request, TIMEOUT).wait()?,
-            Connection::Listener(device) | Connection::Observer(device) => {
-                device.control_in(request, TIMEOUT).wait()?
+        let data = match access {
+            Access::Control(interface) => interface.control_in(request, TIMEOUT).wait()?,
+            Access::Listener(shared) | Access::Observer(shared) => {
+                shared.control_in(request, TIMEOUT).wait()?
             }
         };
         protocol::decode_any(&data).map_err(Error::Protocol)
