@@ -107,7 +107,7 @@ While the agent is running:
 
 The status light is green and the OLED shows a USB symbol while a host is attached. One host holds a board at a time. With the agent running, every `iasis` command except `status` and `ports` goes through it. Other clients use its [local socket](crates/api/README.md).
 
-On Linux, the [Debian package](crates/iasis/README.md#debian-package) runs the agent at boot, and members of the `iasis` group use it. On macOS, the [menu bar app](apps/macos/README.md) shows the same boards and ports, sends the same actions, and its installer starts the agent at login. To run your own build in the background, prefix the command with `launchctl submit -l local.iasisd --`.
+On Linux, the [Debian package](crates/iasis/README.md#debian-package) runs the agent at boot for the person signed in at the computer and members of the `iasis` group. On macOS, the [menu bar app](apps/macos/README.md) shows the same boards and ports, sends the same actions, and its installer starts the agent at login. To run your own build in the background, prefix the command with `launchctl submit -l local.iasisd --`.
 
 ### USB Internet Sharing
 

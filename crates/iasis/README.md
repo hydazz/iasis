@@ -10,18 +10,21 @@
 
 ```sh
 sudo apt install ./iasis_0.1.0-1_amd64.deb
+```
+
+The package runs the agent at boot as the `iasisd` service, under the system user `iasis`. The agent serves the person signed in at the computer, as polkit's action `com.hydaz.iasis.control` allows, and members of the `iasis` group, from SSH or anywhere else. To use it from another session, join the group and log in again:
+
+```sh
 sudo usermod -aG iasis "$USER"
 ```
 
-Log in again after joining the group. The package runs the agent at boot as the `iasisd` service, under the system user `iasis`:
-
-| Path                                         | Contents                                                 |
-| -------------------------------------------- | -------------------------------------------------------- |
-| `/usr/bin/iasis`                             | The command line                                         |
-| `/usr/libexec/iasis/iasisd`, `iasis-gateway` | The agent and its gateway                                |
-| `/run/iasis/agent.sock`                      | The agent's socket, open to members of the `iasis` group |
-| `/var/lib/iasis`                             | Settings                                                 |
-| `/var/cache/iasis`                           | Restore images, worker logs and scratch space            |
+| Path                                         | Contents                                      |
+| -------------------------------------------- | --------------------------------------------- |
+| `/usr/bin/iasis`                             | The command line                              |
+| `/usr/libexec/iasis/iasisd`, `iasis-gateway` | The agent and its gateway                     |
+| `/run/iasis/agent.sock`                      | The agent's socket                            |
+| `/var/lib/iasis`                             | Settings                                      |
+| `/var/cache/iasis`                           | Restore images, worker logs and scratch space |
 
 Only the service touches the boards and targets directly. Its udev rule gives the `iasis-usb` group, whose one member is the service user, these devices:
 
