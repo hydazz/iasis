@@ -1,0 +1,13 @@
+[package]
+name = "iasis-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+iasis-protocol.workspace = true
+serde = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+serde_json = "1.0"

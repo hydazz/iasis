@@ -72,7 +72,7 @@ impl AppleDevice {
 }
 
 /// The mode as a table or log line names it.
-pub(crate) fn mode_name(mode: AppleMode) -> &'static str {
+pub fn mode_name(mode: AppleMode) -> &'static str {
     match mode {
         AppleMode::Dfu => "DFU",
         AppleMode::KisDfu => "DFU, debug USB",

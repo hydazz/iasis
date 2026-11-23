@@ -1,0 +1,574 @@
+{
+  "boards": [
+    {
+      "serial": "817a23bd502453b4",
+      "name": "Bench A",
+      "session": 3,
+      "firmware": "0.1.0",
+      "upstream_mbps": 10000,
+      "supply": "brick",
+      "pool": {
+        "budget_mw": 90000,
+        "allocated_mw": 68250
+      },
+      "host": true,
+      "restores": true,
+      "brightness": 50,
+      "settings_busy": true,
+      "ports": [
+        {
+          "number": 1,
+          "generation": 7,
+          "occupied": true,
+          "device": "MacBook Air (M1, 2020)",
+          "identifying": false,
+          "ecid": "001a79d10e6bc01c",
+          "usb": "apple",
+          "mode": "dfu",
+          "light": {
+            "hue": "purple",
+            "pulse": true,
+            "dim": true
+          },
+          "request": "entering_dfu",
+          "waiting_for_power": false,
+          "powered": true,
+          "wrong_dfu_port": false,
+          "link": "usb2",
+          "power": {
+            "source": "pd",
+            "millivolts": 20000,
+            "milliamps": 3250
+          },
+          "allocated_mw": 68250,
+          "short": false,
+          "fault": null,
+          "dfu": false,
+          "reboot": true,
+          "restore": true,
+          "enabled": true,
+          "job": {
+            "operation": "restore",
+            "phase": "Running"
+          },
+          "fetch": 12,
+          "stage": {
+            "name": "Restoring the system",
+            "percent": 42,
+            "steps": [
+              "Preparing",
+              "Restoring the system"
+            ],
+            "step": 1
+          },
+          "result": {
+            "operation": "restore",
+            "ecid": "001a79d10e6bc01c",
+            "phase": "Reported",
+            "message": "Restore finished",
+            "log_directory": "/var/cache/iasis/restores/001a79d10e6bc01c-1"
+          }
+        },
+        {
+          "number": 2,
+          "generation": 7,
+          "occupied": true,
+          "device": "USB Keyboard",
+          "identifying": false,
+          "ecid": null,
+          "usb": "other",
+          "mode": null,
+          "light": {
+            "hue": "amber",
+            "pulse": false,
+            "dim": false
+          },
+          "request": "dfu_unconfirmed",
+          "waiting_for_power": false,
+          "powered": true,
+          "wrong_dfu_port": true,
+          "link": "usb3",
+          "power": {
+            "source": "usb",
+            "millivolts": 5000,
+            "milliamps": 500
+          },
+          "allocated_mw": 68250,
+          "short": true,
+          "fault": null,
+          "dfu": false,
+          "reboot": true,
+          "restore": true,
+          "enabled": true,
+          "job": {
+            "operation": "revive",
+            "phase": "Preparing"
+          },
+          "fetch": null,
+          "stage": null,
+          "result": {
+            "operation": "revive",
+            "ecid": "001a79d10e6bc01c",
+            "phase": "Failed",
+            "message": "Restore finished",
+            "log_directory": "/var/cache/iasis/restores/001a79d10e6bc01c-1"
+          }
+        },
+        {
+          "number": 3,
+          "generation": 7,
+          "occupied": true,
+          "device": "MacBook Air (M1, 2020)",
+          "identifying": false,
+          "ecid": "001a79d10e6bc01c",
+          "usb": "ambiguous",
+          "mode": null,
+          "light": {
+            "hue": "red",
+            "pulse": true,
+            "dim": false
+          },
+          "request": "restarting",
+          "waiting_for_power": false,
+          "powered": true,
+          "wrong_dfu_port": false,
+          "link": "usb",
+          "power": {
+            "source": "pd",
+            "millivolts": 20000,
+            "milliamps": 3250
+          },
+          "allocated_mw": 68250,
+          "short": false,
+          "fault": "Overcurrent",
+          "dfu": false,
+          "reboot": true,
+          "restore": true,
+          "enabled": true,
+          "job": {
+            "operation": "restore",
+            "phase": "Unconfirmed"
+          },
+          "fetch": null,
+          "stage": null,
+          "result": null
+        },
+        {
+          "number": 4,
+          "generation": 7,
+          "occupied": true,
+          "device": "MacBook Air (M1, 2020)",
+          "identifying": true,
+          "ecid": "001a79d10e6bc01c",
+          "usb": "absent",
+          "mode": null,
+          "light": {
+            "hue": "white",
+            "pulse": false,
+            "dim": true
+          },
+          "request": null,
+          "waiting_for_power": true,
+          "powered": false,
+          "wrong_dfu_port": false,
+          "link": null,
+          "power": null,
+          "allocated_mw": 68250,
+          "short": false,
+          "fault": null,
+          "dfu": false,
+          "reboot": true,
+          "restore": true,
+          "enabled": true,
+          "job": {
+            "operation": "restore",
+            "phase": "Reported"
+          },
+          "fetch": null,
+          "stage": null,
+          "result": null
+        },
+        {
+          "number": 5,
+          "generation": 7,
+          "occupied": false,
+          "device": null,
+          "identifying": false,
+          "ecid": null,
+          "usb": null,
+          "mode": null,
+          "light": {
+            "hue": "off",
+            "pulse": false,
+            "dim": false
+          },
+          "request": null,
+          "waiting_for_power": false,
+          "powered": true,
+          "wrong_dfu_port": false,
+          "link": "usb2",
+          "power": {
+            "source": "pd",
+            "millivolts": 20000,
+            "milliamps": 3250
+          },
+          "allocated_mw": 68250,
+          "short": false,
+          "fault": null,
+          "dfu": false,
+          "reboot": true,
+          "restore": true,
+          "enabled": false,
+          "job": {
+            "operation": "restore",
+            "phase": "Failed"
+          },
+          "fetch": null,
+          "stage": null,
+          "result": null
+        }
+      ],
+      "notice": "the board did not accept the restore request"
+    },
+    {
+      "serial": "a0e012192cdfdb67",
+      "name": "Bench B",
+      "session": 1,
+      "firmware": "0.1.0",
+      "upstream_mbps": null,
+      "supply": "host",
+      "pool": null,
+      "host": true,
+      "restores": false,
+      "brightness": 0,
+      "settings_busy": false,
+      "ports": [
+        {
+          "number": 1,
+          "generation": 7,
+          "occupied": true,
+          "device": "MacBook Air (M1, 2020)",
+          "identifying": false,
+          "ecid": "001a79d10e6bc01c",
+          "usb": "apple",
+          "mode": "port_dfu",
+          "light": {
+            "hue": "blue",
+            "pulse": false,
+            "dim": false
+          },
+          "request": null,
+          "waiting_for_power": false,
+          "powered": true,
+          "wrong_dfu_port": false,
+          "link": "usb2",
+          "power": {
+            "source": "pd",
+            "millivolts": 20000,
+            "milliamps": 3250
+          },
+          "allocated_mw": 68250,
+          "short": false,
+          "fault": null,
+          "dfu": false,
+          "reboot": true,
+          "restore": true,
+          "enabled": true,
+          "job": null,
+          "fetch": null,
+          "stage": null,
+          "result": null
+        },
+        {
+          "number": 2,
+          "generation": 7,
+          "occupied": true,
+          "device": "MacBook Air (M1, 2020)",
+          "identifying": false,
+          "ecid": "001a79d10e6bc01c",
+          "usb": "apple",
+          "mode": "recovery",
+          "light": {
+            "hue": "green",
+            "pulse": false,
+            "dim": false
+          },
+          "request": null,
+          "waiting_for_power": false,
+          "powered": true,
+          "wrong_dfu_port": false,
+          "link": "usb2",
+          "power": {
+            "source": "pd",
+            "millivolts": 20000,
+            "milliamps": 3250
+          },
+          "allocated_mw": 68250,
+          "short": false,
+          "fault": null,
+          "dfu": false,
+          "reboot": true,
+          "restore": true,
+          "enabled": true,
+          "job": null,
+          "fetch": null,
+          "stage": null,
+          "result": null
+        },
+        {
+          "number": 3,
+          "generation": 7,
+          "occupied": true,
+          "device": "MacBook Air (M1, 2020)",
+          "identifying": false,
+          "ecid": "001a79d10e6bc01c",
+          "usb": "apple",
+          "mode": "kis",
+          "light": {
+            "hue": "green",
+            "pulse": false,
+            "dim": false
+          },
+          "request": null,
+          "waiting_for_power": false,
+          "powered": true,
+          "wrong_dfu_port": false,
+          "link": "usb2",
+          "power": {
+            "source": "pd",
+            "millivolts": 20000,
+            "milliamps": 3250
+          },
+          "allocated_mw": 68250,
+          "short": false,
+          "fault": null,
+          "dfu": false,
+          "reboot": true,
+          "restore": true,
+          "enabled": true,
+          "job": null,
+          "fetch": null,
+          "stage": null,
+          "result": null
+        },
+        {
+          "number": 4,
+          "generation": 7,
+          "occupied": true,
+          "device": "MacBook Air (M1, 2020)",
+          "identifying": false,
+          "ecid": "001a79d10e6bc01c",
+          "usb": "apple",
+          "mode": "kis_dfu",
+          "light": {
+            "hue": "green",
+            "pulse": false,
+            "dim": false
+          },
+          "request": null,
+          "waiting_for_power": false,
+          "powered": true,
+          "wrong_dfu_port": false,
+          "link": "usb2",
+          "power": {
+            "source": "pd",
+            "millivolts": 20000,
+            "milliamps": 3250
+          },
+          "allocated_mw": 68250,
+          "short": false,
+          "fault": null,
+          "dfu": false,
+          "reboot": true,
+          "restore": true,
+          "enabled": true,
+          "job": null,
+          "fetch": null,
+          "stage": null,
+          "result": null
+        },
+        {
+          "number": 5,
+          "generation": 7,
+          "occupied": true,
+          "device": "MacBook Air (M1, 2020)",
+          "identifying": false,
+          "ecid": "001a79d10e6bc01c",
+          "usb": "apple",
+          "mode": "mux",
+          "light": {
+            "hue": "green",
+            "pulse": false,
+            "dim": false
+          },
+          "request": null,
+          "waiting_for_power": false,
+          "powered": true,
+          "wrong_dfu_port": false,
+          "link": "usb2",
+          "power": {
+            "source": "pd",
+            "millivolts": 20000,
+            "milliamps": 3250
+          },
+          "allocated_mw": 68250,
+          "short": false,
+          "fault": null,
+          "dfu": false,
+          "reboot": true,
+          "restore": true,
+          "enabled": true,
+          "job": null,
+          "fetch": null,
+          "stage": null,
+          "result": null
+        },
+        {
+          "number": 1,
+          "generation": 7,
+          "occupied": true,
+          "device": "MacBook Air (M1, 2020)",
+          "identifying": false,
+          "ecid": "001a79d10e6bc01c",
+          "usb": "apple",
+          "mode": "restored",
+          "light": {
+            "hue": "green",
+            "pulse": false,
+            "dim": false
+          },
+          "request": null,
+          "waiting_for_power": false,
+          "powered": true,
+          "wrong_dfu_port": false,
+          "link": "usb2",
+          "power": {
+            "source": "pd",
+            "millivolts": 20000,
+            "milliamps": 3250
+          },
+          "allocated_mw": 68250,
+          "short": false,
+          "fault": null,
+          "dfu": false,
+          "reboot": true,
+          "restore": true,
+          "enabled": true,
+          "job": null,
+          "fetch": null,
+          "stage": null,
+          "result": null
+        },
+        {
+          "number": 2,
+          "generation": 7,
+          "occupied": true,
+          "device": "MacBook Air (M1, 2020)",
+          "identifying": false,
+          "ecid": "001a79d10e6bc01c",
+          "usb": "apple",
+          "mode": "normal",
+          "light": {
+            "hue": "green",
+            "pulse": false,
+            "dim": false
+          },
+          "request": null,
+          "waiting_for_power": false,
+          "powered": true,
+          "wrong_dfu_port": false,
+          "link": "usb2",
+          "power": {
+            "source": "pd",
+            "millivolts": 20000,
+            "milliamps": 3250
+          },
+          "allocated_mw": 68250,
+          "short": false,
+          "fault": null,
+          "dfu": false,
+          "reboot": true,
+          "restore": true,
+          "enabled": true,
+          "job": null,
+          "fetch": null,
+          "stage": null,
+          "result": null
+        }
+      ],
+      "notice": null
+    },
+    {
+      "serial": "e2a4c1d0b3f59687",
+      "name": "",
+      "session": null,
+      "firmware": "",
+      "upstream_mbps": null,
+      "supply": "off",
+      "pool": null,
+      "host": false,
+      "restores": false,
+      "brightness": 0,
+      "settings_busy": false,
+      "ports": [],
+      "notice": "not attended"
+    }
+  ],
+  "submitted": [
+    {
+      "operation": "restore",
+      "ecid": "001a79d10e6bc01c",
+      "phase": "Reported",
+      "message": "Restore finished",
+      "log_directory": "/var/cache/iasis/restores/001a79d10e6bc01c-1"
+    },
+    null
+  ],
+  "images": {
+    "images": [
+      {
+        "id": "26B131-UniversalMac_27.2.1_26B131_Restore.ipsw",
+        "os": "macOS",
+        "version": "27.2.1",
+        "build": "26B131",
+        "bytes": 19000000000,
+        "models": [
+          "MacBook Air (M1, 2020)"
+        ],
+        "ready": true,
+        "error": null
+      },
+      {
+        "id": "iPad_Fall_2022_26.2_24C101_Restore.ipsw",
+        "os": "iPadOS",
+        "version": "26.2",
+        "build": "24C101",
+        "bytes": 8000000000,
+        "models": [
+          "iPad (10th generation)"
+        ],
+        "ready": false,
+        "error": "the download stopped"
+      }
+    ],
+    "fetch": {
+      "id": "iPad_Fall_2022_26.2_24C101_Restore.ipsw",
+      "version": "26.2",
+      "build": "24C101",
+      "bytes": 8000000000,
+      "done": 1000000000
+    }
+  },
+  "sharing": {
+    "enabled": true,
+    "problem": "no route to the internet",
+    "ports": [
+      {
+        "board": "817a23bd502453b4",
+        "port": 2,
+        "active": true,
+        "problem": "DHCP failed"
+      }
+    ]
+  }
+}

@@ -100,7 +100,7 @@ pub fn update(
 ) {
     let stage = (job.state == RestoreState::Running).then_some(&job.progress);
     let status = stage
-        .map(ToString::to_string)
+        .map(|stage| format!("{}%  {}", stage.percent, stage.name))
         .unwrap_or_else(|| state_name(job.state, job.operation).into());
     let connection = match identity {
         // The row names the ECID being restored. Only a descriptor that

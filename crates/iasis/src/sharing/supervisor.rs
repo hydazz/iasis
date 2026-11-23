@@ -19,8 +19,9 @@ use super::linux::{Resolver, follow_network};
 #[cfg(target_os = "macos")]
 use super::macos::{Resolver, follow_network};
 use anyhow::{Context, Result, bail, ensure};
+use iasis_api::SharingPort as PortState;
 
-use super::{PortState, Sharing};
+use super::Sharing;
 use crate::{host::Link, topology, watch::Watch};
 
 /// A gateway says when it is ready. It is asked this often whether it has
