@@ -369,7 +369,7 @@ fn in_dfu(
 }
 
 /// Choose each target's image by its model: the chip and board in a DFU
-/// descriptor, or the product type Configurator reads. The store gives the
+/// descriptor, or its product type. The store gives the
 /// newest image it has that Apple still signs, or with `latest` the newest
 /// release, and fetches what it lacks, which the target's port shows.
 fn resolve(
@@ -965,7 +965,7 @@ fn enter_dfu(
             true
         });
         if !pending.is_empty() {
-            // The board, the host's USB devices or Configurator's answer.
+            // The board or the host's USB devices.
             // The devices are enumerated again each second regardless.
             let again = Instant::now() + Duration::from_secs(1);
             seen = link.changes().wait(seen, Some(again.min(deadline)));

@@ -51,9 +51,8 @@ const UNREACHABLE: Duration = Duration::from_secs(2);
 const PLACE_RETRY: Duration = Duration::from_secs(1);
 /// A port's view is reported once it has held this long.
 const AGREE: Duration = Duration::from_millis(250);
-/// Apple Debug USB does not say whether the target is in DFU. Configurator
-/// does, and takes seconds to answer. A question it leaves unanswered is
-/// asked again this often.
+/// A target that could not be named yet, such as a Mac on Apple Debug USB
+/// whose KIS read failed, is asked again this often.
 const IDENTIFY_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Restore jobs by port, each with the attachment it runs on. They outlive a
@@ -213,10 +212,12 @@ type Identified = [Option<(Enumeration, AppleDevice)>; PORT_COUNT];
 
 fn unidentified_usb(snapshot: &Snapshot, port: Port) -> Option<&UsbDevice> {
     dfu::direct_device(snapshot, port).filter(|device| {
-        device
-            .apple
-            .as_ref()
-            .is_some_and(|apple| apple.mode == AppleMode::Kis || apple.mode == AppleMode::Mux)
+        device.apple.as_ref().is_some_and(|apple| {
+            matches!(
+                apple.mode,
+                AppleMode::Kis | AppleMode::Mux | AppleMode::Normal
+            )
+        })
     })
 }
 
@@ -326,13 +327,13 @@ struct Shared {
     /// the view, which a client or a slow host can hold.
     reported: Mutex<(Seen, [RestoreAccess; PORT_COUNT])>,
     identified: Mutex<Identified>,
-    /// Advances when Configurator names or forgets a target.
+    /// Advances when a target is named or forgotten.
     identified_version: AtomicU64,
     failure: Mutex<Option<String>>,
 }
 
 impl Shared {
-    /// What Configurator has said of each enumeration still on its connector.
+    /// What identification found of each enumeration still on its connector.
     fn name_identified(&self, snapshot: &mut Snapshot) {
         let identified = self.identified.lock().unwrap();
         for port in Port::ALL {
@@ -361,7 +362,7 @@ impl Shared {
     }
 
     /// Place the host's USB devices on the board's connectors, with what
-    /// Configurator has said of each enumeration still there. This walks
+    /// identification found of each enumeration still there. This walks
     /// the host's USB ports, so it runs apart from the view and the lease.
     fn place(&self) -> Result<Snapshot, topology::Error> {
         let mut snapshot = topology::locate(self.board.topology(), self.inventory.devices())?;
@@ -603,9 +604,8 @@ impl Shared {
         }
     }
 
-    /// Configurator lists identities without opening the target's usbmux
-    /// service. A confirmed identity belongs to this USB enumeration.
-    /// Returns whether a target is still unnamed.
+    /// A confirmed identity belongs to this USB enumeration. Returns whether a
+    /// target is still unnamed.
     fn identify(&self, status: &Status) -> Result<bool> {
         // Identities already given must not hide the modes they were asked in.
         let mut snapshot = topology::locate(self.board.topology(), self.inventory.devices())?;
@@ -626,12 +626,6 @@ impl Shared {
             asked[index] = enumeration;
         }
         if mask != 0 {
-            #[cfg(target_os = "macos")]
-            {
-                crate::native::identify(&mut snapshot, mask);
-                crate::identity::configurator::query(&mut snapshot, mask);
-            }
-            #[cfg(not(target_os = "macos"))]
             snapshot.query_port_identities(mask);
         }
         let mut unnamed = false;
@@ -663,8 +657,8 @@ impl Shared {
         Ok(unnamed)
     }
 
-    /// Ask Configurator about a target when the board or the host's USB
-    /// devices change, and again while one stays unnamed.
+    /// Identify targets when the board or the host's USB devices change, and
+    /// again while one stays unnamed.
     fn identify_until_stopped(&self) {
         let mut asked = None;
         let mut again = None;
@@ -916,9 +910,8 @@ impl Link {
         Some(board)
     }
 
-    /// The board and its targets, read and enumerated now. A target on
-    /// Apple Debug USB has the mode and identity Configurator gave for its
-    /// enumeration.
+    /// The board and its targets, read and enumerated now, each with the mode
+    /// and identity found for its enumeration.
     pub(crate) fn observe(&self) -> Result<(Status, Snapshot)> {
         self.shared.observe()
     }
@@ -1023,7 +1016,12 @@ mod tests {
             serial_number: serial.clone(),
             product: None,
             speed: Speed::High,
-            apple: AppleDevice::from_usb(vendor, product, serial.as_deref()),
+            apple: AppleDevice::from_usb(
+                vendor,
+                product,
+                serial.as_deref(),
+                crate::identity::tests::functions(product),
+            ),
             #[cfg(target_os = "macos")]
             macos_attachment: None,
             #[cfg(not(target_os = "macos"))]
@@ -1118,7 +1116,7 @@ mod tests {
             let apple = device.apple.as_mut().unwrap();
             apple.identity = Identity::Known {
                 ecid,
-                source: IdentitySource::Configurator,
+                source: IdentitySource::Lockdown,
             };
             apple.model = Some(model.into());
             device
@@ -1229,13 +1227,16 @@ mod tests {
         assert_eq!(mode(&usb, three), Usb::Apple(AppleMode::Mux));
         assert_eq!(mode(&usb, four), Usb::Other);
         assert_eq!(mode(&usb, five), Usb::Apple(AppleMode::Recovery));
-        // Configurator's answer for the same enumeration names the mode.
+        // A KIS read of the same enumeration names the mode.
         usb.ports[1].devices[0].apple = Some(AppleDevice {
             model: None,
             mode: AppleMode::KisDfu,
             identity: Identity::Known {
                 ecid: 9,
-                source: IdentitySource::Configurator,
+                source: IdentitySource::Kis {
+                    chip: 0x8142,
+                    board: 0x24,
+                },
             },
         });
         assert!(observe(&usb, two).dfu());
