@@ -1,11 +1,13 @@
 use std::{
+    fs::File,
     io::{self, IsTerminal, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
+    sync::Arc,
     thread,
     time::{Duration, Instant},
 };
 
-use iasis::{batch, parse_port, parse_serial, progress};
+use iasis::{batch, inventory::Inventory, parse_port, parse_serial, progress, update};
 
 use anyhow::{Context, Result, bail, ensure};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -24,7 +26,8 @@ use iasis_protocol::{CommandResult, DebugActions, Link, Port, PortAction, Restor
 #[derive(Parser)]
 #[command(
     version,
-    about = "Manage Iasis ports and controller firmware. Without a command, show every board's ports."
+    about = "Manage Iasis ports and controller firmware. Without a command, show every board's ports.",
+    long_about = "Manage Iasis ports and controller firmware. Without a command, show every board's ports.\n\nWith iasisd running, every command except status and ports goes through it; otherwise the command opens the board itself."
 )]
 struct Cli {
     /// Board serial, sixteen hexadecimal digits
@@ -75,8 +78,8 @@ enum Command {
         #[arg(long)]
         watch: bool,
     },
-    /// Disable target power and enter the ROM updater
-    Bootloader,
+    /// Update IasisOS from the bundled image or a UF2 file; the ports lose power briefly
+    Update { file: Option<PathBuf> },
     /// Enumerate USB2 and SuperSpeed devices by physical connector
     Ports {
         #[arg(long)]
@@ -154,60 +157,42 @@ fn main() -> Result<()> {
         vendor: cli.vid,
         product: cli.pid,
     };
-    if let Some(Command::Ipsw { path }) = &cli.command {
+    let command = cli.command;
+    if let Some(Command::Ipsw { path }) = &command {
         let prepared = progress::check_ipsw(path)?;
         println!("{}", serde_json::to_string_pretty(&prepared)?);
         return Ok(());
+    }
+    // Diagnostics read the board's USB device themselves, beside any agent.
+    if !matches!(
+        command,
+        Some(Command::Status { .. } | Command::Ports { .. })
+    ) && let Some(agent) = Client::connect(&Home::locate()?)?
+    {
+        return through_agent(agent, cli.serial, cli.board.as_deref(), command);
     }
     let serial = match cli.board {
         Some(name) => Some(resolve_name(ids, &name)?),
         None => cli.serial,
     };
-    let command = match cli.command {
+    let command = match command {
         None => return overview(ids, serial, false),
         Some(Command::Watch) => return overview(ids, serial, true),
         Some(Command::List) => return list(ids, serial),
+        Some(Command::Sharing { .. }) => bail!("USB Internet Sharing requires the running agent"),
+        Some(Command::Images { .. }) => bail!("the agent keeps the restore images; start iasisd"),
         Some(command) => command,
     };
-    let mut agent = Client::connect(&Home::locate()?);
-    match (&command, agent.as_mut()) {
-        (Command::Sharing { command, json }, Some(agent)) => {
-            return sharing(agent, command.as_ref(), *json);
-        }
-        (Command::Sharing { .. }, None) => bail!("USB Internet Sharing requires the running agent"),
-        (Command::Images { command }, Some(agent)) => return images(agent, command.as_ref()),
-        (Command::Images { .. }, None) => {
-            bail!("the agent keeps the restore images; start iasisd")
-        }
-        (Command::Restore(options), Some(agent)) => {
-            let serial = serial.context("select a board with --board NAME or --serial SERIAL")?;
-            return restore_through(agent, serial, options);
-        }
-        (Command::Revive(options), Some(agent)) => {
-            let serial = serial.context("select a board with --board NAME or --serial SERIAL")?;
-            return submit_through(
-                agent,
-                serial,
-                Operation::Revive,
-                &options.source,
-                &options.ports,
-            );
-        }
-        _ => {}
+    if !matches!(command, Command::Status { .. } | Command::Ports { .. }) && serial.is_none() {
+        bail!(SELECT);
     }
-    if matches!(
-        command,
-        Command::Bootloader
-            | Command::Rename { .. }
-            | Command::Brightness { .. }
-            | Command::Power { .. }
-            | Command::Dfu { .. }
-            | Command::Reboot { .. }
-            | Command::Restore(_)
-            | Command::Revive(_)
-    ) && serial.is_none()
-    {
-        bail!("select a board with --board NAME or --serial SERIAL; see `iasis list`");
+    if let Command::Update { file } = &command {
+        let image = firmware(file.as_deref())?;
+        let inventory = Inventory::follow(Arc::default())?;
+        let _writing = progress::waiting("Writing IasisOS");
+        let [major, minor, patch] = update::write(serial.context(SELECT)?, &image, &inventory)?;
+        println!("IasisOS {major}.{minor}.{patch} is running.");
+        return Ok(());
     }
     let devices = iasis::discover(ids, serial)?;
     let mut boards = Vec::new();
@@ -218,9 +203,14 @@ fn main() -> Result<()> {
         }
         .with_context(|| {
             format!(
-                "opening USB bus {} port {:?}",
+                "opening the board on USB bus {} port {:?}{}",
                 device.bus_id(),
-                device.port_chain()
+                device.port_chain(),
+                if cfg!(target_os = "linux") {
+                    "; its USB device is open to root and the iasis-usb group"
+                } else {
+                    ""
+                }
             )
         })?;
         anyhow::ensure!(
@@ -241,20 +231,14 @@ fn main() -> Result<()> {
         | Command::Ipsw { .. }
         | Command::Watch
         | Command::Images { .. }
-        | Command::Sharing { .. } => {
+        | Command::Sharing { .. }
+        | Command::Update { .. } => {
             unreachable!()
         }
         Command::Restore(options) => batch::run(&devices[0], board, options)?,
         Command::Revive(options) => batch::revive(&devices[0], board, options)?,
         Command::Rename { name } => board.rename(&name)?,
         Command::Brightness { percent } => board.brightness(percent)?,
-        Command::Bootloader => {
-            board.enter_bootloader()?;
-            println!(
-                "Update requested for {:016x}; use picotool to check ROM enumeration and load the image.",
-                board.info().serial
-            );
-        }
         Command::Status { json, watch } => loop {
             let status = board.status()?;
             if json {
@@ -333,10 +317,7 @@ fn main() -> Result<()> {
                     Power::Off => PortAction::Disable,
                 },
             )?;
-            println!(
-                "Port {} power request completed; use status to inspect supply and attachment.",
-                port.number()
-            );
+            println!("{}", power_text(port, state));
         }
         Command::Dfu { port } => {
             request_dfu(board, port)?;
@@ -351,6 +332,153 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+const SELECT: &str = "select a board with --board NAME or --serial SERIAL; see `iasis list`";
+
+fn power_text(port: Port, state: Power) -> String {
+    format!(
+        "Port {} power {}; use status to inspect supply and attachment.",
+        port.number(),
+        match state {
+            Power::On => "enabled",
+            Power::Off => "disabled",
+        }
+    )
+}
+
+/// The IasisOS image in `file`, or the one these tools carry.
+fn firmware(file: Option<&Path>) -> Result<update::Image> {
+    match file {
+        Some(file) => {
+            update::Image::parse(&std::fs::read(file).with_context(|| file.display().to_string())?)
+        }
+        None => update::Image::parse(
+            update::bundled().context("these tools carry no IasisOS; name its UF2 file")?,
+        ),
+    }
+}
+
+/// Run a command through the running agent, which holds every board.
+fn through_agent(
+    mut agent: Client,
+    serial: Option<u64>,
+    name: Option<&str>,
+    command: Option<Command>,
+) -> Result<()> {
+    let state = agent.state()?;
+    let selected = match (serial, name) {
+        (Some(serial), _) => Some(format!("{serial:016x}")),
+        (None, Some(name)) => Some(named(&state, name)?),
+        (None, None) => None,
+    };
+    let board = || selected.clone().context(SELECT);
+    match command {
+        None => overview_through(agent, selected.as_deref(), false),
+        Some(Command::Watch) => overview_through(agent, selected.as_deref(), true),
+        Some(Command::List) => {
+            if state.boards.is_empty() {
+                println!("No Iasis boards found.");
+            }
+            for view in &state.boards {
+                let name = if view.name.is_empty() {
+                    "(unnamed)"
+                } else {
+                    view.name.as_str()
+                };
+                match &view.notice {
+                    Some(notice) if view.ports.is_empty() => {
+                        println!("{}  {notice}", view.serial);
+                    }
+                    _ => println!("{}  {name}  IasisOS {}", view.serial, view.firmware),
+                }
+            }
+            Ok(())
+        }
+        Some(Command::Restore(options)) => restore_through(&mut agent, &state, &board()?, &options),
+        Some(Command::Revive(options)) => submit_through(
+            &mut agent,
+            &state,
+            &board()?,
+            Operation::Revive,
+            &options.source,
+            &options.ports,
+        ),
+        Some(Command::Images { command }) => images(&mut agent, command.as_ref()),
+        Some(Command::Sharing { command, json }) => sharing(&mut agent, command.as_ref(), json),
+        Some(Command::Dfu { port }) => dfu_through(&mut agent, &state, &board()?, port),
+        Some(Command::Reboot { port }) => {
+            agent.request(&Request::Reboot {
+                board: board()?,
+                port: port.number(),
+            })?;
+            println!(
+                "Port {} reboot signalled; target restart is not yet confirmed.",
+                port.number()
+            );
+            Ok(())
+        }
+        Some(Command::Power { port, state }) => {
+            agent.request(&Request::Power {
+                board: board()?,
+                port: port.number(),
+                on: matches!(state, Power::On),
+            })?;
+            println!("{}", power_text(port, state));
+            Ok(())
+        }
+        Some(Command::Rename { name }) => agent.request(&Request::Rename {
+            board: board()?,
+            name,
+        }),
+        Some(Command::Brightness { percent }) => agent.request(&Request::Brightness {
+            board: board()?,
+            percent,
+        }),
+        Some(Command::Update { file }) => {
+            let board = board()?;
+            match file {
+                Some(file) => {
+                    // The agent cannot read the caller's files; it is sent the image.
+                    firmware(Some(&file))?;
+                    let mut image = File::open(&file)?;
+                    let bytes = image.metadata()?.len();
+                    let _writing = progress::waiting("Writing IasisOS");
+                    agent.upload(
+                        &Request::Update {
+                            board,
+                            bytes: Some(bytes),
+                        },
+                        &mut image,
+                    )?;
+                }
+                None => {
+                    let _writing = progress::waiting("Writing IasisOS");
+                    agent.request(&Request::Update { board, bytes: None })?;
+                }
+            }
+            println!("IasisOS written.");
+            Ok(())
+        }
+        Some(Command::Status { .. } | Command::Ports { .. } | Command::Ipsw { .. }) => {
+            unreachable!()
+        }
+    }
+}
+
+/// The serial of the one board the agent shows under this name.
+fn named(state: &State, name: &str) -> Result<String> {
+    ensure!(!name.is_empty(), "select an unnamed board by serial");
+    let hits: Vec<_> = state
+        .boards
+        .iter()
+        .filter(|view| view.name.eq_ignore_ascii_case(name))
+        .collect();
+    match hits.as_slice() {
+        [view] => Ok(view.serial.clone()),
+        [] => bail!("no connected board named {name:?}; see `iasis list`"),
+        _ => bail!("multiple boards named {name:?}; select one with --serial"),
+    }
 }
 
 #[derive(serde::Serialize)]
@@ -551,37 +679,43 @@ fn agent_text(state: &State) -> String {
     text
 }
 
-/// Every board's ports. A running agent says what it sees; otherwise the
-/// boards are read directly. A target's USB mode is what the board's host
-/// reports to it, so either view agrees with the lights.
-fn overview(ids: UsbIds, serial: Option<u64>, watch: bool) -> Result<()> {
-    let terminal = io::stdout().is_terminal();
-    let show = |text: &str| -> Result<()> {
-        if watch && terminal {
-            print!("\x1b[H\x1b[J");
-        }
-        print!("{text}");
-        io::stdout().flush()?;
-        Ok(())
-    };
-    if let Some(mut agent) = Client::connect(&Home::locate()?).filter(|_| serial.is_none()) {
-        let mut reply = agent.ask(&if watch {
-            Request::Watch
-        } else {
-            Request::State
-        })?;
-        loop {
-            match reply {
-                Reply::State(state) => show(&agent_text(&state))?,
-                Reply::Error(error) => bail!(error),
-                _ => {}
-            }
-            if !watch {
-                return Ok(());
-            }
-            reply = agent.receive()?;
-        }
+fn show(text: &str, watch: bool) -> Result<()> {
+    if watch && io::stdout().is_terminal() {
+        print!("\x1b[H\x1b[J");
     }
+    print!("{text}");
+    io::stdout().flush()?;
+    Ok(())
+}
+
+/// Every board's ports, or one board's, as the agent sees them.
+fn overview_through(mut agent: Client, board: Option<&str>, watch: bool) -> Result<()> {
+    let mut reply = agent.ask(&if watch {
+        Request::Watch
+    } else {
+        Request::State
+    })?;
+    loop {
+        match reply {
+            Reply::State(mut state) => {
+                state
+                    .boards
+                    .retain(|view| board.is_none_or(|board| view.serial == board));
+                show(&agent_text(&state), watch)?;
+            }
+            Reply::Error(error) => bail!(error),
+            _ => {}
+        }
+        if !watch {
+            return Ok(());
+        }
+        reply = agent.receive()?;
+    }
+}
+
+/// Every board's ports, read from the boards. A target's USB mode is what
+/// the board's host reports to it, so this agrees with the lights.
+fn overview(ids: UsbIds, serial: Option<u64>, watch: bool) -> Result<()> {
     loop {
         let mut text = String::new();
         let devices = iasis::discover(ids, serial)?;
@@ -598,12 +732,71 @@ fn overview(ids: UsbIds, serial: Option<u64>, watch: bool) -> Result<()> {
                 Err(error) => text.push_str(&format!("{}\n", unreadable(device, &error))),
             }
         }
-        show(&text)?;
+        show(&text, watch)?;
         if !watch {
             return Ok(());
         }
         thread::sleep(Duration::from_millis(500));
     }
+}
+
+/// Signal DFU and follow the port until the host sees the target in DFU,
+/// or the board gives up on it.
+fn dfu_through(agent: &mut Client, state: &State, board: &str, port: Port) -> Result<()> {
+    let row = |state: &State| {
+        state
+            .boards
+            .iter()
+            .find(|view| view.serial == board)
+            .and_then(|view| view.ports.get(port.index()))
+            .cloned()
+    };
+    let before = row(state).context("the board is not connected")?;
+    let in_dfu = |row: &iasis::view::PortView| {
+        use iasis_protocol::AppleMode::{Dfu, KisDfu, PortDfu};
+        matches!(row.mode, Some(Dfu | KisDfu | PortDfu))
+    };
+    if in_dfu(&before) {
+        println!("Port {} is in DFU.", port.number());
+        return Ok(());
+    }
+    ensure!(
+        before.dfu,
+        "port {} cannot be signalled into DFU: {}",
+        port.number(),
+        before.activity()
+    );
+    agent.request(&Request::Dfu {
+        board: board.into(),
+        port: port.number(),
+    })?;
+    let waiting = progress::waiting(format!("Waiting for USB DFU on port {}", port.number()));
+    // The board gives up on an unconfirmed signal well before this.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut reply = Some(agent.ask(&Request::Watch)?);
+    while let Some(Reply::State(state)) = reply {
+        let row = row(&state).context("the board left USB")?;
+        if in_dfu(&row) {
+            waiting.finish_and_clear();
+            println!("Port {} is in DFU.", port.number());
+            return Ok(());
+        }
+        ensure!(
+            row.generation == before.generation || row.occupied,
+            "port {} is empty",
+            port.number()
+        );
+        if row.fault.is_some()
+            || matches!(
+                row.request,
+                Some(iasis::view::SignalProgress::DfuUnconfirmed)
+            )
+        {
+            bail!("Port {}  {}", port.number(), row.activity());
+        }
+        reply = agent.receive_by(deadline)?;
+    }
+    bail!("Port {} did not enter DFU", port.number())
 }
 
 fn sharing(agent: &mut Client, command: Option<&SharingCommand>, json: bool) -> Result<()> {
@@ -664,12 +857,7 @@ fn images(agent: &mut Client, command: Option<&ImagesCommand>) -> Result<()> {
                 _ => bail!("the agent did not list the releases"),
             }
         }
-        Some(ImagesCommand::Add { path }) => {
-            let _spinner = progress::waiting("Checking IPSW archive");
-            agent.request(&Request::Import {
-                path: path.canonicalize().context("opening IPSW path")?,
-            })?;
-        }
+        Some(ImagesCommand::Add { path }) => import(agent, path)?,
         Some(ImagesCommand::Remove { image }) => agent.request(&Request::Remove {
             image: image.clone(),
         })?,
@@ -705,8 +893,38 @@ fn images(agent: &mut Client, command: Option<&ImagesCommand>) -> Result<()> {
     Ok(())
 }
 
+/// Send a local archive to the agent's store.
+fn import(agent: &mut Client, path: &Path) -> Result<()> {
+    let mut file = File::open(path).with_context(|| path.display().to_string())?;
+    let bytes = file.metadata()?.len();
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("the archive has no file name")?;
+    let transfer = progress::transfer(
+        bytes,
+        format!("Sending {name}"),
+        "Checking the archive".into(),
+    );
+    agent.upload(
+        &Request::Import {
+            name: name.into(),
+            bytes,
+        },
+        &mut transfer.read(&mut file),
+    )?;
+    transfer.bar.finish_and_clear();
+    println!("{name} is in the store.");
+    Ok(())
+}
+
 /// Ask the running agent for a restore and follow it to its end.
-fn restore_through(agent: &mut Client, serial: u64, options: &batch::Options) -> Result<()> {
+fn restore_through(
+    agent: &mut Client,
+    state: &State,
+    board: &str,
+    options: &batch::Options,
+) -> Result<()> {
     ensure!(options.erase, "restore requires --erase");
     ensure!(
         !options.button,
@@ -714,7 +932,8 @@ fn restore_through(agent: &mut Client, serial: u64, options: &batch::Options) ->
     );
     submit_through(
         agent,
-        serial,
+        state,
+        board,
         Operation::Restore,
         &options.source,
         &options.ports,
@@ -725,15 +944,12 @@ fn restore_through(agent: &mut Client, serial: u64, options: &batch::Options) ->
 /// them to their end.
 fn submit_through(
     agent: &mut Client,
-    serial: u64,
+    state: &State,
+    board: &str,
     operation: Operation,
     source: &batch::Source,
     ports: &[Port],
 ) -> Result<()> {
-    let board = format!("{serial:016x}");
-    let Reply::State(state) = agent.ask(&Request::State)? else {
-        bail!("the agent did not return its boards");
-    };
     let view = state
         .boards
         .iter()
@@ -762,16 +978,15 @@ fn submit_through(
         })
         .collect::<Result<_>>()?;
     if let Some(path) = &source.ipsw {
-        let _spinner = progress::waiting("Checking IPSW archive");
-        match agent.ask(&Request::Import {
-            path: path.canonicalize().context("opening IPSW path")?,
-        })? {
-            Reply::Error(error) if !error.contains("already in the store") => bail!(error),
+        match import(agent, path) {
+            Err(error) if !format!("{error:#}").contains("already in the store") => {
+                return Err(error);
+            }
             _ => {}
         }
     }
     let boards = vec![Selection {
-        board: board.clone(),
+        board: board.into(),
         session,
         targets,
     }];
@@ -780,7 +995,7 @@ fn submit_through(
         Operation::Restore => Request::Restore { boards, latest },
         Operation::Revive => Request::Revive { boards, latest },
     })?;
-    follow_work(agent, &board, ports)
+    follow_work(agent, board, ports)
 }
 
 fn follow_work(agent: &mut Client, board: &str, ports: &[Port]) -> Result<()> {

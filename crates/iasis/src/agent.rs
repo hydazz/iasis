@@ -6,6 +6,7 @@
 
 use std::{
     collections::BTreeMap,
+    io::Read,
     path::PathBuf,
     sync::{
         Arc, Mutex,
@@ -31,6 +32,7 @@ use crate::{
     inventory::Inventory,
     parse_serial,
     restore::{Operation, RestoreEngine},
+    update,
     view::BoardView,
     watch::Watch,
 };
@@ -38,6 +40,8 @@ use crate::{
 /// A board whose session could not be taken is tried again this often
 /// while it stays attached.
 const RETRY: Duration = Duration::from_secs(2);
+/// A UF2 file of IasisOS, whose flash is 2 MB, is at most twice that.
+const UF2_BYTES: u64 = 4 << 20;
 
 pub struct Options {
     /// Attend one board instead of every board.
@@ -149,6 +153,12 @@ pub enum Request {
         board: String,
         percent: u8,
     },
+    /// Write IasisOS to a board: the image these tools carry, or the UF2 file
+    /// of `bytes` bytes that follows the request.
+    Update {
+        board: String,
+        bytes: Option<u64>,
+    },
     /// Share a host network connection with attached USB devices.
     Sharing {
         enabled: bool,
@@ -163,9 +173,11 @@ pub enum Request {
     Releases {
         model: String,
     },
-    /// Copy a local archive into the store.
+    /// Check the IPSW archive of `bytes` bytes that follows the request and
+    /// keep it in the store as `name`.
     Import {
-        path: PathBuf,
+        name: String,
+        bytes: u64,
     },
     /// Delete an image, or give up one still to come, by its `id`.
     Remove {
@@ -173,6 +185,19 @@ pub enum Request {
     },
     /// Reply with every device model the catalog lists.
     Catalog,
+}
+
+impl Request {
+    /// The bytes that follow the request line on the connection.
+    pub fn payload(&self) -> u64 {
+        match self {
+            Self::Import { bytes, .. }
+            | Self::Update {
+                bytes: Some(bytes), ..
+            } => *bytes,
+            _ => 0,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -464,7 +489,51 @@ impl Agent {
         Ok(work)
     }
 
-    fn handle(&self, request: Request, submitted: &mut Vec<PortWork>) -> Reply {
+    /// Write IasisOS to a board that is not restoring. The board leaves USB
+    /// while it is written and is attended again when it returns.
+    fn update(&self, serial: &str, bytes: Option<u64>, payload: &mut dyn Read) -> Result<()> {
+        let image = match bytes {
+            Some(bytes) => {
+                ensure!(bytes <= UF2_BYTES, "the file is too large to be IasisOS");
+                let mut uf2 = Vec::new();
+                payload.take(bytes).read_to_end(&mut uf2)?;
+                ensure!(uf2.len() as u64 == bytes, "the file ended early");
+                update::Image::parse(&uf2)?
+            }
+            None => update::Image::parse(
+                update::bundled().context("these tools carry no IasisOS; send its UF2 file")?,
+            )?,
+        };
+        let serial = parse_serial(serial).map_err(anyhow::Error::msg)?;
+        if let Some(board) = self.boards.lock().unwrap().get(&serial) {
+            let status = board
+                .link
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(|link| link.status());
+            let restoring = status
+                .is_some_and(|status| status.ports.iter().any(|port| port.restoring()))
+                || board
+                    .endings
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .flatten()
+                    .any(|work| work.get().is_none());
+            ensure!(!restoring, "the board is restoring");
+        }
+        let [major, minor, patch] = update::write(serial, &image, &self.inventory)?;
+        println!("Board {serial:016x}: IasisOS {major}.{minor}.{patch} written");
+        Ok(())
+    }
+
+    fn handle(
+        &self,
+        request: Request,
+        submitted: &mut Vec<PortWork>,
+        payload: &mut dyn Read,
+    ) -> Reply {
         let result = match request {
             Request::State | Request::Watch => {
                 return Reply::State(Box::new(self.state()));
@@ -510,8 +579,9 @@ impl Agent {
             Request::Rename { board, name } => self
                 .board(&board)
                 .and_then(|(board, _)| Ok(board.control()?.rename(&name)?)),
+            Request::Update { board, bytes } => self.update(&board, bytes, payload),
             Request::Download { model, build } => self.store.download(&model, build.as_deref()),
-            Request::Import { path } => self.store.import(&path).map(|_| ()),
+            Request::Import { name, bytes } => self.store.import(&name, payload, bytes).map(|_| ()),
             Request::Remove { image } => self.store.remove(&image),
             Request::Sharing { enabled } => self.sharing.configure(enabled),
         };
@@ -708,8 +778,9 @@ mod socket {
         },
     };
 
-    /// Listen for clients. The socket belongs to the user alone: a client
-    /// can erase the targets.
+    /// Listen for clients. Only the agent's user may connect, and on Linux,
+    /// where the agent is a system service, the members of its group: a
+    /// client can erase the targets.
     pub fn serve(agent: Arc<Agent>) -> Result<()> {
         let path = agent.home.socket();
         if let Some(parent) = path.parent() {
@@ -723,7 +794,12 @@ mod socket {
         fs::remove_file(&path).ok();
         let listener = UnixListener::bind(&path)
             .with_context(|| format!("listening on {}", path.display()))?;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
+        let mode = if cfg!(target_os = "linux") {
+            0o660
+        } else {
+            0o600
+        };
+        fs::set_permissions(&path, fs::Permissions::from_mode(mode))?;
         thread::Builder::new()
             .name("socket".into())
             .spawn(move || {
@@ -734,7 +810,7 @@ mod socket {
                         let _ = converse(
                             stream,
                             &agent.changes,
-                            |request, submitted| agent.handle(request, submitted),
+                            |request, submitted, payload| agent.handle(request, submitted, payload),
                             || agent.state(),
                         );
                     });
@@ -755,7 +831,7 @@ mod socket {
     fn converse(
         mut stream: UnixStream,
         changes: &Watch,
-        mut handle: impl FnMut(Request, &mut Vec<PortWork>) -> Reply,
+        mut handle: impl FnMut(Request, &mut Vec<PortWork>, &mut dyn Read) -> Reply,
         state: impl Fn() -> State + Sync,
     ) -> Result<()> {
         let mut reader = BufReader::new(stream.try_clone()?);
@@ -768,7 +844,16 @@ mod socket {
             }
             match serde_json::from_str::<Request>(&line) {
                 Ok(Request::Watch) => break,
-                Ok(request) => send(&mut stream, &handle(request, &mut submitted))?,
+                Ok(request) => {
+                    let mut payload = (&mut reader).take(request.payload());
+                    let reply = handle(request, &mut submitted, &mut payload);
+                    send(&mut stream, &reply)?;
+                    // What is left of a refused upload cannot be told from
+                    // the next request.
+                    if payload.limit() > 0 {
+                        return Ok(());
+                    }
+                }
                 Err(error) => send(
                     &mut stream,
                     &Reply::Error(format!("unreadable request: {error}")),
@@ -828,11 +913,29 @@ mod socket {
 
     impl Client {
         /// Connect, or find that no agent is running.
-        pub fn connect(home: &Home) -> Option<Self> {
-            let stream = UnixStream::connect(home.socket()).ok()?;
-            Some(Self {
-                reader: BufReader::new(stream),
-            })
+        pub fn connect(home: &Home) -> Result<Option<Self>> {
+            let path = home.socket();
+            match UnixStream::connect(&path) {
+                Ok(stream) => Ok(Some(Self {
+                    reader: BufReader::new(stream),
+                })),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                    ) =>
+                {
+                    Ok(None)
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                    bail!(if cfg!(target_os = "linux") {
+                        "the agent is open to the iasis group; join it with `sudo usermod -aG iasis $USER` and log in again"
+                    } else {
+                        "the agent belongs to another user"
+                    })
+                }
+                Err(error) => Err(error).with_context(|| path.display().to_string()),
+            }
         }
 
         pub fn ask(&mut self, request: &Request) -> Result<Reply> {
@@ -840,6 +943,30 @@ mod socket {
             line.push(b'\n');
             self.reader.get_mut().write_all(&line)?;
             self.receive()
+        }
+
+        /// The next reply that arrives before `deadline`.
+        pub fn receive_by(&mut self, deadline: Instant) -> Result<Option<Reply>> {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Ok(None);
+            }
+            self.reader.get_ref().set_read_timeout(Some(left))?;
+            let reply = self.receive();
+            self.reader.get_ref().set_read_timeout(None)?;
+            match reply {
+                Err(error)
+                    if error.downcast_ref::<std::io::Error>().is_some_and(|error| {
+                        matches!(
+                            error.kind(),
+                            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                        )
+                    }) =>
+                {
+                    Ok(None)
+                }
+                reply => reply.map(Some),
+            }
         }
 
         /// The next reply: after `Watch`, the next change of state.
@@ -865,6 +992,25 @@ mod socket {
             match self.ask(request)? {
                 Reply::Error(error) => bail!(error),
                 _ => Ok(()),
+            }
+        }
+
+        /// Make a request whose payload follows it, from `source`.
+        pub fn upload(&mut self, request: &Request, source: &mut impl Read) -> Result<()> {
+            let mut line = serde_json::to_vec(request)?;
+            line.push(b'\n');
+            let stream = self.reader.get_mut();
+            let sent = stream
+                .write_all(&line)
+                .and_then(|()| std::io::copy(&mut source.take(request.payload()), stream));
+            // An agent that refuses the upload says why before it closes.
+            match (self.receive(), sent) {
+                (Ok(Reply::Error(error)), _) => bail!(error),
+                (Ok(_), Ok(sent)) if sent == request.payload() => Ok(()),
+                (Ok(_), Ok(_)) => bail!("the file ended early"),
+                (Ok(_), Err(error)) => Err(error.into()),
+                (Err(error), Ok(_)) => Err(error),
+                (Err(_), Err(error)) => Err(error).context("sending to the agent"),
             }
         }
     }
@@ -949,7 +1095,7 @@ mod socket {
         let serving = {
             let changes = changes.clone();
             thread::spawn(move || {
-                let result = converse(server, &changes, |_, _| Reply::Ok, State::default);
+                let result = converse(server, &changes, |_, _, _| Reply::Ok, State::default);
                 let _ = ended.send(());
                 result
             })
@@ -981,8 +1127,8 @@ pub struct Client;
 
 #[cfg(not(unix))]
 impl Client {
-    pub fn connect(_: &Home) -> Option<Self> {
-        None
+    pub fn connect(_: &Home) -> Result<Option<Self>> {
+        Ok(None)
     }
 
     pub fn ask(&mut self, _: &Request) -> Result<Reply> {
@@ -998,6 +1144,14 @@ impl Client {
     }
 
     pub fn request(&mut self, _: &Request) -> Result<()> {
+        bail!("the agent has no socket on this platform")
+    }
+
+    pub fn upload(&mut self, _: &Request, _: &mut impl Read) -> Result<()> {
+        bail!("the agent has no socket on this platform")
+    }
+
+    pub fn receive_by(&mut self, _: Instant) -> Result<Option<Reply>> {
         bail!("the agent has no socket on this platform")
     }
 }

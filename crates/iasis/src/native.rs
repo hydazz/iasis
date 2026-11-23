@@ -190,7 +190,7 @@ mod worker {
             [command, ecid, ipsw] if command == "revive" => {
                 attempt(ecid, Path::new(ipsw), Mode::Revive)
             }
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(windows)]
             [command, dir, address] if command == "mux" => {
                 super::mux::serve(Path::new(dir), address)
             }

@@ -13,6 +13,7 @@ pub mod progress;
 pub mod restore;
 pub mod sharing;
 pub mod topology;
+pub mod update;
 pub mod view;
 pub mod watch;
 
@@ -65,9 +66,7 @@ pub enum Error {
     SettingsBusy,
     #[error("settings storage is full; unplug targets briefly, then retry")]
     SettingsFull,
-    #[error(
-        "IasisOS on this board and these tools are from different builds; update one to match the other"
-    )]
+    #[error("IasisOS on this board is from another build; update it with `iasis update`")]
     Firmware {
         /// The protocol version the board speaks.
         board: u16,

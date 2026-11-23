@@ -5,8 +5,6 @@ mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "linux")]
-pub(crate) use linux::initial_ios_mux_config;
-#[cfg(target_os = "linux")]
 pub use linux::{linux_usb_id, ncm_interfaces, public_ncm_control};
 #[cfg(target_os = "macos")]
 pub use macos::ncm_interfaces;

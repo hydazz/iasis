@@ -1,0 +1,7 @@
+// The Iasis agent takes each target's USB network link from NetworkManager
+// while its gateway serves the target.
+polkit.addRule(function (action, subject) {
+  if (action.id === "org.freedesktop.NetworkManager.network-control" && subject.user === "iasis") {
+    return polkit.Result.YES;
+  }
+});
