@@ -22,6 +22,15 @@ struct DevicesView: View {
                             .foregroundStyle(.secondary)
                             .selectionDisabled()
                     }
+                    if group.board.update?.required == true {
+                        HStack {
+                            Label("Update IasisOS to use this board", systemImage: "arrow.down.circle")
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Update") { model.perform([.update(board: group.board.serial, bytes: nil)]) }
+                        }
+                        .selectionDisabled()
+                    }
                     ForEach(group.devices) { device in
                         DeviceRowView(device: device)
                             .selectionDisabled(!device.isSelectable)

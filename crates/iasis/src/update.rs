@@ -35,6 +35,11 @@ pub fn bundled() -> Option<&'static [u8]> {
     (!IMAGE.is_empty()).then_some(IMAGE)
 }
 
+/// The version of the IasisOS these tools carry, which is their own.
+pub fn carried() -> Option<&'static str> {
+    bundled().map(|_| env!("CARGO_PKG_VERSION"))
+}
+
 /// An IasisOS image: runs of whole flash sectors, each erased and written
 /// in one piece. Pages the file leaves out stay erased.
 pub struct Image {

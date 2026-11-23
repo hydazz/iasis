@@ -16,6 +16,8 @@ struct StatusMenu: View {
                     let ports = board.devices.filter(\.isSelectable)
                     if let notice = board.board.notice {
                         Text(notice)
+                    } else if board.board.update?.required == true {
+                        Button("Update IasisOS") { model.perform([.update(board: board.board.serial, bytes: nil)]) }
                     } else if ports.isEmpty {
                         Text("No Devices")
                     }
