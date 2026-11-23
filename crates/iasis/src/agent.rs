@@ -59,6 +59,8 @@ struct Attendance {
     endings: Endings,
     link: Mutex<Option<Arc<Link>>>,
     device: Mutex<Option<DeviceInfo>>,
+    /// Clients' commands take the management interface in turn.
+    turn: Mutex<()>,
     notice: Mutex<Option<String>>,
     /// The IasisOS version of a board that runs a build this agent cannot
     /// talk to.
@@ -67,16 +69,18 @@ struct Attendance {
 }
 
 impl Attendance {
-    /// Take the board's management interface for one command. The session
-    /// goes on beside it, and says when the command has had its effect.
-    fn control(&self) -> Result<Board> {
+    /// Run one command on the board's management interface. The session goes
+    /// on beside it, and says when the command has had its effect.
+    fn control<T>(&self, command: impl FnOnce(&Board) -> Result<T, crate::Error>) -> Result<T> {
+        let _turn = self.turn.lock().unwrap();
         let device = self.device.lock().unwrap().clone();
         let board = Board::open(&device.context("the board is not attended")?)
             .context("another tool is controlling the board")?;
-        Ok(match &*self.link.lock().unwrap() {
+        let board = match &*self.link.lock().unwrap() {
             Some(link) => board.notified(link.notice()),
             None => board,
-        })
+        };
+        Ok(command(&board)?)
     }
 }
 
@@ -286,7 +290,7 @@ impl Agent {
         let port = Port::try_from(port)
             .ok()
             .context("ports are numbered 1 to 5")?;
-        board.control()?.command(port, action)?;
+        board.control(|board| board.command(port, action))?;
         Ok(())
     }
 
@@ -439,13 +443,13 @@ impl Agent {
             ),
             Request::Brightness { board, percent } => self
                 .board(&board)
-                .and_then(|(board, _)| Ok(board.control()?.brightness(percent)?)),
+                .and_then(|(board, _)| board.control(|board| board.brightness(percent))),
             Request::Rename { board, name } => self
                 .board(&board)
-                .and_then(|(board, _)| Ok(board.control()?.rename(&name)?)),
+                .and_then(|(board, _)| board.control(|board| board.rename(&name))),
             Request::HostBudget { board, milliamps } => self
                 .board(&board)
-                .and_then(|(board, _)| Ok(board.control()?.host_budget(milliamps)?)),
+                .and_then(|(board, _)| board.control(|board| board.host_budget(milliamps))),
             Request::Update { board, bytes } => self.update(&board, bytes, payload),
             Request::Download { model, build } => self.store.download(&model, build.as_deref()),
             Request::Import { name, bytes } => self.store.import(&name, payload, bytes).map(|_| ()),
