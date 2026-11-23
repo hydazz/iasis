@@ -11,6 +11,7 @@
 		1A5100212F00000000A0E012 /* iasis in Embed Host Tools */ = {isa = PBXBuildFile; fileRef = 1A5100232F00000000A0E012 /* iasis */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		1A5100272F00000000A0E012 /* iasis-gateway in Embed Host Tools */ = {isa = PBXBuildFile; fileRef = 1A5100282F00000000A0E012 /* iasis-gateway */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		1A51002B2F00000000A0E012 /* NOTICES.txt in Resources */ = {isa = PBXBuildFile; fileRef = 1A51002C2F00000000A0E012 /* NOTICES.txt */; };
+		1A51002E2F00000000A0E012 /* com.hydaz.Iasis.agent.plist in Embed Launch Agent */ = {isa = PBXBuildFile; fileRef = 1A51002D2F00000000A0E012 /* com.hydaz.Iasis.agent.plist */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -36,6 +37,16 @@
 			name = "Embed Host Tools";
 			runOnlyForDeploymentPostprocessing = 1;
 		};
+		1A51002F2F00000000A0E012 /* Embed Launch Agent */ = {
+			isa = PBXCopyFilesBuildPhase;
+			dstPath = Contents/Library/LaunchAgents;
+			dstSubfolder = Wrapper;
+			files = (
+				1A51002E2F00000000A0E012 /* com.hydaz.Iasis.agent.plist in Embed Launch Agent */,
+			);
+			name = "Embed Launch Agent";
+			runOnlyForDeploymentPostprocessing = 1;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -46,6 +57,7 @@
 		1A5100232F00000000A0E012 /* iasis */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = iasis; path = ../../target/release/iasis; sourceTree = SOURCE_ROOT; };
 		1A5100282F00000000A0E012 /* iasis-gateway */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = "iasis-gateway"; path = "../../target/release/iasis-gateway"; sourceTree = SOURCE_ROOT; };
 		1A51002C2F00000000A0E012 /* NOTICES.txt */ = {isa = PBXFileReference; lastKnownFileType = text; name = NOTICES.txt; path = ../../crates/iasis/NOTICES.txt; sourceTree = SOURCE_ROOT; };
+		1A51002D2F00000000A0E012 /* com.hydaz.Iasis.agent.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = com.hydaz.Iasis.agent.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -90,6 +102,7 @@
 			isa = PBXGroup;
 			children = (
 				1A5100052F00000000A0E012 /* Version.xcconfig */,
+				1A51002D2F00000000A0E012 /* com.hydaz.Iasis.agent.plist */,
 			);
 			path = Config;
 			sourceTree = "<group>";
@@ -125,6 +138,7 @@
 				1A5100092F00000000A0E012 /* Frameworks */,
 				1A5100102F00000000A0E012 /* Resources */,
 				1A5100242F00000000A0E012 /* Embed Host Tools */,
+				1A51002F2F00000000A0E012 /* Embed Launch Agent */,
 			);
 			buildRules = (
 			);
@@ -363,6 +377,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
@@ -400,6 +415,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;

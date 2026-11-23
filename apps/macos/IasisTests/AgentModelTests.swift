@@ -17,6 +17,21 @@ struct AgentModelTests {
         try await waitUntil { model.state?.devices[1].name == "iPhone" }
     }
 
+    @Test func anAgentOfAnotherVersionIsRestartedOnce() async throws {
+        var state = try Fixtures.state
+        state.version = "0.0.1"
+        let agent = FakeAgent(reports: [state])
+        let restarts = Restarts()
+        let model = AgentModel(agent: agent) { await restarts.count() }
+        model.start()
+        try await waitUntil { await restarts.total == 1 }
+        #expect(model.state == nil)
+        // The restarted agent is still another version.
+        await agent.publish(state)
+        try await waitUntil { model.state != nil }
+        #expect(await restarts.total == 1)
+    }
+
     @Test func menuStatusFollowsConnectedBoardsAndPortLights() throws {
         var state = try Fixtures.state
         #expect(MenuBarStatus(nil) == .offline)
@@ -34,13 +49,22 @@ struct AgentModelTests {
         #expect(MenuBarStatus(state) == .offline)
     }
 
+    /// The model reconnects 2 s after an agent goes, so allow longer.
     private func waitUntil(_ done: () async -> Bool) async throws {
-        for _ in 0 ..< 200 {
+        for _ in 0 ..< 400 {
             if await done() {
                 return
             }
             try await Task.sleep(for: .milliseconds(10))
         }
         Issue.record("the condition never held")
+    }
+}
+
+private actor Restarts {
+    private(set) var total = 0
+
+    func count() {
+        total += 1
     }
 }
