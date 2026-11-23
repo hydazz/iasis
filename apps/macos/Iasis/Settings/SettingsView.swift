@@ -81,7 +81,13 @@ private struct BoardsSettings: View {
                 }
                 if selected.ports.isEmpty {
                     Section {
-                        Text(selected.notice ?? "Board Unavailable")
+                        if let notice = selected.notice {
+                            Text(notice)
+                        } else if selected.update?.required == true {
+                            Text("Update IasisOS to use this board.")
+                        } else {
+                            Text("Board Unavailable")
+                        }
                     }
                 } else {
                     Section {
@@ -97,7 +103,17 @@ private struct BoardsSettings: View {
                 Section {
                     LabeledContent("Serial", value: selected.serial)
                     if !selected.firmware.isEmpty {
-                        LabeledContent("IasisOS", value: selected.firmware)
+                        LabeledContent("IasisOS") {
+                            Text(selected.firmware)
+                            if let update = selected.update {
+                                if model.updating.contains(selected.serial) {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Button("Update to \(update.version)") { model.updateFirmware(of: selected.serial) }
+                                }
+                            }
+                        }
                     }
                 }
                 .textSelection(.enabled)
