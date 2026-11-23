@@ -568,8 +568,8 @@ mod tests {
             speed: Speed::High,
             #[cfg(target_os = "macos")]
             macos_attachment: None,
-            #[cfg(target_os = "linux")]
-            linux_device_address: 1,
+            #[cfg(not(target_os = "macos"))]
+            device_address: 1,
             apple: Some(AppleDevice {
                 model: None,
                 mode,

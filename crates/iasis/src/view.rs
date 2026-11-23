@@ -53,7 +53,9 @@ pub struct PortView {
     pub enabled: bool,
     /// The phase of the restore job on the port.
     pub job: Option<Job>,
-    /// Image download or worker stage, with progress when available.
+    /// Percent of the restore image fetched, while the port waits for one.
+    pub fetch: Option<u8>,
+    /// What the job's worker is doing.
     pub stage: Option<Progress>,
     /// How the port's last restore ended, from the agent that ran it.
     pub result: Option<Ending>,
@@ -141,6 +143,9 @@ pub struct Job {
     pub phase: RestorePhase,
 }
 
+/// A new attachment is shown as being identified for this long.
+pub(crate) const IDENTIFYING_MS: u64 = 12_000;
+
 impl PortView {
     pub fn activity(&self) -> String {
         if let Some(fault) = &self.fault {
@@ -148,13 +153,14 @@ impl PortView {
         }
         if let Some(job) = self.job {
             let phase = job_state(job.phase, job.operation);
-            return match &self.stage {
-                Some(stage) => format!("{phase}  {stage}"),
-                None => phase.into(),
+            return match (self.fetch, &self.stage) {
+                (Some(percent), _) => format!("{phase}  {percent}%  Downloading Image"),
+                (None, Some(stage)) => format!("{phase}  {stage}"),
+                (None, None) => phase.into(),
             };
         }
-        if let Some(stage) = &self.stage {
-            return stage.to_string();
+        if let Some(percent) = self.fetch {
+            return format!("{percent}%  Downloading Image");
         }
         match self.request {
             Some(SignalProgress::EnteringDfu) => "entering DFU",
@@ -182,8 +188,8 @@ impl PortView {
             && !self.waiting_for_power
             && self.job.is_none()
             && self.request.is_none()
-            && self.stage.is_none()
-            && attachment_age_ms < 12_000;
+            && self.fetch.is_none()
+            && attachment_age_ms < IDENTIFYING_MS;
     }
 
     pub(crate) fn attach_result(&mut self, session: Option<u32>, result: &Ending) {
@@ -342,11 +348,8 @@ impl BoardView {
                             operation: Operation::Restore,
                             phase: job.phase,
                         }),
-                        stage: state.fetch.map(|percent| Progress {
-                            name: "Downloading Image".into(),
-                            percent,
-                            ..Progress::default()
-                        }),
+                        fetch: state.fetch,
+                        stage: None,
                         result: None,
                     }
                 })
@@ -560,7 +563,7 @@ mod stage_tests {
         for value in [0, 23, 100] {
             status.ports[0].fetch = Some(value);
             let board = BoardView::new(&info, &status);
-            assert_eq!(board.ports[0].stage.as_ref().unwrap().percent, value);
+            assert_eq!(board.ports[0].fetch, Some(value));
         }
         status.ports[0].state = PortState::Fault;
         assert_eq!(

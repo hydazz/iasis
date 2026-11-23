@@ -8,6 +8,15 @@ nonisolated protocol AgentService: Sendable {
 
     /// Make a request, which either works or throws the agent's reason.
     func send(_ request: AgentRequest) async throws
+
+    /// Every device model the catalog lists.
+    func catalog() async throws -> [AgentState.CatalogModel]
+
+    /// The releases Apple signs for a model, newest first.
+    func releases(of model: String) async throws -> [AgentState.Release]
+
+    /// What a restore would install on each target.
+    func plan(_ boards: [RestoreSelection]) async throws -> [AgentState.Planned]
 }
 
 nonisolated enum AgentError: LocalizedError {
@@ -46,11 +55,37 @@ nonisolated struct AgentClient: AgentService {
     }
 
     func send(_ request: AgentRequest) async throws {
+        _ = try await answer(to: request)
+    }
+
+    func catalog() async throws -> [AgentState.CatalogModel] {
+        guard case let .catalog(models) = try await answer(to: .catalog) else {
+            throw AgentError.unavailable
+        }
+        return models
+    }
+
+    func releases(of model: String) async throws -> [AgentState.Release] {
+        guard case let .releases(releases) = try await answer(to: .releases(model: model)) else {
+            throw AgentError.unavailable
+        }
+        return releases
+    }
+
+    func plan(_ boards: [RestoreSelection]) async throws -> [AgentState.Planned] {
+        guard case let .plan(planned) = try await answer(to: .plan(boards: boards)) else {
+            throw AgentError.unavailable
+        }
+        return planned
+    }
+
+    private func answer(to request: AgentRequest) async throws -> AgentReply {
         for try await line in try lines(answering: request) {
-            if case let .error(reason) = try reply(in: line) {
+            let reply = try reply(in: line)
+            if case let .error(reason) = reply {
                 throw AgentError.refused(reason)
             }
-            return
+            return reply
         }
         throw AgentError.unavailable
     }

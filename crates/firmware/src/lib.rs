@@ -9,6 +9,7 @@ pub mod hub;
 pub mod panel;
 pub mod request;
 pub mod settings;
+pub mod settle;
 
 #[cfg(test)]
 mod stage_test;

@@ -33,7 +33,7 @@ struct StatusMenu: View {
                                     model.perform($0)
                                 } restore: { confirmation in
                                     showDevices()
-                                    browser.confirming = confirmation
+                                    browser.confirm(confirmation)
                                 }
                             }
                         } label: {

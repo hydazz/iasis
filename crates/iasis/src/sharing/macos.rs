@@ -1,13 +1,57 @@
-use std::net::Ipv4Addr;
+use std::{net::Ipv4Addr, thread};
 
 use anyhow::{Context, Result};
 use core_foundation::{
     array::CFArray,
     base::{CFType, TCFType},
     dictionary::CFDictionary,
+    runloop::{CFRunLoop, kCFRunLoopCommonModes},
     string::CFString,
 };
-use system_configuration::dynamic_store::{SCDynamicStore, SCDynamicStoreBuilder};
+use system_configuration::dynamic_store::{
+    SCDynamicStore, SCDynamicStoreBuilder, SCDynamicStoreCallBackContext,
+};
+
+type Changed = Box<dyn Fn() + Send>;
+
+/// Call `changed` whenever the host's interfaces, IPv4 addresses, default
+/// route or resolvers change.
+pub(super) fn follow_network(changed: impl Fn() + Send + 'static) -> Result<()> {
+    fn notify(_: SCDynamicStore, _: CFArray<CFString>, changed: &mut Changed) {
+        changed();
+    }
+    let changed: Changed = Box::new(changed);
+    thread::Builder::new()
+        .name("network-changes".into())
+        .spawn(move || {
+            let context = SCDynamicStoreCallBackContext {
+                callout: notify,
+                info: changed,
+            };
+            let Some(store) = SCDynamicStoreBuilder::new("Iasis network changes")
+                .callback_context(context)
+                .build()
+            else {
+                return;
+            };
+            let keys = CFArray::from_CFTypes(&[
+                CFString::new("State:/Network/Global/DNS"),
+                CFString::new("State:/Network/Global/IPv4"),
+                CFString::new("State:/Network/Interface"),
+            ]);
+            let patterns =
+                CFArray::from_CFTypes(&[CFString::new("State:/Network/Interface/[^/]+/IPv4")]);
+            if !store.set_notification_keys(&keys, &patterns) {
+                return;
+            }
+            let Some(source) = store.create_run_loop_source() else {
+                return;
+            };
+            CFRunLoop::get_current().add_source(&source, unsafe { kCFRunLoopCommonModes });
+            CFRunLoop::run_current();
+        })?;
+    Ok(())
+}
 
 pub(super) struct Resolver(Option<SCDynamicStore>);
 

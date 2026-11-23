@@ -14,10 +14,12 @@ use crate::{
     host::{Jobs, Link, PortJob},
     identity::{AppleMode, Observation, TargetTracker, models::DeviceModel},
     images::{Lease, Network, Store},
+    inventory::Inventory,
     restore::{
         Operation, PreparedIpsw, RestoreBatch, RestoreEngine, RestoreState, image_for_model,
     },
     topology,
+    watch::Watch,
 };
 use anyhow::{Context, Result, bail, ensure};
 use clap::Args;
@@ -33,8 +35,12 @@ use crate::progress;
 #[derive(Args)]
 pub struct Source {
     /// Use this local IPSW instead of the image store, which fetches the
-    /// newest release for each target
+    /// newest release for a target it has no signed image for
     pub ipsw: Option<PathBuf>,
+    /// Fetch the newest release Apple signs for each target, even when the
+    /// image store has an older one that fits
+    #[arg(long, conflicts_with = "ipsw")]
+    pub latest: bool,
     /// Remaining legacy host allowance, including Iasis and excluding other loads
     #[arg(long, value_parser = clap::value_parser!(u16).range(0..=1600))]
     pub host_ma: Option<u16>,
@@ -81,6 +87,9 @@ pub enum Images<'a> {
 pub struct Submission {
     pub session: u32,
     pub targets: Vec<Target>,
+    /// Fetch the newest release for each target instead of using an older
+    /// image in the store.
+    pub latest: bool,
     /// Erase, or revive and keep the data.
     pub operation: Operation,
     pub accepted: std::sync::mpsc::SyncSender<Result<(), String>>,
@@ -128,10 +137,11 @@ pub(crate) fn reserve(endings: &Endings, selected: &[Target]) -> Result<Vec<Port
         .collect())
 }
 
-fn finish(endings: &Endings, port: Port, ending: Ending) {
+fn finish(endings: &Endings, changes: &Watch, port: Port, ending: Ending) {
     if let Some(work) = &endings.lock().unwrap()[port.index()] {
         let _ = work.set(ending);
     }
+    changes.changed();
 }
 
 /// Restore a batch as the board's host. The command holds the board's host
@@ -171,10 +181,18 @@ fn run_batch(
 ) -> Result<()> {
     let home = Home::locate()?;
     let logs = source.logs.unwrap_or_else(|| home.cache.join("restores"));
-    let engine = RestoreEngine::for_host(logs);
+    let changes = Arc::<Watch>::default();
+    let engine = RestoreEngine::for_host(logs, changes.clone());
     // Take the board before the long image check, which another host's
     // session would make pointless.
-    let link = Link::open(device, Jobs::default(), Arc::default(), &engine)?;
+    let link = Link::open(
+        device,
+        Jobs::default(),
+        Arc::default(),
+        &engine,
+        Inventory::follow(changes.clone())?,
+    )?;
+    let board = &board.clone().notified(link.notice());
     let given = match &source.ipsw {
         Some(path) => {
             let ipsw = progress::check_ipsw(path)?;
@@ -188,7 +206,11 @@ fn run_batch(
     };
     let store = match source.ipsw {
         Some(_) => None,
-        None => Some(Store::open(home.cache.join("images"), Network::default())?),
+        None => Some(Store::open(
+            home.cache.join("images"),
+            Network::default(),
+            changes,
+        )?),
     };
     let images = match &store {
         Some(store) => Images::Store(store),
@@ -225,11 +247,15 @@ fn run_batch(
             {
                 break status;
             }
-            thread::sleep(Duration::from_millis(50));
+            ensure!(link.alive(), link.failure());
+            link.changed_after(status.revision, deadline);
         };
         let selected = select_ports(ports, &status)?;
         let (targets, failed) = enter_dfu(board, &link, &engine, &selected)?;
-        (resolve(&link, &engine, &targets, &images)?, failed)
+        (
+            resolve(&link, &engine, &targets, &images, source.latest)?,
+            failed,
+        )
     };
     let running = start(&link, &engine, &images, targets, operation, failed, button)?;
     monitor(&link, running, &Endings::default())
@@ -256,16 +282,21 @@ pub fn listen(
     };
     let button = matches!(asked, Asked::Board);
     let operation = match asked {
-        Asked::Client { operation } => operation,
+        Asked::Client { operation, .. } => operation,
         Asked::Board => Operation::Restore,
     };
-    if button && let Err(error) = reserve(endings, &selected) {
-        return Ok(Some(error.to_string()));
+    if button {
+        if let Err(error) = reserve(endings, &selected) {
+            return Ok(Some(error.to_string()));
+        }
+        link.changes().changed();
     }
     // A declined or unavailable batch finishes this request. The listener
     // can immediately accept the next one.
     let request = (|| -> Result<_> {
-        let control = Board::open(device).context("opening board for restore preparation")?;
+        let control = Board::open(device)
+            .context("opening board for restore preparation")?
+            .notified(link.notice());
         ensure!(
             control.info().serial == link.board().info().serial,
             "board serial changed"
@@ -278,7 +309,8 @@ pub fn listen(
                 !failed && targets.len() == selected.len(),
                 "not all selected targets reached verified DFU; no restore started"
             );
-            resolve(link, engine, &targets, images)?
+            let latest = matches!(asked, Asked::Client { latest: true, .. });
+            resolve(link, engine, &targets, images, latest)?
         };
         start(link, engine, images, targets, operation, false, true)
     })();
@@ -288,6 +320,7 @@ pub fn listen(
             for target in selected {
                 finish(
                     endings,
+                    link.changes(),
                     target.port,
                     Ending {
                         attachment: Some((link.session(), target.generation)),
@@ -330,13 +363,15 @@ fn in_dfu(
 }
 
 /// Choose each target's image by its model: the chip and board in a DFU
-/// descriptor, or the product type Configurator reads. The store fetches an
-/// image it lacks, which the target's port shows.
+/// descriptor, or the product type Configurator reads. The store gives the
+/// newest image it has that Apple still signs, or with `latest` the newest
+/// release, and fetches what it lacks, which the target's port shows.
 fn resolve(
     link: &Link,
     engine: &RestoreEngine,
     targets: &VerifiedTargets,
     images: &Images,
+    latest: bool,
 ) -> Result<ChosenTargets> {
     let (_, snapshot) = link.observe()?;
     let mut models = Vec::new();
@@ -344,14 +379,6 @@ fn resolve(
         let (_, model) = in_dfu(link.board(), engine, target, &snapshot)
             .with_context(|| format!("port {} lost its DFU identity", target.port.number()))?;
         models.push(model);
-    }
-    if let Images::Store(store) = images {
-        for ((target, generation), model) in targets.iter().zip(&models) {
-            let (chip, id) = store.hardware_for(model)?;
-            if store.image_for(chip, id).is_none() {
-                link.fetching(target.port, *generation, Some(0));
-            }
-        }
     }
     let chosen = targets
         .iter()
@@ -362,7 +389,7 @@ fn resolve(
                 Images::Store(store) => {
                     let (chip, id) = store.hardware_for(model)?;
                     let mut announced = false;
-                    store.obtain(chip, id, |fetch| {
+                    store.obtain(chip, id, latest, |fetch| {
                         ensure!(link.alive(), link.failure());
                         ensure!(
                             link.status().is_none_or(|status| {
@@ -370,20 +397,22 @@ fn resolve(
                             }),
                             "the target left while its image was fetched"
                         );
-                        if let Some(fetch) = fetch {
-                            if !announced {
-                                announced = true;
-                                println!(
-                                    "Port {}: fetching {} ({}), {:.1} GB",
-                                    target.port.number(),
-                                    fetch.version,
-                                    fetch.build,
-                                    fetch.bytes as f64 / 1e9
-                                );
-                            }
-                            let percent = fetch.done * 100 / fetch.bytes.max(1);
-                            link.fetching(target.port, *generation, Some(percent.min(100) as u8));
+                        if let Some(fetch) = fetch
+                            && !announced
+                        {
+                            announced = true;
+                            println!(
+                                "Port {}: fetching {} ({}), {:.1} GB",
+                                target.port.number(),
+                                fetch.version,
+                                fetch.build,
+                                fetch.bytes as f64 / 1e9
+                            );
                         }
+                        // A download waiting behind another has not begun.
+                        let percent =
+                            fetch.map_or(0, |fetch| fetch.done * 100 / fetch.bytes.max(1));
+                        link.fetching(target.port, *generation, Some(percent.min(100) as u8));
                         Ok(())
                     })?
                 }
@@ -488,8 +517,18 @@ fn monitor(link: &Link, running: Running, endings: &Endings) -> Result<()> {
         .iter()
         .map(|(target, _)| progress::restore_row(&display, target.port, target.ecid))
         .collect::<Vec<_>>();
+    // The workers say when a job moves and the inventory when a device
+    // comes or goes. The link may have lost the board by then.
+    let changes = link.changes();
+    let inventory = link.inventory();
+    let mut seen = changes.count();
+    let mut placed = None;
     loop {
-        let snapshot = topology::discover(board.topology());
+        let version = inventory.version();
+        let snapshot = match placed.take() {
+            Some((at, snapshot)) if at == version => Ok(snapshot),
+            _ => topology::locate(board.topology(), inventory.devices()),
+        };
         let jobs = batch.snapshots();
         // Do not open a competing restored service while the restore owns it.
         for (index, job) in jobs.iter().enumerate() {
@@ -533,6 +572,7 @@ fn monitor(link: &Link, running: Running, endings: &Endings) -> Result<()> {
                 active.remove(&target.port);
                 finish(
                     endings,
+                    changes,
                     target.port,
                     Ending {
                         attachment: None,
@@ -548,13 +588,18 @@ fn monitor(link: &Link, running: Running, endings: &Endings) -> Result<()> {
         if active.is_empty() {
             break;
         }
-        thread::sleep(Duration::from_secs(1));
+        // A tree that could not be placed is tried again shortly.
+        let again = snapshot
+            .is_err()
+            .then(|| Instant::now() + Duration::from_secs(1));
+        placed = snapshot.ok().map(|snapshot| (version, snapshot));
+        seen = changes.wait(seen, again);
     }
     // Leave once the board has the results, which it keeps until each target
     // leaves.
     let deadline = Instant::now() + Duration::from_secs(3);
     while link.alive() && link.reporting() && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(100));
+        seen = changes.wait(seen, Some(deadline));
     }
     for row in &rows {
         row.finish_and_clear();
@@ -598,26 +643,27 @@ fn select_ports(ports: &[Port], status: &Status) -> Result<Vec<Target>> {
 enum Asked {
     /// A hold on the board, or the ports a command named.
     Board,
-    /// A client, which says whether to erase or revive.
-    Client { operation: Operation },
+    /// A client, which says whether to fetch the newest release and whether
+    /// to erase or revive.
+    Client { latest: bool, operation: Operation },
 }
 
-/// The ports to restore, and who asked: those named, those a client asks
-/// for, or those the board's Restore hold selects.
 fn selection(
     link: &Link,
     ports: &[Port],
     requests: Option<&Requests>,
 ) -> Result<(Vec<Target>, Asked)> {
-    let board = link.board();
-    let initial = board.status()?;
     if !ports.is_empty() {
-        return Ok((select_ports(ports, &initial)?, Asked::Board));
+        return Ok((select_ports(ports, &link.board().status()?)?, Asked::Board));
     }
-    let mut last = initial.button.map_or(0, |e| e.id);
+    // The link reads the board when it announces a change, and a client's
+    // request advances the same count.
+    let read = || link.status().context("the board has not been read");
+    let mut seen = link.changes().count();
+    let mut last = read()?.button.map_or(0, |e| e.id);
     loop {
         ensure!(link.alive(), link.failure());
-        let status = board.status()?;
+        let status = read()?;
         if let Some(request) = requests.and_then(|requests| requests.lock().unwrap().take()) {
             // The request is for the targets the client saw, now.
             let current = status.restore_session() == Some(request.session)
@@ -636,6 +682,7 @@ fn selection(
                 continue;
             }
             let asked = Asked::Client {
+                latest: request.latest,
                 operation: request.operation,
             };
             return Ok((request.targets, asked));
@@ -662,7 +709,7 @@ fn selection(
                 return Ok((selected, Asked::Board));
             }
         }
-        thread::sleep(Duration::from_millis(100));
+        seen = link.changes().wait(seen, None);
     }
 }
 
@@ -699,7 +746,7 @@ fn prepare_selected(
         "not all selected targets reached verified DFU; no erase armed"
     );
     // Fetching an image can take long enough for a target to leave.
-    let targets = resolve(link, engine, &targets, images)?;
+    let targets = resolve(link, engine, &targets, images, false)?;
     // The arm names each attachment as it is now, in DFU.
     for (target, generation, _) in &targets {
         draft.generations[target.port.index()] = *generation;
@@ -719,7 +766,8 @@ fn prepare_selected(
             Instant::now() < deadline,
             "board has no verified DFU report for the prepared targets"
         );
-        thread::sleep(Duration::from_millis(50));
+        ensure!(link.alive(), link.failure());
+        link.changed_after(status.revision, deadline);
     };
     for (target, _, image) in &targets {
         println!(
@@ -742,10 +790,11 @@ fn prepare_selected(
     loop {
         ensure!(link.alive(), "host session lost; erase cancelled");
         ensure!(Instant::now() < deadline, "erase arm expired");
-        if confirmed(arm, &board.status()?)? {
+        let status = board.status()?;
+        if confirmed(arm, &status)? {
             break;
         }
-        thread::sleep(Duration::from_millis(50));
+        link.changed_after(status.revision, deadline);
     }
     // The confirmation counts only while this host still holds the board.
     link.check().context("host session lost; erase cancelled")?;
@@ -840,6 +889,7 @@ fn enter_dfu(
         }
     }
     let deadline = Instant::now() + Duration::from_secs(30);
+    let mut seen = link.changes().count();
     while !pending.is_empty() && Instant::now() < deadline {
         let (status, snapshot) = link.observe()?;
         pending.retain(|(port, generation, previous)| {
@@ -902,7 +952,10 @@ fn enter_dfu(
             true
         });
         if !pending.is_empty() {
-            thread::sleep(Duration::from_millis(100));
+            // The board, the host's USB devices or Configurator's answer.
+            // The devices are enumerated again each second regardless.
+            let again = Instant::now() + Duration::from_secs(1);
+            seen = link.changes().wait(seen, Some(again.min(deadline)));
         }
     }
     for (port, _, _) in pending {
@@ -959,6 +1012,7 @@ mod tests {
         assert!(slots.lock().unwrap()[1].is_none());
         finish(
             &slots,
+            &Watch::default(),
             a.port,
             Ending {
                 attachment: None,
