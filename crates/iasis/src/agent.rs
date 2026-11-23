@@ -227,6 +227,15 @@ impl Agent {
         }
     }
 
+    /// Give every board's host session up, for an agent that is stopping.
+    pub fn release(&self) {
+        for board in self.boards.lock().unwrap().values() {
+            if let Some(link) = &*board.link.lock().unwrap() {
+                link.end();
+            }
+        }
+    }
+
     fn board(&self, serial: &str) -> Result<(Arc<Attendance>, Arc<Link>)> {
         let serial = parse_serial(serial).map_err(anyhow::Error::msg)?;
         let board = self
