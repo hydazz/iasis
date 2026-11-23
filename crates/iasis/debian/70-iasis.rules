@@ -1,0 +1,18 @@
+# Iasis boards, and the Apple devices on their ports, are open to the iasis
+# service through the iasis-usb group. A board's RP2354 sits on port 6 of its
+# Microchip USB7206C hub, whose USB 2 function is 0424:4206 and SuperSpeed
+# function 0424:7206. Owners stay as they are, so usbmuxd keeps the devices
+# it serves.
+
+ACTION=="remove", GOTO="iasis_end"
+SUBSYSTEM!="usb", GOTO="iasis_end"
+ENV{DEVTYPE}!="usb_device", GOTO="iasis_end"
+
+# IasisOS, and the RP2350 boot ROM it restarts into for an update.
+KERNEL=="*.6", ATTR{idVendor}=="1209", ATTR{idProduct}=="0001", ATTR{product}=="Iasis", ATTRS{idVendor}=="0424", ATTRS{idProduct}=="4206", GROUP="iasis-usb", MODE="0660", GOTO="iasis_end"
+KERNEL=="*.6", ATTR{idVendor}=="2e8a", ATTR{idProduct}=="000f", ATTRS{idVendor}=="0424", ATTRS{idProduct}=="4206", GROUP="iasis-usb", MODE="0660", GOTO="iasis_end"
+
+# Apple targets in DFU, Recovery, Apple Debug USB, restore mode or running.
+ATTR{idVendor}=="05ac", ATTR{idProduct}=="1227|128[0-3]|1881|12[9a][0-9a-f]|190[1-5]", ATTRS{idVendor}=="0424", ATTRS{idProduct}=="4206|7206", GROUP="iasis-usb", MODE="0660"
+
+LABEL="iasis_end"

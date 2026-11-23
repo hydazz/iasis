@@ -1,0 +1,3 @@
+u iasis - "Iasis host agent" /var/lib/iasis
+g iasis-usb -
+m iasis iasis-usb

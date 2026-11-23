@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+#DEBHELPER#
+
+if [ "$1" = configure ]; then
+    # Boards and targets already attached get the rules' permissions now.
+    udevadm control --reload-rules || true
+    for vendor in 1209 2e8a 05ac; do
+        udevadm trigger --action=change --subsystem-match=usb --attr-match=idVendor="$vendor" || true
+    done
+fi

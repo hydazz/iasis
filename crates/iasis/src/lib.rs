@@ -13,6 +13,7 @@ pub mod progress;
 pub mod restore;
 pub mod sharing;
 pub mod topology;
+pub mod update;
 pub mod view;
 pub mod watch;
 
@@ -67,9 +68,7 @@ pub enum Error {
     SettingsFull,
     #[error("legacy host allowance must be at most 1600 mA")]
     HostAllowance,
-    #[error(
-        "IasisOS on this board and these tools are from different builds; update one to match the other"
-    )]
+    #[error("IasisOS on this board is from another build; update it with `iasis update`")]
     Firmware {
         /// The protocol version the board speaks.
         board: u16,
