@@ -9,7 +9,7 @@ struct IasisApp: App {
     }
 
     init() {
-        let model = AgentModel(agent: AgentClient())
+        let model = AgentModel(agent: AgentClient(), restartAgent: BundledAgent.isBundled ? { await BundledAgent.restart() } : nil)
         model.start()
         _browser = State(initialValue: DeviceBrowser(model: model))
     }
@@ -26,7 +26,7 @@ struct IasisApp: App {
             DevicesView(browser: browser)
         }
         .defaultSize(width: 720, height: 520)
-        .defaultLaunchBehavior(AppDelegate.launchedInBackground ? .suppressed : .presented)
+        .defaultLaunchBehavior(.suppressed)
         .restorationBehavior(.disabled)
         .commands {
             FileCommands(model: model)
