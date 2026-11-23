@@ -10,9 +10,23 @@ final class DeviceBrowser {
     var showsInspector = true
     /// The erase the user is being asked to confirm.
     var confirming: RestoreConfirmation?
+    @ObservationIgnored private var planning: Task<Void, Never>?
 
     init(model: AgentModel) {
         self.model = model
+    }
+
+    /// Ask the agent what each device would be restored with, then ask the
+    /// user to confirm the erase.
+    func confirm(_ restore: RestoreConfirmation) {
+        guard planning == nil else { return }
+        planning = Task {
+            defer { planning = nil }
+            guard let planned = await model.plan(restore.boards) else { return }
+            var confirmation = restore
+            confirmation.planned = planned
+            confirming = confirmation
+        }
     }
 
     var selected: [Device] {

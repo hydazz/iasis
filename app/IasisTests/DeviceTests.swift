@@ -70,7 +70,7 @@ struct DeviceTests {
         let activity = { (state: AgentState, port: Int) in state.devices[port - 1].activity }
         #expect(activity(state, 1) == .idle)
         #expect(activity(state, 2) == Activity("DFU", .none))
-        #expect(activity(state, 3) == Activity("Sending Filesystem 43%", .working(0.43)))
+        #expect(activity(state, 3) == Activity("Restore 43% (Sending Filesystem)", .working(0.43), symbol: "arrow.counterclockwise.circle"))
         #expect(activity(state, 5) == Activity("Protection tripped", .failed))
         state.boards[0].ports[4].enabled = false
         #expect(activity(state, 5) == Activity("Protection tripped", .failed))
@@ -85,6 +85,30 @@ struct DeviceTests {
         #expect(activity(state, 2) == .idle)
         state.boards[0].ports[1].request = .restarting
         #expect(activity(state, 2) == Activity("Restarting", .working(nil)))
+    }
+
+    @Test func anOperationLaysOutItsStepsAndItsEnding() throws {
+        var state = try Fixtures.state
+        let running = try #require(state.devices[2].operation)
+        #expect(running.title == "Restore")
+        #expect(running.steps.map(\.state) == [.done, .done, .active, .pending])
+        #expect(running.detail == nil)
+        state.boards[0].ports[2].stage?.name = "Updating Firmware"
+        #expect(state.devices[2].operation?.detail == "Updating Firmware")
+
+        state.boards[0].ports[2].stage = nil
+        state.boards[0].ports[2].job?.phase = .preparing
+        #expect(state.devices[2].operation?.detail == "Preparing")
+        state.boards[0].ports[2].fetch = 43
+        #expect(state.devices[2].activity == Activity("Downloading Image 43%", .working(0.43), symbol: "arrow.down.circle"))
+        #expect(state.devices[2].operation?.steps == [.init(name: "Downloading Image", state: .active)])
+
+        let ended = try #require(state.devices[3].operation)
+        #expect(ended.title == "Restore Complete")
+        #expect(ended.mark == .done)
+        #expect(ended.logDirectory == "/tmp/iasis-logs/repair")
+        #expect(state.devices[0].operation == nil)
+        #expect(state.devices[4].operation == nil)
     }
 
     @Test func aRestorePinsEveryAttachmentAcrossBoards() throws {
@@ -106,16 +130,62 @@ struct DeviceTests {
             RestoreTarget(port: 2, generation: 2, ecid: "001a79d10e6bc01c"),
             RestoreTarget(port: 4, generation: 4, ecid: "0002250e3c04c01e"),
         ]
-        #expect(confirmation.request == .restore(boards: [
+        let boards = [
             RestoreSelection(board: "a0e012192cdfdb67", session: 77, targets: targets),
             RestoreSelection(board: "817a23bd502453b4", session: 9, targets: targets),
-        ]))
+        ]
+        #expect(confirmation.boards == boards)
+        // With nothing to choose between, there is one way to go on.
+        #expect(confirmation.choices == [.init(title: "Restore", request: .restore(boards: boards, latest: false))])
 
         // One device that cannot be restored withholds the erase from all.
         #expect(DeviceActions(state.devices.filter { [3, 4].contains($0.port.number) }).restore == nil)
         state.boards[1].session = nil
         #expect(DeviceActions(state.devices.filter { [2, 4].contains($0.port.number) }).restore == nil)
         #expect(RestoreConfirmation([state.devices[1]])?.title == "Restore MacBook Air?")
+    }
+
+    @Test func aRestoreAsksWhichImageOnlyWhenTheStoreHasAnOlderOne() throws {
+        var state = try Fixtures.state
+        state.boards[0].ports[1].restore = true
+        var confirmation = try #require(RestoreConfirmation(state.devices.filter { [2, 4].contains($0.port.number) }))
+        let board = "a0e012192cdfdb67"
+        let release = { (version: String, build: String) in
+            AgentState.Offer.Release(os: "macOS", version: version, build: build, bytes: 25_600_000_000)
+        }
+        let newest = release("27.2.1", "26B131")
+        let older = release("26.6", "25G80")
+
+        // The newest is in the store, or nothing is: no question.
+        confirmation.planned = [
+            .init(board: board, port: 2, offer: .init(latest: newest, held: newest)),
+            .init(board: board, port: 4, offer: .init(latest: newest)),
+        ]
+        #expect(confirmation.choices.map(\.title) == ["Restore"])
+        #expect(confirmation.message.contains("Port 2: MacBook Air (13-inch, M5) · macOS 27.2.1\n"))
+        #expect(confirmation.message.hasSuffix("Port 4: Unknown Device · macOS 27.2.1, 25.6 GB to download"))
+
+        // An older image in the store is a choice against the newest release.
+        confirmation.planned[0].offer = .init(latest: newest, held: older)
+        #expect(confirmation.choices == [
+            .init(title: "Download macOS 27.2.1", request: .restore(boards: confirmation.boards, latest: true)),
+            .init(title: "Use macOS 26.6", request: .restore(boards: confirmation.boards, latest: false)),
+        ])
+        #expect(confirmation.message.contains("macOS 26.6 downloaded, macOS 27.2.1 available (25.6 GB)"))
+        // A build is compared as a number too, and a newer image in the store is no choice.
+        #expect(AgentState.Offer(latest: release("27.2.1", "26B131"), held: release("27.2.1", "26B99")).newer != nil)
+        #expect(AgentState.Offer(latest: older, held: newest).newer == nil)
+
+        // The catalog unreachable: the image in the store serves, and a
+        // device with none cannot be restored.
+        confirmation.planned[0].offer = .init(held: older, problem: "no route")
+        confirmation.planned[1].offer = nil
+        #expect(confirmation.choices.map(\.title) == ["Restore"])
+        #expect(confirmation.message.contains("macOS 26.6, newer releases not checked"))
+        confirmation.planned[1].offer = .init(problem: "asking the image catalog: no route")
+        #expect(confirmation.choices.isEmpty)
+        #expect(confirmation.title == "Cannot Restore 2 Devices")
+        #expect(confirmation.message.hasSuffix("asking the image catalog: no route"))
     }
 
     @Test func actionsGoToTheDevicesThatTakeThem() throws {
@@ -131,7 +201,7 @@ struct DeviceTests {
         let mac = DeviceActions([state.devices[1]])
         let target = RestoreTarget(port: 2, generation: 2, ecid: "001a79d10e6bc01c")
         let selection = RestoreSelection(board: board, session: 77, targets: [target])
-        #expect(mac.revive == .revive(boards: [selection]))
+        #expect(mac.revive == .revive(boards: [selection], latest: false))
 
         state.boards[0].ports[0].enabled = false
         let off = DeviceActions([state.devices[0]])

@@ -133,16 +133,28 @@ Setup Assistant can use this connection for Automated Device Enrollment. See the
 
 ### Images
 
-The agent keeps the newest release Apple signs for each model it restores. The first restore of a model fetches its image, and the agent then checks for a newer release every six hours and replaces the old one once the new one is in hand. Release listings come from [ipsw.me](https://ipsw.me) and the archives from Apple's servers, checked against their published SHA-256.
+The agent holds IPSW archives. One archive restores every model its manifest names: a macOS image restores every Mac that release supports, and an iPadOS or iOS image a few related models. Archives for different models can share a version and build number.
+
+A restore asks what Apple signs for each device before it chooses an image:
+
+- With no image that fits, it downloads the newest release.
+- With an image that is the newest release, or newer, it uses it.
+- With an older image Apple still signs, it uses that one, or downloads the newest with `--latest`. The Mac app asks which.
+- An image Apple no longer signs is deleted and the newest release downloaded. Apple signs older macOS releases for a long time and older iOS and iPadOS releases only briefly.
+- When the catalog cannot be reached, the newest image that fits is used.
+
+Any release Apple signs can also be downloaded ahead of time. Release listings come from [ipsw.me](https://ipsw.me) and the archives from Apple's servers, checked against their published SHA-256.
 
 ```sh
-target/release/iasis images                       # what is kept, and any download
-target/release/iasis images keep iPad13,18        # fetch a model's image ahead of time
+target/release/iasis images                           # each image by name, and any download
+target/release/iasis images releases Macmini9,1       # the releases Apple signs for a model
+target/release/iasis images fetch Macmini9,1          # download the newest of them
+target/release/iasis images fetch Macmini9,1 --build 25G80
 target/release/iasis images add /path/to/UniversalMac.ipsw
-target/release/iasis images remove 26B131
+target/release/iasis images remove UniversalMac_27.2.1_26B131_Restore.ipsw
 ```
 
-An image added from a file stays until it is removed. Where several images fit a target, the newest is used. Images live in the cache directory: `~/Library/Caches/iasis` on macOS and `$XDG_CACHE_HOME/iasis` on Linux. A Mac image is about 26 GB and an iPad image about 11 GB.
+An image stays until it is removed. Removing one that is still downloading stops the download. An image added from a file is never taken for an unsigned one, since the catalog may not list it. Images live in the cache directory: `~/Library/Caches/iasis` on macOS and `$XDG_CACHE_HOME/iasis` on Linux. A Mac image is about 26 GB and an iPad image about 11 GB.
 
 While an image is being fetched for a target, its port pulses purple, the OLED labels it `IMG`, and `iasis` shows the percentage.
 

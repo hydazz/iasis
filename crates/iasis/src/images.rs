@@ -1,8 +1,11 @@
 //! The host's restore images.
 //!
-//! The store keeps the newest image Apple signs for every device model it
-//! has been asked for, and fetches what it lacks. An image added by hand
-//! stays until it is removed.
+//! The store is a cache of IPSW archives, each restoring the models its
+//! manifest names. A restore asks the catalog what Apple signs for its
+//! device, then takes the newest image in the store that is still signed or
+//! has the newest release fetched. Any signed release can be fetched ahead
+//! of time. An image stays until it is removed, or until a restore finds
+//! that Apple no longer signs it.
 
 use std::{
     collections::BTreeMap,
@@ -18,7 +21,7 @@ use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{identity::models::DeviceModel, restore::PreparedIpsw};
+use crate::{identity::models::DeviceModel, restore::PreparedIpsw, watch::Watch};
 
 const CATALOG: &str = "https://api.ipsw.me/v4";
 /// The hosts Apple serves restore images from.
@@ -27,9 +30,8 @@ const IMAGE_HOSTS: [&str; 3] = [
     "secure-appldnld.apple.com",
     "appldnld.apple.com",
 ];
-/// How often to ask whether a model has a newer release.
-const RECHECK: Duration = Duration::from_secs(6 * 3600);
-const RETRY: Duration = Duration::from_secs(60);
+/// How long a model's listing serves before the catalog is asked again.
+const LISTING: Duration = Duration::from_secs(600);
 
 /// A release as the catalog lists it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,6 +66,11 @@ impl Firmware {
         );
         Ok(name)
     }
+
+    /// The last part of the address, which names the archive in the store.
+    fn name(&self) -> &str {
+        self.url.rsplit('/').next().unwrap_or_default()
+    }
 }
 
 /// A device model and the chips and boards it is built on.
@@ -77,11 +84,17 @@ pub struct Device {
 /// Where releases are listed and fetched from.
 pub trait Catalog: Send + Sync + 'static {
     fn devices(&self) -> Result<Vec<Device>>;
-    /// The newest release Apple signs for a model.
-    fn latest(&self, identifier: &str) -> Result<Firmware>;
-    /// Complete `part` with the release's archive and check its digest.
-    /// `progress` takes the bytes in hand.
-    fn fetch(&self, firmware: &Firmware, part: &Path, progress: &mut dyn FnMut(u64)) -> Result<()>;
+    /// The releases Apple signs for a model, newest first.
+    fn releases(&self, identifier: &str) -> Result<Vec<Firmware>>;
+    /// Complete `part` with the release's archive, checked against its
+    /// published SHA-256. `progress` takes the bytes in hand, and ends the
+    /// fetch by failing.
+    fn fetch(
+        &self,
+        firmware: &Firmware,
+        part: &Path,
+        progress: &mut dyn FnMut(u64) -> Result<()>,
+    ) -> Result<()>;
 }
 
 /// ipsw.me for the listings, Apple's servers for the archives.
@@ -96,7 +109,7 @@ impl Default for Network {
         Self {
             listings: ureq::Agent::config_builder()
                 .user_agent(agent)
-                .timeout_global(Some(Duration::from_secs(30)))
+                .timeout_global(Some(Duration::from_secs(10)))
                 .build()
                 .into(),
             // An archive takes as long as it takes, unless it stalls.
@@ -154,25 +167,32 @@ impl Network {
     }
 }
 
-fn newest_signed(listing: Listing) -> Result<Firmware> {
-    let listed = listing
-        .firmwares
-        .into_iter()
-        .find(|firmware| firmware.signed)
-        .context("Apple signs no release for this model")?;
-    let firmware = Firmware {
-        version: listed.version,
-        build: listed.buildid,
-        url: listed.url,
-        sha256: listed
-            .sha256sum
-            .filter(|sum| sum.len() == 64)
-            .context("the catalog lists no digest for the newest release")?
-            .to_ascii_lowercase(),
-        bytes: listed.filesize,
-    };
-    firmware.file_name()?;
-    Ok(firmware)
+/// The releases Apple signs, in the catalog's order: newest first. An older
+/// one with no digest to check its archive against is left out. The newest
+/// is never passed over for an older one.
+fn signed(listing: Listing) -> Result<Vec<Firmware>> {
+    let mut releases = Vec::new();
+    for listed in listing.firmwares.into_iter().filter(|listed| listed.signed) {
+        let digest = listed.sha256sum.filter(|sum| sum.len() == 64);
+        let firmware = digest.map(|digest| Firmware {
+            version: listed.version,
+            build: listed.buildid,
+            url: listed.url,
+            sha256: digest.to_ascii_lowercase(),
+            bytes: listed.filesize,
+        });
+        match firmware {
+            Some(firmware) if firmware.file_name().is_ok() => releases.push(firmware),
+            Some(firmware) if releases.is_empty() => {
+                firmware.file_name()?;
+            }
+            None if releases.is_empty() => {
+                bail!("the catalog lists no digest for the newest release")
+            }
+            _ => {}
+        }
+    }
+    Ok(releases)
 }
 
 impl Catalog for Network {
@@ -192,17 +212,22 @@ impl Catalog for Network {
             .collect())
     }
 
-    fn latest(&self, identifier: &str) -> Result<Firmware> {
+    fn releases(&self, identifier: &str) -> Result<Vec<Firmware>> {
         ensure!(
             identifier
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b == b','),
             "invalid model identifier"
         );
-        newest_signed(self.json(&format!("device/{identifier}?type=ipsw"))?)
+        signed(self.json(&format!("device/{identifier}?type=ipsw"))?)
     }
 
-    fn fetch(&self, firmware: &Firmware, part: &Path, progress: &mut dyn FnMut(u64)) -> Result<()> {
+    fn fetch(
+        &self,
+        firmware: &Firmware,
+        part: &Path,
+        progress: &mut dyn FnMut(u64) -> Result<()>,
+    ) -> Result<()> {
         let mut file = OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -223,7 +248,7 @@ impl Catalog for Network {
                 ensure!(count != 0, "partial image ended early");
                 digest.update(&buffer[..count]);
                 have += count as u64;
-                progress(have);
+                progress(have)?;
             }
         }
         if have < firmware.bytes {
@@ -254,7 +279,7 @@ impl Catalog for Network {
                 file.write_all(&buffer[..count])
                     .context("writing the image")?;
                 digest.update(&buffer[..count]);
-                progress(have);
+                progress(have)?;
             }
         }
         ensure!(
@@ -263,11 +288,8 @@ impl Catalog for Network {
             firmware.bytes
         );
         file.sync_all()?;
-        let sum: String = digest
-            .finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
+        let digest = digest.finalize();
+        let sum: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
         if sum != firmware.sha256 {
             drop(file);
             fs::remove_file(part).ok();
@@ -277,122 +299,209 @@ impl Catalog for Network {
     }
 }
 
-/// An image in the store.
+/// An archive in the store.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Image {
     #[serde(flatten)]
     pub ipsw: PreparedIpsw,
-    /// Fetched for a model, and replaced when that model has a newer one.
+    /// Fetched from the catalog, as opposed to added from a file.
     pub fetched: bool,
 }
 
-/// A model the store keeps an image for.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Model {
-    pub identifier: String,
-    pub name: String,
-    pub latest: Option<Firmware>,
-    /// Why the newest release could not be listed or fetched.
-    pub error: Option<String>,
-    #[serde(skip)]
-    checked: Option<Instant>,
+/// The store's name for an archive: its file's.
+fn file_id(path: &Path) -> &str {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+}
+
+impl Image {
+    fn id(&self) -> &str {
+        file_id(self.ipsw.path())
+    }
+
+    fn covers(&self, identifier: &str) -> bool {
+        self.ipsw
+            .product_types
+            .iter()
+            .any(|kind| kind == identifier)
+    }
+
+    /// Whether this is the archive of a release listed for a model: the file
+    /// the store fetched for it, or one of that build that restores the
+    /// model. Archives for different models share a build number.
+    fn is(&self, identifier: &str, firmware: &Firmware) -> bool {
+        (self.fetched && self.id() == firmware.name())
+            || (self.ipsw.build_version == firmware.build && self.covers(identifier))
+    }
+
+    fn describe(&self) -> Release {
+        let kinds = &self.ipsw.product_types;
+        Release {
+            os: kinds
+                .first()
+                .and_then(|kind| system(kind))
+                .unwrap_or_default()
+                .into(),
+            version: self.ipsw.product_version.clone(),
+            build: self.ipsw.build_version.clone(),
+            bytes: self.ipsw.bytes(),
+        }
+    }
+}
+
+/// A release to fetch, with the model it was listed for.
+struct Download {
+    identifier: String,
+    name: String,
+    firmware: Firmware,
+    /// Why the fetch failed. It is tried again when it is next asked for.
+    error: Option<String>,
 }
 
 /// A download under way.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Fetch {
+    /// The image it becomes.
+    pub id: String,
     pub version: String,
     pub build: String,
     pub bytes: u64,
     pub done: u64,
 }
 
-/// What the store holds, for a client to show.
+/// The store's archives, for a client to show: those it holds and those it
+/// is still to fetch.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Snapshot {
-    pub images: Vec<Image>,
-    pub models: Vec<ModelView>,
+    pub images: Vec<ImageView>,
     pub fetch: Option<Fetch>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ModelView {
-    pub identifier: String,
-    pub name: String,
-    pub latest: Option<Firmware>,
-    pub error: Option<String>,
-    /// The newest release is in the store.
+pub struct ImageView {
+    /// The store's name for the archive, which requests use.
+    pub id: String,
+    /// The system it installs, as Apple names it.
+    pub os: String,
+    pub version: String,
+    pub build: String,
+    pub bytes: u64,
+    /// The models it restores, by name.
+    pub models: Vec<String>,
+    /// The archive is in the store.
     pub ready: bool,
+    /// Why it could not be fetched.
+    pub error: Option<String>,
+}
+
+/// A system release, as an image in the store or as the catalog lists it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Release {
+    pub os: String,
+    pub version: String,
+    pub build: String,
+    pub bytes: u64,
+}
+
+/// What a restore of one device can install.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Offer {
+    /// The newest release Apple signs for the device.
+    pub latest: Option<Release>,
+    /// The newest image in the store that restores it, left out when the
+    /// catalog shows Apple no longer signs it.
+    pub held: Option<Release>,
+    /// Why the catalog could not say what Apple signs.
+    pub problem: Option<String>,
+}
+
+/// The system a product type runs, for the families the store keeps.
+fn system(product_type: &str) -> Option<&'static str> {
+    let families = [
+        ("iPhone", "iOS"),
+        ("iPad", "iPadOS"),
+        ("AppleTV", "tvOS"),
+        ("Watch", "watchOS"),
+        ("AudioAccessory", "HomePod Software"),
+        ("RealityDevice", "visionOS"),
+    ];
+    families
+        .iter()
+        .find(|(prefix, _)| product_type.starts_with(prefix))
+        .map(|&(_, name)| name)
+        .or_else(|| product_type.contains("Mac").then_some("macOS"))
 }
 
 #[derive(Default, Serialize, Deserialize)]
 struct Saved {
     images: Vec<Image>,
-    models: Vec<Model>,
     devices: Vec<Device>,
 }
 
 #[derive(Default)]
 struct State {
     saved: Saved,
+    /// Releases to fetch, in the order they were asked for.
+    downloads: Vec<Download>,
     fetch: Option<Fetch>,
-    /// Builds a restore is reading, by how many.
-    held: BTreeMap<String, usize>,
-    /// Something changed that the worker should look at.
-    dirty: bool,
-    failed: Option<Instant>,
+    /// Images a restore is reading, by how many.
+    leased: BTreeMap<String, usize>,
+    /// What the catalog last listed for each model, and when.
+    listings: BTreeMap<String, (Instant, Vec<Firmware>)>,
     devices_asked: Option<Instant>,
     stop: bool,
 }
 
+/// What a restore of one model has to choose from.
+struct Survey<'a> {
+    /// The images that restore the hardware, newest first, without those
+    /// the catalog shows Apple no longer signs.
+    held: Vec<&'a Image>,
+    /// Fetched images Apple no longer signs for the model.
+    lapsed: Vec<&'a Image>,
+}
+
 impl State {
-    fn has(&self, build: &str) -> bool {
+    fn holds(&self, identifier: &str, firmware: &Firmware) -> bool {
         self.saved
             .images
             .iter()
-            .any(|image| image.ipsw.build_version == build)
+            .any(|image| image.is(identifier, firmware))
     }
 
-    /// The newest image that can erase this hardware.
-    fn image_for(&self, chip: u32, board: u32) -> Option<&PreparedIpsw> {
-        self.saved
+    /// The next release to fetch.
+    fn next(&self) -> Option<&Download> {
+        self.downloads
+            .iter()
+            .find(|download| download.error.is_none())
+    }
+
+    fn fetching(&self, firmware: &Firmware) -> bool {
+        self.downloads
+            .iter()
+            .any(|download| download.firmware == *firmware && download.error.is_none())
+    }
+
+    /// Sort the images that erase this hardware by what `signed` says of
+    /// them. An image added from a file is never taken for a lapsed one: the
+    /// catalog may not list it at all.
+    fn survey(&self, chip: u32, board: u32, signed: Option<&[Firmware]>) -> Survey<'_> {
+        let fits = self
+            .saved
             .images
             .iter()
-            .map(|image| &image.ipsw)
-            .filter(|ipsw| ipsw.erases(chip, board))
-            .max_by(|a, b| a.release().cmp(&b.release()))
-    }
-
-    /// The next release to fetch: a model's newest that is not here yet.
-    fn wanted(&self) -> Option<Firmware> {
-        self.saved
-            .models
-            .iter()
-            .filter_map(|model| model.latest.as_ref())
-            .find(|firmware| !self.has(&firmware.build))
-            .cloned()
-    }
-
-    /// Fetched images no model needs: none names them as its newest, and
-    /// every model they serve has its newest here.
-    fn superseded(&self) -> Vec<PathBuf> {
-        let models = &self.saved.models;
-        self.saved
-            .images
-            .iter()
-            .filter(|image| image.fetched && !self.held.contains_key(&image.ipsw.build_version))
-            .filter(|image| {
-                models.iter().all(|model| {
-                    let Some(latest) = &model.latest else {
-                        return !image.ipsw.product_types.contains(&model.identifier);
-                    };
-                    latest.build != image.ipsw.build_version
-                        && (!image.ipsw.product_types.contains(&model.identifier)
-                            || self.has(&latest.build))
+            .filter(|image| image.ipsw.erases(chip, board));
+        let (lapsed, mut held): (Vec<_>, Vec<_>) = fits.partition(|image| {
+            image.fetched
+                && signed.is_some_and(|signed| {
+                    !signed
+                        .iter()
+                        .any(|release| release.build == image.ipsw.build_version)
                 })
-            })
-            .map(|image| image.ipsw.path().to_owned())
-            .collect()
+        });
+        held.sort_by(|a, b| b.ipsw.release().cmp(&a.ipsw.release()));
+        Survey { held, lapsed }
     }
 }
 
@@ -401,6 +510,10 @@ struct Inner {
     catalog: Box<dyn Catalog>,
     state: Mutex<State>,
     changed: Condvar,
+    /// Advances whenever the store shows something new.
+    changes: Arc<Watch>,
+    /// Held by whoever asks the catalog for a model the saved list lacks.
+    asking: Mutex<()>,
     _lock: File,
 }
 
@@ -419,6 +532,7 @@ impl Inner {
         if let Err(error) = write() {
             eprintln!("Images: saving the index: {error:#}");
         }
+        self.changes.changed();
     }
 
     fn drop_files(&self, state: &mut State, paths: &[PathBuf]) {
@@ -433,95 +547,56 @@ impl Inner {
             .retain(|image| !paths.iter().any(|path| path == image.ipsw.path()));
     }
 
+    /// The catalog's models of the families `system` names.
     fn devices(&self) -> Result<Vec<Device>> {
-        let devices = self.catalog.devices()?;
+        let mut devices = self.catalog.devices()?;
+        devices.retain(|device| system(&device.identifier).is_some());
         let mut state = self.lock();
         state.saved.devices.clone_from(&devices);
         self.save(&state);
         Ok(devices)
     }
 
-    /// Ask the catalog about each model that is due, fetch one missing
-    /// release, clear out what that leaves behind, then wait.
+    /// Fetch each release that is asked for, one at a time.
     fn work(&self) {
         if self.lock().saved.devices.is_empty() {
             let _ = self.devices();
         }
         loop {
-            let due: Vec<String> = {
-                let mut state = self.lock();
+            let firmware = {
+                let state = self.lock();
+                let state = self
+                    .changed
+                    .wait_while(state, |state| !state.stop && state.next().is_none())
+                    .unwrap();
                 if state.stop {
                     return;
                 }
-                state.dirty = false;
-                state
-                    .saved
-                    .models
-                    .iter()
-                    .filter(|model| model.checked.is_none_or(|at| at.elapsed() >= RECHECK))
-                    .map(|model| model.identifier.clone())
-                    .collect()
+                state.next().map(|download| download.firmware.clone())
             };
-            for identifier in due {
-                let latest = self.catalog.latest(&identifier);
-                let mut state = self.lock();
-                let Some(model) = state
-                    .saved
-                    .models
-                    .iter_mut()
-                    .find(|model| model.identifier == identifier)
-                else {
-                    continue;
-                };
-                model.checked = Some(Instant::now());
-                match latest {
-                    Ok(firmware) => {
-                        model.latest = Some(firmware);
-                        model.error = None;
-                    }
-                    Err(error) => model.error = Some(format!("{error:#}")),
-                }
-                self.save(&state);
-            }
-            let next = {
-                let state = self.lock();
-                state
-                    .failed
-                    .is_none_or(|at| at.elapsed() >= RETRY)
-                    .then(|| state.wanted())
-                    .flatten()
-            };
-            if let Some(firmware) = next {
-                let result = self.fetch(&firmware);
-                let mut state = self.lock();
-                state.fetch = None;
-                state.failed = result.is_err().then(Instant::now);
-                let error = result.err().map(|error| format!("{error:#}"));
-                if let Some(error) = &error {
-                    eprintln!("Images: {} ({}): {error}", firmware.version, firmware.build);
-                }
-                for model in &mut state.saved.models {
-                    if model.latest.as_ref() == Some(&firmware) {
-                        model.error.clone_from(&error);
-                    }
-                }
-                self.save(&state);
+            let Some(firmware) = firmware else {
                 continue;
-            }
+            };
+            let result = self.fetch(&firmware);
             let mut state = self.lock();
-            let superseded = state.superseded();
-            if !superseded.is_empty() {
-                self.drop_files(&mut state, &superseded);
-                self.save(&state);
+            state.fetch = None;
+            match result {
+                Ok(()) => state
+                    .downloads
+                    .retain(|download| download.firmware != firmware),
+                Err(error) => {
+                    // A fetch given up because its release was removed left
+                    // nothing to mark.
+                    let error = format!("{error:#}");
+                    for download in &mut state.downloads {
+                        if download.firmware == firmware {
+                            eprintln!("Images: {} ({}): {error}", firmware.version, firmware.build);
+                            download.error = Some(error.clone());
+                        }
+                    }
+                }
             }
-            let retry = state.failed.map(|at| RETRY.saturating_sub(at.elapsed()));
-            let wait = retry
-                .unwrap_or(RECHECK)
-                .clamp(Duration::from_secs(1), Duration::from_secs(600));
-            let _ = self
-                .changed
-                .wait_timeout_while(state, wait, |state| !state.dirty && !state.stop)
-                .unwrap();
+            self.save(&state);
         }
     }
 
@@ -529,7 +604,7 @@ impl Inner {
         let name = firmware.file_name()?;
         let path = self.dir.join(name);
         let part = self.dir.join(format!("{name}.part"));
-        // An earlier model's partial download is of no further use.
+        // An earlier release's partial download is of no further use.
         for entry in fs::read_dir(&self.dir)?.flatten() {
             let other = entry.path();
             if other.extension().is_some_and(|ext| ext == "part") && other != part {
@@ -537,12 +612,14 @@ impl Inner {
             }
         }
         let fetch = Fetch {
+            id: name.into(),
             version: firmware.version.clone(),
             build: firmware.build.clone(),
             bytes: firmware.bytes,
             done: 0,
         };
         self.lock().fetch = Some(fetch.clone());
+        self.changes.changed();
         println!(
             "Images: fetching {} ({}), {:.1} GB",
             firmware.version,
@@ -550,15 +627,25 @@ impl Inner {
             firmware.bytes as f64 / 1e9
         );
         let mut reported = Instant::now();
-        self.catalog.fetch(firmware, &part, &mut |done| {
-            if reported.elapsed() >= Duration::from_millis(250) {
-                reported = Instant::now();
-                self.lock().fetch = Some(Fetch {
-                    done,
-                    ..fetch.clone()
-                });
+        let fetched = self.catalog.fetch(firmware, &part, &mut |done| {
+            if reported.elapsed() < Duration::from_millis(250) {
+                return Ok(());
             }
-        })?;
+            reported = Instant::now();
+            let mut state = self.lock();
+            ensure!(state.fetching(firmware), "the image is no longer wanted");
+            state.fetch = Some(Fetch {
+                done,
+                ..fetch.clone()
+            });
+            drop(state);
+            self.changes.changed();
+            Ok(())
+        });
+        if fetched.is_err() && !self.lock().fetching(firmware) {
+            fs::remove_file(&part).ok();
+        }
+        fetched?;
         fs::rename(&part, &path)?;
         let ipsw = PreparedIpsw::open_stored(&path)?;
         ensure!(
@@ -579,18 +666,16 @@ impl Inner {
 /// Keeps an image from being cleared away while a restore reads it.
 pub struct Lease {
     inner: Arc<Inner>,
-    build: String,
+    id: String,
 }
 
 impl Drop for Lease {
     fn drop(&mut self) {
         let mut state = self.inner.lock();
-        if let Some(count) = state.held.get_mut(&self.build) {
+        if let Some(count) = state.leased.get_mut(&self.id) {
             *count -= 1;
             if *count == 0 {
-                state.held.remove(&self.build);
-                state.dirty = true;
-                self.inner.changed.notify_all();
+                state.leased.remove(&self.id);
             }
         }
     }
@@ -601,7 +686,11 @@ pub struct Store(Arc<Inner>);
 
 impl Store {
     /// Open the store in `dir`, which one process holds at a time.
-    pub fn open(dir: impl Into<PathBuf>, catalog: impl Catalog) -> Result<Self> {
+    pub fn open(
+        dir: impl Into<PathBuf>,
+        catalog: impl Catalog,
+        changes: Arc<Watch>,
+    ) -> Result<Self> {
         let dir = dir.into();
         fs::create_dir_all(&dir).context("creating the image store")?;
         let dir = dir.canonicalize()?;
@@ -644,6 +733,8 @@ impl Store {
                 ..State::default()
             }),
             changed: Condvar::new(),
+            changes,
+            asking: Mutex::default(),
             _lock: lock,
         }));
         if index_changed {
@@ -658,31 +749,52 @@ impl Store {
 
     pub fn snapshot(&self) -> Snapshot {
         let state = self.0.lock();
-        Snapshot {
-            images: state.saved.images.clone(),
-            models: state
+        let name = |identifier: &str| {
+            let device = state
                 .saved
-                .models
+                .devices
                 .iter()
-                .map(|model| ModelView {
-                    identifier: model.identifier.clone(),
-                    name: model.name.clone(),
-                    ready: model
-                        .latest
-                        .as_ref()
-                        .is_some_and(|firmware| state.has(&firmware.build)),
-                    latest: model.latest.clone(),
-                    error: model.error.clone(),
-                })
-                .collect(),
+                .find(|device| device.identifier == identifier);
+            device.map_or_else(|| identifier.to_owned(), |device| device.name.clone())
+        };
+        let held = state.saved.images.iter().map(|image| {
+            let mut models = Vec::new();
+            for model in image.ipsw.product_types.iter().map(|kind| name(kind)) {
+                if !models.contains(&model) {
+                    models.push(model);
+                }
+            }
+            let Release {
+                os,
+                version,
+                build,
+                bytes,
+            } = image.describe();
+            ImageView {
+                id: image.id().into(),
+                os,
+                version,
+                build,
+                bytes,
+                models,
+                ready: true,
+                error: None,
+            }
+        });
+        let coming = state.downloads.iter().map(|download| ImageView {
+            id: download.firmware.name().into(),
+            os: system(&download.identifier).unwrap_or_default().into(),
+            version: download.firmware.version.clone(),
+            build: download.firmware.build.clone(),
+            bytes: download.firmware.bytes,
+            models: vec![download.name.clone()],
+            ready: false,
+            error: download.error.clone(),
+        });
+        Snapshot {
+            images: held.chain(coming).collect(),
             fetch: state.fetch.clone(),
         }
-    }
-
-    fn touch(&self, mut state: MutexGuard<'_, State>) {
-        state.dirty = true;
-        self.0.save(&state);
-        self.0.changed.notify_all();
     }
 
     pub(crate) fn device_name(
@@ -705,11 +817,19 @@ impl Store {
             .map(|device| device.name.clone())
     }
 
-    /// Keep the newest image for a model from now on.
-    pub fn want(&self, identifier: &str) -> Result<()> {
-        if self.wants(identifier) {
-            return Ok(());
+    /// Every model the catalog lists.
+    pub fn catalog(&self) -> Result<Vec<Device>> {
+        let saved = self.0.lock().saved.devices.clone();
+        if saved.is_empty() {
+            self.0.devices()
+        } else {
+            Ok(saved)
         }
+    }
+
+    /// The catalog's entry for a model, from a fresh list when the saved one
+    /// lacks it.
+    fn device(&self, identifier: &str) -> Result<Device> {
         let known = |devices: &[Device]| {
             devices
                 .iter()
@@ -717,65 +837,73 @@ impl Store {
                 .cloned()
         };
         let listed = known(&self.0.lock().saved.devices);
-        let device = match listed {
-            Some(device) => device,
+        match listed {
+            Some(device) => Ok(device),
             None => known(&self.0.devices()?)
-                .with_context(|| format!("the catalog lists no model {identifier}"))?,
-        };
-        let mut state = self.0.lock();
-        if !state
-            .saved
-            .models
-            .iter()
-            .any(|model| model.identifier == device.identifier)
-        {
-            state.saved.models.push(Model {
-                identifier: device.identifier,
-                name: device.name,
-                latest: None,
-                error: None,
-                checked: None,
-            });
-            state.failed = None;
-            self.touch(state);
+                .with_context(|| format!("the catalog lists no model {identifier}")),
         }
-        Ok(())
     }
 
-    fn wants(&self, identifier: &str) -> bool {
+    /// The releases Apple signs for a model, newest first. A listing serves
+    /// for a while, so that what a restore was offered is what it gets.
+    pub fn releases(&self, identifier: &str) -> Result<Vec<Firmware>> {
+        let device = self.device(identifier)?;
+        self.signed(&device.identifier)
+    }
+
+    fn signed(&self, identifier: &str) -> Result<Vec<Firmware>> {
+        if let Some((listed, releases)) = self.0.lock().listings.get(identifier)
+            && listed.elapsed() < LISTING
+        {
+            return Ok(releases.clone());
+        }
+        let releases = self.0.catalog.releases(identifier)?;
         self.0
             .lock()
-            .saved
-            .models
-            .iter()
-            .any(|model| model.identifier.eq_ignore_ascii_case(identifier))
+            .listings
+            .insert(identifier.to_owned(), (Instant::now(), releases.clone()));
+        Ok(releases)
     }
 
-    /// Stop keeping a model's image. Its fetched image goes once no other
-    /// model needs it.
-    pub fn forget(&self, identifier: &str) -> Result<()> {
-        let mut state = self.0.lock();
-        let before = state.saved.models.len();
-        state
-            .saved
-            .models
-            .retain(|model| !model.identifier.eq_ignore_ascii_case(identifier));
-        ensure!(
-            state.saved.models.len() != before,
-            "no model {identifier} is kept"
-        );
-        self.touch(state);
+    /// Fetch a release Apple signs for a model: its newest, or the one of
+    /// this build.
+    pub fn download(&self, identifier: &str, build: Option<&str>) -> Result<()> {
+        let device = self.device(identifier)?;
+        let mut releases = self.signed(&device.identifier)?.into_iter();
+        let firmware = match build {
+            None => releases.next(),
+            Some(build) => releases.find(|release| release.build.eq_ignore_ascii_case(build)),
+        };
+        let firmware = firmware.with_context(|| match build {
+            Some(build) => format!("Apple signs no build {build} for {}", device.name),
+            None => format!("Apple signs no release for {}", device.name),
+        })?;
+        self.want(&device, firmware);
         Ok(())
     }
 
-    /// Ask the catalog about every model now.
-    pub fn refresh(&self) {
+    /// Queue a release unless it is here, and try it again if it failed.
+    fn want(&self, device: &Device, firmware: Firmware) {
         let mut state = self.0.lock();
-        for model in &mut state.saved.models {
-            model.checked = None;
+        if state.holds(&device.identifier, &firmware) {
+            return;
         }
-        state.failed = None;
-        self.touch(state);
+        match state
+            .downloads
+            .iter_mut()
+            .find(|download| download.firmware == firmware)
+        {
+            Some(download) => download.error = None,
+            None => state.downloads.push(Download {
+                identifier: device.identifier.clone(),
+                name: device.name.clone(),
+                firmware,
+                error: None,
+            }),
+        }
+        drop(state);
+        self.0.changed.notify_all();
+        self.0.changes.changed();
     }
 
     /// The model built on this chip and board.
@@ -786,7 +914,10 @@ impl Store {
                 .find(|device| device.hardware.contains(&(chip, board)))
                 .cloned()
         };
-        let asked = {
+        let unknown = || format!("no known model has CPID:{chip:04X} BDID:{board:02X}");
+        // One caller asks for a fresh list and the rest wait for it.
+        let _asking = self.0.asking.lock().unwrap();
+        {
             let mut state = self.0.lock();
             if let Some(device) = known(&state.saved.devices) {
                 return Ok(device);
@@ -796,14 +927,10 @@ impl Store {
             let recently = state
                 .devices_asked
                 .is_some_and(|at| at.elapsed() < Duration::from_secs(600));
+            ensure!(!recently, unknown());
             state.devices_asked = Some(Instant::now());
-            recently
-        };
-        (!asked)
-            .then(|| self.0.devices())
-            .transpose()?
-            .and_then(|devices| known(&devices))
-            .with_context(|| format!("no known model has CPID:{chip:04X} BDID:{board:02X}"))
+        }
+        known(&self.0.devices()?).with_context(unknown)
     }
 
     /// The chip and board a model's images are filed under: its own, or the
@@ -830,63 +957,131 @@ impl Store {
         }
     }
 
-    pub fn image_for(&self, chip: u32, board: u32) -> Option<PreparedIpsw> {
-        self.0.lock().image_for(chip, board).cloned()
+    /// What Apple signs for this hardware's model, or why that is not known.
+    /// A model the catalog does not list has only the images in the store.
+    fn listed(&self, chip: u32, board: u32) -> Result<(Device, Vec<Firmware>)> {
+        let device = self.model_for(chip, board)?;
+        let releases = self.signed(&device.identifier)?;
+        Ok((device, releases))
     }
 
-    /// The image for this hardware, fetched first if the store lacks one.
-    /// `waiting` hears of the download, and ends the wait by failing.
+    /// What a restore of this hardware can install now.
+    pub fn offer(&self, chip: u32, board: u32) -> Offer {
+        let listed = self.listed(chip, board);
+        let signed = listed
+            .as_ref()
+            .ok()
+            .map(|(_, releases)| releases.as_slice());
+        let state = self.0.lock();
+        let held = state.survey(chip, board, signed).held;
+        Offer {
+            latest: listed.as_ref().ok().and_then(|(device, releases)| {
+                let newest = releases.first()?;
+                Some(Release {
+                    os: system(&device.identifier).unwrap_or_default().into(),
+                    version: newest.version.clone(),
+                    build: newest.build.clone(),
+                    bytes: newest.bytes,
+                })
+            }),
+            held: held.first().map(|image| image.describe()),
+            problem: listed.err().map(|error| format!("{error:#}")),
+        }
+    }
+
+    /// The image to restore this hardware with: the newest in the store
+    /// that Apple still signs, or with `latest` the newest release Apple
+    /// signs, fetched if the store lacks it. A fetched image Apple no longer
+    /// signs is deleted. When the catalog cannot be asked, the newest image
+    /// in the store serves. `waiting` hears of a download, and ends the wait
+    /// by failing.
     pub fn obtain(
         &self,
         chip: u32,
         board: u32,
+        latest: bool,
         mut waiting: impl FnMut(Option<&Fetch>) -> Result<()>,
     ) -> Result<PreparedIpsw> {
-        if let Some(image) = self.image_for(chip, board) {
-            return Ok(image);
-        }
-        let device = self.model_for(chip, board)?;
-        self.want(&device.identifier)?;
+        let listed = self.listed(chip, board);
+        let mut seen = self.0.changes.count();
+        let (device, newest) = {
+            let mut state = self.0.lock();
+            let signed = listed
+                .as_ref()
+                .ok()
+                .map(|(_, releases)| releases.as_slice());
+            let survey = state.survey(chip, board, signed);
+            let held = survey.held.first().map(|image| image.ipsw.clone());
+            let lapsed: Vec<PathBuf> = survey
+                .lapsed
+                .iter()
+                .filter(|image| !state.leased.contains_key(image.id()))
+                .map(|image| image.ipsw.path().to_owned())
+                .collect();
+            if !lapsed.is_empty() {
+                self.0.drop_files(&mut state, &lapsed);
+                self.0.save(&state);
+            }
+            let (device, releases) = match (listed, held) {
+                (Ok(listed), None) => listed,
+                (Ok(listed), Some(_)) if latest => listed,
+                (Ok(_), Some(held)) => return Ok(held),
+                (Err(error), Some(held)) => {
+                    eprintln!("Images: using the image in the store: {error:#}");
+                    return Ok(held);
+                }
+                (Err(error), None) => return Err(error),
+            };
+            let newest = releases
+                .into_iter()
+                .next()
+                .with_context(|| format!("Apple signs no release for {}", device.name))?;
+            (device, newest)
+        };
+        self.want(&device, newest.clone());
         loop {
             let fetch = {
                 let state = self.0.lock();
-                if let Some(image) = state.image_for(chip, board) {
-                    return Ok(image.clone());
-                }
-                let model = state
+                let here = state
                     .saved
-                    .models
+                    .images
                     .iter()
-                    .find(|model| model.identifier == device.identifier)
-                    .with_context(|| format!("{} is no longer kept", device.identifier))?;
-                if let Some(error) = &model.error {
+                    .find(|image| image.is(&device.identifier, &newest));
+                if let Some(image) = here {
+                    ensure!(
+                        image.ipsw.erases(chip, board),
+                        "the image for {} does not cover this device",
+                        device.name
+                    );
+                    return Ok(image.ipsw.clone());
+                }
+                let download = state
+                    .downloads
+                    .iter()
+                    .find(|download| download.firmware == newest)
+                    .with_context(|| format!("the image for {} was removed", device.name))?;
+                if let Some(error) = &download.error {
                     bail!("{}: {error}", device.name);
                 }
-                ensure!(
-                    !model
-                        .latest
-                        .as_ref()
-                        .is_some_and(|firmware| state.has(&firmware.build)),
-                    "the image for {} does not cover this device",
-                    device.name
-                );
-                state.fetch.clone()
+                // Another archive's download is not this one's progress.
+                state
+                    .fetch
+                    .clone()
+                    .filter(|fetch| fetch.id == newest.name())
             };
             waiting(fetch.as_ref())?;
-            thread::sleep(Duration::from_millis(500));
+            // The download, the store and whatever `waiting` watches all
+            // advance this count.
+            seen = self.0.changes.wait(seen, None);
         }
     }
 
     pub fn hold(&self, ipsw: &PreparedIpsw) -> Lease {
-        *self
-            .0
-            .lock()
-            .held
-            .entry(ipsw.build_version.clone())
-            .or_default() += 1;
+        let id = file_id(ipsw.path()).to_owned();
+        *self.0.lock().leased.entry(id.clone()).or_default() += 1;
         Lease {
             inner: self.0.clone(),
-            build: ipsw.build_version.clone(),
+            id,
         }
     }
 
@@ -894,8 +1089,11 @@ impl Store {
     pub fn import(&self, path: &Path) -> Result<PreparedIpsw> {
         let source = PreparedIpsw::open(path)?;
         ensure!(
-            !self.0.lock().has(&source.build_version),
-            "build {} is already in the store",
+            !self.0.lock().saved.images.iter().any(|image| {
+                image.ipsw.build_version == source.build_version
+                    && image.ipsw.product_types == source.product_types
+            }),
+            "build {} for these models is already in the store",
             source.build_version
         );
         let name = path
@@ -912,33 +1110,34 @@ impl Store {
             ipsw: ipsw.clone(),
             fetched: false,
         });
-        self.touch(state);
+        self.0.save(&state);
         Ok(ipsw)
     }
 
-    /// Delete an image, and stop keeping the models it was the newest for.
-    pub fn remove(&self, build: &str) -> Result<()> {
+    /// Delete an image, or cancel its download.
+    pub fn remove(&self, id: &str) -> Result<()> {
         let mut state = self.0.lock();
         ensure!(
-            !state.held.contains_key(build),
-            "a restore is using build {build}"
+            !state.leased.contains_key(id),
+            "a restore is using this image"
         );
-        let paths: Vec<PathBuf> = state
+        let held: Vec<PathBuf> = state
             .saved
             .images
             .iter()
-            .filter(|image| image.ipsw.build_version == build)
+            .filter(|image| image.id() == id)
             .map(|image| image.ipsw.path().to_owned())
             .collect();
-        ensure!(!paths.is_empty(), "no image has build {build}");
-        self.0.drop_files(&mut state, &paths);
-        state.saved.models.retain(|model| {
-            model
-                .latest
-                .as_ref()
-                .is_none_or(|firmware| firmware.build != build)
-        });
-        self.touch(state);
+        let queued = state.downloads.len();
+        state
+            .downloads
+            .retain(|download| download.firmware.name() != id);
+        ensure!(
+            !held.is_empty() || state.downloads.len() != queued,
+            "the store has no image {id}"
+        );
+        self.0.drop_files(&mut state, &held);
+        self.0.save(&state);
         Ok(())
     }
 }
@@ -955,23 +1154,48 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use zip::{ZipWriter, write::SimpleFileOptions};
 
-    fn archive(path: &Path, version: &str, build: &str, model: &str, board: u32) {
+    const MODELS: [&str; 4] = ["Macmini9,1", "iPad13,18", "iPad13,19", "iBridge2,1"];
+
+    fn board(model: &str) -> u32 {
+        match model {
+            "Macmini9,1" => 34,
+            "iPad13,18" => 20,
+            "iBridge2,1" => 40,
+            _ => 21,
+        }
+    }
+
+    /// An archive of one build that restores these models.
+    fn archive(path: &Path, version: &str, build: &str, models: &[&str]) {
+        let kinds: String = models
+            .iter()
+            .map(|model| format!("<string>{model}</string>"))
+            .collect();
+        let identities: String = models
+            .iter()
+            .map(|model| {
+                format!(
+                    r#"<dict>
+                    <key>ApChipID</key><string>0x8103</string>
+                    <key>ApBoardID</key><integer>{}</integer>
+                    <key>Info</key><dict>
+                        <key>DeviceClass</key><string>j274ap</string>
+                        <key>Variant</key><string>Customer Erase Install (IPSW)</string>
+                    </dict>
+                    </dict>"#,
+                    board(model)
+                )
+            })
+            .collect();
         let manifest = format!(
             r#"<?xml version="1.0"?><plist version="1.0"><dict>
             <key>ProductVersion</key><string>{version}</string>
             <key>ProductBuildVersion</key><string>{build}</string>
-            <key>SupportedProductTypes</key><array><string>{model}</string></array>
-            <key>BuildIdentities</key><array><dict>
-                <key>ApChipID</key><string>0x8103</string>
-                <key>ApBoardID</key><integer>{board}</integer>
-                <key>Info</key><dict>
-                    <key>DeviceClass</key><string>j274ap</string>
-                    <key>Variant</key><string>Customer Erase Install (IPSW)</string>
-                </dict>
-            </dict></array>
+            <key>SupportedProductTypes</key><array>{kinds}</array>
+            <key>BuildIdentities</key><array>{identities}</array>
             </dict></plist>"#
         );
         let mut zip = ZipWriter::new(File::create(path).unwrap());
@@ -982,40 +1206,57 @@ mod tests {
         zip.finish().unwrap();
     }
 
-    /// A catalog of two models. Each release is written when fetched.
+    /// A catalog of three models and a T2 bridge. Each archive is written
+    /// when fetched.
     struct Shelf {
-        releases: Mutex<BTreeMap<String, (String, String)>>,
+        /// Each model's signed releases, newest first, as version and build.
+        releases: Mutex<BTreeMap<String, Vec<(String, String)>>>,
+        /// Models whose releases come in one archive.
+        shared: Mutex<Vec<&'static str>>,
         fetches: AtomicUsize,
         fail: Mutex<Option<String>>,
+        /// A fetch goes on until its progress is refused.
+        slow: AtomicBool,
+        /// The catalog does not answer.
+        offline: AtomicBool,
     }
 
     impl Shelf {
         fn new() -> Arc<Self> {
             let shelf = Self {
                 releases: Mutex::default(),
+                shared: Mutex::default(),
                 fetches: AtomicUsize::new(0),
                 fail: Mutex::default(),
+                slow: AtomicBool::new(false),
+                offline: AtomicBool::new(false),
             };
             shelf.release("Macmini9,1", "26.0", "25A354");
             shelf.release("iPad13,18", "26.0", "23A340");
             Arc::new(shelf)
         }
 
-        fn release(&self, model: &str, version: &str, build: &str) {
-            self.releases
-                .lock()
-                .unwrap()
-                .insert(model.into(), (version.into(), build.into()));
+        /// Sign these releases for a model, newest first, and no others.
+        fn sign(&self, model: &str, releases: &[(&str, &str)]) {
+            let releases = releases
+                .iter()
+                .map(|(version, build)| ((*version).into(), (*build).into()))
+                .collect();
+            self.releases.lock().unwrap().insert(model.into(), releases);
         }
-    }
 
-    fn board(model: &str) -> u32 {
-        if model == "Macmini9,1" { 34 } else { 20 }
+        fn release(&self, model: &str, version: &str, build: &str) {
+            self.sign(model, &[(version, build)]);
+        }
+
+        fn fetched(&self) -> usize {
+            self.fetches.load(Ordering::SeqCst)
+        }
     }
 
     impl Catalog for Arc<Shelf> {
         fn devices(&self) -> Result<Vec<Device>> {
-            Ok(["Macmini9,1", "iPad13,18"]
+            Ok(MODELS
                 .map(|identifier| Device {
                     identifier: identifier.into(),
                     name: format!("A {identifier}"),
@@ -1024,43 +1265,50 @@ mod tests {
                 .into())
         }
 
-        fn latest(&self, identifier: &str) -> Result<Firmware> {
-            let (version, build) = self
-                .releases
-                .lock()
-                .unwrap()
+        fn releases(&self, identifier: &str) -> Result<Vec<Firmware>> {
+            ensure!(!self.offline.load(Ordering::SeqCst), "no route");
+            let shared = self.shared.lock().unwrap();
+            let models = if shared.contains(&identifier) {
+                shared.join("+")
+            } else {
+                identifier.to_owned()
+            };
+            let releases = self.releases.lock().unwrap();
+            Ok(releases
                 .get(identifier)
-                .cloned()
-                .context("unsigned")?;
-            Ok(Firmware {
-                url: format!("https://updates.cdn-apple.com/x/{identifier}_{build}.ipsw"),
-                version,
-                build,
-                sha256: identifier.into(),
-                bytes: 1,
-            })
+                .into_iter()
+                .flatten()
+                .map(|(version, build)| Firmware {
+                    url: format!(
+                        "https://updates.cdn-apple.com/x/{}_{build}.ipsw",
+                        models.replace('+', "_")
+                    ),
+                    version: version.clone(),
+                    build: build.clone(),
+                    // The archive's models stand in for its digest.
+                    sha256: models.clone(),
+                    bytes: 1,
+                })
+                .collect())
         }
 
         fn fetch(
             &self,
             firmware: &Firmware,
             part: &Path,
-            progress: &mut dyn FnMut(u64),
+            progress: &mut dyn FnMut(u64) -> Result<()>,
         ) -> Result<()> {
             self.fetches.fetch_add(1, Ordering::SeqCst);
             if let Some(error) = self.fail.lock().unwrap().clone() {
                 bail!(error);
             }
-            let model = &firmware.sha256;
-            archive(
-                part,
-                &firmware.version,
-                &firmware.build,
-                model,
-                board(model),
-            );
-            progress(1);
-            Ok(())
+            while self.slow.load(Ordering::SeqCst) {
+                thread::sleep(Duration::from_millis(5));
+                progress(0)?;
+            }
+            let models: Vec<&str> = firmware.sha256.split('+').collect();
+            archive(part, &firmware.version, &firmware.build, &models);
+            progress(1)
         }
     }
 
@@ -1070,6 +1318,17 @@ mod tests {
             assert!(Instant::now() < deadline, "{what}");
             thread::sleep(Duration::from_millis(5));
         }
+    }
+
+    fn builds(store: &Store) -> Vec<String> {
+        let images = store.snapshot().images;
+        let ready = images.into_iter().filter(|image| image.ready);
+        ready.map(|image| image.build).collect()
+    }
+
+    /// A store whose listings are asked for afresh each time.
+    fn relist(store: &Store) {
+        store.0.lock().listings.clear();
     }
 
     #[test]
@@ -1104,72 +1363,72 @@ mod tests {
     }
 
     #[test]
-    fn the_newest_signed_release_is_the_one_listed() {
-        let listing: Listing = serde_json::from_str(
-            r#"{"identifier": "iPad13,18", "firmwares": [
-            {"version": "27.3", "buildid": "24C1", "signed": false, "filesize": 3,
-             "url": "https://updates.cdn-apple.com/a/c.ipsw", "sha256sum": null},
-            {"version": "27.2.1", "buildid": "24B156", "signed": true, "filesize": 2,
-             "url": "https://updates.cdn-apple.com/a/b.ipsw",
-             "sha256sum": "B546FE71E7684F3D29A589171C3DA480D19739B066CB2122B53FB69153A43FC6"},
-            {"version": "27.2", "buildid": "24B119", "signed": true, "filesize": 1,
-             "url": "https://updates.cdn-apple.com/a/a.ipsw", "sha256sum": "00"}]}"#,
-        )
-        .unwrap();
-        let firmware = newest_signed(listing).unwrap();
-        assert_eq!(firmware.build, "24B156");
-        assert_eq!(firmware.bytes, 2);
-        assert!(firmware.sha256.starts_with("b546fe71"));
+    fn the_signed_releases_are_listed_newest_first() {
+        let digest = "B546FE71E7684F3D29A589171C3DA480D19739B066CB2122B53FB69153A43FC6";
+        let listing = |newest: &str| -> Listing {
+            serde_json::from_str(&format!(
+                r#"{{"identifier": "Macmini9,1", "firmwares": [
+                {{"version": "27.3", "buildid": "26C1", "signed": false, "filesize": 4,
+                 "url": "https://updates.cdn-apple.com/a/d.ipsw", "sha256sum": null}},
+                {{"version": "27.2.1", "buildid": "26B131", "signed": true, "filesize": 3,
+                 "url": "https://updates.cdn-apple.com/a/c.ipsw", "sha256sum": {newest}}},
+                {{"version": "27.2", "buildid": "26B100", "signed": true, "filesize": 2,
+                 "url": "https://updates.cdn-apple.com/a/b.ipsw", "sha256sum": "00"}},
+                {{"version": "26.6", "buildid": "25G80", "signed": true, "filesize": 1,
+                 "url": "https://updates.cdn-apple.com/a/a.ipsw", "sha256sum": "{digest}"}}]}}"#
+            ))
+            .unwrap()
+        };
+        let releases = signed(listing(&format!(r#""{digest}""#))).unwrap();
+        let builds: Vec<&str> = releases.iter().map(|r| r.build.as_str()).collect();
+        // An older release without a digest cannot be checked, so is not offered.
+        assert_eq!(builds, ["26B131", "25G80"]);
+        assert_eq!(releases[0].bytes, 3);
+        assert!(releases[0].sha256.starts_with("b546fe71"));
+        // The newest one without a digest is not passed over for an older.
+        assert!(signed(listing("null")).is_err());
         let unsigned: Listing = serde_json::from_str(r#"{"firmwares": []}"#).unwrap();
-        assert!(newest_signed(unsigned).is_err());
+        assert!(signed(unsigned).unwrap().is_empty());
     }
 
     #[test]
-    fn the_store_fetches_what_a_device_needs_and_keeps_it_current() {
+    fn a_restore_fetches_the_newest_release_and_the_next_reuses_it() {
         let temp = tempfile::tempdir().unwrap();
         let shelf = Shelf::new();
-        let store = Store::open(temp.path(), shelf.clone()).unwrap();
-        assert!(store.image_for(0x8103, 34).is_none());
+        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
         assert!(store.model_for(0x8103, 99).is_err());
-        // A device nobody asked about is identified, wanted and fetched.
+        assert_eq!(store.offer(0x8103, 34).held, None);
+        // A device nobody asked about is identified and its image fetched.
         let mut waits = 0;
         let image = store
-            .obtain(0x8103, 34, |_| {
+            .obtain(0x8103, 34, false, |_| {
                 waits += 1;
                 Ok(())
             })
             .unwrap();
         assert_eq!(image.build_version, "25A354");
         assert!(waits > 0);
-        let snapshot = store.snapshot();
-        assert_eq!(snapshot.models.len(), 1);
-        assert!(snapshot.models[0].ready && snapshot.images[0].fetched);
-        // The same hardware again needs no catalog and no wait.
-        store.obtain(0x8103, 34, |_| bail!("waited")).unwrap();
-        assert_eq!(shelf.fetches.load(Ordering::SeqCst), 1);
-
-        // A newer release replaces the old one once it is in hand, and not
-        // while a restore still reads the old one.
-        let lease = store.hold(&image);
-        shelf.release("Macmini9,1", "26.1", "25B78");
-        store.refresh();
-        until("the newer image", || {
-            store.image_for(0x8103, 34).unwrap().build_version == "25B78"
-        });
-        thread::sleep(Duration::from_millis(50));
-        assert!(image.path().exists());
-        drop(lease);
-        until("the old image to go", || !image.path().exists());
-        assert_eq!(store.snapshot().images.len(), 1);
+        let images = store.snapshot().images;
+        assert_eq!(images.len(), 1);
+        assert!(images[0].ready);
+        assert_eq!(images[0].os, "macOS");
+        assert_eq!(images[0].models, ["A Macmini9,1"]);
+        // The same hardware again waits for nothing.
+        for latest in [false, true] {
+            store
+                .obtain(0x8103, 34, latest, |_| bail!("waited"))
+                .unwrap();
+        }
+        assert_eq!(shelf.fetched(), 1);
         store.close();
         drop(store);
 
         // The index survives, and one process holds the store at a time.
         let shelf = Shelf::new();
         until("the store to be free", || {
-            Store::open(temp.path(), shelf.clone()).is_ok_and(|store| {
-                assert!(Store::open(temp.path(), shelf.clone()).is_err());
-                assert_eq!(store.image_for(0x8103, 34).unwrap().build_version, "25B78");
+            Store::open(temp.path(), shelf.clone(), Arc::default()).is_ok_and(|store| {
+                assert!(Store::open(temp.path(), shelf.clone(), Arc::default()).is_err());
+                assert_eq!(builds(&store), ["25A354"]);
                 store.close();
                 true
             })
@@ -1177,18 +1436,201 @@ mod tests {
     }
 
     #[test]
+    fn a_newer_release_is_offered_and_fetched_only_when_asked_for() {
+        let temp = tempfile::tempdir().unwrap();
+        let shelf = Shelf::new();
+        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
+        store.obtain(0x8103, 34, false, |_| Ok(())).unwrap();
+        shelf.sign("Macmini9,1", &[("26.1", "25B78"), ("26.0", "25A354")]);
+        relist(&store);
+        let offer = store.offer(0x8103, 34);
+        assert_eq!(offer.latest.as_ref().unwrap().build, "25B78");
+        assert_eq!(offer.latest.as_ref().unwrap().os, "macOS");
+        assert_eq!(offer.held.as_ref().unwrap().build, "25A354");
+        assert_eq!(offer.problem, None);
+
+        // The image in the store serves until the newest is asked for.
+        let held = store
+            .obtain(0x8103, 34, false, |_| bail!("waited"))
+            .unwrap();
+        assert_eq!(held.build_version, "25A354");
+        let newest = store.obtain(0x8103, 34, true, |_| Ok(())).unwrap();
+        assert_eq!(newest.build_version, "25B78");
+        assert_eq!(shelf.fetched(), 2);
+        // Both stay, and the newer is the one in the store a restore takes.
+        assert_eq!(builds(&store), ["25A354", "25B78"]);
+        let reused = store
+            .obtain(0x8103, 34, false, |_| bail!("waited"))
+            .unwrap();
+        assert_eq!(reused.build_version, "25B78");
+        let offer = store.offer(0x8103, 34);
+        assert_eq!(offer.held.unwrap().build, offer.latest.unwrap().build);
+        store.close();
+    }
+
+    #[test]
+    fn an_image_apple_no_longer_signs_gives_way_to_the_newest() {
+        let temp = tempfile::tempdir().unwrap();
+        let shelf = Shelf::new();
+        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
+        let old = store.obtain(0x8103, 20, false, |_| Ok(())).unwrap();
+        assert_eq!(old.build_version, "23A340");
+        shelf.release("iPad13,18", "26.1", "23B85");
+        relist(&store);
+        // Nothing in the store is offered, and a restore reading the old
+        // image keeps it.
+        assert_eq!(store.offer(0x8103, 20).held, None);
+        let lease = store.hold(&old);
+        let new = store.obtain(0x8103, 20, false, |_| Ok(())).unwrap();
+        assert_eq!(new.build_version, "23B85");
+        assert!(old.path().exists());
+        drop(lease);
+        // The next restore clears it away.
+        store
+            .obtain(0x8103, 20, false, |_| bail!("waited"))
+            .unwrap();
+        assert!(!old.path().exists());
+        assert_eq!(builds(&store), ["23B85"]);
+        assert_eq!(shelf.fetched(), 2);
+        store.close();
+    }
+
+    #[test]
+    fn the_image_in_the_store_serves_while_the_catalog_cannot_be_asked() {
+        let temp = tempfile::tempdir().unwrap();
+        let shelf = Shelf::new();
+        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
+        store.obtain(0x8103, 34, false, |_| Ok(())).unwrap();
+        shelf.offline.store(true, Ordering::SeqCst);
+        relist(&store);
+        let offer = store.offer(0x8103, 34);
+        assert_eq!(offer.latest, None);
+        assert_eq!(offer.held.unwrap().build, "25A354");
+        assert!(offer.problem.unwrap().contains("no route"));
+        for latest in [false, true] {
+            let image = store
+                .obtain(0x8103, 34, latest, |_| bail!("waited"))
+                .unwrap();
+            assert_eq!(image.build_version, "25A354");
+        }
+        // With nothing in the store, the restore ends with the reason.
+        let error = store.obtain(0x8103, 20, false, |_| Ok(())).unwrap_err();
+        assert!(format!("{error:#}").contains("no route"), "{error:#}");
+        store.close();
+    }
+
+    #[test]
+    fn archives_of_one_build_for_different_models_are_distinct() {
+        let temp = tempfile::tempdir().unwrap();
+        let shelf = Shelf::new();
+        shelf.release("iPad13,18", "26.0", "25A354");
+        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
+        let mac = store.obtain(0x8103, 34, false, |_| Ok(())).unwrap();
+        let ipad = store.obtain(0x8103, 20, false, |_| Ok(())).unwrap();
+        assert_eq!(mac.build_version, ipad.build_version);
+        assert_ne!(mac.path(), ipad.path());
+        assert!(ipad.erases(0x8103, 20) && !mac.erases(0x8103, 20));
+        assert_eq!(shelf.fetched(), 2);
+        // A restore holding one does not hold the other.
+        let lease = store.hold(&ipad);
+        store.remove(file_id(mac.path())).unwrap();
+        assert!(store.remove(file_id(ipad.path())).is_err());
+        drop(lease);
+        assert!(!mac.path().exists() && ipad.path().exists());
+        let images = store.snapshot().images;
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].models, ["A iPad13,18"]);
+        store.close();
+    }
+
+    #[test]
+    fn models_that_share_an_archive_fetch_it_once() {
+        let temp = tempfile::tempdir().unwrap();
+        let shelf = Shelf::new();
+        *shelf.shared.lock().unwrap() = vec!["iPad13,18", "iPad13,19"];
+        shelf.release("iPad13,19", "26.0", "23A340");
+        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
+        // Two restores ask at once, and so do two of one model.
+        let asking: Vec<_> = [20, 21, 21]
+            .map(|board| {
+                let store = store.clone();
+                thread::spawn(move || store.obtain(0x8103, board, false, |_| Ok(())).unwrap())
+            })
+            .into();
+        let images: Vec<PreparedIpsw> = asking
+            .into_iter()
+            .map(|asked| asked.join().unwrap())
+            .collect();
+        assert!(images.iter().all(|image| image.path() == images[0].path()));
+        assert_eq!(shelf.fetched(), 1);
+        let images = store.snapshot().images;
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].os, "iPadOS");
+        assert_eq!(images[0].models, ["A iPad13,18", "A iPad13,19"]);
+        store.close();
+    }
+
+    #[test]
+    fn any_signed_release_can_be_fetched_ahead_of_a_restore() {
+        let temp = tempfile::tempdir().unwrap();
+        let shelf = Shelf::new();
+        shelf.sign("Macmini9,1", &[("26.1", "25B78"), ("26.0", "25A354")]);
+        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
+        let listed = store.releases("macmini9,1").unwrap();
+        let listed: Vec<&str> = listed.iter().map(|r| r.build.as_str()).collect();
+        assert_eq!(listed, ["25B78", "25A354"]);
+        assert!(store.download("Macmini9,1", Some("25X1")).is_err());
+        assert!(store.download("Mac99,9", None).is_err());
+
+        // An older release is what a restore reuses while it is the newest
+        // in the store.
+        store.download("Macmini9,1", Some("25A354")).unwrap();
+        until("the older image", || builds(&store) == ["25A354"]);
+        let image = store
+            .obtain(0x8103, 34, false, |_| bail!("waited"))
+            .unwrap();
+        assert_eq!(image.build_version, "25A354");
+        // Asking for one that is here fetches nothing.
+        store.download("Macmini9,1", Some("25A354")).unwrap();
+        store.download("Macmini9,1", None).unwrap();
+        until("the newest image", || builds(&store).len() == 2);
+        assert_eq!(shelf.fetched(), 2);
+        store.close();
+    }
+
+    #[test]
+    fn removing_a_release_gives_up_its_download() {
+        let temp = tempfile::tempdir().unwrap();
+        let shelf = Shelf::new();
+        shelf.slow.store(true, Ordering::SeqCst);
+        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
+        store.download("Macmini9,1", None).unwrap();
+        until("the download", || store.snapshot().fetch.is_some());
+        let snapshot = store.snapshot();
+        let id = snapshot.fetch.unwrap().id;
+        assert_eq!(snapshot.images.len(), 1);
+        assert!(snapshot.images[0].id == id && !snapshot.images[0].ready);
+        store.remove(&id).unwrap();
+        until("the download to end", || store.snapshot().fetch.is_none());
+        assert!(store.snapshot().images.is_empty());
+        assert_eq!(shelf.fetched(), 1);
+        shelf.slow.store(false, Ordering::SeqCst);
+        store.close();
+    }
+
+    #[test]
     fn reopening_drops_an_image_whose_file_is_not_as_the_store_left_it() {
         let temp = tempfile::tempdir().unwrap();
         let local = temp.path().join("Mini.ipsw");
-        archive(&local, "25.0", "24A1", "Macmini9,1", 34);
+        archive(&local, "25.0", "24A1", &["Macmini9,1"]);
         let dir = temp.path().join("store");
-        let store = Store::open(&dir, Shelf::new()).unwrap();
+        let store = Store::open(&dir, Shelf::new(), Arc::default()).unwrap();
         let added = store.import(&local).unwrap();
         store.close();
         drop(store);
-        archive(added.path(), "25.0", "24A1", "Macmini9,1", 34);
+        archive(added.path(), "25.0", "24A1", &["Macmini9,1"]);
         until("the store to be free", || {
-            Store::open(&dir, Shelf::new()).is_ok_and(|store| {
+            Store::open(&dir, Shelf::new(), Arc::default()).is_ok_and(|store| {
                 assert!(store.snapshot().images.is_empty());
                 store.close();
                 true
@@ -1197,11 +1639,28 @@ mod tests {
     }
 
     #[test]
+    fn the_store_keeps_only_the_families_it_names() {
+        let temp = tempfile::tempdir().unwrap();
+        let shelf = Shelf::new();
+        shelf.release("iBridge2,1", "10.2", "23P2101");
+        let store = Store::open(temp.path(), shelf, Arc::default()).unwrap();
+        let models: Vec<String> = store
+            .catalog()
+            .unwrap()
+            .into_iter()
+            .map(|device| device.identifier)
+            .collect();
+        assert_eq!(models, ["Macmini9,1", "iPad13,18", "iPad13,19"]);
+        assert!(store.offer(0x8103, board("iBridge2,1")).latest.is_none());
+        store.close();
+    }
+
+    #[test]
     fn an_index_the_store_cannot_read_is_reported_and_left_alone() {
         let temp = tempfile::tempdir().unwrap();
         let index = temp.path().join("index.json");
         fs::write(&index, r#"{"images": [{"path": "/a.ipsw"}]}"#).unwrap();
-        let Err(error) = Store::open(temp.path(), Shelf::new()) else {
+        let Err(error) = Store::open(temp.path(), Shelf::new(), Arc::default()) else {
             panic!("the store opened");
         };
         assert!(format!("{error:#}").contains("index.json"), "{error:#}");
@@ -1209,17 +1668,26 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_fetch_ends_the_wait_with_its_reason() {
+    fn a_failed_fetch_ends_the_wait_with_its_reason_and_is_tried_again_when_asked() {
         let temp = tempfile::tempdir().unwrap();
         let shelf = Shelf::new();
         *shelf.fail.lock().unwrap() = Some("no route".into());
-        let store = Store::open(temp.path(), shelf.clone()).unwrap();
-        let error = store.obtain(0x8103, 20, |_| Ok(())).unwrap_err();
+        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
+        let error = store.obtain(0x8103, 20, false, |_| Ok(())).unwrap_err();
         assert!(format!("{error:#}").contains("no route"), "{error:#}");
-        // A model Apple signs nothing for fails the same way.
-        shelf.releases.lock().unwrap().remove("Macmini9,1");
-        let error = store.obtain(0x8103, 34, |_| Ok(())).unwrap_err();
-        assert!(format!("{error:#}").contains("unsigned"), "{error:#}");
+        // The failure shows on the image that did not come.
+        let images = store.snapshot().images;
+        assert!(!images[0].ready && images[0].error.as_deref() == Some("no route"));
+        *shelf.fail.lock().unwrap() = None;
+        store.obtain(0x8103, 20, false, |_| Ok(())).unwrap();
+        assert_eq!(shelf.fetched(), 2);
+        // A model Apple signs nothing for ends the same way.
+        shelf.sign("Macmini9,1", &[]);
+        let error = store.obtain(0x8103, 34, false, |_| Ok(())).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("signs no release"),
+            "{error:#}"
+        );
         store.close();
     }
 
@@ -1227,9 +1695,9 @@ mod tests {
     fn an_added_image_stays_until_it_is_removed() {
         let temp = tempfile::tempdir().unwrap();
         let local = temp.path().join("Mini.ipsw");
-        archive(&local, "25.0", "24A1", "Macmini9,1", 34);
+        archive(&local, "25.0", "24A1", &["Macmini9,1"]);
         let shelf = Shelf::new();
-        let store = Store::open(temp.path().join("store"), shelf.clone()).unwrap();
+        let store = Store::open(temp.path().join("store"), shelf.clone(), Arc::default()).unwrap();
         let added = store.import(&local).unwrap();
         assert!(store.import(&local).is_err());
         assert!(
@@ -1237,31 +1705,24 @@ mod tests {
                 .path()
                 .starts_with(temp.path().join("store").canonicalize().unwrap())
         );
-        // It serves its hardware without a fetch.
-        assert_eq!(
-            store
-                .obtain(0x8103, 34, |_| bail!("waited"))
-                .unwrap()
-                .build_version,
-            "24A1"
-        );
-        // Keeping the model fetches its newest; the added image stays, and
-        // the newest serves the hardware.
-        store.want("macmini9,1").unwrap();
-        until("the newest image", || store.snapshot().images.len() == 2);
-        assert_eq!(store.image_for(0x8103, 34).unwrap().build_version, "25A354");
-        thread::sleep(Duration::from_millis(50));
+        // It serves its hardware without a fetch, though the catalog does
+        // not list its build.
+        let image = store
+            .obtain(0x8103, 34, false, |_| bail!("waited"))
+            .unwrap();
+        assert_eq!(image.build_version, "24A1");
+        // With the newest fetched beside it, the newest serves.
+        let newest = store.obtain(0x8103, 34, true, |_| Ok(())).unwrap();
+        assert_eq!(newest.build_version, "25A354");
         assert!(added.path().exists());
+        let id = file_id(added.path());
         let lease = store.hold(&added);
-        assert!(store.remove("24A1").is_err());
+        assert!(store.remove(id).is_err());
         drop(lease);
-        store.remove("24A1").unwrap();
+        store.remove(id).unwrap();
         assert!(!added.path().exists());
-        assert!(store.remove("24A1").is_err());
-        // Removing a model's newest image stops keeping the model.
-        store.remove("25A354").unwrap();
-        assert!(store.snapshot().models.is_empty());
-        assert!(store.want("Mac99,9").is_err());
+        assert!(store.remove(id).is_err());
+        assert_eq!(builds(&store), ["25A354"]);
         store.close();
     }
 }

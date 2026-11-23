@@ -6,7 +6,21 @@ struct DeviceInspector: View {
 
     var body: some View {
         if devices.count == 1, let device = devices.first {
+            let operation = device.operation
+            // The operation or fault leads, under the device's name.
+            let leads = operation != nil || device.port.fault != nil
             Form {
+                if leads {
+                    Section {
+                        if let fault = device.port.fault {
+                            Label(fault, systemImage: "exclamationmark.triangle.fill")
+                        } else if let operation {
+                            OperationView(operation: operation)
+                        }
+                    } header: {
+                        DeviceTitle(device: device)
+                    }
+                }
                 Section {
                     LabeledContent("Port", value: "\(device.boardTitle) · \(device.port.number)")
                     if let ecid = device.port.ecid {
@@ -27,10 +41,9 @@ struct DeviceInspector: View {
                         Label("Internet Sharing", systemImage: DeviceSymbol.lan)
                     }
                 } header: {
-                    DeviceName(device: device, lineLimit: nil)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                        .textCase(nil)
+                    if !leads {
+                        DeviceTitle(device: device)
+                    }
                 }
                 if device.port.powered || device.port.power != nil || device.port.waitingForPower || device.port.short {
                     Section("Power") {
@@ -47,21 +60,6 @@ struct DeviceInspector: View {
                         }
                     }
                 }
-                if let fault = device.port.fault {
-                    Label(fault, systemImage: "exclamationmark.triangle")
-                } else if device.port.request != nil || device.port.stage != nil || (device.port.job != nil && device.port.result == nil) {
-                    LabeledContent("Operation", value: device.activity.text)
-                }
-                if let result = device.port.result {
-                    Section("Last \(result.operation.title)") {
-                        Text(result.message)
-                        if let directory = result.logDirectory {
-                            Button("Show Logs in Finder") {
-                                NSWorkspace.shared.open(URL(filePath: directory, directoryHint: .isDirectory))
-                            }
-                        }
-                    }
-                }
             }
             .formStyle(.grouped)
             .textSelection(.enabled)
@@ -69,6 +67,93 @@ struct DeviceInspector: View {
             ContentUnavailableView("No Selection", systemImage: "cable.connector")
         } else {
             ContentUnavailableView("\(devices.count) Devices Selected", systemImage: "rectangle.stack")
+        }
+    }
+}
+
+private struct DeviceTitle: View {
+    let device: Device
+
+    var body: some View {
+        DeviceName(device: device, lineLimit: nil)
+            .font(.headline)
+            .foregroundStyle(.primary)
+            .textCase(nil)
+    }
+}
+
+/// An operation from its title down: overall progress, each step and how it
+/// stands, then the outcome.
+private struct OperationView: View {
+    let operation: OperationStatus
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label(operation.title, systemImage: operation.symbol)
+                    .fontWeight(.medium)
+                Spacer()
+                if case let .working(fraction?) = operation.mark {
+                    Text(fraction.formatted(.percent.precision(.fractionLength(0))))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                } else {
+                    ActivityMark(activity: Activity(operation.title, operation.mark))
+                }
+            }
+            if case let .working(fraction?) = operation.mark {
+                ProgressView(value: fraction)
+                    .accessibilityLabel(operation.title)
+            }
+            if !operation.steps.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(operation.steps.enumerated()), id: \.offset) { _, step in
+                        StepLabel(step: step, detail: step.state == .active ? operation.detail : nil)
+                    }
+                }
+            } else if let detail = operation.detail {
+                Text(detail).foregroundStyle(.secondary)
+            }
+        }
+        if let directory = operation.logDirectory {
+            Button("Show Logs in Finder") {
+                NSWorkspace.shared.open(URL(filePath: directory, directoryHint: .isDirectory))
+            }
+        }
+    }
+}
+
+private struct StepLabel: View {
+    let step: OperationStatus.Step
+    /// What the worker is doing within the step, when it is something else.
+    let detail: String?
+
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(step.name)
+                    .foregroundStyle(step.state == .pending ? .secondary : .primary)
+                if let detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } icon: {
+            switch step.state {
+            case .done:
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Done")
+            case .active:
+                Image(systemName: "progress.indicator")
+                    .symbolEffect(.variableColor.iterative, options: .repeat(.continuous))
+                    .accessibilityLabel("Under Way")
+            case .pending:
+                Image(systemName: "circle")
+                    .foregroundStyle(.tertiary)
+                    .accessibilityLabel("Waiting")
+            }
         }
     }
 }
