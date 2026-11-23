@@ -54,9 +54,8 @@ impl AppleDevice {
             0x1227 => AppleMode::Dfu,
             0xf014 => AppleMode::PortDfu,
             0x1280..=0x1283 => AppleMode::Recovery,
-            0x1222 => AppleMode::Wtf,
             0x1881 => AppleMode::Kis,
-            0x1290..=0x12af | 0x1901..=0x1905 | 0x8600 => AppleMode::Mux,
+            0x1290..=0x12af | 0x1901..=0x1905 => AppleMode::Mux,
             _ => return None,
         };
         let identity = if matches!(mode, AppleMode::Mux | AppleMode::Kis) {
@@ -80,7 +79,6 @@ pub(crate) fn mode_name(mode: AppleMode) -> &'static str {
         AppleMode::Kis => "debug USB",
         AppleMode::PortDfu => "port DFU",
         AppleMode::Recovery => "recovery",
-        AppleMode::Wtf => "WTF",
         AppleMode::Restored => "restore service",
         AppleMode::Normal => "booted",
         // The running system or a restore; nothing has asked which.

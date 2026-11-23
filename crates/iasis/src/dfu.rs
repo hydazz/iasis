@@ -154,7 +154,6 @@ impl Assessment {
     pub(crate) fn restore_access(
         &self,
         port: &PortStatus,
-        action: PortAction,
         supports: impl FnOnce(AppleMode) -> bool,
     ) -> RestoreAccess {
         match self.signal {
@@ -166,7 +165,7 @@ impl Assessment {
             Signal::Restoring
                 if self.usb_mode == Some(AppleMode::Restored)
                     && !port.restoring()
-                    && port.offers(action) =>
+                    && port.offers(PortAction::Dfu) =>
             {
                 RestoreAccess::EnterDfu
             }
@@ -185,7 +184,6 @@ impl Assessment {
             Some(AppleMode::Mux) => "Apple usbmux interface",
             Some(AppleMode::Normal) => "Normal mode",
             Some(AppleMode::Restored) => "Restore service",
-            Some(AppleMode::Wtf) => "Apple WTF mode",
             None => "",
         };
         let mut parts = Vec::new();
@@ -334,7 +332,6 @@ pub fn assess(
     port: Port,
     status: &Status,
     snapshot: &Snapshot,
-    action: PortAction,
     attempt: Option<&Attempt>,
 ) -> Assessment {
     let p = &status.ports[port.index()];
@@ -409,7 +406,7 @@ pub fn assess(
         Signal::Settling
     } else if p.debug_actions == DebugActions::Silent {
         Signal::NoDebug
-    } else if !p.offers(action) {
+    } else if !p.offers(PortAction::Dfu) {
         if single.is_some_and(is_mac)
             && matches!(p.debug_actions, DebugActions::Listed(ids) if !ids.contains(&iasis_protocol::DFU_USB))
         {
@@ -584,7 +581,7 @@ mod tests {
         }
     }
     fn report(st: &Status, s: &Snapshot, attempt: Option<&Attempt>) -> Assessment {
-        assess(8, P, st, s, PortAction::DfuAppleSilicon, attempt)
+        assess(8, P, st, s, attempt)
     }
     fn sent(st: &Status, s: &Snapshot, result: CommandResult) -> Attempt {
         Attempt::new(8, P, &report(st, s, None), s, result)
@@ -612,8 +609,7 @@ mod tests {
         let mut debug = apple(AppleMode::Kis, 0x1881, None);
         debug.topology = slot.usb2.clone();
         slot.devices = vec![child, debug, direct];
-        let report =
-            |s: &Snapshot| assess(8, port, &status(), s, PortAction::DfuAppleSilicon, None);
+        let report = |s: &Snapshot| assess(8, port, &status(), s, None);
         let seen = report(&s);
         assert_eq!(seen.signal, Signal::MultipleTransports);
         assert_eq!((seen.usb_mode, seen.ecid), (None, None));
@@ -819,11 +815,7 @@ mod tests {
         ] {
             usb.ports[0].devices = vec![apple(mode, 0x1227, ecid)];
             assert_eq!(
-                report(&st, &usb, None).restore_access(
-                    &st.ports[0],
-                    PortAction::DfuAppleSilicon,
-                    |_| supports
-                ),
+                report(&st, &usb, None).restore_access(&st.ports[0], |_| supports),
                 expected
             );
         }
@@ -848,7 +840,7 @@ mod tests {
         }
         st.ports[0].debug_actions = DebugActions::Silent;
         assert_eq!(report(&st, &usb, None).signal, Signal::NoDebug);
-        // DFU USB present, but the command for this family is absent.
+        // DFU USB present, but the DFU command is absent.
         st.ports[0].debug_actions =
             DebugActions::Listed([0x0606, 0x0105, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         assert_eq!(report(&st, &usb, None).signal, Signal::NotOffered);
