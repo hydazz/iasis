@@ -12,10 +12,8 @@ use usbpd::{
     protocol_layer::message::header::{Header, SpecificationRevision},
 };
 
-/// Set Action 0x0106: Apple Silicon DFU hold.
-pub const SILICON_DFU: [u32; 3] = [0x05ac_8012, 0x0106, 0x8001_0000];
-/// Set Action 0x0105: T2 PMU reset with DFU hold.
-pub const T2_DFU: [u32; 3] = [0x05ac_8012, 0x0105, 0x8002_0000];
+/// Set Action 0x0106: DFU hold.
+pub const DFU: [u32; 3] = [0x05ac_8012, 0x0106, 0x8001_0000];
 /// Set Action 0x0105: reboot.
 pub const REBOOT: [u32; 3] = [0x05ac_8012, 0x0105, 0x8000_0000];
 /// An empty vendor header. Targets answer it before accepting an action.
@@ -73,7 +71,7 @@ mod tests {
     #[test]
     fn debug_messages_carry_the_action_after_a_source_vendor_header() {
         assert_eq!(
-            message(5, &SILICON_DFU).as_slice(),
+            message(5, &DFU).as_slice(),
             &[
                 0x6f, 0x3b, 0x12, 0x80, 0xac, 0x05, 0x06, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x80
             ]
@@ -101,8 +99,7 @@ mod tests {
                 0x0103, 0
             ]
         );
-        assert!(list.contains(&action(&SILICON_DFU)) && list.contains(&action(&REBOOT)));
-        assert_eq!(action(&T2_DFU), action(&REBOOT));
+        assert!(list.contains(&action(&DFU)) && list.contains(&action(&REBOOT)));
         // A port without the debug actions, and a reply that ends early.
         let plain = actions(&[0x05ac_8050, 0x0302_0501, 0x0301_0000, 0x0106_0000]).unwrap();
         assert_eq!(plain[..4], [0x0302, 0x0501, 0x0301, 0]);

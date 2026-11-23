@@ -297,9 +297,7 @@ pub fn label(port: &PortStatus) -> &'static str {
         PortState::Unattached => "--",
         PortState::Debouncing => "CC",
         PortState::Starting => "STRT",
-        PortState::Contract
-            if port.offers(PortAction::DfuAppleSilicon) || port.offers(PortAction::Reboot) =>
-        {
+        PortState::Contract if port.offers(PortAction::Dfu) || port.offers(PortAction::Reboot) => {
             "RDY"
         }
         PortState::Ready if port.pd_transition => "STRT",
@@ -894,7 +892,7 @@ mod tests {
         };
         assert_eq!(label(&status.ports[0]), "RDY");
         status.ports[0].request = Some(Request {
-            action: PortAction::DfuAppleSilicon,
+            action: PortAction::Dfu,
             at_ms: 0,
         });
         assert_eq!(label(&status.ports[0]), "DFU?");
@@ -955,7 +953,7 @@ mod tests {
                 debug_actions: DebugActions::Listed(list),
                 ..contract(5000, 2000)
             };
-            assert!(!status.ports[0].offers(PortAction::DfuAppleSilicon));
+            assert!(!status.ports[0].offers(PortAction::Dfu));
             assert_eq!(label(&status.ports[0]), "RDY");
             assert_eq!(view(&status, &selecting(0), 0).lines[1], "PD 5V 2A (10W)");
         }

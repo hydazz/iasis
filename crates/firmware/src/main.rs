@@ -428,7 +428,7 @@ async fn main(_spawner: Spawner) {
                     }
                     iasis_firmware::button::Event::Action(event) => {
                         let action = match event.gesture {
-                            protocol::Gesture::Dfu => Some(protocol::PortAction::DfuAppleSilicon),
+                            protocol::Gesture::Dfu => Some(protocol::PortAction::Dfu),
                             protocol::Gesture::Reboot => Some(protocol::PortAction::Reboot),
                             protocol::Gesture::Restore => None,
                         };

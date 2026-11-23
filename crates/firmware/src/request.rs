@@ -92,7 +92,7 @@ mod tests {
     }
 
     fn dfu() -> Tracker {
-        Tracker::sent(PortAction::DfuAppleSilicon, 1000)
+        Tracker::sent(PortAction::Dfu, 1000)
     }
 
     #[test]

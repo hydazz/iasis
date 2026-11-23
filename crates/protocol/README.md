@@ -10,7 +10,7 @@ Messages use vendor control transfers on endpoint zero, addressed to interface 0
 | ------------------------ | --------------------------------------------------------- |
 | Request type / recipient | Vendor / interface                                        |
 | `wIndex`                 | `0`                                                       |
-| `wValue`                 | Protocol version, `18`                                    |
+| `wValue`                 | Protocol version, `19`                                    |
 | Maximum payload          | 1408 bytes                                                |
 | Payload header           | ASCII `IASI`, then a little-endian `u16` protocol version |
 | Payload body             | Postcard-encoded message                                  |
@@ -39,7 +39,7 @@ After a trip the port reports its `error` and `fault_sample` until an attachment
 
 `recoveries` counts trips since boot. `pd_write_retries` counts PD frames the port controller refused on a busy line and firmware wrote again. `hard_resets_sent` and `hard_resets_received` count PD hard resets by their sender; each removes VBUS from the target for about a second. `requests_rejected` counts requests the port answered with Reject.
 
-`debug_actions` is the target's answer to the Apple debug Get Action List query, asked once a contract has settled: `Pending` before an answer, `Silent` after three asks without one, or `Listed` with up to twelve action IDs, zero padded. A DFU or reboot command for a target that does not list its action (`0x0106` for Apple Silicon DFU, `0x0105` for reboot and T2 DFU), or a DFU command on a port that does not list DFU USB (`0x0606`), fails with `Unsupported`, or `NotReady` while the answer is pending.
+`debug_actions` is the target's answer to the Apple debug Get Action List query, asked once a contract has settled: `Pending` before an answer, `Silent` after three asks without one, or `Listed` with up to twelve action IDs, zero padded. A DFU or reboot command for a target that does not list its action (`0x0106` for DFU, `0x0105` for reboot), or a DFU command on a port that does not list DFU USB (`0x0606`), fails with `Unsupported`, or `NotReady` while the answer is pending.
 
 `link` is the USB link the hub holds with the target, read from the hub's downstream port state: `Down`, `Usb2` or `Usb3`, or absent while the hub cannot be read.
 

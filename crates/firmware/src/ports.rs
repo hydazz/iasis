@@ -808,8 +808,7 @@ impl Port<'_> {
     /// before they accept DFU.
     async fn signal(&self, action: PortAction) -> Result<(), PortError> {
         let words = match action {
-            PortAction::DfuAppleSilicon => apple::SILICON_DFU,
-            PortAction::DfuT2 => apple::T2_DFU,
+            PortAction::Dfu => apple::DFU,
             _ => apple::REBOOT,
         };
         if action != PortAction::Reboot {

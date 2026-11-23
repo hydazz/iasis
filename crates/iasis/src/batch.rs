@@ -20,7 +20,7 @@ use crate::{
     topology,
 };
 use anyhow::{Context, Result, bail, ensure};
-use clap::{Args, ValueEnum};
+use clap::Args;
 use iasis_protocol::{
     self as protocol, Gesture, Port, PortAction, PortState, RestoreArm, RestoreDecision,
     RestorePhase, RestoreStatus, Status,
@@ -35,8 +35,6 @@ pub struct Source {
     /// Use this local IPSW instead of the image store, which fetches the
     /// newest release for each target
     pub ipsw: Option<PathBuf>,
-    #[arg(long, value_enum, default_value = "apple-silicon")]
-    pub device: Device,
     /// Worker logs and scratch directories; the cache directory by default
     #[arg(long)]
     pub logs: Option<PathBuf>,
@@ -133,21 +131,6 @@ fn finish(endings: &Endings, port: Port, ending: Ending) {
     }
 }
 
-#[derive(Clone, Copy, ValueEnum)]
-pub enum Device {
-    AppleSilicon,
-    T2,
-}
-
-impl Device {
-    pub fn dfu_action(self) -> PortAction {
-        match self {
-            Self::AppleSilicon => PortAction::DfuAppleSilicon,
-            Self::T2 => PortAction::DfuT2,
-        }
-    }
-}
-
 /// Restore a batch as the board's host. The command holds the board's host
 /// session until its workers finish.
 pub fn run(device: &nusb::DeviceInfo, board: &Board, options: Options) -> Result<()> {
@@ -188,13 +171,7 @@ fn run_batch(
     let engine = RestoreEngine::for_host(logs);
     // Take the board before the long image check, which another host's
     // session would make pointless.
-    let link = Link::open(
-        device,
-        Jobs::default(),
-        Arc::default(),
-        &engine,
-        source.device,
-    )?;
+    let link = Link::open(device, Jobs::default(), Arc::default(), &engine)?;
     let given = match &source.ipsw {
         Some(path) => {
             let ipsw = progress::check_ipsw(path)?;
@@ -214,7 +191,6 @@ fn run_batch(
         Some(store) => Images::Store(store),
         None => Images::Given(&given),
     };
-    let action = source.device.dfu_action();
     let (targets, failed) = if button {
         ensure!(
             board.info().capabilities & protocol::CAP_RESTORE_ARM != 0,
@@ -227,7 +203,7 @@ fn run_batch(
             );
         }
         let selected = selection(&link, ports, None)?.0;
-        let targets = prepare_selected(board, &link, &engine, &selected, action, &images)?;
+        let targets = prepare_selected(board, &link, &engine, &selected, &images)?;
         link.restore_ready(false)?;
         (targets, false)
     } else {
@@ -246,7 +222,7 @@ fn run_batch(
             thread::sleep(Duration::from_millis(50));
         };
         let selected = select_ports(ports, &status)?;
-        let (targets, failed) = enter_dfu(board, &link, &engine, &selected, action)?;
+        let (targets, failed) = enter_dfu(board, &link, &engine, &selected)?;
         (resolve(&link, &engine, &targets, &images)?, failed)
     };
     let running = start(&link, &engine, &images, targets, operation, failed, button)?;
@@ -262,11 +238,9 @@ pub fn listen(
     device: &nusb::DeviceInfo,
     engine: &RestoreEngine,
     images: &Images,
-    family: Device,
     requests: &Requests,
     endings: &Endings,
 ) -> Result<Option<String>> {
-    let action = family.dfu_action();
     link.restore_ready(true)?;
     let (selected, asked) = match selection(link, &[], Some(requests)) {
         Ok(selected) => selected,
@@ -291,9 +265,9 @@ pub fn listen(
             "board serial changed"
         );
         let targets = if button {
-            prepare_selected(&control, link, engine, &selected, action, images)?
+            prepare_selected(&control, link, engine, &selected, images)?
         } else {
-            let (targets, failed) = enter_dfu(&control, link, engine, &selected, action)?;
+            let (targets, failed) = enter_dfu(&control, link, engine, &selected)?;
             ensure!(
                 !failed && targets.len() == selected.len(),
                 "not all selected targets reached verified DFU; no restore started"
@@ -692,7 +666,6 @@ fn prepare_selected(
     link: &Link,
     engine: &RestoreEngine,
     selected: &[Target],
-    action: PortAction,
     images: &Images,
 ) -> Result<ChosenTargets> {
     let status = board.status()?;
@@ -714,7 +687,7 @@ fn prepare_selected(
         draft.matches_targets(&status),
         "selected targets changed, are busy or are unavailable"
     );
-    let (targets, failed) = enter_dfu(board, link, engine, selected, action)?;
+    let (targets, failed) = enter_dfu(board, link, engine, selected)?;
     ensure!(
         !failed && targets.len() == selected.len(),
         "not all selected targets reached verified DFU; no erase armed"
@@ -793,7 +766,6 @@ fn enter_dfu(
     link: &Link,
     engine: &RestoreEngine,
     selected: &[Target],
-    action: PortAction,
 ) -> Result<(VerifiedTargets, bool)> {
     let mut pending = Vec::new();
     let mut targets = Vec::new();
@@ -808,7 +780,7 @@ fn enter_dfu(
         if status.ready_mask() & (1 << port.index()) != 0 {
             snapshot.query_port_identity(port);
         }
-        let assessment = dfu::assess(board.info().serial, port, &status, &snapshot, action, None);
+        let assessment = dfu::assess(board.info().serial, port, &status, &snapshot, None);
         if generation != assessment.generation || status.ready_mask() & (1 << port.index()) == 0 {
             eprintln!(
                 "port {}: attachment changed or unavailable. {}",
@@ -824,9 +796,7 @@ fn enter_dfu(
             "the device on port {} is not the one selected",
             port.number()
         );
-        match assessment.restore_access(&status.ports[port.index()], action, |mode| {
-            engine.restores(mode)
-        }) {
+        match assessment.restore_access(&status.ports[port.index()], |mode| engine.restores(mode)) {
             protocol::RestoreAccess::InDfu => {
                 match TargetTracker::pin(board.info().serial, &snapshot, port) {
                     Ok(target) if ecid.is_some_and(|id| id != target.ecid) => {
@@ -848,7 +818,7 @@ fn enter_dfu(
                 continue;
             }
         }
-        match board.command_for_generation(port, generation, action) {
+        match board.command_for_generation(port, generation, PortAction::Dfu) {
             Ok(result) => {
                 println!("port {} DFU signalling: {result:?}", port.number());
                 pending.push((
@@ -888,7 +858,6 @@ fn enter_dfu(
                 *port,
                 &status,
                 &snapshot,
-                action,
                 Some(previous),
             );
             if matches!(

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 18;
+pub const VERSION: u16 = 19;
 pub const MAX_PACKET: usize = 1408;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
@@ -159,7 +159,6 @@ pub enum AppleMode {
     Dfu,
     PortDfu,
     Recovery,
-    Wtf,
     /// Apple Debug USB; whether the target is in DFU is not established.
     Kis,
     KisDfu,
@@ -302,9 +301,9 @@ impl PortStatus {
             return light(Hue::Purple, true);
         }
         match self.observed.map(|seen| seen.usb) {
-            Some(Usb::Apple(
-                AppleMode::Dfu | AppleMode::KisDfu | AppleMode::Recovery | AppleMode::Wtf,
-            )) => return light(Hue::Blue, false),
+            Some(Usb::Apple(AppleMode::Dfu | AppleMode::KisDfu | AppleMode::Recovery)) => {
+                return light(Hue::Blue, false);
+            }
             // A restore some other tool is running.
             Some(Usb::Apple(AppleMode::Restored)) => return light(Hue::Purple, true),
             _ => {}
@@ -715,8 +714,7 @@ pub enum I2cFailure {
 pub enum PortAction {
     Enable,
     Disable,
-    DfuAppleSilicon,
-    DfuT2,
+    Dfu,
     Reboot,
 }
 
@@ -729,8 +727,8 @@ impl PortAction {
     pub fn debug_action(self) -> Option<u16> {
         match self {
             Self::Enable | Self::Disable => None,
-            Self::DfuAppleSilicon => Some(0x0106),
-            Self::DfuT2 | Self::Reboot => Some(0x0105),
+            Self::Dfu => Some(0x0106),
+            Self::Reboot => Some(0x0105),
         }
     }
 }
@@ -837,15 +835,12 @@ impl Status {
         let mut mask = 0;
         for (i, port) in self.ports.iter().enumerate() {
             let offered = match gesture {
-                Gesture::Dfu => port.offers(PortAction::DfuAppleSilicon),
+                Gesture::Dfu => port.offers(PortAction::Dfu),
                 Gesture::Reboot => port.offers(PortAction::Reboot),
                 Gesture::Restore => {
                     self.restore_session().is_some()
                         && match port.restore_access {
-                            RestoreAccess::EnterDfu => {
-                                port.offers(PortAction::DfuAppleSilicon)
-                                    || port.offers(PortAction::DfuT2)
-                            }
+                            RestoreAccess::EnterDfu => port.offers(PortAction::Dfu),
                             RestoreAccess::InDfu => port.in_restorable_dfu(),
                             _ => false,
                         }
@@ -960,7 +955,7 @@ mod tests {
         assert!(port.settings_busy(0));
         port.command_result = CommandResult::Acknowledged;
         port.request = Some(Request {
-            action: PortAction::DfuAppleSilicon,
+            action: PortAction::Dfu,
             at_ms: 5,
         });
         assert!(port.settings_busy(REQUEST_MS + 4));
@@ -1226,8 +1221,6 @@ mod tests {
             internet_sharing: false,
         });
         assert_eq!(status.gesture_mask(Gesture::Restore), 0b10001);
-        assert!(status.ports[0].offers(PortAction::DfuT2));
-        assert!(!status.ports[2].offers(PortAction::DfuT2));
         assert!(!status.ports[0].offers(PortAction::Enable));
         status.ports[0].pd_transition = true;
         assert_eq!(status.gesture_mask(Gesture::Dfu), 0);
