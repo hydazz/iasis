@@ -26,6 +26,10 @@
         {
           "type": "generic",
           "path": "apps/macos/Config/Version.xcconfig"
+        },
+        {
+          "type": "generic",
+          "path": "crates/iasis/windows/.mise.toml"
         }
       ]
     },

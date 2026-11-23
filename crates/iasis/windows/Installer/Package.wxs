@@ -1,0 +1,27 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="Iasis"
+      Manufacturer="hydazz"
+      Version="$(var.Version)"
+      UpgradeCode="5e1c6d2b-6b57-4c0a-9c4e-3a0e7c9b2f41"
+      Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Iasis is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Iasis">
+        <Directory Id="BINFOLDER" Name="bin" />
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Iasis">
+      <Component Directory="BINFOLDER">
+        <File Source="$(var.ToolsDir)\iasis.exe" />
+        <Environment Id="Path" Name="PATH" Value="[BINFOLDER]" Part="last" System="yes" Action="set" />
+      </Component>
+      <Component Directory="BINFOLDER">
+        <File Source="$(var.ToolsDir)\iasisd.exe" />
+      </Component>
+    </Feature>
+  </Package>
+</Wix>

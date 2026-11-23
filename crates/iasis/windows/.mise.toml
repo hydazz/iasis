@@ -1,0 +1,9 @@
+[vars]
+version = "0.1.0" # x-release-please-version
+
+[tools]
+dotnet = { version = "10", os = ["windows"] }
+
+[tasks.package]
+description = "MSI"
+run = "dotnet build Installer -c Release -p:Version={{ vars.version }} -p:ToolsDir={{ config_root }}/../../../target/x86_64-pc-windows-gnu/release -o build"

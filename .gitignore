@@ -31,5 +31,10 @@ fp-info-cache
 /apps/macos/build/
 xcuserdata/
 
+# WiX
+/crates/iasis/windows/*/bin/
+/crates/iasis/windows/*/obj/
+/crates/iasis/windows/build/
+
 # Rust
 /target/

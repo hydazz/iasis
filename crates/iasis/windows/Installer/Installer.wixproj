@@ -1,0 +1,8 @@
+<Project Sdk="WixToolset.Sdk">
+  <PropertyGroup>
+    <OutputName>Iasis-$(Version)-x64</OutputName>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <AcceptEula>wix7</AcceptEula>
+    <DefineConstants>Version=$(Version);ToolsDir=$(ToolsDir)</DefineConstants>
+  </PropertyGroup>
+</Project>
