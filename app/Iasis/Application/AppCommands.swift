@@ -37,7 +37,7 @@ private struct DeviceMenuItems: View {
         DeviceActionButtons(actions: browser?.actions ?? DeviceActions(), shortcuts: true) { requests in
             browser?.model.perform(requests)
         } restore: { confirmation in
-            browser?.confirming = confirmation
+            browser?.confirm(confirmation)
         }
     }
 }

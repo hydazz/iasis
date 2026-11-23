@@ -1,16 +1,18 @@
 //! One host's session with a board.
 //!
 //! Only a host sees a target's USB mode, so the host that holds a board's
-//! session tells the board what is on each connector. A [`Link`] samples the
-//! board and the USB tree a few times a second and reports the result, with
-//! any restore job the host is running. The reports renew the session; a host
-//! that stops reporting loses it, and the board forgets what it was told.
+//! session tells the board what is on each connector. A [`Link`] reads the
+//! board when it announces a change, follows the host's USB devices as they
+//! come and go, and reports what it finds with any restore job the host is
+//! running. Reports renew the session whether or not anything changed; a
+//! host that stops reporting loses it, and the board forgets what it was
+//! told.
 
 use std::{
     hash::{BuildHasher, RandomState},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -24,18 +26,34 @@ use iasis_protocol::{
 use nusb::{DeviceInfo, transfer::TransferError};
 
 use crate::{
-    Board, Topology, dfu,
+    Board, Events, Topology, dfu,
     identity::{AppleDevice, models::Models},
+    inventory::Inventory,
     restore::{Operation, Progress},
     topology::{self, Snapshot, UsbDevice},
+    watch::Watch,
 };
 
-/// Several reports fit inside the session lease.
-const REPORT_INTERVAL: Duration = Duration::from_millis(250);
+/// A report renews the session lease this often, which leaves room for two
+/// to go missing.
+const HEARTBEAT: Duration = Duration::from_secs(1);
+/// Changes are reported no closer together than this.
+const REPORT_GAP: Duration = Duration::from_millis(100);
+/// The board announces its changes. It is read this often regardless, for
+/// its measurements and for an announcement that went missing.
+const HEALTH: Duration = Duration::from_secs(1);
+/// Announcements closer together than this are read as one.
+const COALESCE: Duration = Duration::from_millis(20);
 /// A board out of reach this long is about to drop the session anyway.
 const UNREACHABLE: Duration = Duration::from_secs(2);
+/// A USB tree that could not be placed on the connectors is tried again
+/// this often.
+const PLACE_RETRY: Duration = Duration::from_secs(1);
+/// A port's view is reported once it has held this long.
+const AGREE: Duration = Duration::from_millis(250);
 /// Apple Debug USB does not say whether the target is in DFU. Configurator
-/// does, and takes seconds to answer.
+/// does, and takes seconds to answer. A question it leaves unanswered is
+/// asked again this often.
 const IDENTIFY_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Restore jobs by port, each with the attachment it runs on. They outlive a
@@ -102,7 +120,7 @@ fn sharing_target(status: &Status, snapshot: &Snapshot, port: Port) -> Option<u6
         }
         topology::linux_usb_id(
             device.topology.bus.parse().ok()?,
-            device.linux_device_address,
+            device.device_address,
             &device.topology.port_chain,
         )
     }
@@ -117,18 +135,20 @@ fn appears_elsewhere(snapshot: &Snapshot, port: Port, ecid: u64) -> bool {
         .any(|device| device.apple.as_ref().and_then(AppleDevice::ecid) == Some(ecid))
 }
 
-/// Reports a port only once two samples in a row agree. The board and the
-/// USB tree are read at different moments, and a target that has just
+/// Reports a port only once its view has held for [`AGREE`]. The board and
+/// the USB tree change at different moments, and a target that has just
 /// reattached can still be listed in the mode it left.
 #[derive(Default)]
 struct Observer {
     last: Seen,
+    /// When each port's latest view was first seen.
+    since: [Option<Instant>; PORT_COUNT],
     attached_at_ms: [u64; PORT_COUNT],
     stable: Seen,
 }
 
 impl Observer {
-    fn sample(&mut self, status: &Status, snapshot: &Snapshot) -> Seen {
+    fn sample(&mut self, status: &Status, snapshot: &Snapshot, at: Instant) -> Seen {
         for port in Port::ALL {
             let index = port.index();
             let state = &status.ports[index];
@@ -141,12 +161,23 @@ impl Observer {
                 self.attached_at_ms[index] = status.uptime_ms;
                 self.stable[index] = None;
             }
-            if now == self.last[index] {
+            if now != self.last[index] {
+                self.last[index] = now;
+                self.since[index] = Some(at);
+            } else if self.since[index].is_some_and(|since| at.duration_since(since) >= AGREE) {
                 self.stable[index] = now;
             }
-            self.last[index] = now;
         }
         self.stable
+    }
+
+    /// When the earliest view still waiting to be reported will have held.
+    fn settles_at(&self) -> Option<Instant> {
+        (0..PORT_COUNT)
+            .filter(|index| self.last[*index] != self.stable[*index])
+            .filter_map(|index| self.since[index])
+            .map(|since| since + AGREE)
+            .min()
     }
 }
 
@@ -158,7 +189,7 @@ struct Enumeration {
     serial_number: Option<String>,
     #[cfg(target_os = "macos")]
     registry_entry_id: Option<u64>,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_os = "macos"))]
     device_address: u8,
 }
 
@@ -172,8 +203,8 @@ impl From<&UsbDevice> for Enumeration {
             registry_entry_id: device
                 .macos_attachment
                 .map(|attachment| attachment.registry_entry_id),
-            #[cfg(target_os = "linux")]
-            device_address: device.linux_device_address,
+            #[cfg(not(target_os = "macos"))]
+            device_address: device.device_address,
         }
     }
 }
@@ -206,6 +237,15 @@ struct View {
     sample: Option<(Status, Snapshot)>,
 }
 
+/// The view shows the time since an attachment or a request, which passes
+/// without the board's state changing.
+fn ages(status: &Status, attached_at_ms: &[u64; PORT_COUNT]) -> bool {
+    let recent = crate::view::IDENTIFYING_MS + HEALTH.as_millis() as u64;
+    status.ports.iter().zip(attached_at_ms).any(|(port, at)| {
+        port.request.is_some() || (port.occupied() && status.uptime_ms.saturating_sub(*at) < recent)
+    })
+}
+
 /// Note the model of each target whose USB gives its ECID.
 fn remember_models(snapshot: &Snapshot, models: &Models) {
     for port in Port::ALL {
@@ -225,16 +265,18 @@ fn finished(job: &RestoreStatus) -> bool {
 /// nothing left to report: the board keeps it until the target leaves. A
 /// restarted board counts its attachments from zero again, so no job from
 /// before describes them.
-fn settle(jobs: &mut [Option<PortJob>; PORT_COUNT], status: &Status, restarted: bool) {
+fn settle(jobs: &mut [Option<PortJob>; PORT_COUNT], status: &Status, restarted: bool) -> bool {
+    let mut settled = false;
     for (slot, port) in jobs.iter_mut().zip(&status.ports) {
         let done = slot.as_ref().is_some_and(|job| {
             finished(&job.status)
                 && (job.generation != port.generation || port.restore == Some(job.status))
         });
         if restarted || done {
-            *slot = None;
+            settled |= slot.take().is_some();
         }
     }
+    settled
 }
 
 /// Pair each port's view with the job and the image fetch on the same
@@ -269,23 +311,29 @@ struct Shared {
     session: u32,
     jobs: Jobs,
     models: Arc<Models>,
+    inventory: Arc<Inventory>,
+    changes: Arc<Watch>,
     fetching: Mutex<[Option<(u32, u8)>; PORT_COUNT]>,
     restore_ready: AtomicBool,
     internet_sharing: AtomicBool,
     alive: AtomicBool,
     stop: AtomicBool,
     next_arm: AtomicU32,
+    /// The board's copy of the view or the jobs is out of date.
+    unreported: AtomicBool,
     view: Mutex<View>,
+    /// What the next report says of each port. The lease reads this and not
+    /// the view, which a client or a slow host can hold.
+    reported: Mutex<(Seen, [RestoreAccess; PORT_COUNT])>,
     identified: Mutex<Identified>,
+    /// Advances when Configurator names or forgets a target.
+    identified_version: AtomicU64,
     failure: Mutex<Option<String>>,
 }
 
 impl Shared {
-    /// Read the board and the USB tree, with what Configurator has said of
-    /// each enumeration still on its connector.
-    fn observe(&self) -> Result<(Status, Snapshot)> {
-        let status = self.board.status()?;
-        let mut snapshot = topology::discover(self.board.topology())?;
+    /// What Configurator has said of each enumeration still on its connector.
+    fn name_identified(&self, snapshot: &mut Snapshot) {
         let identified = self.identified.lock().unwrap();
         for port in Port::ALL {
             let Some((enumeration, apple)) = &identified[port.index()] else {
@@ -297,22 +345,58 @@ impl Shared {
                 device.apple = Some(apple.clone());
             }
         }
-        drop(identified);
+    }
+
+    /// Read the board and enumerate the host's USB devices now, whatever
+    /// the link last saw of either.
+    fn observe(&self) -> Result<(Status, Snapshot)> {
+        let status = self.board.status()?;
+        let mut snapshot = topology::discover(self.board.topology())?;
+        self.name_identified(&mut snapshot);
         Ok((status, snapshot))
     }
 
-    /// Read the board and the USB tree into the view the next report carries.
-    fn sample(&self) -> Result<()> {
-        let (status, snapshot) = self.observe()?;
+    fn usb_version(&self) -> u64 {
+        self.inventory.version() + self.identified_version.load(Ordering::Relaxed)
+    }
+
+    /// Place the host's USB devices on the board's connectors, with what
+    /// Configurator has said of each enumeration still there. This walks
+    /// the host's USB ports, so it runs apart from the view and the lease.
+    fn place(&self) -> Result<Snapshot, topology::Error> {
+        let mut snapshot = topology::locate(self.board.topology(), self.inventory.devices())?;
+        self.name_identified(&mut snapshot);
+        remember_models(&snapshot, &self.models);
+        Ok(snapshot)
+    }
+
+    /// The connectors while the host's USB tree cannot be placed on them:
+    /// empty, so nothing a target was seen as before is reported.
+    fn unplaced(&self, error: &topology::Error) -> Snapshot {
+        eprintln!("Board {:016x}: {error}", self.board.info().serial);
+        Snapshot::vacant(self.board.topology())
+    }
+
+    /// Bring the view up to date: with the board's status when it has just
+    /// been read, and with the host's USB devices when they have just been
+    /// placed.
+    fn refresh(&self, read: Option<Status>, placed: Option<Snapshot>) -> Result<()> {
         let mut view = self.view.lock().unwrap();
+        let (was, usb) = view.sample.take().unzip();
+        let usb_moved = placed.is_some();
+        let (Some(status), Some(snapshot)) = (read.or(was), placed.or(usb)) else {
+            return Ok(());
+        };
+        let state_moved = was.is_none_or(|was| was.state() != status.state());
         let restarted = status.uptime_ms < view.uptime_ms;
-        settle(&mut self.jobs.lock().unwrap(), &status, restarted);
+        let settled = settle(&mut self.jobs.lock().unwrap(), &status, restarted);
         if restarted {
+            drop(view);
             self.fail(anyhow!("the board restarted"));
             bail!("the board restarted");
         }
         view.uptime_ms = status.uptime_ms;
-        let seen = view.observer.sample(&status, &snapshot);
+        let seen = view.observer.sample(&status, &snapshot, Instant::now());
         view.access = Port::ALL.map(|port| {
             let slot = &status.ports[port.index()];
             if seen[port.index()] != Some((slot.generation, observe(&snapshot, port))) {
@@ -321,17 +405,23 @@ impl Shared {
             dfu::assess(self.board.info().serial, port, &status, &snapshot, None)
                 .restore_access(slot, |mode| self.engine.restores(mode))
         });
-        remember_models(&snapshot, &self.models);
+        let report = (view.observer.stable, view.access);
+        let unreported = std::mem::replace(&mut *self.reported.lock().unwrap(), report) != report;
+        let aged = read.is_some() && ages(&status, &view.observer.attached_at_ms);
         view.sample = Some((status, snapshot));
+        drop(view);
+        if unreported {
+            self.unreported.store(true, Ordering::Relaxed);
+        }
+        if unreported || state_moved || usb_moved || settled || aged {
+            self.changes.changed();
+        }
         Ok(())
     }
 
     /// Send the current view and jobs, renewing the session.
     fn send(&self) -> Result<(), Unsent> {
-        let (seen, access) = {
-            let view = self.view.lock().unwrap();
-            (view.observer.stable, view.access)
-        };
+        let (seen, access) = *self.reported.lock().unwrap();
         let report = HostReport {
             serial: self.board.info().serial,
             session: HostSession {
@@ -359,39 +449,166 @@ impl Shared {
             .unwrap()
             .get_or_insert(format!("{error:#}"));
         self.alive.store(false, Ordering::Relaxed);
-        // Stop both workers, so the lease lapses and another link can take over.
+        // Stop the workers, so the lease lapses and another link can take over.
         self.stop.store(true, Ordering::Relaxed);
+        self.changes.changed();
     }
 
-    /// Sample and report until the board refuses or stays out of reach for
-    /// most of the lease. USB is at its busiest during a restore, and one
-    /// failed read is not a lost board.
+    /// Something the board is told has changed.
+    fn report_soon(&self) {
+        self.unreported.store(true, Ordering::Relaxed);
+        self.changes.changed();
+    }
+
+    /// Renew the session and keep the board's copy of the view and jobs
+    /// current, until the board refuses or stays out of reach for most of
+    /// the lease. USB is at its busiest during a restore, and one failed
+    /// report is not a lost board. Nothing here reads the board's status,
+    /// the USB tree or the view, so none of them can cost the lease.
     fn report(&self) {
         let mut reached = Instant::now();
+        let mut sent = reached;
+        let mut seen = self.changes.count();
         while !self.stop.load(Ordering::Relaxed) {
-            let sent = match self.sample() {
-                Ok(()) => self.send(),
-                Err(error) => Err(Unsent::Unreachable(error)),
-            };
-            match sent {
-                Ok(()) => reached = Instant::now(),
-                Err(Unsent::Refused) => {
-                    return self.fail(anyhow!("the board gave the host session up"));
+            let now = Instant::now();
+            let changed = self.unreported.load(Ordering::Relaxed) && now >= sent + REPORT_GAP;
+            if changed || now >= sent + HEARTBEAT {
+                self.unreported.store(false, Ordering::Relaxed);
+                sent = now;
+                match self.send() {
+                    Ok(()) => reached = now,
+                    Err(Unsent::Refused) => {
+                        return self.fail(anyhow!("the board gave the host session up"));
+                    }
+                    Err(Unsent::Unreachable(error)) if reached.elapsed() >= UNREACHABLE => {
+                        return self.fail(error.context("the board stopped answering"));
+                    }
+                    Err(Unsent::Unreachable(_)) => self.unreported.store(true, Ordering::Relaxed),
                 }
-                Err(Unsent::Unreachable(error)) if reached.elapsed() >= UNREACHABLE => {
-                    return self.fail(error.context("the board stopped answering"));
-                }
-                Err(Unsent::Unreachable(_)) => {}
             }
-            thread::sleep(REPORT_INTERVAL);
+            let mut until = sent + HEARTBEAT;
+            if self.unreported.load(Ordering::Relaxed) {
+                until = until.min(sent + REPORT_GAP);
+            }
+            seen = self.changes.wait(seen, Some(until));
         }
     }
 
-    /// Configurator lists identities without opening the target's usbmux service.
-    /// A confirmed identity belongs to this USB enumeration.
-    fn identify(&self) -> Result<()> {
-        let status = self.board.status()?;
-        let mut snapshot = topology::discover(self.board.topology())?;
+    /// Keep the view's USB devices current. They are placed again when the
+    /// host's devices or their identities change, the view is looked at
+    /// again when a port's is due to have held, and a tree that could not be
+    /// placed is tried again every [`PLACE_RETRY`]. `placed` is the version
+    /// of the devices the view starts from.
+    fn place_until_stopped(&self, mut placed: Option<u64>) {
+        let mut retry = placed.is_none().then(|| Instant::now() + PLACE_RETRY);
+        let mut seen = self.changes.count();
+        while !self.stop.load(Ordering::Relaxed) {
+            let version = self.usb_version();
+            let now = Instant::now();
+            let held = self.view.lock().unwrap().observer.settles_at();
+            let refreshed = if placed != Some(version) && retry.is_none_or(|at| now >= at) {
+                match self.place() {
+                    Ok(snapshot) => {
+                        placed = Some(version);
+                        retry = None;
+                        self.refresh(None, Some(snapshot))
+                    }
+                    Err(error) => {
+                        let vacant = retry.is_none().then(|| self.unplaced(&error));
+                        retry = Some(now + PLACE_RETRY);
+                        self.refresh(None, vacant)
+                    }
+                }
+            } else if held.is_some_and(|at| now >= at) {
+                self.refresh(None, None)
+            } else {
+                Ok(())
+            };
+            if refreshed.is_err() {
+                return;
+            }
+            let held = self.view.lock().unwrap().observer.settles_at();
+            let until = match (held, retry) {
+                (Some(held), Some(retry)) => Some(held.min(retry)),
+                (held, retry) => held.or(retry),
+            };
+            seen = self.changes.wait(seen, until);
+        }
+    }
+
+    /// Read the board whenever it announces a change. Without its
+    /// announcements, which another client may hold for a moment, the board
+    /// is read every [`HEALTH`] and they are asked for again.
+    fn follow(&self, mut events: Option<Events>) {
+        let mut read = Instant::now();
+        let mut attached = None;
+        while !self.stop.load(Ordering::Relaxed) {
+            if let Some(early) = COALESCE.checked_sub(read.elapsed()) {
+                thread::sleep(early);
+            }
+            match &mut events {
+                Some(announcements) => {
+                    if announcements.next(HEALTH).is_err() {
+                        events = None;
+                    }
+                }
+                None => {
+                    thread::sleep(HEALTH);
+                    events = self.board.events().ok();
+                }
+            }
+            if self.stop.load(Ordering::Relaxed) {
+                return;
+            }
+            read = Instant::now();
+            // A board that cannot be read is lost when its reports fail.
+            let Ok(status) = self.board.status() else {
+                continue;
+            };
+            // A target that came or went changed the host's USB devices,
+            // whether or not the host has said so.
+            let now = status.ports.map(|port| (port.generation, port.occupied()));
+            if attached.replace(now).is_some_and(|before| before != now) {
+                self.inventory.reconcile();
+            }
+            if self.refresh(Some(status), None).is_err() {
+                return;
+            }
+        }
+    }
+
+    /// Wait until the board has been read at a revision after `revision`,
+    /// the link is lost or `deadline` arrives.
+    fn changed_after(&self, revision: u32, deadline: Instant) {
+        let mut seen = self.changes.count();
+        loop {
+            let newer = self
+                .view
+                .lock()
+                .unwrap()
+                .sample
+                .as_ref()
+                .is_some_and(|(status, _)| {
+                    matches!(status.revision.wrapping_sub(revision), 1..0x8000_0000)
+                });
+            let left = deadline.saturating_duration_since(Instant::now());
+            if newer || left.is_zero() {
+                return;
+            }
+            if !self.alive.load(Ordering::Relaxed) {
+                // Nothing reads the board for a lost link.
+                return thread::sleep(left.min(crate::UNANNOUNCED));
+            }
+            seen = self.changes.wait(seen, Some(deadline));
+        }
+    }
+
+    /// Configurator lists identities without opening the target's usbmux
+    /// service. A confirmed identity belongs to this USB enumeration.
+    /// Returns whether a target is still unnamed.
+    fn identify(&self, status: &Status) -> Result<bool> {
+        // Identities already given must not hide the modes they were asked in.
+        let mut snapshot = topology::locate(self.board.topology(), self.inventory.devices())?;
         let known = self.identified.lock().unwrap().clone();
         let mut asked: [Option<Enumeration>; PORT_COUNT] = Default::default();
         let mut mask = 0;
@@ -417,7 +634,9 @@ impl Shared {
             #[cfg(not(target_os = "macos"))]
             snapshot.query_port_identities(mask);
         }
+        let mut unnamed = false;
         let mut identified = self.identified.lock().unwrap();
+        let before = identified.clone();
         for port in Port::ALL {
             let index = port.index();
             let Some(enumeration) = asked[index].take() else {
@@ -427,20 +646,43 @@ impl Shared {
             if mask & (1 << index) == 0 {
                 continue;
             }
-            if let [device] = snapshot.ports[index].devices.as_slice()
-                && let Some(apple) = &device.apple
-            {
-                identified[index] = Some((enumeration, apple.clone()));
+            match snapshot.ports[index].devices.as_slice() {
+                [device] if device.apple.is_some() => {
+                    let apple = device.apple.clone().unwrap();
+                    unnamed |= apple.ecid().is_none();
+                    identified[index] = Some((enumeration, apple));
+                }
+                _ => unnamed = true,
             }
         }
-        Ok(())
+        if *identified != before {
+            drop(identified);
+            self.identified_version.fetch_add(1, Ordering::Relaxed);
+            self.changes.changed();
+        }
+        Ok(unnamed)
     }
 
+    /// Ask Configurator about a target when the board or the host's USB
+    /// devices change, and again while one stays unnamed.
     fn identify_until_stopped(&self) {
+        let mut asked = None;
+        let mut again = None;
+        let mut seen = self.changes.count();
         while !self.stop.load(Ordering::Relaxed) {
-            // An unanswered question is asked again.
-            let _ = self.identify();
-            thread::sleep(IDENTIFY_INTERVAL);
+            let status = self.view.lock().unwrap().sample.as_ref().map(|(s, _)| *s);
+            if let Some(status) = status {
+                let now = (self.inventory.version(), status.revision);
+                if asked != Some(now) || again.is_some_and(|at| Instant::now() >= at) {
+                    asked = Some(now);
+                    again = match self.identify(&status) {
+                        Ok(false) => None,
+                        // An unnamed target, or a tree that could not be placed.
+                        Ok(true) | Err(_) => Some(Instant::now() + IDENTIFY_INTERVAL),
+                    };
+                }
+            }
+            seen = self.changes.wait(seen, again);
         }
     }
 }
@@ -458,6 +700,7 @@ impl Link {
         jobs: Jobs,
         models: Arc<Models>,
         engine: &crate::restore::RestoreEngine,
+        inventory: Arc<Inventory>,
     ) -> Result<Self> {
         let board = Board::listen(device)?;
         let session = (RandomState::new().hash_one(board.info().serial) as u32).max(1);
@@ -467,17 +710,36 @@ impl Link {
             session,
             jobs,
             models,
+            changes: inventory.changes().clone(),
+            inventory,
             fetching: Mutex::default(),
             restore_ready: AtomicBool::new(false),
             internet_sharing: AtomicBool::new(false),
             alive: AtomicBool::new(true),
             stop: AtomicBool::new(false),
             next_arm: AtomicU32::new(1),
+            unreported: AtomicBool::new(false),
             view: Mutex::default(),
+            reported: Mutex::default(),
             identified: Mutex::default(),
+            identified_version: AtomicU64::new(0),
             failure: Mutex::default(),
         });
-        shared.sample()?;
+        shared.board.current()?;
+        // Listening starts before the first read, so no change after it is missed.
+        let events = shared.board.events();
+        if let Err(error) = &events {
+            eprintln!(
+                "Board {:016x}: reading every {HEALTH:?} without its announcements: {error}",
+                shared.board.info().serial
+            );
+        }
+        let version = shared.usb_version();
+        let (placed, snapshot) = match shared.place() {
+            Ok(snapshot) => (Some(version), snapshot),
+            Err(error) => (None, shared.unplaced(&error)),
+        };
+        shared.refresh(Some(shared.board.status()?), Some(snapshot))?;
         match shared.send() {
             Ok(()) => {}
             Err(Unsent::Refused) => {
@@ -485,6 +747,14 @@ impl Link {
             }
             Err(Unsent::Unreachable(error)) => return Err(error),
         }
+        let follow = {
+            let shared = shared.clone();
+            thread::spawn(move || shared.follow(events.ok()))
+        };
+        let place = {
+            let shared = shared.clone();
+            thread::spawn(move || shared.place_until_stopped(placed))
+        };
         let threads = [
             Shared::report as fn(&Shared),
             Shared::identify_until_stopped,
@@ -495,8 +765,29 @@ impl Link {
         });
         Ok(Self {
             shared,
-            threads: threads.into(),
+            threads: threads.into_iter().chain([follow, place]).collect(),
         })
+    }
+
+    /// The count every change this link sees advances.
+    pub fn changes(&self) -> &Arc<Watch> {
+        &self.shared.changes
+    }
+
+    pub(crate) fn inventory(&self) -> &Inventory {
+        &self.shared.inventory
+    }
+
+    /// Wait until the board has been read at a revision after `revision`,
+    /// the session is lost or `deadline` arrives.
+    pub fn changed_after(&self, revision: u32, deadline: Instant) {
+        self.shared.changed_after(revision, deadline);
+    }
+
+    /// Lets a control connection wait on this link's reading of the board.
+    pub(crate) fn notice(&self) -> crate::Notice {
+        let shared = self.shared.clone();
+        Arc::new(move |revision, deadline| shared.changed_after(revision, deadline))
     }
 
     pub fn board(&self) -> &Board {
@@ -538,9 +829,9 @@ impl Link {
 
     /// Report whether the host is serving any of this board's USB network links.
     pub fn set_internet_sharing(&self, active: bool) {
-        self.shared
-            .internet_sharing
-            .store(active, Ordering::Relaxed);
+        if self.shared.internet_sharing.swap(active, Ordering::Relaxed) != active {
+            self.shared.report_soon();
+        }
     }
 
     /// Tell the board whether a button restore request would be answered.
@@ -566,7 +857,7 @@ impl Link {
                 Err(Unsent::Unreachable(error)) if started.elapsed() >= UNREACHABLE => {
                     return Err(error);
                 }
-                Err(Unsent::Unreachable(_)) => thread::sleep(REPORT_INTERVAL),
+                Err(Unsent::Unreachable(_)) => thread::sleep(REPORT_GAP),
             }
         }
     }
@@ -578,14 +869,24 @@ impl Link {
 
     /// Set or clear the restore job on a port's attachment.
     pub fn job(&self, port: Port, job: Option<PortJob>) {
-        self.shared.jobs.lock().unwrap()[port.index()] = job;
+        let mut jobs = self.shared.jobs.lock().unwrap();
+        if jobs[port.index()] != job {
+            jobs[port.index()] = job;
+            drop(jobs);
+            self.shared.report_soon();
+        }
     }
 
     /// Say how much of a port's restore image is fetched, or that the fetch
     /// is over.
     pub fn fetching(&self, port: Port, generation: u32, percent: Option<u8>) {
-        self.shared.fetching.lock().unwrap()[port.index()] =
-            percent.map(|percent| (generation, percent));
+        let fetch = percent.map(|percent| (generation, percent));
+        let mut fetching = self.shared.fetching.lock().unwrap();
+        if fetching[port.index()] != fetch {
+            fetching[port.index()] = fetch;
+            drop(fetching);
+            self.shared.report_soon();
+        }
     }
 
     pub(crate) fn board_view(
@@ -617,13 +918,14 @@ impl Link {
         Some(board)
     }
 
-    /// The board and its targets, read now. A target on Apple Debug USB has
-    /// the mode and identity Configurator gave for its enumeration.
+    /// The board and its targets, read and enumerated now. A target on
+    /// Apple Debug USB has the mode and identity Configurator gave for its
+    /// enumeration.
     pub(crate) fn observe(&self) -> Result<(Status, Snapshot)> {
         self.shared.observe()
     }
 
-    /// The board's status at the last sample.
+    /// The board's status as last read.
     pub fn status(&self) -> Option<Status> {
         self.shared
             .view
@@ -660,6 +962,7 @@ impl Link {
 impl Drop for Link {
     fn drop(&mut self) {
         self.shared.stop.store(true, Ordering::Relaxed);
+        self.shared.changes.changed();
         for thread in self.threads.drain(..) {
             let _ = thread.join();
         }
@@ -714,8 +1017,8 @@ mod tests {
             apple: AppleDevice::from_usb(vendor, product, serial.as_deref()),
             #[cfg(target_os = "macos")]
             macos_attachment: None,
-            #[cfg(target_os = "linux")]
-            linux_device_address: 1,
+            #[cfg(not(target_os = "macos"))]
+            device_address: 1,
         }
     }
 
@@ -772,7 +1075,7 @@ mod tests {
         };
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("index.json"), r#"{"images":[],"models":[],"devices":[{"identifier":"iPad13,18","name":"iPad (10th generation)","hardware":[]}]}"#).unwrap();
-        let store = Store::open(dir.path(), Network::default()).unwrap();
+        let store = Store::open(dir.path(), Network::default(), Arc::default()).unwrap();
         let info = iasis_protocol::Info {
             serial: 1,
             firmware_version: [0, 1, 0],
@@ -1009,27 +1312,42 @@ mod tests {
             usb: Usb::Apple(AppleMode::Dfu),
             ecid: Some(42),
         };
+        let start = Instant::now();
+        let mut at = start;
+        // Each look comes AGREE after the one before unless it says otherwise.
+        let mut look = |observer: &mut Observer, status: &Status, usb: &Snapshot, wait| {
+            at += wait;
+            observer.sample(status, usb, at)
+        };
         let status = attached([Some(3), None, None, None, None]);
-        assert_eq!(observer.sample(&status, &usb)[0], None);
+        assert_eq!(look(&mut observer, &status, &usb, AGREE)[0], None);
+        // Looks that follow each other closely are one look.
+        assert_eq!(look(&mut observer, &status, &usb, AGREE / 2)[0], None);
         assert_eq!(
-            observer.sample(&status, &usb),
+            observer.settles_at(),
+            Some(start + AGREE + AGREE),
+            "the view is due once it has held"
+        );
+        assert_eq!(
+            look(&mut observer, &status, &usb, AGREE / 2),
             [Some((3, booted)), None, None, None, None]
         );
+        assert_eq!(observer.settles_at(), None);
 
         // The target reattaches. The USB tree still lists the mode it left,
         // which says nothing about the new attachment.
         let status = attached([Some(5), None, None, None, None]);
-        assert_eq!(observer.sample(&status, &usb)[0], None);
+        assert_eq!(look(&mut observer, &status, &usb, AGREE)[0], None);
         usb.ports[0].devices[0] = device(one, 0x05ac, 0x1227, Some(42));
-        assert_eq!(observer.sample(&status, &usb)[0], None);
-        assert_eq!(observer.sample(&status, &usb)[0], Some((5, dfu)));
+        assert_eq!(look(&mut observer, &status, &usb, AGREE)[0], None);
+        assert_eq!(look(&mut observer, &status, &usb, AGREE)[0], Some((5, dfu)));
 
         // A change on the same attachment keeps the last agreed view until
-        // the new one repeats.
+        // the new one has held.
         usb.ports[0].devices.clear();
-        assert_eq!(observer.sample(&status, &usb)[0], Some((5, dfu)));
+        assert_eq!(look(&mut observer, &status, &usb, AGREE)[0], Some((5, dfu)));
         assert_eq!(
-            observer.sample(&status, &usb)[0],
+            look(&mut observer, &status, &usb, AGREE)[0],
             Some((
                 5,
                 Observed {
@@ -1040,6 +1358,9 @@ mod tests {
         );
         // An empty connector is not reported.
         let status = attached([None; PORT_COUNT]);
-        assert_eq!(observer.sample(&status, &usb), [None; PORT_COUNT]);
+        assert_eq!(
+            look(&mut observer, &status, &usb, AGREE),
+            [None; PORT_COUNT]
+        );
     }
 }

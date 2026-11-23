@@ -5,13 +5,16 @@
 //! returns through vSafe0V and tries again; repeated failures and protection
 //! trips hold it off until the sink is unplugged or the port is enabled.
 
-use core::cell::Cell;
+use core::{cell::Cell, future::pending};
 
 use embassy_futures::select::{Either3, select, select3};
 use embassy_rp::gpio::Input;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
-use embassy_time::{Duration, Instant, Timer};
-use iasis_firmware::request::Tracker;
+use embassy_time::{Duration, Instant, Timer, with_deadline};
+use iasis_firmware::{
+    request::Tracker,
+    settle::{Settle, Settling},
+};
 use iasis_pd::{
     Contract, apple,
     power::{self, PortDemand, SinkDemand},
@@ -83,10 +86,57 @@ pub struct Grant {
     pub brick_5v_pdo: u32,
 }
 
+/// One conversion of a port's VBUS divider.
+#[derive(Clone, Copy)]
+struct Reading {
+    adc: Option<u16>,
+    /// Counts the conversions, so a reading already seen is not taken for a
+    /// new one.
+    conversion: u32,
+    at: Instant,
+}
+
+impl Default for Reading {
+    fn default() -> Self {
+        Self {
+            adc: None,
+            conversion: 0,
+            at: Instant::MIN,
+        }
+    }
+}
+
+/// VBUS as an attachment on `supply` at `millivolts` should hold it.
+fn holds(supply: Supply, millivolts: u16, vbus: Option<u16>) -> bool {
+    match supply {
+        Supply::HostPresence => power::safe_presence(vbus),
+        Supply::Brick => {
+            let (low, high) = iasis_pd::voltage_window(millivolts);
+            vbus.and_then(power::millivolts)
+                .is_some_and(|mv| (u32::from(low)..=u32::from(high)).contains(&mv))
+        }
+        Supply::Off => false,
+    }
+}
+
+async fn until(deadline: Option<Instant>) {
+    match deadline {
+        Some(deadline) => Timer::at(deadline).await,
+        None => pending().await,
+    }
+}
+
+/// The earlier of two optional deadlines.
+fn sooner(next: &mut Option<Instant>, at: Instant) {
+    *next = Some(next.map_or(at, |next| next.min(at)));
+}
+
 #[derive(Default)]
 struct Shared {
     status: Cell<PortStatus>,
-    vbus: Cell<Option<u16>>,
+    vbus: Cell<Reading>,
+    /// The supply and voltage the attachment should hold.
+    expected: Cell<(Supply, u16)>,
     pins: Cell<Option<PortFaults>>,
     link: Cell<Option<Link>>,
     grant: Cell<Grant>,
@@ -101,14 +151,26 @@ struct Shared {
     /// The target's ECID with the attachment it was read on.
     identity: Cell<Option<(u32, u64)>>,
     tracker: Cell<Tracker>,
+    /// Raised for the port's task by a grant, a command, a fault or a reading
+    /// that changes what it would do.
     wake: Signal<NoopRawMutex, ()>,
+    /// Raised for the PD policy when the offers may have changed.
+    reoffer: Signal<NoopRawMutex, ()>,
+    /// Raised at every conversion, for a task following VBUS through a
+    /// transition.
+    converted: Signal<NoopRawMutex, ()>,
 }
 
 impl Shared {
     fn update(&self, change: impl FnOnce(&mut PortStatus)) {
         let mut status = self.status.get();
+        let restoring = status.restoring();
         change(&mut status);
         self.status.set(status);
+        // An active restore keeps its voltage, which decides the offers.
+        if status.restoring() != restoring {
+            self.reoffer.signal(());
+        }
     }
 
     fn identity(&self, generation: u32) -> Option<u64> {
@@ -130,7 +192,7 @@ impl Shared {
                 .demand
                 .get()
                 .allocated_mw(grant.supply == Supply::Brick && grant.budget_mw > 0),
-            vbus_adc: self.vbus.get(),
+            vbus_adc: self.vbus.get().adc,
             faults: self.pins.get(),
             link: self.link.get(),
             observed: view.map(|entry| entry.observed),
@@ -163,9 +225,29 @@ impl Ports {
         }
     }
 
+    /// Take one conversion of a port's VBUS and the level of its fault pins.
+    /// The port's task is woken only when they change what it would do.
     pub fn sample(&self, index: usize, vbus: Option<u16>, pins: PortFaults) {
-        self.ports[index].vbus.set(vbus);
-        self.ports[index].pins.set(Some(pins));
+        let port = &self.ports[index];
+        let before = port.vbus.get();
+        let (supply, millivolts) = port.expected.get();
+        let class = |adc: Option<u16>| {
+            (
+                adc.is_none(),
+                power::safe_zero(adc),
+                holds(supply, millivolts, adc),
+            )
+        };
+        let tripped = port.pins.replace(Some(pins)) != Some(pins);
+        port.vbus.set(Reading {
+            adc: vbus,
+            conversion: before.conversion.wrapping_add(1),
+            at: Instant::now(),
+        });
+        port.converted.signal(());
+        if tripped || class(before.adc) != class(vbus) {
+            port.wake.signal(());
+        }
     }
 
     /// The hub's reading of each port's link, or `None` when it gave none.
@@ -199,6 +281,7 @@ impl Ports {
             };
             if port.grant.replace(grant) != grant {
                 port.wake.signal(());
+                port.reoffer.signal(());
             }
         }
     }
@@ -270,6 +353,8 @@ impl Ports {
                 {
                     port.update(|status| status.restore = Some(job));
                     port.feedback_deadline.set(now + 5000);
+                    // The port's task watches for the job's reports to stop.
+                    port.wake.signal(());
                 }
             } else if !present {
                 port.report.set(None);
@@ -445,26 +530,47 @@ impl Port<'_> {
         if self.fault.get().is_none() {
             self.fault.set(Some(error));
         }
+        self.shared.wake.signal(());
     }
 
-    fn millivolts(&self) -> Option<u32> {
-        self.shared.vbus.get().and_then(power::millivolts)
+    fn vbus(&self) -> Option<u16> {
+        self.shared.vbus.get().adc
     }
 
     fn operating_voltage(&self) -> u16 {
         self.contract.get().map_or(5000, |c| c.millivolts)
     }
 
+    /// Supply and contract change only here, so the readings are judged
+    /// against the voltage the attachment now holds.
+    fn hold(&self, supply: Supply, contract: Option<Contract>) {
+        self.supply.set(supply);
+        self.contract.set(contract);
+        self.shared.expected.set((supply, self.operating_voltage()));
+    }
+
     fn voltage_valid(&self) -> bool {
-        match self.supply.get() {
-            Supply::HostPresence => power::safe_presence(self.shared.vbus.get()),
-            Supply::Brick => {
-                let (low, high) = iasis_pd::voltage_window(self.operating_voltage());
-                self.millivolts()
-                    .is_some_and(|mv| (u32::from(low)..=u32::from(high)).contains(&mv))
-            }
-            Supply::Off => false,
-        }
+        let (supply, millivolts) = self.shared.expected.get();
+        holds(supply, millivolts, self.vbus())
+    }
+
+    /// Mark a supply transition. The watch on the attachment judges VBUS
+    /// against the contract again once it ends.
+    fn transitioning(&self, transition: bool) {
+        self.update(|status| status.pd_transition = transition);
+        self.shared.wake.signal(());
+    }
+
+    /// Wait for the port's wake, its controller's interrupt or `deadline`.
+    async fn attend(
+        &self,
+        int: &mut Input<'static>,
+        deadline: Option<Instant>,
+    ) -> Result<(), PortError> {
+        let other = async {
+            select(self.shared.wake.wait(), until(deadline)).await;
+        };
+        self.phy.wait(int, other).await
     }
 
     /// The board no longer wants this attachment as it stands.
@@ -474,7 +580,7 @@ impl Port<'_> {
     }
 
     fn pins(&self) -> Result<(), PortError> {
-        if self.shared.vbus.get().is_none() {
+        if self.vbus().is_none() {
             return Err(PortError::Adc);
         }
         let Some(pins) = self.shared.pins.get() else {
@@ -510,6 +616,8 @@ impl Port<'_> {
     fn advertise(&self, offers: [u32; 4]) {
         self.offers.set(offers);
         self.update(|status| status.pd_source_pdos = offers);
+        // Debug discovery waits for the advertised offers to be current.
+        self.shared.wake.signal(());
     }
 
     fn reset_debug_discovery(&self) {
@@ -556,16 +664,20 @@ impl Port<'_> {
         true
     }
 
+    /// Wait for a conversion taken from now on to satisfy `reached`.
     async fn vbus_within(&self, limit: Duration, reached: impl Fn(Option<u16>) -> bool) -> bool {
         let deadline = Instant::now() + limit;
+        self.shared.converted.reset();
         loop {
-            if reached(self.shared.vbus.get()) {
-                return true;
-            }
-            if Instant::now() >= deadline {
+            if with_deadline(deadline, self.shared.converted.wait())
+                .await
+                .is_err()
+            {
                 return false;
             }
-            Timer::after_millis(1).await;
+            if reached(self.vbus()) {
+                return true;
+            }
         }
     }
 
@@ -586,14 +698,14 @@ impl Port<'_> {
             if enabled && self.shared.grant.get().supply != Supply::Off {
                 return;
             }
-            select(self.shared.wake.wait(), Timer::after_millis(50)).await;
+            self.shared.wake.wait().await;
         }
     }
 
     /// One attachment, from looking for a sink until it leaves or fails.
     async fn attachment(&self, int: &mut Input<'static>) -> Result<(), PortError> {
         let supply = self.shared.grant.get().supply;
-        self.supply.set(supply);
+        self.hold(supply, None);
         let id = self.phy.init().await?;
         self.update(|status| {
             status.fusb_device_id = Some(id);
@@ -604,7 +716,7 @@ impl Port<'_> {
             if self.stopping() {
                 return Ok(());
             }
-            self.phy.wait(int, 20).await?;
+            self.attend(int, None).await?;
             if let Some(orientation) = self.phy.toggled() {
                 break orientation;
             }
@@ -623,23 +735,28 @@ impl Port<'_> {
         let bleed_until = Instant::now() + BLEED;
         let mut stage_step = 0;
         let mut stage_due = Instant::now();
+        // The step this phase next acts on by itself.
+        let mut next = None;
         loop {
-            self.phy.wait(int, 5).await?;
+            self.attend(int, next.take()).await?;
             if self.stopping() || self.phy.cc_open() {
                 return Ok(());
             }
             self.pins()?;
             // A sink unplugged a moment ago can return some charge to VBUS.
             // Bleed it briefly; a source holding VBUS up is left to itself.
-            let quiet = power::safe_zero(self.shared.vbus.get());
+            let quiet = power::safe_zero(self.vbus());
             let mut io = self.io.lock().await;
-            io.discharge(self.index, !quiet && Instant::now() < bleed_until)
-                .await?;
+            let bleeding = !quiet && Instant::now() < bleed_until;
+            io.discharge(self.index, bleeding).await?;
+            if bleeding {
+                sooner(&mut next, bleed_until);
+            }
             if self.shared.grant.get().budget_mw == 0 {
                 continue;
             }
             self.update(|status| status.supply = supply);
-            if supply == Supply::Brick && Instant::now() >= stage_due {
+            if supply == Supply::Brick && stage_step < 3 && Instant::now() >= stage_due {
                 let bus = io.port(self.index).await?;
                 match stage_step {
                     0 => {
@@ -654,10 +771,15 @@ impl Port<'_> {
                     2 => stage::check_status(bus).await?,
                     _ => {}
                 }
-                stage_step = (stage_step + 1).min(3);
+                stage_step += 1;
             }
             let stage_ready = supply != Supply::Brick || stage_step == 3;
-            if quiet && stage_ready && Instant::now() >= debounced {
+            if !stage_ready {
+                sooner(&mut next, stage_due);
+            }
+            if Instant::now() < debounced {
+                sooner(&mut next, debounced);
+            } else if quiet && stage_ready {
                 break;
             }
         }
@@ -678,7 +800,7 @@ impl Port<'_> {
         self.update(|status| status.state = PortState::Starting);
         let deadline = Instant::now() + VBUS_ON;
         while !self.voltage_valid() {
-            self.phy.wait(int, 2).await?;
+            self.attend(int, Some(deadline)).await?;
             if self.stopping() || self.phy.cc_open() {
                 return Ok(());
             }
@@ -715,13 +837,14 @@ impl Port<'_> {
         }
     }
 
-    /// Watch an attached sink beside the PD engine.
+    /// Watch an attached sink beside the PD engine. Each pass acts on what
+    /// has changed, then sleeps until the controller, the board or a reading
+    /// changes something, or until the next thing it is timing comes due.
     async fn supervise(&self) -> Result<(), PortError> {
         let mut open_since = None;
         let mut invalid_since = None;
         let mut ask_due = Instant::MIN;
         loop {
-            select(self.phy.changed(), Timer::after_millis(2)).await;
             let failure = self.phy.failure().or(self.fault.take());
             if let Some(error) = failure.or(self.shared.supply_fault.take()) {
                 return Err(error);
@@ -756,13 +879,14 @@ impl Port<'_> {
             // Ask for the debug actions under the rule new offers follow:
             // the sink silent for OFFER_SETTLE and nothing waiting to be
             // advertised, since revision 2.0 has no collision avoidance.
-            if !transition
-                && self.contract.get().is_some()
-                && self.asks.get() > 0
-                && self.quiet.get().elapsed() >= OFFER_SETTLE
-                && now >= ask_due
-                && self.offers.get() == self.current_offers()
-            {
+            let asking = || {
+                !self.status().pd_transition
+                    && self.contract.get().is_some()
+                    && self.asks.get() > 0
+                    && self.offers.get() == self.current_offers()
+            };
+            let ask_at = |ask_due: Instant| (self.quiet.get() + OFFER_SETTLE).max(ask_due);
+            if asking() && Instant::now() >= ask_at(ask_due) {
                 self.discover().await?;
                 ask_due = Instant::now() + ACTION_ASK_SPACING;
             }
@@ -782,6 +906,30 @@ impl Port<'_> {
                 }
             });
             self.publish();
+
+            let mut next = None;
+            if let Some(since) = open_since {
+                sooner(&mut next, since + DISCONNECT);
+            }
+            if let Some(since) = invalid_since {
+                sooner(&mut next, since + UNDERVOLTAGE);
+            }
+            if let Some((due, _)) = self.lowering.get().filter(|_| !transition) {
+                sooner(&mut next, due);
+            }
+            if asking() {
+                sooner(&mut next, ask_at(ask_due));
+            }
+            if self.status().restore.is_some_and(|restore| {
+                matches!(
+                    restore.phase,
+                    RestorePhase::Preparing | RestorePhase::Running
+                )
+            }) {
+                let silent = Instant::from_millis(self.shared.feedback_deadline.get());
+                sooner(&mut next, silent);
+            }
+            select3(self.phy.changed(), self.shared.wake.wait(), until(next)).await;
         }
     }
 
@@ -853,24 +1001,22 @@ impl Port<'_> {
     /// Move the supply to the accepted request. PS_RDY follows.
     async fn transition(&self) -> Result<(), PortError> {
         let (target, rdo) = self.pending.get().ok_or(PortError::Protocol)?;
-        self.update(|status| status.pd_transition = true);
+        self.transitioning(true);
         let result = self.change_rail(target).await;
         if result.is_ok() {
             self.pending.set(None);
             let mut sink = self.sink.get();
             sink.accept(&self.offers.get(), rdo);
             self.sink.set(sink);
-            self.contract.set(Some(target));
-        }
-        self.update(|status| {
-            status.pd_transition = false;
-            if result.is_ok() {
+            self.hold(self.supply.get(), Some(target));
+            self.update(|status| {
                 status.pd_request = Some(rdo);
                 status.contract_mv = target.millivolts;
                 status.contract_ma = target.operating_ma;
                 status.state = PortState::Contract;
-            }
-        });
+            });
+        }
+        self.transitioning(false);
         self.publish();
         result
     }
@@ -918,28 +1064,36 @@ impl Port<'_> {
             let bus = io.port(self.index).await?;
             stage::set_contract(bus, target.millivolts, target.limit_ma).await?;
         }
+        // The converter has its new setting. Conversions from here on are
+        // of the rail it is moving; the newest so far is of the old one.
         let window = |mv: u16| {
             let (low, high) = iasis_pd::voltage_window(mv);
-            u32::from(low)..=u32::from(high)
+            (u32::from(low), u32::from(high))
         };
         let (from, to) = (window(from_mv), window(target.millivolts));
-        let slew = *from.start().min(to.start())..=*from.end().max(to.end());
+        let slew = (from.0.min(to.0), from.1.max(to.1));
+        let mut settle = Settle::new(
+            self.shared.vbus.get().conversion,
+            slew,
+            to,
+            STABLE.as_micros(),
+        );
         let deadline = Instant::now() + SETTLE;
-        let mut stable_since = None;
         loop {
-            Timer::after_millis(1).await;
-            let now = Instant::now();
-            let mv = self.millivolts().ok_or(PortError::Adc)?;
-            if !slew.contains(&mv) {
-                return Err(PortError::Voltage);
-            }
-            if !to.contains(&mv) {
-                stable_since = None;
-            } else if now - *stable_since.get_or_insert(now) >= STABLE {
-                break;
-            }
-            if now >= deadline {
-                return Err(PortError::PdTimeout);
+            // Without conversions that settle it, the transition ends here
+            // and PS_RDY is not sent.
+            with_deadline(deadline, self.shared.converted.wait())
+                .await
+                .map_err(|_| PortError::PdTimeout)?;
+            let reading = self.shared.vbus.get();
+            match settle.take(
+                reading.conversion,
+                reading.at.as_micros(),
+                reading.adc.and_then(power::millivolts),
+            ) {
+                Settling::Stable => break,
+                Settling::Excursion => return Err(PortError::Voltage),
+                Settling::Waiting => {}
             }
         }
         let mut io = self.io.lock().await;
@@ -954,20 +1108,20 @@ impl Port<'_> {
 
     /// Hard reset: VBUS to vSafe0V, tSrcRecover, then vSafe5V.
     async fn power_cycle(&self) -> Result<(), PortError> {
-        self.contract.set(None);
+        self.hold(self.supply.get(), None);
         self.first_offer_mw.set(0);
         self.lowering.set(None);
         self.sink.set(SinkDemand::default());
         self.reset_debug_discovery();
         self.update(|status| {
-            status.pd_transition = true;
             status.state = PortState::Ready;
             status.pd_request = None;
             status.contract_mv = 0;
             status.contract_ma = 0;
         });
+        self.transitioning(true);
         let result = self.cycle().await;
-        self.update(|status| status.pd_transition = false);
+        self.transitioning(false);
         self.publish();
         result
     }
@@ -1055,7 +1209,7 @@ impl Port<'_> {
             }
         }
 
-        self.contract.set(None);
+        self.hold(self.supply.get(), None);
         self.pending.set(None);
         self.first_offer_mw.set(0);
         self.lowering.set(None);
@@ -1153,13 +1307,14 @@ impl Port<'_> {
         let mut open_since = None;
         while !self.shared.rearm.take() {
             if !watching {
-                select(self.shared.wake.wait(), Timer::after_millis(50)).await;
+                self.shared.wake.wait().await;
                 continue;
             }
-            watching = self.phy.wait(int, 20).await.is_ok();
+            let detached = open_since.map(|since| Instant::from_millis(since) + CC_DEBOUNCE);
+            watching = self.attend(int, detached).await.is_ok();
             let pins = self.shared.pins.get();
-            let clear = pins.is_some_and(|pins| !pins.cc && !pins.power)
-                && power::safe_zero(self.shared.vbus.get());
+            let clear =
+                pins.is_some_and(|pins| !pins.cc && !pins.power) && power::safe_zero(self.vbus());
             if power::cc_detached(
                 &mut open_since,
                 watching && clear && self.phy.cc_open(),
@@ -1213,6 +1368,7 @@ impl DevicePolicyManager for Policy<'_, '_> {
 
     async fn evaluate_request(&mut self, request: &PowerSource) -> CapabilityResponse {
         self.port.first_offer_mw.set(0);
+        self.port.publish();
         let PowerSource::FixedVariableSupply(request) = request else {
             return CapabilityResponse::Reject;
         };
@@ -1223,6 +1379,7 @@ impl DevicePolicyManager for Policy<'_, '_> {
         } else {
             let port = self.port;
             port.rejected.set(port.rejected.get().saturating_add(1));
+            port.shared.wake.signal(());
             CapabilityResponse::Reject
         }
     }
@@ -1232,6 +1389,7 @@ impl DevicePolicyManager for Policy<'_, '_> {
         // never negotiated, already at vSafe5V.
         if !core::mem::take(&mut self.accepted) {
             self.port.first_offer_mw.set(0);
+            self.port.publish();
             return Ok(());
         }
         let moved = self.port.transition().await;
@@ -1264,12 +1422,16 @@ impl DevicePolicyManager for Policy<'_, '_> {
                 return Event::UpdatedSourceCapabilities;
             } else if self.candidate.is_none_or(|(held, _)| held != offers) {
                 self.candidate = Some((offers, Instant::now()));
-            } else if self
-                .candidate
-                .is_some_and(|(_, since)| since.elapsed() >= OFFER_SETTLE)
-                && self.port.quiet.get().elapsed() >= OFFER_SETTLE
-                && self.port.last_offer_update.get().elapsed() >= OFFER_SETTLE
-            {
+            }
+            // The offers wait for the board to change them; a candidate waits
+            // for the last of the three settle times as well.
+            let settled = self.candidate.map(|(_, since)| {
+                since
+                    .max(self.port.quiet.get())
+                    .max(self.port.last_offer_update.get())
+                    + OFFER_SETTLE
+            });
+            if settled.is_some_and(|settled| Instant::now() >= settled) {
                 // A sink can change voltage even for a current-only update.
                 // Space unsolicited renegotiations across the shared input.
                 self.port.last_offer_update.set(Instant::now());
@@ -1277,7 +1439,7 @@ impl DevicePolicyManager for Policy<'_, '_> {
                 self.port.advertise(offers);
                 return Event::UpdatedSourceCapabilities;
             }
-            Timer::after_millis(10).await;
+            select(self.port.shared.reoffer.wait(), until(settled)).await;
         }
     }
 }

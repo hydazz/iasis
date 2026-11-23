@@ -122,16 +122,19 @@ enum SharingCommand {
 
 #[derive(Subcommand)]
 enum ImagesCommand {
-    /// Keep the newest image for a model, such as iPad13,18
-    Keep { model: String },
-    /// Stop keeping a model's image
-    Forget { model: String },
+    /// Fetch the newest release Apple signs for a model, such as iPad13,18
+    Fetch {
+        model: String,
+        /// Fetch this signed release instead, such as 26B131
+        #[arg(long)]
+        build: Option<String>,
+    },
+    /// List the releases Apple signs for a model
+    Releases { model: String },
     /// Check a local IPSW and copy it into the store
     Add { path: PathBuf },
-    /// Delete an image by its build, such as 26B131
-    Remove { build: String },
-    /// Ask for newer releases now
-    Refresh,
+    /// Delete an image or cancel its download
+    Remove { image: String },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -571,7 +574,7 @@ fn overview(ids: UsbIds, serial: Option<u64>, watch: bool) -> Result<()> {
             match reply {
                 Reply::State(state) => show(&agent_text(&state))?,
                 Reply::Error(error) => bail!(error),
-                Reply::Ok => {}
+                _ => {}
             }
             if !watch {
                 return Ok(());
@@ -637,22 +640,39 @@ fn sharing(agent: &mut Client, command: Option<&SharingCommand>, json: bool) -> 
 
 fn images(agent: &mut Client, command: Option<&ImagesCommand>) -> Result<()> {
     match command {
-        Some(ImagesCommand::Keep { model }) => agent.request(&Request::Keep {
+        Some(ImagesCommand::Fetch { model, build }) => agent.request(&Request::Download {
             model: model.clone(),
+            build: build.clone(),
         })?,
-        Some(ImagesCommand::Forget { model }) => agent.request(&Request::Forget {
-            model: model.clone(),
-        })?,
+        Some(ImagesCommand::Releases { model }) => {
+            let reply = agent.ask(&Request::Releases {
+                model: model.clone(),
+            })?;
+            match reply {
+                Reply::Releases(releases) => {
+                    for release in releases {
+                        println!(
+                            "{} ({})  {:.1} GB",
+                            release.version,
+                            release.build,
+                            release.bytes as f64 / 1e9
+                        );
+                    }
+                    return Ok(());
+                }
+                Reply::Error(error) => bail!(error),
+                _ => bail!("the agent did not list the releases"),
+            }
+        }
         Some(ImagesCommand::Add { path }) => {
             let _spinner = progress::waiting("Checking IPSW archive");
             agent.request(&Request::Import {
                 path: path.canonicalize().context("opening IPSW path")?,
             })?;
         }
-        Some(ImagesCommand::Remove { build }) => agent.request(&Request::Remove {
-            build: build.clone(),
+        Some(ImagesCommand::Remove { image }) => agent.request(&Request::Remove {
+            image: image.clone(),
         })?,
-        Some(ImagesCommand::Refresh) => agent.request(&Request::Refresh)?,
         None => {}
     }
     let images = agent.state()?.images;
@@ -660,39 +680,26 @@ fn images(agent: &mut Client, command: Option<&ImagesCommand>) -> Result<()> {
         println!("No images.");
     }
     for image in &images.images {
-        let models = &image.ipsw.product_types;
+        let state = match (&image.error, &images.fetch) {
+            (_, _) if image.ready => "ready".into(),
+            (Some(error), _) => error.clone(),
+            (None, Some(fetch)) if fetch.id == image.id => {
+                format!("fetching {}%", fetch.done * 100 / fetch.bytes.max(1))
+            }
+            (None, _) => "waiting to fetch".into(),
+        };
         println!(
-            "{} ({})  {:.1} GB  {}  {}{}",
-            image.ipsw.product_version,
-            image.ipsw.build_version,
-            image.ipsw.bytes() as f64 / 1e9,
-            if image.fetched { "fetched" } else { "added" },
-            models.first().map_or("", String::as_str),
-            match models.len() {
+            "{}  {} {} ({})  {:.1} GB  {state}  {}{}",
+            image.id,
+            image.os,
+            image.version,
+            image.build,
+            image.bytes as f64 / 1e9,
+            image.models.first().map_or("", String::as_str),
+            match image.models.len() {
                 0 | 1 => String::new(),
                 count => format!(" and {} more", count - 1),
             }
-        );
-    }
-    for model in &images.models {
-        let latest = model.latest.as_ref();
-        let state = match (&model.error, latest, &images.fetch) {
-            (_, Some(_), _) if model.ready => "ready".into(),
-            (Some(error), _, _) => error.clone(),
-            (None, Some(latest), Some(fetch)) if fetch.build == latest.build => {
-                format!("fetching {}%", fetch.done * 100 / fetch.bytes.max(1))
-            }
-            (None, Some(_), _) => "waiting to fetch".into(),
-            (None, None, _) => "asking the catalog".into(),
-        };
-        println!(
-            "Keeping {} ({}): {}  {state}",
-            model.name,
-            model.identifier,
-            latest.map_or(String::new(), |latest| format!(
-                "{} ({})",
-                latest.version, latest.build
-            )),
         );
     }
     Ok(())
@@ -768,9 +775,10 @@ fn submit_through(
         session,
         targets,
     }];
+    let latest = source.latest;
     agent.request(&match operation {
-        Operation::Restore => Request::Restore { boards },
-        Operation::Revive => Request::Revive { boards },
+        Operation::Restore => Request::Restore { boards, latest },
+        Operation::Revive => Request::Revive { boards, latest },
     })?;
     follow_work(agent, &board, ports)
 }
@@ -834,9 +842,9 @@ fn print_status(status: &Status) {
         status.button
     );
     println!(
-        "uptime {} ms  sample {}  reset 0x{:08x}  watchdog {}  retained update {}",
+        "uptime {} ms  revision {}  reset 0x{:08x}  watchdog {}  retained update {}",
         status.uptime_ms,
-        status.sequence,
+        status.revision,
         status.reset_reason,
         status.watchdog_reason,
         status.retained_update

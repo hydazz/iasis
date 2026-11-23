@@ -10,7 +10,7 @@ Messages use vendor control transfers on endpoint zero, addressed to interface 0
 | ------------------------ | --------------------------------------------------------- |
 | Request type / recipient | Vendor / interface                                        |
 | `wIndex`                 | `0`                                                       |
-| `wValue`                 | Protocol version, `19`                                    |
+| `wValue`                 | Protocol version, `20`                                    |
 | Maximum payload          | 1408 bytes                                                |
 | Payload header           | ASCII `IASI`, then a little-endian `u16` protocol version |
 | Payload body             | Postcard-encoded message                                  |
@@ -18,7 +18,7 @@ Messages use vendor control transfers on endpoint zero, addressed to interface 0
 | Request | Direction     | Message                                                          |
 | ------- | ------------- | ---------------------------------------------------------------- |
 | `1`     | Device → host | `Info`: board serial, firmware version, flash size, capabilities |
-| `2`     | Device → host | `Status`: latest completed sample                                |
+| `2`     | Device → host | `Status`: the board's state and its latest readings              |
 | `3`     | Host → device | `BootloaderRequest`: board serial                                |
 | `4`     | Host → device | `PortCommand`: serial, port, generation, request ID, action      |
 | `6`     | Host → device | `HostReport`: serial, session and the host's view of each port   |
@@ -29,9 +29,17 @@ The decoder rejects unknown versions, invalid ports, incomplete messages and tra
 
 `Info` and `BootloaderRequest` keep one layout, and the board answers them whatever version `wValue` and the payload header carry. The `Info` header gives the version the firmware speaks, so a tool built for another version can still name the board and send it to its updater.
 
+### Change announcements
+
+Interface 1 has one interrupt IN endpoint, `0x81`. Whenever `Status.revision` advances the board sends the new revision there as a little-endian `u32`. The packet carries no state: a client that receives one reads `Status`. Revisions that pass while a packet waits to be collected are announced as one, so a client compares revisions and does not count packets.
+
+One client claims interface 1 at a time, normally the host that holds the session. Other clients read `Status` when they need it. A client also reads it at an interval of its own choosing, for the readings and in case a packet was lost, and keeps its own deadline for anything it waits on.
+
 ## Commands and status
 
-Ports are numbered 1–5 and appear in that order in status. ADC readings are raw counts; absent readings use `None`. Sequence zero means no sample has completed. Later samples increment a wrapping sequence number and record their completion time in `uptime_ms`.
+Ports are numbered 1–5 and appear in that order in status. ADC readings are raw counts; absent readings use `None`. `uptime_ms` is when the status was composed.
+
+`revision` advances, wrapping, whenever the status changes in anything but a reading: `uptime_ms`, the connector, input and thermistor ADC counts and the upstream CC levels do not advance it. The latest button event stays in the status with its ID until the next one replaces it, and a restore decision until its arm expires, so a client that reads after several revisions still finds them.
 
 Status reports the brick’s source PDOs, requested voltage and qualified input current. The charging budget is in milliwatts. Each port reports the source PDOs it offers, the accepted request, contract voltage (mV) and agreed operating current (mA).
 
@@ -45,7 +53,7 @@ After a trip the port reports its `error` and `fault_sample` until an attachment
 
 `PortProtection` identifies the local CC or power inputs that triggered the trip. The local power input is shared by the port’s host eFuse and charging converter. If it trips with the converter on, `converter_status` records TPS55288 STATUS after the output switch opens and before converter shutdown, when readable. `HostLimiter` identifies the shared host limiter. TPS55288 errors report the observed STATUS (0x07), MODE (0x06), current-limit (0x02) or failed readback register value. I²C errors identify the operation, 7-bit address, register or mux selection, exposed mux channel mask and failure reason.
 
-Send a `PortCommand` with a nonzero request ID. USB acceptance queues the command; poll status for the matching ID and result. DFU and reboot act on one attachment and must carry the port's latest generation; a stale generation is rejected. Enable and disable apply to the port itself. The USB command queue holds one request, and a port with an action pending rejects another.
+Send a `PortCommand` with a nonzero request ID. USB acceptance queues the command; the matching ID and its result then appear in status, and each step of the result is announced. DFU and reboot act on one attachment and must carry the port's latest generation; a stale generation is rejected. Enable and disable apply to the port itself. The USB command queue holds one request, and a port with an action pending rejects another.
 
 | Result                    | Meaning                                                                                     |
 | ------------------------- | ------------------------------------------------------------------------------------------- |
