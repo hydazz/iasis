@@ -23,10 +23,19 @@ struct SettingsView: View {
 /// What applies to the app and its agent, whichever boards are connected.
 private struct GeneralSettings: View {
     let model: AgentModel
+    @State private var opensAtLogin = OpenAtLogin.isEnabled
     @State private var revealsDevices = FinderReveal.isEnabled
 
     var body: some View {
         Form {
+            Section {
+                Toggle("Open at Login", isOn: Binding {
+                    opensAtLogin
+                } set: { opens in
+                    OpenAtLogin.set(opens)
+                    opensAtLogin = OpenAtLogin.isEnabled
+                })
+            }
             Section {
                 Toggle("Share Internet over USB", isOn: Binding {
                     model.state?.sharing.enabled == true

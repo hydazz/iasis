@@ -4,9 +4,6 @@ import SwiftUI
 /// Iasis lives in the menu bar. While one of its windows is open it is also
 /// an ordinary app, with a Dock icon and a menu bar of its own.
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    /// Started at login, which shows no window.
-    static let launchedInBackground = CommandLine.arguments.contains("--background")
-
     /// Opens the app's windows; the menu bar item supplies it.
     var openWindow: OpenWindowAction?
     private var observers: [any NSObjectProtocol] = []
@@ -18,8 +15,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Task { @MainActor in Self.followWindows() }
             })
         }
+        // Opened at login, the app stays in the menu bar. Only the open
+        // event, current here and not when the scenes are built, says so.
+        let event = NSAppleEventManager.shared().currentAppleEvent
+        if event?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue != keyAELaunchedAsLogInItem {
+            openWindow?(id: DevicesView.windowID)
+        }
         // The window shown at launch opens before the app is active.
         Task { Self.followWindows() }
+        if BundledAgent.isBundled {
+            BundledAgent.register()
+            OpenAtLogin.addOnFirstLaunch()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool {
