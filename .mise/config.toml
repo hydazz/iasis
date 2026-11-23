@@ -11,6 +11,7 @@ oxfmt = "0.75.0"
 node = "26.13.1"
 "npm:pyright" = "1.1.414"
 "github:raspberrypi/pico-sdk-tools" = { version = "2.3.1-0", matching = "picotool" }
+"cargo:cargo-deb" = "3.8.0"
 
 [settings]
 experimental = true
@@ -78,8 +79,16 @@ depends = [
 run = ["mise fmt --check", "oxfmt --check"]
 
 [tasks."host:build"]
-description = "Build the Iasis host tools"
+description = "Build the Iasis host tools, carrying IasisOS"
+depends = ["firmware:uf2"]
+env = { IASIS_OS_UF2 = "{{config_root}}/target/thumbv8m.main-none-eabihf/release/IasisOS.uf2" }
 run = "cargo build --locked --release -p iasis"
+
+[tasks."host:package"]
+description = "Build the Debian package of the host tools for this Linux machine's architecture"
+depends = ["firmware:uf2"]
+env = { IASIS_OS_UF2 = "{{config_root}}/target/thumbv8m.main-none-eabihf/release/IasisOS.uf2" }
+run = "cargo deb --locked -p iasis"
 
 [tasks."firmware:build"]
 description = "Build IasisOS, the RP2354B firmware"
