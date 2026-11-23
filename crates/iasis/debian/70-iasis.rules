@@ -5,6 +5,7 @@
 # it serves.
 
 ACTION=="remove", GOTO="iasis_end"
+SUBSYSTEM=="net", GOTO="iasis_net"
 SUBSYSTEM!="usb", GOTO="iasis_end"
 ENV{DEVTYPE}!="usb_device", GOTO="iasis_end"
 
@@ -14,5 +15,13 @@ KERNEL=="*.6", ATTR{idVendor}=="2e8a", ATTR{idProduct}=="000f", ATTRS{idVendor}=
 
 # Apple targets in DFU, Recovery, Apple Debug USB, restore mode or running.
 ATTR{idVendor}=="05ac", ATTR{idProduct}=="1227|128[0-3]|1881|12[9a][0-9a-f]|190[1-5]", ATTRS{idVendor}=="0424", ATTRS{idProduct}=="4206|7206", GROUP="iasis-usb", MODE="0660"
+GOTO="iasis_end"
+
+# A target's USB network links are for the agent's gateway alone, so
+# NetworkManager leaves them unconfigured. Parent keys in one rule must match
+# one ancestor, so the target and its driver come from usb_id.
+LABEL="iasis_net"
+ATTRS{idVendor}=="0424", ATTRS{idProduct}=="4206|7206", IMPORT{builtin}="usb_id"
+ATTRS{idVendor}=="0424", ATTRS{idProduct}=="4206|7206", ENV{ID_USB_VENDOR_ID}=="05ac", ENV{ID_USB_DRIVER}=="cdc_ncm", ENV{NM_UNMANAGED}="1"
 
 LABEL="iasis_end"
