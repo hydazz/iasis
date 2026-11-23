@@ -67,7 +67,7 @@ postinstall = "lefthook install"
 "brew:libtool" = { os = "macos" }
 "brew:pkgconf" = { os = "macos" }
 "brew:cmake" = { os = "macos" }
-"brew:openssl@3" = { os = "macos" }
+"brew:openssl@4" = { os = "macos" }
 
 [tasks.deps]
 run = ["uv sync --locked", "cargo fetch --locked"]
