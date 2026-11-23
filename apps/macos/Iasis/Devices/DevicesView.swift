@@ -28,7 +28,8 @@ struct DevicesView: View {
                             Label("Update IasisOS to use this board", systemImage: "arrow.down.circle")
                                 .foregroundStyle(.secondary)
                             Spacer()
-                            Button("Update") { model.perform([.update(board: group.board.serial, bytes: nil)]) }
+                            Button("Update") { model.updateFirmware(of: group.board.serial) }
+                                .disabled(model.updating.contains(group.board.serial))
                         }
                         .selectionDisabled()
                     }
