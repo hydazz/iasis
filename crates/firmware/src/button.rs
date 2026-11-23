@@ -434,8 +434,7 @@ mod tests {
         use iasis_pd::apple;
         use iasis_protocol::PortAction;
         for (command, words) in [
-            (PortAction::DfuAppleSilicon, apple::SILICON_DFU),
-            (PortAction::DfuT2, apple::T2_DFU),
+            (PortAction::Dfu, apple::DFU),
             (PortAction::Reboot, apple::REBOOT),
         ] {
             assert_eq!(command.debug_action(), Some(apple::action(&words)));
