@@ -188,12 +188,17 @@ fn state() -> State {
         })
         .collect();
     State {
+        version: "0.2.0".into(),
         boards: vec![
             BoardView {
                 serial: "817a23bd502453b4".into(),
                 name: "Bench A".into(),
                 session: Some(3),
                 firmware: "0.1.0".into(),
+                update: Some(FirmwareUpdate {
+                    version: "0.2.0".into(),
+                    required: false,
+                }),
                 upstream_mbps: Some(10_000),
                 supply: Supply::Brick,
                 pool: Some(Pool {
@@ -219,6 +224,15 @@ fn state() -> State {
                 ..BoardView::unreadable(String::new(), String::new())
             },
             BoardView::unreadable("e2a4c1d0b3f59687".into(), "not attended".into()),
+            BoardView {
+                firmware: "0.1.0".into(),
+                update: Some(FirmwareUpdate {
+                    version: "0.2.0".into(),
+                    required: true,
+                }),
+                notice: None,
+                ..BoardView::unreadable("5c19e0f2a7d4b368".into(), String::new())
+            },
         ],
         submitted: vec![
             Some(ending(Operation::Restore, RestorePhase::Reported)),

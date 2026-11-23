@@ -201,6 +201,8 @@ pub struct CatalogModel {
 /// Everything the agent knows, for a client to show.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct State {
+    /// The agent's release version.
+    pub version: String,
     pub boards: Vec<BoardView>,
     /// A submitting connection's watch receives its work's results in target
     /// order, each null until it has one.
@@ -216,7 +218,11 @@ pub struct BoardView {
     /// Empty for an unnamed board.
     pub name: String,
     pub session: Option<u32>,
+    /// The IasisOS version the board runs; empty while the board cannot be
+    /// read.
     pub firmware: String,
+    /// The IasisOS the agent carries, when the board runs another.
+    pub update: Option<FirmwareUpdate>,
     /// The negotiated rate between the host and the board's hub.
     pub upstream_mbps: Option<u16>,
     pub supply: Supply,
@@ -243,6 +249,7 @@ impl BoardView {
             name: String::new(),
             session: None,
             firmware: String::new(),
+            update: None,
             upstream_mbps: None,
             supply: Supply::Off,
             pool: None,
@@ -254,6 +261,15 @@ impl BoardView {
             notice: Some(notice),
         }
     }
+}
+
+/// IasisOS the agent can write to a board.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FirmwareUpdate {
+    pub version: String,
+    /// The board runs a build the agent cannot talk to, so it has no ports
+    /// until it takes this one.
+    pub required: bool,
 }
 
 /// What powers the targets.
