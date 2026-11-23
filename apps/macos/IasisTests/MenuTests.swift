@@ -21,6 +21,33 @@ struct MenuTests {
         #expect(await agent.received == [.reboot(board: "a0e012192cdfdb67", port: 2)])
     }
 
+    @Test func theBoardMenuUpdatesABoardThatRunsAnotherIasisOS() async throws {
+        var state = try Fixtures.state
+        let agent = FakeAgent(reports: [state])
+        let model = AgentModel(agent: agent)
+        model.start()
+        for _ in 0 ..< 100 where model.state == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let menu = NSHostingMenu(rootView: BoardMenuItems(model: model))
+        menu.update()
+        let update = try #require(menu.item(withTitle: "Update IasisOS"))
+        #expect(!update.isEnabled)
+        state.boards[0].update = .init(version: "0.2.0", required: false)
+        await agent.publish(state)
+        for _ in 0 ..< 100 where !update.isEnabled {
+            try await Task.sleep(for: .milliseconds(10))
+            menu.update()
+        }
+        let index = menu.index(of: update)
+        try #require(index >= 0)
+        menu.performActionForItem(at: index)
+        for _ in 0 ..< 100 where await agent.received.isEmpty {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(await agent.received == [.update(board: "a0e012192cdfdb67", bytes: nil)])
+    }
+
     @Test func theNativeMenuIdentifiesThePortAndKeepsItsCommandsOnThatAttachment() async throws {
         var state = try Fixtures.state
         let agent = FakeAgent(reports: [state])
