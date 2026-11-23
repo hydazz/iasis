@@ -32,6 +32,8 @@ const IMAGE_HOSTS: [&str; 3] = [
 ];
 /// How long a model's listing serves before the catalog is asked again.
 const LISTING: Duration = Duration::from_secs(600);
+/// The name an archive arriving from a client has until it is checked.
+const IMPORTING: &str = ".import-";
 
 /// A release as the catalog lists it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -698,6 +700,12 @@ impl Store {
         lock.try_lock()
             .ok()
             .context("another Iasis process holds the image store")?;
+        // An archive a client was still sending when its agent stopped.
+        for entry in fs::read_dir(&dir)?.flatten() {
+            if entry.file_name().to_string_lossy().starts_with(IMPORTING) {
+                fs::remove_file(entry.path()).ok();
+            }
+        }
         let index = dir.join("index.json");
         let mut saved: Saved = match fs::read(&index) {
             Ok(bytes) => serde_json::from_slice(&bytes).with_context(|| {
@@ -1085,25 +1093,44 @@ impl Store {
         }
     }
 
-    /// Check a local archive and keep a copy of it in the store.
-    pub fn import(&self, path: &Path) -> Result<PreparedIpsw> {
-        let source = PreparedIpsw::open(path)?;
+    /// Receive an archive of `bytes` bytes named `name`, check every member
+    /// and publish it in the store. Until it is whole and checked it is a
+    /// hidden file that the store neither lists nor keeps.
+    pub fn import(&self, name: &str, source: &mut dyn Read, bytes: u64) -> Result<PreparedIpsw> {
+        ensure!(
+            !name.is_empty()
+                && !name.starts_with('.')
+                && Path::new(name).file_name() == Some(name.as_ref())
+                && name.to_ascii_lowercase().ends_with(".ipsw"),
+            "{name:?} is not an IPSW file name"
+        );
+        let mut part = tempfile::Builder::new()
+            .prefix(IMPORTING)
+            .tempfile_in(&self.0.dir)
+            .context("creating the image file")?;
+        let received = io::copy(&mut source.take(bytes), part.as_file_mut())
+            .context("receiving the archive")?;
+        ensure!(
+            received == bytes,
+            "the archive ended after {received} of {bytes} bytes"
+        );
+        part.as_file().sync_all()?;
+        let received = PreparedIpsw::open(part.path())?;
         ensure!(
             !self.0.lock().saved.images.iter().any(|image| {
-                image.ipsw.build_version == source.build_version
-                    && image.ipsw.product_types == source.product_types
+                image.ipsw.build_version == received.build_version
+                    && image.ipsw.product_types == received.product_types
             }),
             "build {} for these models is already in the store",
-            source.build_version
+            received.build_version
         );
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .context("the archive has no file name")?;
-        let kept = self.0.dir.join(format!("{}-{name}", source.build_version));
-        // A copy on the same volume shares the archive's blocks where the
-        // file system can.
-        fs::copy(source.path(), &kept).context("copying the archive into the store")?;
+        let kept = self
+            .0
+            .dir
+            .join(format!("{}-{name}", received.build_version));
+        part.persist_noclobber(&kept)
+            .map_err(|error| error.error)
+            .with_context(|| format!("{} is already in the store", kept.display()))?;
         let ipsw = PreparedIpsw::open_stored(&kept)?;
         let mut state = self.0.lock();
         state.saved.images.push(Image {
@@ -1156,6 +1183,57 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use zip::{ZipWriter, write::SimpleFileOptions};
+
+    fn import(store: &Store, path: &Path) -> Result<PreparedIpsw> {
+        let mut file = File::open(path)?;
+        let bytes = file.metadata()?.len();
+        let name = path.file_name().unwrap().to_str().unwrap();
+        store.import(name, &mut file, bytes)
+    }
+
+    /// What the store directory holds besides its index and lock.
+    fn files(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name != "index.json" && name != "lock")
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn an_import_is_published_whole_or_not_at_all() {
+        let temp = tempfile::tempdir().unwrap();
+        let local = temp.path().join("Mini.ipsw");
+        archive(&local, "25.0", "24A1", &["Macmini9,1"]);
+        let dir = temp.path().join("store");
+        let store = Store::open(&dir, Shelf::new(), Arc::default()).unwrap();
+        let whole = fs::read(&local).unwrap();
+        let cut = &whole[..whole.len() / 2];
+        // A client that stops sending, or sends a broken archive.
+        let error = store
+            .import("Mini.ipsw", &mut &cut[..], whole.len() as u64)
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("ended after"), "{error:#}");
+        assert!(
+            store
+                .import("Mini.ipsw", &mut &cut[..], cut.len() as u64)
+                .is_err()
+        );
+        assert!(
+            store
+                .import("../Mini.ipsw", &mut &whole[..], whole.len() as u64)
+                .is_err()
+        );
+        assert!(files(&dir).is_empty());
+        assert!(store.snapshot().images.is_empty());
+        let added = import(&store, &local).unwrap();
+        assert_eq!(files(&dir), ["24A1-Mini.ipsw"]);
+        assert_eq!(fs::read(added.path()).unwrap(), whole);
+        assert_eq!(store.snapshot().images.len(), 1);
+        store.close();
+    }
 
     const MODELS: [&str; 4] = ["Macmini9,1", "iPad13,18", "iPad13,19", "iBridge2,1"];
 
@@ -1625,7 +1703,7 @@ mod tests {
         archive(&local, "25.0", "24A1", &["Macmini9,1"]);
         let dir = temp.path().join("store");
         let store = Store::open(&dir, Shelf::new(), Arc::default()).unwrap();
-        let added = store.import(&local).unwrap();
+        let added = import(&store, &local).unwrap();
         store.close();
         drop(store);
         archive(added.path(), "25.0", "24A1", &["Macmini9,1"]);
@@ -1698,8 +1776,8 @@ mod tests {
         archive(&local, "25.0", "24A1", &["Macmini9,1"]);
         let shelf = Shelf::new();
         let store = Store::open(temp.path().join("store"), shelf.clone(), Arc::default()).unwrap();
-        let added = store.import(&local).unwrap();
-        assert!(store.import(&local).is_err());
+        let added = import(&store, &local).unwrap();
+        assert!(import(&store, &local).is_err());
         assert!(
             added
                 .path()

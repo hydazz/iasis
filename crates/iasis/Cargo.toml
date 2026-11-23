@@ -1,5 +1,7 @@
 [package]
 name = "iasis"
+description = "Host tools for Iasis, a USB-C hub that puts Apple devices in DFU and restores them"
+homepage = "https://github.com/hydazz/iasis"
 default-run = "iasis"
 version.workspace = true
 edition.workspace = true
@@ -21,9 +23,13 @@ thiserror = "2.0"
 zip = { version = "9.1.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 ureq = "3"
 sha2 = "0.11.1"
-directories = "6.0.0"
 restorekit.workspace = true
 futures-core = "0.3"
+picoboot = { version = "0.3.0", default-features = false, features = ["smol"] }
+pollster = "0.4"
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+directories = "6.0.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
@@ -37,3 +43,48 @@ pktkit = { version = "=0.1.12", features = ["dhcp", "l2adapter", "slirp"] }
 
 [target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
 restorekit-sys.workspace = true
+
+[package.metadata.deb]
+maintainer = "hydazz <hydazz@users.noreply.github.com>"
+copyright = "hydazz"
+license-file = ["../../LICENSE", "0"]
+extended-description = """\
+The iasis command and the iasisd service, which attends every Iasis board, \
+restores the Apple devices on their ports and shares this host's internet \
+connection with them. Members of the iasis group use the service."""
+section = "utils"
+depends = "$auto, usbmuxd, systemd | systemd-standalone-sysusers | systemd-sysusers"
+maintainer-scripts = "debian/"
+assets = [
+  [
+    "target/release/iasis",
+    "usr/bin/",
+    "755",
+  ],
+  [
+    "target/release/iasisd",
+    "usr/libexec/iasis/",
+    "755",
+  ],
+  [
+    "target/release/iasis-gateway",
+    "usr/libexec/iasis/",
+    "755",
+  ],
+  [
+    "debian/70-iasis.rules",
+    "usr/lib/udev/rules.d/",
+    "644",
+  ],
+  [
+    "debian/iasis.polkit.rules",
+    "usr/share/polkit-1/rules.d/iasis.rules",
+    "644",
+  ],
+  [
+    "NOTICES.txt",
+    "usr/share/doc/iasis/",
+    "644",
+  ],
+]
+systemd-units = { unit-scripts = "debian/", unit-name = "iasisd" }
