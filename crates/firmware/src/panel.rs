@@ -183,7 +183,7 @@ mod tests {
             progress: 100,
         });
         status.ports[0].request = Some(Request {
-            action: PortAction::DfuAppleSilicon,
+            action: PortAction::Dfu,
             at_ms: 0,
         });
         status.ports[2].observed = seen(AppleMode::Dfu);
@@ -295,7 +295,7 @@ mod tests {
     fn a_sent_dfu_pulses_until_a_host_sees_it() {
         let mut status = ready();
         status.ports[0].request = Some(Request {
-            action: PortAction::DfuAppleSilicon,
+            action: PortAction::Dfu,
             at_ms: 0,
         });
         let button = Button::default();
@@ -329,7 +329,7 @@ mod tests {
             status.ports[0].request = None;
             assert_eq!(indicators(&status, &button, 0)[5], GREEN);
             status.ports[0].request = Some(Request {
-                action: PortAction::DfuAppleSilicon,
+                action: PortAction::Dfu,
                 at_ms: 0,
             });
         }

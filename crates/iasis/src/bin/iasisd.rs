@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Parser;
 use iasis::{
     agent::{Agent, Options},
-    batch, parse_serial,
+    parse_serial,
 };
 
 #[derive(Parser)]
@@ -21,8 +21,6 @@ struct Arguments {
     /// by default
     #[arg(long)]
     logs: Option<PathBuf>,
-    #[arg(long, value_enum, default_value = "apple-silicon")]
-    device: batch::Device,
 }
 
 fn main() -> Result<()> {
@@ -31,7 +29,6 @@ fn main() -> Result<()> {
     let options = Options {
         serial: arguments.serial,
         logs: arguments.logs,
-        family: arguments.device,
     };
     Agent::new(&options)?.run(&options)
 }
