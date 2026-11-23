@@ -123,12 +123,14 @@ pub async fn set_contract(bus: &mut Bus, millivolts: u16, milliamps: u16) -> Res
         return Err(PortError::ConverterCurrentLimitDisabled { raw: old_limit });
     }
     let slew_limit = if code < previous {
-        // The higher current available at a lower voltage may exceed the
-        // input budget at the old rail. Hold the smaller limit during slew.
         if mode & FPWM == 0 {
             write_checked(bus, MODE, ON | FPWM).await?;
         }
-        old_limit.min(limit)
+        // The old limit holds until the new voltage is confirmed. At a lower
+        // voltage the old current stays within the old contract's watts,
+        // for a sink that keeps drawing instead of entering Sink Standby; a
+        // larger new current would not.
+        old_limit
     } else {
         limit
     };
