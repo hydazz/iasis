@@ -184,7 +184,7 @@ impl PreparedIpsw {
     }
 
     /// Whether the archive restores this model: by the chip and board a DFU
-    /// descriptor gives, or else by the product type Configurator reads.
+    /// descriptor gives, or else by its product type.
     pub(crate) fn restores(&self, model: &DeviceModel) -> bool {
         match (model.hardware(), model.identifier()) {
             (Some((chip, board)), _) => self.erases(chip, board),
