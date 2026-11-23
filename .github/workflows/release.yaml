@@ -47,7 +47,7 @@ jobs:
             v*)
               VERSION="${RELEASE_TAG#v}"
               grep -Fqx "version = \"${VERSION}\"" Cargo.toml
-              grep -Fqx "MARKETING_VERSION = ${VERSION} // x-release-please-version" app/Config/Version.xcconfig
+              grep -Fqx "MARKETING_VERSION = ${VERSION} // x-release-please-version" apps/macos/Config/Version.xcconfig
               ;;
             *-board-v*)
               BOARD="${RELEASE_TAG%-board-v*}"
@@ -153,7 +153,7 @@ jobs:
     env:
       VERSION: ${{ needs.tag.outputs.version }}
       APP_NAME: Iasis
-      PROJECT: app/Iasis.xcodeproj
+      PROJECT: apps/macos/Iasis.xcodeproj
       SCHEME: Iasis
       PKG_SIGNING_IDENTITY: "Developer ID Installer: Woodleigh School (SMLKBTR495)"
 
@@ -205,7 +205,7 @@ jobs:
             -exportArchive \
             -archivePath "${RUNNER_TEMP}/${APP_NAME}.xcarchive" \
             -exportPath "${RUNNER_TEMP}/export" \
-            -exportOptionsPlist app/Config/ExportOptions.plist
+            -exportOptionsPlist apps/macos/Config/ExportOptions.plist
 
       - name: Import Developer ID Installer certificate
         uses: apple-actions/import-codesign-certs@288b8ec97b82c66b6f2a6baaf7acc8dfbcbe331c # v7.2.0
@@ -218,7 +218,7 @@ jobs:
       - name: Stage package payload
         run: |
           codesign --verify --deep --strict "${RUNNER_TEMP}/export/${APP_NAME}.app"
-          ditto --norsrc app/packaging/root "${RUNNER_TEMP}/payload"
+          ditto --norsrc apps/macos/packaging/root "${RUNNER_TEMP}/payload"
           ditto --norsrc "${RUNNER_TEMP}/export/${APP_NAME}.app" \
             "${RUNNER_TEMP}/payload/Applications/${APP_NAME}.app"
 
@@ -227,7 +227,7 @@ jobs:
         uses: woodleighschool/.github/actions/apple-pkg@583bc37748899a9154880b1c538b15cf46b5b05d # apple-pkg-v1.0.0
         with:
           payload-root: ${{ runner.temp }}/payload
-          scripts: app/packaging/scripts
+          scripts: apps/macos/packaging/scripts
           identifier: com.hydaz.Iasis
           version: ${{ env.VERSION }}
           signing-identity: ${{ env.PKG_SIGNING_IDENTITY }}

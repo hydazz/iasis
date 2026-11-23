@@ -17,12 +17,12 @@ See the [main board](hardware/boards/iasis/README.md) for fabrication files and 
 
 ## Software
 
-| Part                                 | Role                                         |
-| ------------------------------------ | -------------------------------------------- |
-| [IasisOS](crates/firmware/README.md) | Firmware on the board's RP2354               |
-| [`iasisd`](#host-agent)              | Host agent: follows boards and runs restores |
-| `iasis`                              | Command-line control of boards and the agent |
-| [Iasis for macOS](app/README.md)     | Menu bar app, with the host tools inside     |
+| Part                                    | Role                                         |
+| --------------------------------------- | -------------------------------------------- |
+| [IasisOS](crates/firmware/README.md)    | Firmware on the board's RP2354               |
+| [`iasisd`](#host-agent)                 | Host agent: follows boards and runs restores |
+| `iasis`                                 | Command-line control of boards and the agent |
+| [Iasis for macOS](apps/macos/README.md) | Menu bar app, with the host tools inside     |
 
 They share one version and are released together.
 
@@ -103,7 +103,7 @@ While the agent is running:
 
 The status light is green and the OLED shows a USB symbol while a host is attached. One host holds a board at a time. With the agent running, every `iasis` command except `status` and `ports` goes through it. Other clients use its [local socket](crates/api/README.md).
 
-On Linux, the [Debian package](crates/iasis/README.md#debian-package) runs the agent at boot, and members of the `iasis` group use it. On macOS, the [menu bar app](app/README.md) shows the same boards and ports, sends the same actions, and its installer starts the agent at login. To run your own build in the background, prefix the command with `launchctl submit -l local.iasisd --`.
+On Linux, the [Debian package](crates/iasis/README.md#debian-package) runs the agent at boot, and members of the `iasis` group use it. On macOS, the [menu bar app](apps/macos/README.md) shows the same boards and ports, sends the same actions, and its installer starts the agent at login. To run your own build in the background, prefix the command with `launchctl submit -l local.iasisd --`.
 
 ### USB Internet Sharing
 
@@ -119,7 +119,7 @@ A directly attached Apple device that offers USB Ethernet can use the host’s i
 
 On Linux, use a kernel whose `cdc_ncm` driver supports the target’s USB ID. The Debian package gives the agent the USB and network access its gateway needs. iPhones and iPads are not served there: usbmuxd 1.1.1, which Debian and Ubuntu ship, holds them in a USB configuration without USB Ethernet.
 
-Setup Assistant can use this connection for Automated Device Enrollment. See the [Mac app guide](app/README.md#usb-internet-sharing) for host permissions.
+Setup Assistant can use this connection for Automated Device Enrollment. See the [Mac app guide](apps/macos/README.md#usb-internet-sharing) for host permissions.
 
 ### Images
 
