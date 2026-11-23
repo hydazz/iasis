@@ -586,7 +586,10 @@ impl Port<'_> {
         let Some(pins) = self.shared.pins.get() else {
             return Ok(());
         };
-        let power = pins.power && (self.stage_on.get() || self.powered.get());
+        // Without a running stage the line is the host eFuse's FLT, which also
+        // reports current limiting and reverse blocking. The eFuse handles
+        // those itself and the VBUS window judges the port, as for the stage.
+        let power = pins.power && self.stage_on.get();
         if pins.cc || power {
             return Err(PortError::PortProtection {
                 pins: PortFaults { cc: pins.cc, power },
