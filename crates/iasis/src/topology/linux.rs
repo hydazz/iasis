@@ -232,78 +232,9 @@ pub fn public_ncm_control(
     candidates.next().is_none().then_some(candidate)
 }
 
-/// Linux selects the PTP-only configuration at boot. Retain PTP and, when the
-/// current personality advertises it, the same public NCM function the gateway uses.
-pub(crate) fn initial_ios_mux_config<'a>(
-    product: u16,
-    active: &nusb::descriptors::ConfigurationDescriptor<'_>,
-    configs: impl Iterator<Item = nusb::descriptors::ConfigurationDescriptor<'a>>,
-) -> Option<u8> {
-    fn classes(
-        config: &nusb::descriptors::ConfigurationDescriptor<'_>,
-    ) -> impl Iterator<Item = (u8, u8, u8)> {
-        config.interfaces().map(|i| {
-            let i = i.first_alt_setting();
-            (i.class(), i.subclass(), i.protocol())
-        })
-    }
-    let ptp = (6, 1, 1);
-    let mux = (0xff, 0xfe, 2);
-    if !matches!(product, 0x1290..=0x12af)
-        || active.configuration_value() != 1
-        || !classes(active).eq([ptp])
-    {
-        return None;
-    }
-    let mut ptp_mux = None;
-    for config in configs {
-        if public_ncm_control(product, &config).is_some() {
-            return Some(config.configuration_value());
-        }
-        if classes(&config).eq([ptp, mux]) {
-            ptp_mux.get_or_insert(config.configuration_value());
-        }
-    }
-    ptp_mux
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn ios_identity_uses_mux_on_the_initial_ptp_attachment() {
-        use nusb::descriptors::ConfigurationDescriptor;
-        let ptp = [9, 2, 18, 0, 1, 1, 0, 0x80, 0, 9, 4, 0, 0, 0, 6, 1, 1, 0];
-        let mux = [
-            9, 2, 27, 0, 2, 3, 0, 0x80, 0, 9, 4, 0, 0, 0, 6, 1, 1, 0, 9, 4, 1, 0, 0, 0xff, 0xfe, 2,
-            0,
-        ];
-        let network = [
-            9, 2, 43, 0, 3, 5, 0, 0x80, 0, 9, 4, 0, 0, 0, 6, 1, 1, 0, 9, 4, 1, 0, 0, 0xff, 0xfe, 2,
-            0, 9, 4, 2, 0, 1, 2, 13, 0, 0, 7, 5, 0x81, 3, 16, 0, 1,
-        ];
-        let ptp = ConfigurationDescriptor::new(&ptp).unwrap();
-        let mux = ConfigurationDescriptor::new(&mux).unwrap();
-        let network = ConfigurationDescriptor::new(&network).unwrap();
-        let configs = [ptp.clone(), mux.clone(), network.clone()];
-        assert_eq!(
-            initial_ios_mux_config(0x12ab, &ptp, configs[..2].iter().cloned()),
-            Some(3)
-        );
-        assert_eq!(
-            initial_ios_mux_config(0x12ab, &ptp, configs.iter().cloned()),
-            Some(5)
-        );
-        assert_eq!(
-            initial_ios_mux_config(0x12ab, &network, configs.iter().cloned()),
-            None
-        );
-        assert_eq!(
-            initial_ios_mux_config(0x1905, &ptp, configs.iter().cloned()),
-            None
-        );
-    }
 
     fn ios_network_config(ptp_class: u8, endpoint_attributes: u8) -> Vec<u8> {
         let mut bytes = vec![9, 2, 70, 0, 6, 5, 0, 0x80, 0];
