@@ -1069,16 +1069,15 @@ impl Port<'_> {
         }
         // The converter has its new setting. Conversions from here on are
         // of the rail it is moving; the newest so far is of the old one.
-        let window = |mv: u16| {
-            let (low, high) = iasis_pd::voltage_window(mv);
-            (u32::from(low), u32::from(high))
-        };
-        let (from, to) = (window(from_mv), window(target.millivolts));
-        let slew = (from.0.min(to.0), from.1.max(to.1));
+        // The rail may pass through either contract's vSrcValid band and
+        // settles in the new contract's window (USB PD §4.1.2.1).
+        let window = |(low, high): (u16, u16)| (u32::from(low), u32::from(high));
+        let from = window(iasis_pd::valid_window(from_mv));
+        let to = window(iasis_pd::valid_window(target.millivolts));
         let mut settle = Settle::new(
             self.shared.vbus.get().conversion,
-            slew,
-            to,
+            (from.0.min(to.0), from.1.max(to.1)),
+            window(iasis_pd::voltage_window(target.millivolts)),
             STABLE.as_micros(),
         );
         let deadline = Instant::now() + SETTLE;
