@@ -54,11 +54,17 @@ const IDLE_ROLES: u8 = 0xb0;
 const PD_ROLES: u8 = 0xb4;
 /// Default USB current on Rp.
 const HOST_CURRENT: u8 = 0x04;
+/// 3 A on Rp, which under a contract is PD 3 SinkTxOK. Sinks that keep
+/// collision avoidance at revision 2.0 abandon a contract held at default Rp.
+const SINK_TX_OK: u8 = 0x0c;
 /// Comparator code for 1.6 V, above the Rd range at default Rp.
 const OPEN_THRESHOLD: u8 = 0x26;
+/// Comparator code for 2.6 V, above the Rd range at 3 A Rp.
+const OPEN_THRESHOLD_3A: u8 = 0x3d;
 /// Flush the receive FIFO; accept SOP, SOP′ Debug and SOP″ Debug.
 const RECEIVE: u8 = 0x64;
 const REJECT: u8 = 4;
+const PS_RDY: u8 = 6;
 const NOT_SUPPORTED: u8 = 16;
 const SOP: [u8; 4] = [0x12, 0x12, 0x12, 0x13];
 /// Sync-1, RST-2, Sync-3, Sync-2 (USB PD table 5.3).
@@ -107,6 +113,8 @@ pub struct Phy<'a> {
     toggling: Cell<bool>,
     toggle: Cell<Option<Orientation>>,
     cc_open: Cell<bool>,
+    /// Rp current while attached.
+    rp: Cell<u8>,
     hard_reset: Cell<bool>,
     hard_sent: Cell<bool>,
     sent: Cell<Option<Tx>>,
@@ -138,6 +146,7 @@ impl<'a> Phy<'a> {
             toggling: Cell::new(false),
             toggle: Cell::new(None),
             cc_open: Cell::new(false),
+            rp: Cell::new(HOST_CURRENT),
             hard_reset: Cell::new(false),
             hard_sent: Cell::new(false),
             sent: Cell::new(None),
@@ -168,6 +177,7 @@ impl<'a> Phy<'a> {
         self.toggling.set(false);
         self.toggle.set(None);
         self.cc_open.set(false);
+        self.rp.set(HOST_CURRENT);
         self.hard_reset.set(false);
         self.hard_sent.set(false);
         self.sent.set(None);
@@ -257,8 +267,10 @@ impl<'a> Phy<'a> {
         let bus = io.port(self.channel).await?;
         write(bus, RESET, 0x02).await?;
         write(bus, CONTROL0, TX_FLUSH | HOST_CURRENT).await?;
+        write(bus, MEASURE, OPEN_THRESHOLD).await?;
         write(bus, CONTROL1, RECEIVE).await?;
         drop(io);
+        self.rp.set(HOST_CURRENT);
         self.hard_reset.set(false);
         self.hard_sent.set(false);
         self.sent.set(None);
@@ -472,10 +484,22 @@ impl<'a> Phy<'a> {
     async fn flush(&self) -> Result<(), PortError> {
         let mut io = self.io.lock().await;
         let bus = io.port(self.channel).await?;
-        write(bus, CONTROL0, TX_FLUSH | HOST_CURRENT).await?;
+        write(bus, CONTROL0, TX_FLUSH | self.rp.get()).await?;
         drop(io);
         Timer::after_millis(1).await;
         Ok(())
+    }
+
+    /// Let the sink start messages once a contract holds.
+    async fn sink_tx_ok(&self) -> Result<(), PortError> {
+        if self.rp.replace(SINK_TX_OK) == SINK_TX_OK {
+            return Ok(());
+        }
+        let mut io = self.io.lock().await;
+        let bus = io.port(self.channel).await?;
+        // Rd reads as open at 3 A Rp until the threshold is raised.
+        write(bus, MEASURE, OPEN_THRESHOLD_3A).await?;
+        write(bus, CONTROL0, SINK_TX_OK).await
     }
 
     /// Send one Apple debug message over SOP″ Debug.
@@ -537,11 +561,18 @@ impl Driver for PdPhy<'_, '_> {
             return Err(DriverTxError::Discarded);
         }
         message[0] = (message[0] & 0x3f) | 0x40;
-        if message[0] & 0x1f == NOT_SUPPORTED && message[1] & 0xf0 == 0 {
+        let control = message[1] & 0xf0 == 0;
+        if control && message[0] & 0x1f == NOT_SUPPORTED {
             message[0] = (message[0] & !0x1f) | REJECT;
         }
+        let ps_rdy = control && message[0] & 0x1f == PS_RDY;
         let result = match self.phy.send(SOP, &message).await {
-            Ok(Tx::Sent) => Ok(()),
+            Ok(Tx::Sent) => {
+                if ps_rdy && let Err(error) = self.phy.sink_tx_ok().await {
+                    self.phy.fail(error);
+                }
+                Ok(())
+            }
             Ok(_) if self.phy.hard_reset.take() => {
                 self.phy.answering.set(true);
                 Err(DriverTxError::HardReset)
