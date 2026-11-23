@@ -11,6 +11,8 @@ final class AgentModel {
     private(set) var menuSnapshot: AgentState?
     /// An archive on its way into the agent's store.
     private(set) var importing: Importing?
+    /// Boards being written IasisOS, by serial.
+    private(set) var updating: Set<String> = []
     private var menuRefreshPending = false
     private let agent: any AgentService
     /// Replaces the running agent with the one the app carries; nil when it
@@ -72,6 +74,15 @@ final class AgentModel {
             for request in requests {
                 guard await send(request) else { return }
             }
+        }
+    }
+
+    /// Write the IasisOS the agent carries to a board.
+    func updateFirmware(of board: String) {
+        guard updating.insert(board).inserted else { return }
+        Task {
+            await send(.update(board: board, bytes: nil))
+            updating.remove(board)
         }
     }
 
