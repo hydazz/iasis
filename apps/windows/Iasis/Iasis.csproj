@@ -9,6 +9,9 @@
     <ApplicationIcon>Assets\Iasis.ico</ApplicationIcon>
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
+    <!-- Without the MSIX tooling, publishing leaves out Iasis.pri, the
+         resource index the app's XAML loads through. -->
+    <EnableMsixTooling>true</EnableMsixTooling>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <Platforms>x64</Platforms>
     <SelfContained>true</SelfContained>
