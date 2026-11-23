@@ -266,7 +266,6 @@ fn compose(
 struct Shared {
     board: Board,
     engine: crate::restore::RestoreEngine,
-    family: crate::batch::Device,
     session: u32,
     jobs: Jobs,
     models: Arc<Models>,
@@ -314,21 +313,13 @@ impl Shared {
         }
         view.uptime_ms = status.uptime_ms;
         let seen = view.observer.sample(&status, &snapshot);
-        let action = self.family.dfu_action();
         view.access = Port::ALL.map(|port| {
             let slot = &status.ports[port.index()];
             if seen[port.index()] != Some((slot.generation, observe(&snapshot, port))) {
                 return RestoreAccess::Unavailable;
             }
-            dfu::assess(
-                self.board.info().serial,
-                port,
-                &status,
-                &snapshot,
-                action,
-                None,
-            )
-            .restore_access(slot, action, |mode| self.engine.restores(mode))
+            dfu::assess(self.board.info().serial, port, &status, &snapshot, None)
+                .restore_access(slot, |mode| self.engine.restores(mode))
         });
         remember_models(&snapshot, &self.models);
         view.sample = Some((status, snapshot));
@@ -467,14 +458,12 @@ impl Link {
         jobs: Jobs,
         models: Arc<Models>,
         engine: &crate::restore::RestoreEngine,
-        family: crate::batch::Device,
     ) -> Result<Self> {
         let board = Board::listen(device)?;
         let session = (RandomState::new().hash_one(board.info().serial) as u32).max(1);
         let shared = Arc::new(Shared {
             board,
             engine: engine.clone(),
-            family,
             session,
             jobs,
             models,
@@ -613,7 +602,6 @@ impl Link {
             &crate::view::Host {
                 store,
                 models: &self.shared.models,
-                family: self.shared.family,
             },
         );
         let jobs = self.shared.jobs.lock().unwrap();
@@ -779,7 +767,6 @@ mod tests {
     #[test]
     fn a_target_keeps_its_identity_while_its_attachment_lasts() {
         use crate::{
-            batch::Device,
             images::{Network, Store},
             view::PortView,
         };
@@ -809,7 +796,6 @@ mod tests {
                 &crate::view::Host {
                     store: &store,
                     models,
-                    family: Device::AppleSilicon,
                 },
             );
             board.ports.remove(0)
