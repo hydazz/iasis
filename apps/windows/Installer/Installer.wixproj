@@ -1,0 +1,11 @@
+<Project Sdk="WixToolset.Sdk">
+  <PropertyGroup>
+    <OutputName>Iasis-$(Version)-x64</OutputName>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <AcceptEula>wix7</AcceptEula>
+    <DefineConstants>Version=$(Version);AppDir=$(AppDir);ToolsDir=$(ToolsDir)</DefineConstants>
+    <!-- ICE38, ICE43 and ICE57 read the Start menu as the user's, but the
+         package installs for the machine. -->
+    <SuppressIces>ICE38;ICE43;ICE57</SuppressIces>
+  </PropertyGroup>
+</Project>

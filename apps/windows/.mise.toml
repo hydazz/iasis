@@ -1,0 +1,24 @@
+[vars]
+version = "0.1.0" # x-release-please-version
+
+[tools]
+dotnet = { version = "10", os = ["windows"] }
+
+[tasks.build]
+run = "dotnet build Iasis.slnx -c Release"
+
+[tasks.lint]
+run = "dotnet format Iasis.slnx --verify-no-changes"
+
+[tasks.test]
+run = "dotnet test Iasis.Tests -c Release"
+
+[tasks.run]
+run = "dotnet run --project Iasis -c Release"
+
+[tasks.package]
+description = "MSI"
+run = [
+  "dotnet publish Iasis -c Release -p:Version={{ vars.version }} -o build/app",
+  "dotnet build Installer -c Release -p:Version={{ vars.version }} -p:AppDir={{ config_root }}/build/app -p:ToolsDir={{ config_root }}/../../target/x86_64-pc-windows-gnu/release -o build",
+]
