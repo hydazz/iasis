@@ -234,7 +234,7 @@ fn matching_ports(snapshot: &Snapshot, ecid: u64) -> Vec<Port> {
 
 pub(crate) fn query(snapshot: &mut Snapshot, mask: u8) {
     #[cfg(target_os = "linux")]
-    crate::native::prepare_ios_identity(snapshot, mask);
+    crate::native::mux::prepare_ios_identity(snapshot, mask);
     query_mux(snapshot, mask);
     crate::native::identify(snapshot, mask);
     #[cfg(target_os = "macos")]
@@ -259,9 +259,6 @@ fn query_mux(snapshot: &mut Snapshot, mask: u8) {
     if candidates.is_empty() {
         return;
     }
-    #[cfg(target_os = "linux")]
-    let list = crate::native::mux_path().and_then(|_| mux::list());
-    #[cfg(not(target_os = "linux"))]
     let list = mux::list();
     for device in candidates {
         let result = match &list {
@@ -321,8 +318,8 @@ mod tests {
             apple: AppleDevice::from_usb(0x05ac, pid, serial.as_deref()),
             #[cfg(target_os = "macos")]
             macos_attachment: None,
-            #[cfg(target_os = "linux")]
-            linux_device_address: 1,
+            #[cfg(not(target_os = "macos"))]
+            device_address: 1,
         }
     }
 

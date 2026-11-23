@@ -25,7 +25,7 @@ struct IasisApp: App {
         Window("Iasis", id: DevicesView.windowID) {
             DevicesView(browser: browser)
         }
-        .defaultSize(width: 720, height: 414)
+        .defaultSize(width: 720, height: 520)
         .defaultLaunchBehavior(AppDelegate.launchedInBackground ? .suppressed : .presented)
         .restorationBehavior(.disabled)
         .commands {

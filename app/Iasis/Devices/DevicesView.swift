@@ -37,7 +37,7 @@ struct DevicesView: View {
                 DeviceActionButtons(actions: browser.actions(for: ids)) { requests in
                     model.perform(requests)
                 } restore: { confirmation in
-                    browser.confirming = confirmation
+                    browser.confirm(confirmation)
                 }
                 Divider()
                 Button("Get Info", systemImage: "info.circle") {
@@ -88,9 +88,13 @@ struct DevicesView: View {
                 }
                 .disabled(actions.revive == nil)
                 .help("Reinstall the system on the selected device and keep its data")
-                Button("Restore…", systemImage: DeviceSymbol.restore) { browser.confirming = actions.restore }
-                    .disabled(actions.restore == nil)
-                    .help("Erase the selected devices and reinstall their system")
+                Button("Restore…", systemImage: DeviceSymbol.restore) {
+                    if let restore = actions.restore {
+                        browser.confirm(restore)
+                    }
+                }
+                .disabled(actions.restore == nil)
+                .help("Erase the selected devices and reinstall their system")
             }
             ToolbarSpacer(.fixed)
             ToolbarItem {
@@ -111,8 +115,10 @@ struct DevicesView: View {
             },
             presenting: browser.confirming
         ) { confirmation in
-            Button("Restore", role: .destructive) { model.perform([confirmation.request]) }
-            Button("Cancel", role: .cancel) {}
+            ForEach(confirmation.choices) { choice in
+                Button(choice.title, role: .destructive) { model.perform([choice.request]) }
+            }
+            Button(confirmation.choices.isEmpty ? "OK" : "Cancel", role: .cancel) {}
         } message: { confirmation in
             Text(confirmation.message)
         }
@@ -162,7 +168,7 @@ private struct AgentStatusBar: View {
     var body: some View {
         if let fetch = state.images.fetch {
             bar {
-                Label("Downloading \(fetch.version)", systemImage: "arrow.down.circle")
+                Label("Downloading \(state.images.fetching?.title ?? "Image")", systemImage: DeviceSymbol.download)
                 ProgressView(value: fetch.fraction)
                     .frame(maxWidth: 160)
                 Text(fetch.fraction.formatted(.percent.precision(.fractionLength(0))))

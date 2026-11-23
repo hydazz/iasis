@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 19;
+pub const VERSION: u16 = 20;
 pub const MAX_PACKET: usize = 1408;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
@@ -14,6 +14,12 @@ pub const HOST_BUDGET: u8 = 5;
 pub const HOST_REPORT: u8 = 6;
 pub const HOST_CONTROL: u8 = 7;
 pub const SETTINGS: u8 = 8;
+/// The interface that announces each new `Status::revision`. Its one
+/// interrupt endpoint sends the revision as a little-endian `u32`; a host
+/// claims the interface to listen and reads the status the number announces.
+pub const EVENT_INTERFACE: u8 = 1;
+pub const EVENT_ENDPOINT: u8 = 0x81;
+pub const EVENT_SIZE: usize = 4;
 pub const BOARD_NAME_MAX: usize = 16;
 /// Indicator brightness in percent. The default is half of full.
 pub const BRIGHTNESS_DEFAULT: u8 = 50;
@@ -778,7 +784,8 @@ pub struct PortCommand {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Status {
     pub uptime_ms: u64,
-    pub sequence: u32,
+    /// Advances when the status changes in anything but a measurement.
+    pub revision: u32,
     pub reset_reason: u32,
     pub watchdog_reason: u8,
     pub retained_update: bool,
@@ -819,6 +826,21 @@ pub struct Status {
 }
 
 impl Status {
+    /// The status without its readings, uptime and revision. Two statuses
+    /// with the same state differ only in what the board measures
+    /// continuously.
+    pub fn state(mut self) -> Self {
+        self.uptime_ms = 0;
+        self.revision = 0;
+        self.bus_voltage_adc = None;
+        self.thermistor_adc = [None; 2];
+        self.upstream_cc = None;
+        for port in &mut self.ports {
+            port.vbus_adc = None;
+        }
+        self
+    }
+
     pub fn allocated_mw(&self) -> u32 {
         self.ports.iter().map(|port| port.allocated_mw).sum()
     }
@@ -1018,6 +1040,21 @@ mod tests {
     }
 
     #[test]
+    fn readings_alone_leave_the_state_unchanged() {
+        let mut status = Status::default();
+        let state = status.state();
+        status.uptime_ms = 9;
+        status.revision = 4;
+        status.bus_voltage_adc = Some(1);
+        status.thermistor_adc = [Some(2), None];
+        status.upstream_cc = Some([1, 0]);
+        status.ports[3].vbus_adc = Some(7);
+        assert_eq!(status.state(), state);
+        status.ports[3].generation = 1;
+        assert_ne!(status.state(), state);
+    }
+
+    #[test]
     fn largest_status_fits_one_control_transfer() {
         let error = PortError::I2c {
             address: u8::MAX,
@@ -1034,7 +1071,7 @@ mod tests {
         });
         let status = Status {
             uptime_ms: u64::MAX,
-            sequence: u32::MAX,
+            revision: u32::MAX,
             reset_reason: u32::MAX,
             watchdog_reason: u8::MAX,
             retained_update: true,
