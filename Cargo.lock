@@ -1507,7 +1507,6 @@ dependencies = [
  "tempfile",
  "thiserror",
  "ureq",
- "wait-timeout",
  "zip",
 ]
 
@@ -2663,7 +2662,7 @@ dependencies = [
 [[package]]
 name = "restorekit"
 version = "0.6.4"
-source = "git+https://github.com/hydazz/restorekit?rev=e0b23d74104d4dee720c89f51e43769a11ebb05d#e0b23d74104d4dee720c89f51e43769a11ebb05d"
+source = "git+https://github.com/hydazz/restorekit?rev=b9d6c874c827e0bc3ac8361089076cec36a42c39#b9d6c874c827e0bc3ac8361089076cec36a42c39"
 dependencies = [
  "core-foundation",
  "dunce",
@@ -2685,12 +2684,12 @@ dependencies = [
 [[package]]
 name = "restorekit-dongle-proto"
 version = "0.6.4"
-source = "git+https://github.com/hydazz/restorekit?rev=e0b23d74104d4dee720c89f51e43769a11ebb05d#e0b23d74104d4dee720c89f51e43769a11ebb05d"
+source = "git+https://github.com/hydazz/restorekit?rev=b9d6c874c827e0bc3ac8361089076cec36a42c39#b9d6c874c827e0bc3ac8361089076cec36a42c39"
 
 [[package]]
 name = "restorekit-sys"
 version = "0.6.4"
-source = "git+https://github.com/hydazz/restorekit?rev=e0b23d74104d4dee720c89f51e43769a11ebb05d#e0b23d74104d4dee720c89f51e43769a11ebb05d"
+source = "git+https://github.com/hydazz/restorekit?rev=b9d6c874c827e0bc3ac8361089076cec36a42c39#b9d6c874c827e0bc3ac8361089076cec36a42c39"
 dependencies = [
  "cc",
  "cmake",
@@ -2991,7 +2990,7 @@ version = "1.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
 dependencies = [
- "errno 0.3.14",
+ "errno 0.2.8",
  "libc",
 ]
 
@@ -3650,15 +3649,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "de437e2a6208b014ab52972a27e59b33fa2920d3e00fe05026167a1c509d19cc"
 dependencies = [
  "vcell",
-]
-
-[[package]]
-name = "wait-timeout"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09ac3b126d3914f9849036f826e054cbabdc8519970b8998ddaf3b5bd3c65f11"
-dependencies = [
- "libc",
 ]
 
 [[package]]
