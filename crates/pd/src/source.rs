@@ -99,6 +99,13 @@ pub const fn voltage_window(mv: u16) -> (u16, u16) {
     }
 }
 
+/// The rail's window and the 0.5 V beyond it that a fixed supply may reach
+/// during a load step or a voltage transition (USB PD vSrcValid, §4.1.2.1).
+pub const fn valid_window(mv: u16) -> (u16, u16) {
+    let (low, high) = voltage_window(mv);
+    (low - 500, high + 500)
+}
+
 fn fixed(mv: u16, ma: u16) -> FixedSupply {
     FixedSupply(0)
         .with_raw_voltage(mv / 50)
