@@ -1,0 +1,38 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="Iasis"
+      Manufacturer="hydazz"
+      Version="$(var.Version)"
+      UpgradeCode="5e1c6d2b-6b57-4c0a-9c4e-3a0e7c9b2f41"
+      Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Iasis is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <Icon Id="Iasis.ico" SourceFile="$(var.AppDir)\Assets\Iasis.ico" />
+    <Property Id="ARPPRODUCTICON" Value="Iasis.ico" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Iasis">
+        <!-- NTFS cannot hold Iasis.exe and iasis.exe in one folder. -->
+        <Directory Id="BINFOLDER" Name="bin" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <Feature Id="Iasis">
+      <Files Directory="INSTALLFOLDER" Include="$(var.AppDir)\**" />
+      <Component Directory="BINFOLDER">
+        <File Source="$(var.ToolsDir)\iasis.exe" />
+        <Environment Id="Path" Name="PATH" Value="[BINFOLDER]" Part="last" System="yes" Action="set" />
+      </Component>
+      <Component Directory="BINFOLDER">
+        <File Source="$(var.ToolsDir)\iasisd.exe" />
+      </Component>
+      <Component Directory="ProgramMenuFolder">
+        <Shortcut Id="StartMenu" Name="Iasis" Target="[INSTALLFOLDER]Iasis.exe" WorkingDirectory="INSTALLFOLDER">
+          <ShortcutProperty Key="System.AppUserModel.ID" Value="com.hydaz.Iasis" />
+        </Shortcut>
+        <RegistryValue Root="HKLM" Key="Software\hydazz\Iasis" Name="StartMenu" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </Feature>
+  </Package>
+</Wix>
