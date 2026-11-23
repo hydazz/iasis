@@ -7,19 +7,24 @@ use std::{
     time::{Duration, Instant},
 };
 
-use iasis::{batch, inventory::Inventory, parse_port, parse_serial, progress, update};
+use iasis::{
+    batch, inventory::Inventory, parse_port, parse_serial, progress, update, watch::Watch,
+};
 
 use anyhow::{Context, Result, bail, ensure};
 use clap::{Parser, Subcommand, ValueEnum};
 use iasis::{
     Board, UsbIds,
-    agent::{Client, Reply, Request, Selection, State, Target},
+    agent::Client,
     dfu::{self, Attempt, Outcome, Signal},
     home::Home,
-    identity::AppleMode,
-    restore::Operation,
+    identity::{self, AppleMode},
     topology::{self, Snapshot},
-    view::{BoardView, port_usb},
+    view,
+};
+use iasis_api::{
+    BoardView, Job, Operation, PortPower, PortView, PowerSource, Reply, Request, Selection,
+    SignalProgress, State, Supply, Target, Usb, UsbLink,
 };
 use iasis_protocol::{CommandResult, DebugActions, Link, Port, PortAction, RestorePhase, Status};
 
@@ -542,6 +547,8 @@ fn inspect_dfu(
 }
 
 fn request_dfu(board: &Board, port: Port) -> Result<()> {
+    let changes = Arc::<Watch>::default();
+    let _inventory = follow(&changes, board)?;
     let (snapshot, before) = inspect_dfu(board, port, None, true)?
         .context("The attachment changed before signalling. Inspect the current target.")?;
     match before.signal {
@@ -562,6 +569,7 @@ fn request_dfu(board: &Board, port: Port) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(10);
     let waiting = progress::waiting(format!("Waiting for USB DFU on port {}", port.number()));
     loop {
+        let seen = changes.count();
         let final_read = Instant::now() >= deadline;
         let Some((_, report)) = inspect_dfu(board, port, Some(&attempt), final_read)? else {
             if final_read {
@@ -570,7 +578,7 @@ fn request_dfu(board: &Board, port: Port) -> Result<()> {
                     port.number()
                 );
             }
-            thread::sleep(Duration::from_millis(250));
+            changes.wait(seen, Some(deadline));
             continue;
         };
         match report.outcome {
@@ -593,9 +601,36 @@ fn request_dfu(board: &Board, port: Port) -> Result<()> {
             {
                 bail!("Port {}  {}", port.number(), report.describe())
             }
-            _ => thread::sleep(Duration::from_millis(250)),
+            _ => {
+                changes.wait(seen, Some(deadline));
+            }
         }
     }
+}
+
+/// Advance `changes` whenever the host's USB devices change or the board
+/// announces a new status, for as long as the inventory is held.
+fn follow(changes: &Arc<Watch>, board: &Board) -> Result<Arc<Inventory>> {
+    let inventory = Inventory::follow(changes.clone())?;
+    hear(changes, board);
+    Ok(inventory)
+}
+
+/// Advance `changes` whenever the board announces a new status, until it
+/// leaves. Another client may hold the announcements, and then only USB
+/// changes are seen.
+fn hear(changes: &Arc<Watch>, board: &Board) {
+    let Ok(mut events) = board.events() else {
+        return;
+    };
+    let changes = changes.clone();
+    thread::spawn(move || {
+        while let Ok(announced) = events.next(Duration::from_secs(3600)) {
+            if announced.is_some() {
+                changes.changed();
+            }
+        }
+    });
 }
 
 fn signal_result(result: CommandResult) -> &'static str {
@@ -689,7 +724,7 @@ fn agent_text(state: &State) -> String {
         text.push_str("No Iasis boards found.\n");
     }
     for board in &state.boards {
-        text.push_str(&board.text());
+        text.push_str(&board_text(board));
     }
     if let Some(fetch) = &state.images.fetch {
         text.push_str(&format!(
@@ -700,6 +735,137 @@ fn agent_text(state: &State) -> String {
         ));
     }
     text
+}
+
+/// The board and its ports, a line each.
+fn board_text(board: &BoardView) -> String {
+    if board.ports.is_empty() {
+        return format!(
+            "{}  {}\n",
+            board.serial,
+            board.notice.as_deref().unwrap_or("")
+        );
+    }
+    let supply = match (board.supply, board.pool) {
+        (Supply::Brick, Some(pool)) => {
+            format!("power supply, {} W for targets", pool.budget_mw / 1000)
+        }
+        (Supply::Brick, None) => "power supply".into(),
+        (Supply::Host, _) => "host power".into(),
+        (Supply::Off, _) => "USB power off".into(),
+    };
+    let host = match (board.host, board.restores) {
+        (true, true) => "host attached, restores ready",
+        (true, false) => "host attached",
+        _ => "no host: start iasisd to see USB modes",
+    };
+    let id = if board.name.is_empty() {
+        board.serial.clone()
+    } else {
+        format!("{}  {}", board.name, board.serial)
+    };
+    let mut text = format!("{id}  {supply}  {host}");
+    if let Some(speed) = board.upstream_mbps {
+        text.push_str(&format!("  upstream {speed} Mb/s"));
+    }
+    text.push('\n');
+    for port in &board.ports {
+        let line = format!(
+            "  {}  {:<16} {:<34}{:<7}{}",
+            port.number,
+            activity(port),
+            usb_text(port.usb, port.mode, port.ecid.as_deref()),
+            port.link.map_or("", link_label),
+            port.power.map(power_reading).unwrap_or_default()
+        );
+        text.push_str(line.trim_end());
+        text.push('\n');
+    }
+    if let Some(notice) = &board.notice {
+        text.push_str(&format!("  {notice}\n"));
+    }
+    text
+}
+
+/// What the port is doing, or what is on it.
+fn activity(port: &PortView) -> String {
+    if let Some(fault) = &port.fault {
+        return fault.clone();
+    }
+    if let Some(job) = port.job {
+        let phase = job_text(job);
+        return match (port.fetch, &port.stage) {
+            (Some(percent), _) => format!("{phase}  {percent}%  Downloading Image"),
+            (None, Some(stage)) => format!("{phase}  {}%  {}", stage.percent, stage.name),
+            (None, None) => phase.into(),
+        };
+    }
+    if let Some(percent) = port.fetch {
+        return format!("{percent}%  Downloading Image");
+    }
+    match port.request {
+        Some(SignalProgress::EnteringDfu) => "entering DFU",
+        Some(SignalProgress::DfuUnconfirmed) => "DFU unconfirmed",
+        Some(SignalProgress::Restarting) => "restarting",
+        None if !port.enabled => "off",
+        None if !port.occupied => "empty",
+        None if port.waiting_for_power => "waiting for power",
+        None if port.identifying => "identifying",
+        None if let Some(device) = &port.device => device,
+        None if port.dfu || port.reboot => "ready",
+        None if port.link.is_some() => "connected",
+        None => "attached",
+    }
+    .into()
+}
+
+fn job_text(job: Job) -> &'static str {
+    match job.phase {
+        RestorePhase::Preparing => "preparing",
+        RestorePhase::Running if job.operation == Operation::Revive => "reviving",
+        RestorePhase::Running => "restoring",
+        RestorePhase::Reported => "completed",
+        RestorePhase::Unconfirmed => "completion unknown",
+        RestorePhase::Failed => "failed",
+    }
+}
+
+/// What the board's host sees on a port's USB.
+fn usb_text(usb: Option<Usb>, mode: Option<AppleMode>, ecid: Option<&str>) -> String {
+    let what = match usb {
+        None => return String::new(),
+        Some(Usb::Absent) => "not enumerated",
+        Some(Usb::Other) => "USB device",
+        Some(Usb::Ambiguous) => "several USB devices",
+        Some(Usb::Apple) => mode.map_or("Apple device", identity::mode_name),
+    };
+    match ecid {
+        Some(ecid) => format!("{what} {ecid}"),
+        None => what.into(),
+    }
+}
+
+/// A negotiated PD operating point or a default USB allowance.
+fn power_reading(power: PortPower) -> String {
+    let kind = match power.source {
+        PowerSource::Pd => "PD",
+        PowerSource::Usb => "USB",
+    };
+    let mut current = String::new();
+    iasis_pd::write_current(&mut current, power.milliamps).expect("writing to a string");
+    let watts = f64::from(u32::from(power.millivolts) * u32::from(power.milliamps)) / 1_000_000.0;
+    format!(
+        "{kind} {}V {current} ({watts}W)",
+        f64::from(power.millivolts) / 1000.0
+    )
+}
+
+fn link_label(link: UsbLink) -> &'static str {
+    match link {
+        UsbLink::Usb => "USB",
+        UsbLink::Usb2 => "USB 2",
+        UsbLink::Usb3 => "USB 3",
+    }
 }
 
 fn show(text: &str, watch: bool) -> Result<()> {
@@ -739,9 +905,18 @@ fn overview_through(mut agent: Client, board: Option<&str>, watch: bool) -> Resu
 /// Every board's ports, read from the boards. A target's USB mode is what
 /// the board's host reports to it, so this agrees with the lights.
 fn overview(ids: UsbIds, serial: Option<u64>, watch: bool) -> Result<()> {
+    let changes = Arc::<Watch>::default();
+    let inventory = watch
+        .then(|| Inventory::follow(changes.clone()))
+        .transpose()?;
+    let mut heard = std::collections::HashSet::new();
     loop {
+        let seen = changes.count();
         let mut text = String::new();
-        let devices = iasis::discover(ids, serial)?;
+        let devices = match &inventory {
+            Some(inventory) => iasis::boards(inventory.devices(), ids, serial),
+            None => iasis::discover(ids, serial)?,
+        };
         if devices.is_empty() {
             text.push_str("No Iasis boards found.\n");
         }
@@ -750,7 +925,10 @@ fn overview(ids: UsbIds, serial: Option<u64>, watch: bool) -> Result<()> {
                 .and_then(|board| board.status().map(|status| (board, status)))
             {
                 Ok((board, status)) => {
-                    text.push_str(&BoardView::new(board.info(), &status).text());
+                    if watch && heard.insert(device.id()) {
+                        hear(&changes, &board);
+                    }
+                    text.push_str(&board_text(&view::board(board.info(), &status)));
                 }
                 Err(error) => text.push_str(&format!("{}\n", unreadable(device, &error))),
             }
@@ -759,7 +937,7 @@ fn overview(ids: UsbIds, serial: Option<u64>, watch: bool) -> Result<()> {
         if !watch {
             return Ok(());
         }
-        thread::sleep(Duration::from_millis(500));
+        changes.wait(seen, None);
     }
 }
 
@@ -775,7 +953,7 @@ fn dfu_through(agent: &mut Client, state: &State, board: &str, port: Port) -> Re
             .cloned()
     };
     let before = row(state).context("the board is not connected")?;
-    let in_dfu = |row: &iasis::view::PortView| {
+    let in_dfu = |row: &PortView| {
         use iasis_protocol::AppleMode::{Dfu, KisDfu, PortDfu};
         matches!(row.mode, Some(Dfu | KisDfu | PortDfu))
     };
@@ -787,7 +965,7 @@ fn dfu_through(agent: &mut Client, state: &State, board: &str, port: Port) -> Re
         before.dfu,
         "port {} cannot be signalled into DFU: {}",
         port.number(),
-        before.activity()
+        activity(&before)
     );
     agent.request(&Request::Dfu {
         board: board.into(),
@@ -809,13 +987,8 @@ fn dfu_through(agent: &mut Client, state: &State, board: &str, port: Port) -> Re
             "port {} is empty",
             port.number()
         );
-        if row.fault.is_some()
-            || matches!(
-                row.request,
-                Some(iasis::view::SignalProgress::DfuUnconfirmed)
-            )
-        {
-            bail!("Port {}  {}", port.number(), row.activity());
+        if row.fault.is_some() || row.request == Some(SignalProgress::DfuUnconfirmed) {
+            bail!("Port {}  {}", port.number(), activity(&row));
         }
         reply = agent.receive_by(deadline)?;
     }
@@ -1037,7 +1210,11 @@ fn follow_work(agent: &mut Client, board: &str, ports: &[Port]) -> Result<()> {
             if result.is_none()
                 && let Some(row) = view.and_then(|view| view.ports.get(port.index()))
             {
-                let line = format!("{}  {}", row.activity(), row.usb);
+                let line = format!(
+                    "{}  {}",
+                    activity(row),
+                    usb_text(row.usb, row.mode, row.ecid.as_deref())
+                );
                 if *shown != line {
                     println!("Port {}  {}", port.number(), line.trim_end());
                     *shown = line;
@@ -1119,8 +1296,16 @@ fn print_status(status: &Status) {
         if let Some(link) = state.link {
             println!("  link: {}", link_text(link));
         }
-        if state.observed.is_some() {
-            println!("  host sees: {}", port_usb(state));
+        if let Some(seen) = state.observed {
+            let mode = match seen.usb {
+                iasis_protocol::Usb::Apple(mode) => Some(mode),
+                _ => None,
+            };
+            let ecid = state.ecid.map(|id| format!("{id:016x}"));
+            println!(
+                "  host sees: {}",
+                usb_text(view::port_usb(state), mode, ecid.as_deref())
+            );
         }
         if let Some(request) = state.request {
             println!(
@@ -1190,7 +1375,24 @@ fn board_temperature(adc: u16) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
-    use super::board_temperature;
+    use super::*;
+
+    #[test]
+    fn a_reading_names_its_source_and_power() {
+        let reading = |source, millivolts, milliamps| {
+            power_reading(PortPower {
+                source,
+                millivolts,
+                milliamps,
+            })
+        };
+        assert_eq!(reading(PowerSource::Usb, 5_000, 900), "USB 5V 900mA (4.5W)");
+        assert_eq!(
+            reading(PowerSource::Pd, 20_000, 780),
+            "PD 20V 780mA (15.6W)"
+        );
+        assert_eq!(reading(PowerSource::Pd, 20_000, 0), "PD 20V 0A (0W)");
+    }
 
     #[test]
     fn thermistor_matches_nominal_divider_and_rejects_rails() {

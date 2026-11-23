@@ -1,8 +1,13 @@
 import Foundation
 
-/// The shapes follow the agent's socket, decoded from snake case.
-nonisolated struct AgentState: Decodable, Equatable {
+/// The shapes follow the agent's socket in snake case, field for field.
+/// `crates/api/fixtures` holds the agent's example of every message, which
+/// these models read and write back unchanged.
+nonisolated struct AgentState: Codable, Equatable {
     var boards: [Board]
+    /// A submitting connection's results in target order, each null until it
+    /// has one. Absent on other connections.
+    var submitted: [Ending?]?
     var images: ImageStore
     var sharing: Sharing
 
@@ -14,14 +19,19 @@ nonisolated struct AgentState: Decodable, Equatable {
         return "\(board.displayName) · \(unique ? String(suffix) : board.serial)"
     }
 
-    struct Board: Decodable, Equatable, Identifiable {
+    struct Board: Codable, Equatable, Identifiable {
         var serial: String
         var name: String
         var session: UInt32?
         var firmware: String
         var upstreamMbps: Int?
+        var supply: Supply
         /// The power supply's pool for the targets, when there is a supply.
         var pool: Pool?
+        /// A host holds the board.
+        var host: Bool
+        /// The host takes restore requests for the board.
+        var restores: Bool
         var brightness: Int
         var settingsBusy: Bool
         var ports: [Port]
@@ -38,31 +48,45 @@ nonisolated struct AgentState: Decodable, Equatable {
         }
     }
 
-    struct Port: Decodable, Equatable, Identifiable {
+    /// What powers the targets.
+    enum Supply: String, Codable {
+        /// A USB-C power supply on the board's power input.
+        case brick
+        /// The host's USB port alone.
+        case host
+        case off
+    }
+
+    struct Port: Codable, Equatable, Identifiable {
         var number: Int
-        var occupied: Bool
         var generation: UInt32
+        var occupied: Bool
         var device: String?
-        var mode: String?
+        var identifying: Bool
         var ecid: String?
+        /// What the board's host finds on the port's USB.
+        var usb: USB?
+        /// The Apple target's USB mode, when `usb` is `apple`.
+        var mode: AppleMode?
+        var light: Light
+        var request: SignalProgress?
+        var waitingForPower: Bool
+        var powered: Bool
+        var wrongDfuPort: Bool
         var link: USBLink?
         var power: PortPower?
+        /// Power supply capacity committed to this port.
+        var allocatedMw: Int
         /// The target took the largest offer its board could make and would
         /// use more.
         var short: Bool
         /// Why the port faulted, in the board's words.
         var fault: String?
-        var identifying: Bool
-        var request: SignalProgress?
-        var waitingForPower: Bool
-        var powered: Bool
-        var wrongDfuPort: Bool
-        var job: Job?
-        var light: Light
         var dfu: Bool
         var reboot: Bool
         var restore: Bool
         var enabled: Bool
+        var job: Job?
         /// Percent of the restore image fetched, while the port waits for one.
         var fetch: UInt8?
         var stage: Stage?
@@ -73,8 +97,29 @@ nonisolated struct AgentState: Decodable, Equatable {
         }
     }
 
-    struct PortPower: Decodable, Equatable {
-        enum Source: String, Decodable {
+    enum USB: String, Codable {
+        /// Nothing enumerates.
+        case absent
+        /// A device that is not an Apple target.
+        case other
+        /// Several devices, so no single target can be named.
+        case ambiguous
+        case apple
+    }
+
+    enum AppleMode: String, Codable {
+        case dfu
+        case portDfu = "port_dfu"
+        case recovery
+        case kis
+        case kisDfu = "kis_dfu"
+        case mux
+        case restored
+        case normal
+    }
+
+    struct PortPower: Codable, Equatable {
+        enum Source: String, Codable {
             case pd, usb
         }
 
@@ -83,17 +128,17 @@ nonisolated struct AgentState: Decodable, Equatable {
         var milliamps: Int
     }
 
-    struct Pool: Decodable, Equatable {
+    struct Pool: Codable, Equatable {
         var budgetMw: Int
         var allocatedMw: Int
     }
 
-    struct Sharing: Decodable, Equatable {
+    struct Sharing: Codable, Equatable {
         var enabled: Bool
         var problem: String?
         var ports: [Port]
 
-        struct Port: Decodable, Equatable {
+        struct Port: Codable, Equatable {
             var board: String
             var port: Int
             var active: Bool
@@ -101,7 +146,7 @@ nonisolated struct AgentState: Decodable, Equatable {
         }
     }
 
-    enum USBLink: String, Decodable {
+    enum USBLink: String, Codable {
         case usb, usb2, usb3
 
         var title: String {
@@ -113,20 +158,20 @@ nonisolated struct AgentState: Decodable, Equatable {
         }
     }
 
-    enum SignalProgress: String, Decodable {
+    enum SignalProgress: String, Codable {
         case enteringDfu = "entering_dfu"
         case dfuUnconfirmed = "dfu_unconfirmed"
         case restarting
     }
 
-    struct Job: Decodable, Equatable {
+    struct Job: Codable, Equatable {
         var operation: Operation
         var phase: RestorePhase
     }
 
     /// What a job's worker is doing: its step among the job's steps, and
     /// how far along the whole job is.
-    struct Stage: Decodable, Equatable {
+    struct Stage: Codable, Equatable {
         var name: String
         var percent: UInt8
         var steps: [String]
@@ -134,12 +179,18 @@ nonisolated struct AgentState: Decodable, Equatable {
         var step: Int
     }
 
-    struct Light: Decodable, Equatable {
-        var hue: String
+    /// The port's light on the board.
+    struct Light: Codable, Equatable {
+        var hue: Hue
         var pulse: Bool
+        var dim: Bool
     }
 
-    enum RestorePhase: String, Decodable {
+    enum Hue: String, Codable {
+        case off, red, green, blue, amber, purple, white
+    }
+
+    enum RestorePhase: String, Codable {
         case preparing = "Preparing"
         case running = "Running"
         case reported = "Reported"
@@ -147,7 +198,7 @@ nonisolated struct AgentState: Decodable, Equatable {
         case failed = "Failed"
     }
 
-    enum Operation: String, Decodable {
+    enum Operation: String, Codable {
         case restore, revive
 
         var title: String {
@@ -158,16 +209,18 @@ nonisolated struct AgentState: Decodable, Equatable {
         }
     }
 
-    /// The last worker result on this physical port.
-    struct Ending: Decodable, Equatable {
+    /// How an operation ended.
+    struct Ending: Codable, Equatable {
         var operation: Operation
-        var logDirectory: String?
+        /// The target's ECID, when it was known.
+        var ecid: String?
         var phase: RestorePhase
         var message: String
+        var logDirectory: String?
     }
 
     /// The store's archives: those it holds and those it is still to fetch.
-    struct ImageStore: Decodable, Equatable {
+    struct ImageStore: Codable, Equatable {
         var images: [Image]
         var fetch: Fetch?
 
@@ -178,7 +231,7 @@ nonisolated struct AgentState: Decodable, Equatable {
     }
 
     /// One IPSW archive, in the store or wanted there.
-    struct Image: Decodable, Equatable, Identifiable {
+    struct Image: Codable, Equatable, Identifiable {
         /// The store's name for the archive, which requests use.
         var id: String
         /// The system it installs, as Apple names it.
@@ -198,7 +251,7 @@ nonisolated struct AgentState: Decodable, Equatable {
     }
 
     /// What a restore would install on one target.
-    struct Planned: Decodable, Equatable {
+    struct Planned: Codable, Equatable {
         var board: String
         var port: Int
         /// Absent while the agent does not know the target's model.
@@ -206,18 +259,7 @@ nonisolated struct AgentState: Decodable, Equatable {
     }
 
     /// What a restore of one device can install.
-    struct Offer: Decodable, Equatable {
-        struct Release: Decodable, Equatable {
-            var os: String
-            var version: String
-            var build: String
-            var bytes: Int64
-
-            var title: String {
-                os.isEmpty ? version : "\(os) \(version)"
-            }
-        }
-
+    struct Offer: Codable, Equatable {
         /// The newest release Apple signs for the device.
         var latest: Release?
         /// The newest image in the store that restores it and that Apple
@@ -237,8 +279,10 @@ nonisolated struct AgentState: Decodable, Equatable {
         }
     }
 
-    /// A release Apple signs for a model.
-    struct Release: Decodable, Equatable, Identifiable {
+    /// A system release, as an image in the store or as Apple signs it.
+    struct Release: Codable, Equatable, Identifiable {
+        /// The system, as Apple names it.
+        var os: String
         var version: String
         var build: String
         var bytes: Int64
@@ -246,10 +290,14 @@ nonisolated struct AgentState: Decodable, Equatable {
         var id: String {
             build
         }
+
+        var title: String {
+            os.isEmpty ? version : "\(os) \(version)"
+        }
     }
 
     /// A device model the catalog lists.
-    struct CatalogModel: Decodable, Equatable, Identifiable {
+    struct CatalogModel: Codable, Equatable, Identifiable {
         var identifier: String
         var name: String
 
@@ -259,9 +307,11 @@ nonisolated struct AgentState: Decodable, Equatable {
     }
 
     /// A download under way.
-    struct Fetch: Decodable, Equatable {
+    struct Fetch: Codable, Equatable {
         /// The image it becomes.
         var id: String
+        var version: String
+        var build: String
         var bytes: Int64
         var done: Int64
 

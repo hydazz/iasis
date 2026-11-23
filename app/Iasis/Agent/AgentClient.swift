@@ -17,6 +17,10 @@ nonisolated protocol AgentService: Sendable {
 
     /// What a restore would install on each target.
     func plan(_ boards: [RestoreSelection]) async throws -> [AgentState.Planned]
+
+    /// Send an IPSW archive to the store, reporting the bytes sent as they
+    /// go. The agent checks the archive before it answers.
+    func importImage(_ file: URL, progress: @escaping @Sendable (Int64) -> Void) async throws
 }
 
 nonisolated enum AgentError: LocalizedError {
@@ -79,6 +83,74 @@ nonisolated struct AgentClient: AgentService {
         return planned
     }
 
+    func importImage(_ file: URL, progress: @escaping @Sendable (Int64) -> Void) async throws {
+        let handle = try FileHandle(forReadingFrom: file)
+        let bytes = try Int64(handle.seekToEnd())
+        try handle.seek(toOffset: 0)
+        let request = AgentRequest.importImage(name: file.lastPathComponent, bytes: bytes)
+        let reply = try await withCheckedThrowingContinuation { continuation in
+            Thread.detachNewThread {
+                defer { try? handle.close() }
+                continuation.resume(with: Result { try upload(request, from: handle, progress: progress) })
+            }
+        }
+        if case let .error(reason) = reply {
+            throw AgentError.refused(reason)
+        }
+    }
+
+    /// Send a request and the bytes it names, then read its one reply. An
+    /// agent that refuses an upload says why before it closes the connection.
+    private func upload(_ request: AgentRequest, from file: FileHandle, progress: (Int64) -> Void) throws -> AgentReply {
+        let descriptor = try connect()
+        defer { close(descriptor) }
+        // A refusal closes the socket under a write, which must fail rather
+        // than end the app.
+        var on: Int32 = 1
+        setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        var message = try JSONEncoder().encode(request)
+        message.append(0x0A)
+        var sent: Int64 = 0
+        if write(message, to: descriptor) {
+            while sent < request.payload, let chunk = try file.read(upToCount: 1 << 20), !chunk.isEmpty {
+                guard write(chunk, to: descriptor) else { break }
+                sent += Int64(chunk.count)
+                if sent % (32 << 20) == 0 || sent == request.payload {
+                    progress(sent)
+                }
+            }
+        }
+        var line = Data()
+        var byte: UInt8 = 0
+        while read(descriptor, &byte, 1) == 1, byte != 0x0A {
+            line.append(byte)
+        }
+        guard !line.isEmpty else {
+            throw AgentError.unavailable
+        }
+        let answer = try reply(in: line)
+        if case .error = answer {
+            return answer
+        }
+        guard sent == request.payload else {
+            throw AgentError.refused("The file ended early.")
+        }
+        return answer
+    }
+
+    /// Write all of `data`, or find that the agent has gone.
+    private func write(_ data: Data, to descriptor: Int32) -> Bool {
+        data.withUnsafeBytes { buffer in
+            var offset = 0
+            while offset < buffer.count {
+                let count = Darwin.write(descriptor, buffer.baseAddress! + offset, buffer.count - offset)
+                guard count > 0 else { return false }
+                offset += count
+            }
+            return true
+        }
+    }
+
     private func answer(to request: AgentRequest) async throws -> AgentReply {
         for try await line in try lines(answering: request) {
             let reply = try reply(in: line)
@@ -103,8 +175,7 @@ nonisolated struct AgentClient: AgentService {
         let descriptor = try connect()
         var message = try JSONEncoder().encode(request)
         message.append(0x0A)
-        let sent = message.withUnsafeBytes { write(descriptor, $0.baseAddress, $0.count) }
-        guard sent == message.count else {
+        guard write(message, to: descriptor) else {
             close(descriptor)
             throw AgentError.unavailable
         }

@@ -1485,6 +1485,7 @@ dependencies = [
  "core-foundation",
  "directories",
  "futures-core",
+ "iasis-api",
  "iasis-pd",
  "iasis-protocol",
  "indicatif",
@@ -1505,7 +1506,17 @@ dependencies = [
  "tempfile",
  "thiserror",
  "ureq",
+ "wait-timeout",
  "zip",
+]
+
+[[package]]
+name = "iasis-api"
+version = "0.1.0"
+dependencies = [
+ "iasis-protocol",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3618,6 +3629,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "de437e2a6208b014ab52972a27e59b33fa2920d3e00fe05026167a1c509d19cc"
 dependencies = [
  "vcell",
+]
+
+[[package]]
+name = "wait-timeout"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09ac3b126d3914f9849036f826e054cbabdc8519970b8998ddaf3b5bd3c65f11"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

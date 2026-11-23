@@ -176,6 +176,9 @@ private struct ImageSettings: View {
                             model.perform([.remove(image: image.id)])
                         }
                     }
+                    if let importing = model.importing {
+                        ImportRow(importing: importing)
+                    }
                     HStack {
                         Text(summary(of: store.images))
                             .foregroundStyle(.secondary)
@@ -210,7 +213,7 @@ private struct ImageSettings: View {
             allowedContentTypes: [UTType(filenameExtension: "ipsw") ?? .data]
         ) { chosen in
             if case let .success(file) = chosen {
-                model.perform([.importImage(path: file.path(percentEncoded: false))])
+                model.importImage(file)
             }
         }
     }
@@ -279,6 +282,34 @@ private struct ImageRow: View {
             return Activity("Downloading \(percent)", .working(fetch.fraction), symbol: DeviceSymbol.download)
         }
         return Activity("Waiting to Download", .working(0), symbol: DeviceSymbol.download)
+    }
+}
+
+/// An archive being added from a file: sent to the agent, then checked.
+private struct ImportRow: View {
+    let importing: AgentModel.Importing
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "doc.zipper")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+                .frame(width: 30)
+                .accessibilityHidden(true)
+            Text(importing.name)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 4)
+            ActivityMark(activity: activity)
+        }
+    }
+
+    private var activity: Activity {
+        guard importing.sent < importing.bytes else {
+            return Activity("Checking", .working(nil))
+        }
+        let percent = importing.fraction.formatted(.percent.precision(.fractionLength(0)))
+        return Activity("Adding \(percent)", .working(importing.fraction))
     }
 }
 

@@ -20,7 +20,8 @@ use serde::{Deserialize, Serialize};
 mod integrity;
 use integrity::{FileStamp, Integrity};
 mod progress;
-pub use progress::Progress;
+pub use iasis_api::{Operation, Progress};
+use progress::Stages;
 
 pub const MAX_RESTORES: usize = 5;
 
@@ -183,7 +184,7 @@ impl PreparedIpsw {
     }
 
     /// Whether the archive restores this model: by the chip and board a DFU
-    /// descriptor gives, or else by its product type.
+    /// descriptor gives, or else by the product type Configurator reads.
     pub(crate) fn restores(&self, model: &DeviceModel) -> bool {
         match (model.hardware(), model.identifier()) {
             (Some((chip, board)), _) => self.erases(chip, board),
@@ -321,13 +322,6 @@ pub struct RestoreStatus {
     pub message: String,
     pub exit_code: Option<i32>,
     pub directory: PathBuf,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Operation {
-    Restore,
-    Revive,
 }
 
 /// Restores and revives targets in DFU, over ordinary USB or Apple Debug USB,

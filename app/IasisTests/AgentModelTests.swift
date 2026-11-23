@@ -21,7 +21,7 @@ struct AgentModelTests {
         var state = try Fixtures.state
         #expect(MenuBarStatus(nil) == .offline)
         #expect(MenuBarStatus(state) == .fault)
-        state.boards[0].ports.removeAll { $0.light.hue == "red" }
+        state.boards[0].ports.removeAll { $0.light.hue == .red }
         state.images.fetch = nil
         #expect(MenuBarStatus(state) == .busy)
         state.boards[0].ports.removeAll { $0.light.pulse }
