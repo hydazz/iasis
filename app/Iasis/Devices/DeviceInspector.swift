@@ -84,7 +84,6 @@ private extension AgentState.Port {
         case "restored": "Restore Service"
         case "normal": "Started Up"
         case "mux": "System"
-        case "wtf": "WTF"
         default: mode
         }
     }
