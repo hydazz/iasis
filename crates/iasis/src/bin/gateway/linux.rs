@@ -22,22 +22,6 @@ use nusb::{
 pub(super) const CAPTURE_PERMISSION: &str =
     "USB packet capture requires CAP_NET_RAW on iasis-gateway.";
 
-/// Where NetworkManager runs it would configure the link for this host, and
-/// this host would then take its address from the gateway. It leaves the
-/// link alone from here until the link goes away.
-fn take_from_network_manager(link: &str) {
-    let Ok(output) = std::process::Command::new("nmcli")
-        .args(["device", "set", link, "managed", "no"])
-        .output()
-    else {
-        return;
-    };
-    let error = String::from_utf8_lossy(&output.stderr);
-    if !output.status.success() && !error.contains("NetworkManager is not running") {
-        eprintln!("NetworkManager still manages {link}: {}", error.trim());
-    }
-}
-
 pub(super) fn open_link(link: &str, target: u64) -> Result<(pcap::Capture<pcap::Active>, OwnedFd)> {
     // Protocol zero keeps this socket transmit-only. Open it before changing
     // IFF_UP so a caller without packet access leaves the interface alone.
@@ -57,7 +41,6 @@ pub(super) fn open_link(link: &str, target: u64) -> Result<(pcap::Capture<pcap::
         .context("USB network interface disappeared")?;
     let index = i32::try_from(index)?;
     super::verify_attachment(link, target)?;
-    take_from_network_manager(link);
     if !flags.contains(nix::net::if_::InterfaceFlags::IFF_UP) {
         bring_up(index).with_context(|| format!("bring up {link} (requires CAP_NET_ADMIN)"))?;
     }
