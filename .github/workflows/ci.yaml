@@ -108,16 +108,16 @@ jobs:
         run: xcodebuild -version
 
       - name: Check app formatting
-        run: mise run //app:fmt-check
+        run: mise run //apps/macos:fmt-check
 
       - name: Lint app
-        run: mise run //app:lint
+        run: mise run //apps/macos:lint
 
       - name: Test app
-        run: mise run //app:test
+        run: mise run //apps/macos:test
 
       - name: Package app with host tools
-        run: mise run //app:package
+        run: mise run //apps/macos:package
 
   hardware:
     name: Hardware

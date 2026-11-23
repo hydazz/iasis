@@ -25,7 +25,7 @@
         },
         {
           "type": "generic",
-          "path": "app/Config/Version.xcconfig"
+          "path": "apps/macos/Config/Version.xcconfig"
         }
       ]
     },
