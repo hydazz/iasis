@@ -57,19 +57,42 @@ final class AgentModel {
         }
     }
 
+    func catalog() async throws -> [AgentState.CatalogModel] {
+        try await agent.catalog()
+    }
+
+    func releases(of model: String) async throws -> [AgentState.Release] {
+        try await agent.releases(of: model)
+    }
+
+    /// What a restore would install on each target, or nil once the agent's
+    /// refusal has been shown.
+    func plan(_ boards: [RestoreSelection]) async -> [AgentState.Planned]? {
+        do {
+            return try await agent.plan(boards)
+        } catch {
+            report(error)
+            return nil
+        }
+    }
+
     @discardableResult
     func send(_ request: AgentRequest) async -> Bool {
         do {
             try await agent.send(request)
             return true
         } catch {
-            Log.agent.error("Request refused: \(error.localizedDescription)")
-            let alert = NSAlert()
-            alert.messageText = "The Action Could Not Be Completed"
-            alert.informativeText = error.localizedDescription
-            NSApp.activate()
-            alert.runModal()
+            report(error)
             return false
         }
+    }
+
+    private func report(_ error: any Error) {
+        Log.agent.error("Request refused: \(error.localizedDescription)")
+        let alert = NSAlert()
+        alert.messageText = "The Action Could Not Be Completed"
+        alert.informativeText = error.localizedDescription
+        NSApp.activate()
+        alert.runModal()
     }
 }

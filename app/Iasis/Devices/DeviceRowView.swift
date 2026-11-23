@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// One port on one line: its number in the colour of its light, the device,
-/// and what the port is doing.
+/// and at the trailing edge one mark for what the port is doing.
 struct DeviceRowView: View {
     let device: Device
 
@@ -18,20 +18,14 @@ struct DeviceRowView: View {
                     .help(Device.dfuPortHelp)
                     .accessibilityLabel(Device.dfuPortHelp)
             }
-            if activity != .idle {
+            // A mode is the device's own state. An operation is the mark's to show.
+            if activity.mark == .none, activity != .idle {
                 Text(activity.text)
                     .foregroundStyle(.secondary)
-                    .monospacedDigit()
                     .lineLimit(1)
-                    .help(activity.text)
             }
-            if case .working = activity.mark {
-                Spacer(minLength: 4)
-                ActivityMark(mark: activity.mark)
-            } else {
-                ActivityMark(mark: activity.mark)
-                Spacer(minLength: 4)
-            }
+            Spacer(minLength: 4)
+            ActivityMark(activity: activity)
         }
         .accessibilityElement(children: .combine)
     }
@@ -120,34 +114,34 @@ private struct ConnectionMarks: View {
     }
 }
 
+/// What a port is doing or how it ended, as one symbol. Work with a known
+/// fraction is its operation's symbol in a ring drawn that far round.
 struct ActivityMark: View {
-    let mark: Activity.Mark
+    let activity: Activity
 
     var body: some View {
-        switch mark {
-        case .none:
-            EmptyView()
-        case let .working(fraction):
-            ProgressView(value: fraction)
-                .progressViewStyle(.circular)
-                .controlSize(.small)
-        case .done:
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-                .accessibilityLabel("Complete")
-        case .failed:
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.red)
-                .accessibilityLabel("Failed")
-        case .uncertain:
-            Image(systemName: "questionmark.circle.fill")
-                .foregroundStyle(.purple)
-                .accessibilityLabel("Unknown")
-        case .caution:
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.yellow)
-                .accessibilityLabel("Needs Attention")
+        Group {
+            switch activity.mark {
+            case .none:
+                EmptyView()
+            case let .working(fraction?):
+                Image(systemName: activity.symbol, variableValue: fraction)
+                    .symbolVariableValueMode(.draw)
+            case .working(nil):
+                ProgressView().controlSize(.small)
+            case .done:
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            case .failed:
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+            case .uncertain:
+                Image(systemName: "questionmark.circle.fill").foregroundStyle(.purple)
+            case .caution:
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+            }
         }
+        .imageScale(.large)
+        .help(activity.text)
+        .accessibilityLabel(activity.text)
     }
 }
 

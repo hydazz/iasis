@@ -5,10 +5,26 @@
 //! reached, and holding past the last sends nothing. Ten seconds of holding
 //! starts the Easter egg, which the next press ends.
 
-use heapless::Vec;
+use heapless::{Deque, Vec};
 use iasis_protocol::{
     ButtonEvent, Gesture, Port, RestoreArm, RestoreDecision, RestorePhase, Status,
 };
+
+/// The button's changes of level since they were last taken, oldest first:
+/// whether it went down, and when.
+#[derive(Default)]
+pub struct Edges(Deque<(bool, u64), 8>);
+
+impl Edges {
+    /// Note a change of level. Contact bounce can outrun the reader, which
+    /// then loses the oldest changes and keeps the level the button ends at.
+    pub fn record(&mut self, down: bool, at_ms: u64) {
+        if self.0.is_full() {
+            self.0.pop_front();
+        }
+        let _ = self.0.push_back((down, at_ms));
+    }
+}
 
 /// The order a hold steps through.
 const GESTURES: [Gesture; 3] = [Gesture::Dfu, Gesture::Reboot, Gesture::Restore];
@@ -262,6 +278,31 @@ impl Button {
         decision
     }
 
+    /// Sample through the changes of level since the last call, each at its
+    /// own time, then at `now`. A press shorter than the caller's cycle counts
+    /// as it would for a caller that never looked away.
+    pub fn replay(
+        &mut self,
+        status: &Status,
+        pending_arm: Option<RestoreArm>,
+        edges: &mut Edges,
+        now: u64,
+    ) -> Vec<Event, 4> {
+        let mut events = Vec::new();
+        while let Some((down, at)) = edges.0.pop_front() {
+            // The level held until the change, then the change itself.
+            for level in [!down, down] {
+                if let Some(event) = self.sample(status, None, level, at.min(now)) {
+                    let _ = events.push(event);
+                }
+            }
+        }
+        if let Some(event) = self.sample(status, pending_arm, self.raw, now) {
+            let _ = events.push(event);
+        }
+        events
+    }
+
     fn release(&mut self, status: &Status, held_ms: u64, now: u64) -> Option<Event> {
         if let Some(arm) = self.armed.take() {
             self.tell("Restore cancelled", now);
@@ -409,6 +450,38 @@ mod tests {
                 Some(Event::Action(e)) if e.gesture == gesture && e.ports == ports && e.session == session
             )
         }
+    }
+
+    #[test]
+    fn a_press_shorter_than_the_sampling_cycle_still_counts() {
+        let mut r = Rig::new(0b01010);
+        let mut edges = Edges::default();
+        // A tap falls wholly inside one slow cycle of the caller.
+        edges.record(true, r.now + 20);
+        edges.record(false, r.now + 20 + DEBOUNCE_MS + 10);
+        r.now += 100;
+        assert!(
+            r.button
+                .replay(&r.status, None, &mut edges, r.now)
+                .is_empty()
+        );
+        assert_eq!(r.selected(), Some(2));
+        // Contact bounce shorter than the debounce time is no press.
+        edges.record(true, r.now + 5);
+        edges.record(false, r.now + 10);
+        r.now += 100;
+        assert!(
+            r.button
+                .replay(&r.status, None, &mut edges, r.now)
+                .is_empty()
+        );
+        assert_eq!(r.selected(), Some(2));
+        // A hold released inside one cycle sends the action it reached.
+        edges.record(true, r.now + 1);
+        edges.record(false, r.now + 1 + HOLD_MS + 10);
+        r.now += HOLD_MS + 100;
+        let events = r.button.replay(&r.status, None, &mut edges, r.now);
+        assert!(action(Gesture::Dfu, 0b00010, None)(events.first().copied()));
     }
 
     #[test]

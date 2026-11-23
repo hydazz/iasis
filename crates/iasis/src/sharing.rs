@@ -1,9 +1,15 @@
 //! Internet sharing preferences and the live state published by the agent.
 
-use std::{fs, io, path::PathBuf, sync::Mutex};
+use std::{
+    fs, io,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
+
+use crate::watch::Watch;
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -26,7 +32,7 @@ pub struct State {
     pub ports: Vec<PortState>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PortState {
     pub board: String,
     pub port: u8,
@@ -37,6 +43,8 @@ pub struct PortState {
 pub(crate) struct Sharing {
     file: PathBuf,
     inner: Mutex<Runtime>,
+    /// Advances when the preference or a gateway's state changes.
+    changes: Arc<Watch>,
 }
 
 struct Runtime {
@@ -46,7 +54,7 @@ struct Runtime {
 }
 
 impl Sharing {
-    pub fn open(file: PathBuf) -> Self {
+    pub fn open(file: PathBuf, changes: Arc<Watch>) -> Self {
         let settings: Settings = match fs::File::open(&file) {
             Ok(reader) => serde_json::from_reader(reader).map_err(io::Error::other),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Settings::default()),
@@ -61,6 +69,7 @@ impl Sharing {
         });
         Self {
             file,
+            changes,
             inner: Mutex::new(Runtime {
                 state: State {
                     enabled: settings.enabled && SUPPORTED,
@@ -98,6 +107,8 @@ impl Sharing {
         state.ports.clear();
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         runtime.gateways.clear();
+        drop(runtime);
+        self.changes.changed();
         Ok(())
     }
 }
