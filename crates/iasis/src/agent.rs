@@ -38,7 +38,6 @@ pub struct Options {
     pub serial: Option<u64>,
     /// Worker logs and scratch directories; the cache directory by default.
     pub logs: Option<PathBuf>,
-    pub family: batch::Device,
 }
 
 /// Everything the agent knows, for a client to show.
@@ -195,7 +194,6 @@ pub struct Agent {
     store: Store,
     models: Arc<Models>,
     engine: RestoreEngine,
-    family: batch::Device,
     boards: Mutex<BTreeMap<u64, Arc<Attendance>>>,
 }
 
@@ -278,7 +276,6 @@ impl Agent {
             store: Store::open(home.cache.join("images"), Network::default())?,
             models: Arc::new(Models::open(home.cache.join("device-models.json"))),
             engine: RestoreEngine::for_host(logs),
-            family: options.family,
             boards: Mutex::default(),
             sharing: crate::sharing::Sharing::open(home.state.join("usb-sharing.json")),
             home,
@@ -392,7 +389,7 @@ impl Agent {
             Request::Revive { boards } => self
                 .restore(&boards, Operation::Revive)
                 .map(|work| *submitted = work),
-            Request::Dfu { board, port } => self.command(&board, port, self.family.dfu_action()),
+            Request::Dfu { board, port } => self.command(&board, port, PortAction::Dfu),
             Request::Reboot { board, port } => self.command(&board, port, PortAction::Reboot),
             Request::Power { board, port, on } => self.command(
                 &board,
@@ -432,7 +429,6 @@ impl Agent {
             board.jobs.clone(),
             self.models.clone(),
             &self.engine,
-            self.family,
         )?);
         println!("Board {:016x}: attending", link.board().info().serial);
         *board.device.lock().unwrap() = Some(device.clone());
@@ -446,7 +442,6 @@ impl Agent {
                     device,
                     &self.engine,
                     &Images::Store(&self.store),
-                    self.family,
                     &board.requests,
                     &board.endings,
                 )?;

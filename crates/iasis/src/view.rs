@@ -7,7 +7,7 @@ use iasis_protocol::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    batch::{Device, Ending},
+    batch::Ending,
     dfu::{self, Signal},
     host::{PortJob, observe},
     identity::{
@@ -228,7 +228,6 @@ impl PortView {
 pub(crate) struct Host<'a> {
     pub store: &'a Store,
     pub models: &'a Models,
-    pub family: Device,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -335,7 +334,7 @@ impl BoardView {
                             .or_else(|| {
                                 (state.state == PortState::Fault).then(|| "Port fault".into())
                             }),
-                        dfu: available && state.offers(PortAction::DfuAppleSilicon),
+                        dfu: available && state.offers(PortAction::Dfu),
                         reboot: available && state.offers(PortAction::Reboot),
                         restore: restore & (1 << port.index()) != 0,
                         enabled: state.enabled,
@@ -363,14 +362,10 @@ impl BoardView {
         snapshot: &Snapshot,
         host: &Host,
     ) {
-        let Host {
-            store,
-            models,
-            family,
-        } = *host;
+        let Host { store, models } = *host;
         self.upstream_mbps = snapshot.upstream_mbps;
         for (port, row) in Port::ALL.into_iter().zip(&mut self.ports) {
-            let assessment = dfu::assess(serial, port, status, snapshot, family.dfu_action(), None);
+            let assessment = dfu::assess(serial, port, status, snapshot, None);
             row.dfu = assessment.signal == Signal::Available;
             let slot = &status.ports[port.index()];
             if !row.occupied {

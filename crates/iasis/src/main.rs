@@ -104,8 +104,6 @@ enum Command {
     Dfu {
         #[arg(value_parser = parse_port)]
         port: Port,
-        #[arg(long, value_enum, default_value = "apple-silicon")]
-        device: AppleDevice,
     },
     /// Send an Apple reboot VDM
     Reboot {
@@ -140,12 +138,6 @@ enum ImagesCommand {
 enum Power {
     On,
     Off,
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-enum AppleDevice {
-    AppleSilicon,
-    T2,
 }
 
 fn parse_id(value: &str) -> Result<u16, String> {
@@ -286,14 +278,7 @@ fn main() -> Result<()> {
             let current = board.status()?;
             let reports = Port::ALL.map(|port| {
                 let slot = &snapshot.ports[port.index()];
-                let mut report = dfu::assess(
-                    board.info().serial,
-                    port,
-                    &current,
-                    &snapshot,
-                    PortAction::DfuAppleSilicon,
-                    None,
-                );
+                let mut report = dfu::assess(board.info().serial, port, &current, &snapshot, None);
                 if status.ports[port.index()].generation != report.generation {
                     report.outcome = Some(Outcome::AttachmentChanged);
                     report.signal = Signal::Settling;
@@ -350,8 +335,8 @@ fn main() -> Result<()> {
                 port.number()
             );
         }
-        Command::Dfu { port, device } => {
-            request_dfu(board, port, device)?;
+        Command::Dfu { port } => {
+            request_dfu(board, port)?;
         }
         Command::Reboot { port } => {
             let result = board.command(port, PortAction::Reboot)?;
@@ -375,7 +360,6 @@ struct PortReport<'a> {
 fn inspect_dfu(
     board: &Board,
     port: Port,
-    action: PortAction,
     attempt: Option<&Attempt>,
     identify: bool,
 ) -> Result<Option<(Snapshot, dfu::Assessment)>> {
@@ -393,14 +377,7 @@ fn inspect_dfu(
         snapshot.query_port_identity(port);
     }
     let after = board.status()?;
-    let report = dfu::assess(
-        board.info().serial,
-        port,
-        &after,
-        &snapshot,
-        action,
-        attempt,
-    );
+    let report = dfu::assess(board.info().serial, port, &after, &snapshot, attempt);
     if after.uptime_ms < before.uptime_ms {
         bail!("Iasis restarted during USB enumeration.");
     }
@@ -410,12 +387,8 @@ fn inspect_dfu(
     Ok(Some((snapshot, report)))
 }
 
-fn request_dfu(board: &Board, port: Port, device: AppleDevice) -> Result<()> {
-    let action = match device {
-        AppleDevice::AppleSilicon => PortAction::DfuAppleSilicon,
-        AppleDevice::T2 => PortAction::DfuT2,
-    };
-    let (snapshot, before) = inspect_dfu(board, port, action, None, true)?
+fn request_dfu(board: &Board, port: Port) -> Result<()> {
+    let (snapshot, before) = inspect_dfu(board, port, None, true)?
         .context("The attachment changed before signalling. Inspect the current target.")?;
     match before.signal {
         Signal::Available => {}
@@ -425,7 +398,7 @@ fn request_dfu(board: &Board, port: Port, device: AppleDevice) -> Result<()> {
         }
         _ => bail!("Port {}  {}", port.number(), before.describe()),
     }
-    let result = board.command_for_generation(port, before.generation, action)?;
+    let result = board.command_for_generation(port, before.generation, PortAction::Dfu)?;
     println!(
         "Port {} DFU signal {}.",
         port.number(),
@@ -436,8 +409,7 @@ fn request_dfu(board: &Board, port: Port, device: AppleDevice) -> Result<()> {
     let waiting = progress::waiting(format!("Waiting for USB DFU on port {}", port.number()));
     loop {
         let final_read = Instant::now() >= deadline;
-        let Some((_, report)) = inspect_dfu(board, port, action, Some(&attempt), final_read)?
-        else {
+        let Some((_, report)) = inspect_dfu(board, port, Some(&attempt), final_read)? else {
             if final_read {
                 bail!(
                     "Port {} is still reconnecting. Check its USB mode.",
@@ -923,7 +895,7 @@ fn print_status(status: &Status) {
                 println!(
                     "  debug actions: {}  DFU {}  reboot {}",
                     ids.join(" "),
-                    state.offers(PortAction::DfuAppleSilicon),
+                    state.offers(PortAction::Dfu),
                     state.offers(PortAction::Reboot)
                 );
             }
