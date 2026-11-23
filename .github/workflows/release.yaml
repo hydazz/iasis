@@ -135,7 +135,7 @@ jobs:
           install_args: --locked rust cargo:cargo-deb github:raspberrypi/pico-sdk-tools
 
       - name: Build package
-        run: mise run deb
+        run: mise run //apps/linux:package
 
       - name: Upload release asset
         env:
