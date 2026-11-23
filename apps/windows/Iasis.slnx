@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Iasis.Core/Iasis.Core.csproj" />
+  <Project Path="Iasis.Tests/Iasis.Tests.csproj" />
+  <Project Path="Iasis/Iasis.csproj" />
+</Solution>
