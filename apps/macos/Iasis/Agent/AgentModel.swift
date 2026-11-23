@@ -13,10 +13,17 @@ final class AgentModel {
     private(set) var importing: Importing?
     private var menuRefreshPending = false
     private let agent: any AgentService
+    /// Replaces the running agent with the one the app carries; nil when it
+    /// carries none.
+    private let restartAgent: (() async -> Void)?
+    private var restartedAgent = false
     private var watching: Task<Void, Never>?
 
-    init(agent: any AgentService) {
+    static let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+
+    init(agent: any AgentService, restartAgent: (() async -> Void)? = nil) {
         self.agent = agent
+        self.restartAgent = restartAgent
     }
 
     /// Follow the agent for as long as the app runs, across its restarts.
@@ -28,6 +35,15 @@ final class AgentModel {
             while !Task.isCancelled {
                 do {
                     for try await state in agent.states() {
+                        // An app put in place of another finds that app's
+                        // agent still running. One restart: a difference it
+                        // cannot fix would otherwise repeat it forever.
+                        if state.version != Self.version, let restartAgent, !restartedAgent {
+                            restartedAgent = true
+                            Log.agent.notice("Restarting agent \(state.version, privacy: .public) for app \(Self.version, privacy: .public)")
+                            await restartAgent()
+                            break
+                        }
                         publish(state)
                     }
                 } catch {
