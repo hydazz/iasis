@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use iasis_protocol::{AppleMode, Light, Port, RestorePhase};
+pub use iasis_protocol::{AppleMode, Hue, Light, Port, RestorePhase};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
