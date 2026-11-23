@@ -1,17 +1,25 @@
 monorepo_root = true
 
 [tools]
-python = "3.14.10"
-rust = { version = "1.100.0", components = "rustfmt,clippy", targets = "thumbv8m.main-none-eabihf" }
-uv = "0.13.9"
-ruff = "0.17.6"
-lefthook = "2.2.2"
-jactionlint = "v2.6.0"
-oxfmt = "0.75.0"
-node = "26.13.1"
-"npm:pyright" = "1.1.414"
-"github:raspberrypi/pico-sdk-tools" = { version = "2.3.1-0", matching = "picotool" }
-"cargo:cargo-deb" = "3.8.0"
+# Everything but the Windows app builds on Linux and macOS; Windows has the
+# app's own toolchain (apps/windows).
+python = { version = "3.14.10", os = ["linux", "macos"] }
+rust = { version = "1.100.0", components = "rustfmt,clippy", targets = "thumbv8m.main-none-eabihf,x86_64-pc-windows-gnu", os = [
+  "linux",
+  "macos",
+] }
+uv = { version = "0.13.9", os = ["linux", "macos"] }
+ruff = { version = "0.17.6", os = ["linux", "macos"] }
+lefthook = { version = "2.2.2", os = ["linux", "macos"] }
+jactionlint = { version = "v2.6.0", os = ["linux", "macos"] }
+oxfmt = { version = "0.75.0", os = ["linux", "macos"] }
+node = { version = "26.13.1", os = ["linux", "macos"] }
+"npm:pyright" = { version = "1.1.414", os = ["linux", "macos"] }
+"github:raspberrypi/pico-sdk-tools" = { version = "2.3.1-0", matching = "picotool", os = [
+  "linux",
+  "macos",
+] }
+"cargo:cargo-deb" = { version = "3.8.0", os = ["linux"] }
 
 [settings]
 experimental = true
@@ -24,10 +32,42 @@ _.path = ["/Applications/KiCad/KiCad.app/Contents/MacOS"]
 UV_PYTHON = "python"
 
 [monorepo]
-config_roots = ["apps/macos", "hardware/case", "hardware/boards/*"]
+config_roots = [
+  "apps/macos",
+  "apps/linux",
+  "apps/windows",
+  "hardware/case",
+  "hardware/boards/*",
+]
 
 [hooks]
 postinstall = "lefthook install"
+
+# Native libraries the host tools' vendored C stack builds against, and the
+# Debian packaging. The Windows host tools cross-build here with mingw-w64:
+# their C stack builds only with GNU autotools.
+[bootstrap.packages]
+"apt:build-essential" = { os = "linux" }
+"apt:autoconf" = { os = "linux" }
+"apt:automake" = { os = "linux" }
+"apt:libtool" = { os = "linux" }
+"apt:pkgconf" = { os = "linux" }
+"apt:cmake" = { os = "linux" }
+"apt:git" = { os = "linux" }
+"apt:patch" = { os = "linux" }
+"apt:libssl-dev" = { os = "linux" }
+"apt:libcurl4-openssl-dev" = { os = "linux" }
+"apt:zlib1g-dev" = { os = "linux" }
+"apt:libpcap-dev" = { os = "linux" }
+"apt:libusb-1.0-0" = { os = "linux" }
+"apt:dpkg-dev" = { os = "linux" }
+"apt:gcc-mingw-w64-x86-64" = { os = "linux" }
+"brew:autoconf" = { os = "macos" }
+"brew:automake" = { os = "macos" }
+"brew:libtool" = { os = "macos" }
+"brew:pkgconf" = { os = "macos" }
+"brew:cmake" = { os = "macos" }
+"brew:openssl@3" = { os = "macos" }
 
 [tasks.deps]
 run = ["uv sync --locked", "cargo fetch --locked"]
@@ -85,10 +125,23 @@ env = { IASIS_OS_UF2 = "{{config_root}}/target/thumbv8m.main-none-eabihf/release
 run = "cargo build --locked --release -p iasis"
 
 [tasks."host:package"]
-description = "Build the Debian package of the host tools for this Linux machine's architecture"
+description = "Build the Debian package of the host tools and the Linux app for this machine's architecture"
 depends = ["firmware:uf2"]
 env = { IASIS_OS_UF2 = "{{config_root}}/target/thumbv8m.main-none-eabihf/release/IasisOS.uf2" }
-run = "cargo deb --locked -p iasis"
+run = [
+  "cargo build --locked --release -p iasis -p iasis-desktop",
+  "cargo deb --locked --no-build -p iasis",
+]
+
+[tasks."windows:tools"]
+description = "Cross-build the Windows host tools, carrying IasisOS"
+depends = ["firmware:uf2"]
+env = { IASIS_OS_UF2 = "{{config_root}}/target/thumbv8m.main-none-eabihf/release/IasisOS.uf2" }
+run = "cargo build --locked --release -p iasis --target x86_64-pc-windows-gnu"
+
+[tasks."windows:lint"]
+description = "Lint the host tools as Windows builds them"
+run = "cargo clippy --locked -p iasis -p iasis-api --all-targets --target x86_64-pc-windows-gnu -- -D warnings"
 
 [tasks."firmware:build"]
 description = "Build IasisOS, the RP2354B firmware"

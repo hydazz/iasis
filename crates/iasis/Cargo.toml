@@ -52,10 +52,10 @@ maintainer = "hydazz <hydazz@users.noreply.github.com>"
 copyright = "hydazz"
 license-file = ["../../LICENSE", "0"]
 extended-description = """\
-The iasis command and the iasisd service, which attends every Iasis board, \
-restores the Apple devices on their ports and shares this host's internet \
-connection with them. The person signed in at the computer and members of \
-the iasis group use the service."""
+The Iasis app, the iasis command and the iasisd service, which attends every \
+Iasis board, restores the Apple devices on their ports and shares this host's \
+internet connection with them. The person signed in at the computer and \
+members of the iasis group use the service."""
 section = "utils"
 depends = "$auto, usbmuxd, systemd | systemd-standalone-sysusers | systemd-sysusers"
 recommends = "polkitd"
@@ -84,6 +84,31 @@ assets = [
   [
     "debian/com.hydaz.iasis.policy",
     "usr/share/polkit-1/actions/",
+    "644",
+  ],
+  [
+    "target/release/iasis-desktop",
+    "usr/bin/",
+    "755",
+  ],
+  [
+    "../../apps/linux/data/com.hydaz.Iasis.desktop",
+    "usr/share/applications/",
+    "644",
+  ],
+  [
+    "../../apps/linux/data/com.hydaz.Iasis.metainfo.xml",
+    "usr/share/metainfo/",
+    "644",
+  ],
+  [
+    "../../apps/linux/data/icons/hicolor/scalable/apps/com.hydaz.Iasis.svg",
+    "usr/share/icons/hicolor/scalable/apps/",
+    "644",
+  ],
+  [
+    "../../apps/linux/data/icons/hicolor/symbolic/apps/*.svg",
+    "usr/share/icons/hicolor/symbolic/apps/",
     "644",
   ],
   [
