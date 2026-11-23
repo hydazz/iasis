@@ -116,13 +116,6 @@ jobs:
     env:
       VERSION: ${{ needs.tag.outputs.version }}
     steps:
-      - name: Install build tools
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates curl git gh xz-utils dpkg-dev \
-            build-essential autoconf automake libtool pkg-config cmake \
-            libssl-dev libcurl4-openssl-dev zlib1g-dev libpcap-dev libusb-1.0-0
-
       - name: Checkout release
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -132,7 +125,13 @@ jobs:
         uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
         with:
           cache: false
-          install_args: --locked rust cargo:cargo-deb github:raspberrypi/pico-sdk-tools
+          install: false
+
+      - name: Install system packages
+        run: mise -C apps/linux bootstrap packages apply --yes
+
+      - name: Install tools
+        run: mise install --locked rust cargo:cargo-deb github:raspberrypi/pico-sdk-tools
 
       - name: Build package
         run: mise run //apps/linux:package
@@ -177,8 +176,8 @@ jobs:
           cache: false
           install_args: --locked rust github:raspberrypi/pico-sdk-tools
 
-      - name: Install native build tools
-        run: brew install autoconf automake libtool pkg-config cmake openssl
+      - name: Install system packages
+        run: mise bootstrap packages apply --yes
 
       - name: Build host tools
         run: mise run host:build
