@@ -80,11 +80,6 @@ assets = [
     "644",
   ],
   [
-    "debian/iasis.polkit.rules",
-    "usr/share/polkit-1/rules.d/iasis.rules",
-    "644",
-  ],
-  [
     "NOTICES.txt",
     "usr/share/doc/iasis/",
     "644",
