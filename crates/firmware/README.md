@@ -26,7 +26,7 @@ A port whose voltage or negotiation fails switches its output off, discharges VB
 
 | Supply path     | Target offer                               | Budget                                                                                                                                                 |
 | --------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Host presence   | Fixed 5 V / 0 mA PDO                       | Iasis reserves 800 mA. The remaining current selects the shared limiter below.                                                                         |
+| Host presence   | Fixed 5 V / 0 mA PDO                       | Iasis reserves 650 mA. The remaining current selects the shared limiter below.                                                                         |
 | Charging supply | Fixed 5, 9, 15 or 20 V, up to 3 A per port | The brick contract covers input cable and board losses, logic power and a 35 W reserve when the CM5 carrier is powered. The ports share the remainder. |
 
 With host USB alone, charged Apple targets use 5 V for attachment and PD signalling. A 5 V / 0 mA offer is how PD says a source has no power to give, so targets do not charge, and the OLED shows `No charging`. The port ADC measures connector voltage only. Ordinary USB peripherals draw their operating current from the same 5 V supply. Each port has a nominal 0.51 A current limit. Component tolerance can put the trip point below 500 mA. All five also share a limiter whose upper trip threshold is shown below.
@@ -34,7 +34,7 @@ With host USB alone, charged Apple targets use 5 V for attachment and PD signall
 | Upstream allowance | Shared limiter threshold (max) |
 | ------------------ | ------------------------------ |
 | Default USB | Off |
-| 1500 mA            | 550 mA                         |
+| 1500 mA | 550 mA |
 | 3000 mA            | 1890 mA                        |
 
 Default USB requires the charging input to power targets.
