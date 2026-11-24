@@ -28,7 +28,6 @@ pub enum Signal {
     NoDebug,
     NotOffered,
     WrongMacPort,
-    MultipleTransports,
     Ambiguous,
     DifferentDevice,
 }
@@ -54,9 +53,6 @@ impl Signal {
             }
             Self::NotOffered => "The target does not offer DFU on this connection.",
             Self::WrongMacPort => "Connect to the Mac's DFU port.",
-            Self::MultipleTransports => {
-                "Apple Debug USB is present alongside two Mac interfaces advertising the same USB serial. If a restore is in progress, leave the cable connected."
-            }
             Self::Ambiguous => {
                 "Multiple USB devices, a hub or conflicting identities prevent target selection."
             }
@@ -172,6 +168,12 @@ impl Assessment {
         }
     }
 
+    /// After a command, the connector's USB names no one Apple target, as
+    /// for a moment while a target behind Debug USB restarts into DFU.
+    pub fn unclear(&self) -> bool {
+        self.outcome == Some(Outcome::TargetUnclear) && self.signal != Signal::DifferentDevice
+    }
+
     pub fn describe(&self) -> String {
         let mode = match self.usb_mode {
             Some(AppleMode::Dfu) => "USB DFU (05ac:1227)",
@@ -234,7 +236,7 @@ impl Attempt {
         snapshot: &Snapshot,
         result: CommandResult,
     ) -> Self {
-        let was_mac = direct_device(snapshot, port).is_some_and(is_mac);
+        let was_mac = snapshot.target(port).is_some_and(is_mac);
         Self {
             generation: before.generation,
             uptime_ms: before.uptime_ms,
@@ -261,64 +263,6 @@ fn is_mac(device: &UsbDevice) -> bool {
         .map_or_else(|| device.product.as_deref().is_some_and(mac_name), mac_name)
 }
 
-pub fn direct_device(snapshot: &Snapshot, port: Port) -> Option<&UsbDevice> {
-    let slot = &snapshot.ports[port.index()];
-    let [device] = slot.devices.as_slice() else {
-        return None;
-    };
-    (device.topology == slot.usb2 || matches!(&slot.superspeed, Companion::Mapped { topology } if *topology == device.topology)).then_some(device)
-}
-
-fn matching_mac_transports(snapshot: &Snapshot, port: Port) -> bool {
-    let slot = &snapshot.ports[port.index()];
-    let Companion::Mapped { topology: ss } = &slot.superspeed else {
-        return false;
-    };
-    let devices = &slot.devices;
-    if devices.len() != 3
-        || !devices
-            .iter()
-            .any(|d| d.vendor_id == 0x05ac && d.product_id == 0x1881 && d.topology == slot.usb2)
-    {
-        return false;
-    }
-    let mut macs = devices.iter().filter(|d| {
-        d.vendor_id == 0x05ac && d.product_id == 0x12ac && d.product.as_deref() == Some("Mac")
-    });
-    let (Some(a), Some(b)) = (macs.next(), macs.next()) else {
-        return false;
-    };
-    let (direct, child) = if a.topology == *ss { (a, b) } else { (b, a) };
-    let Some(serial) = direct
-        .serial_number
-        .as_deref()
-        .filter(|s| !s.trim().is_empty())
-    else {
-        return false;
-    };
-    if direct.topology != *ss
-        || child.serial_number.as_deref() != Some(serial)
-        || child.topology.bus != slot.usb2.bus
-        || child.topology.port_chain.split_last() != Some((&1, slot.usb2.port_chain.as_slice()))
-    {
-        return false;
-    }
-    let mut ecids = devices.iter().filter_map(|d| d.apple.as_ref()?.ecid());
-    let first = ecids.next();
-    !ecids.any(|id| Some(id) != first)
-        && !snapshot
-            .ports
-            .iter()
-            .filter(|p| p.port != port)
-            .flat_map(|p| &p.devices)
-            .any(|d| {
-                d.vendor_id == 0x05ac
-                    && (d.serial_number.as_deref() == Some(serial)
-                        || first.is_some()
-                            && d.apple.as_ref().and_then(|apple| apple.ecid()) == first)
-            })
-}
-
 pub fn job_in_progress(p: &PortStatus) -> bool {
     p.restoring()
 }
@@ -333,22 +277,12 @@ pub fn assess(
     let p = &status.ports[port.index()];
     let slot = &snapshot.ports[port.index()];
     let devices = slot.devices.as_slice();
-    let single = direct_device(snapshot, port);
+    let single = snapshot.target(port);
     let apple = single.and_then(|d| d.apple.as_ref());
     let usb_mode = apple.map(|a| a.mode);
     let ecid = apple.and_then(|a| a.ecid());
-    let duplicates = ecid.is_some_and(|id| {
-        snapshot
-            .ports
-            .iter()
-            .flat_map(|p| &p.devices)
-            .filter(|d| d.apple.as_ref().and_then(|a| a.ecid()) == Some(id))
-            .count()
-            > 1
-    });
-    let signal = if matching_mac_transports(snapshot, port) {
-        Signal::MultipleTransports
-    } else if (!devices.is_empty() && single.is_none()) || duplicates {
+    let duplicates = ecid.is_some_and(|id| snapshot.ecid_elsewhere(port, id));
+    let signal = if (!devices.is_empty() && single.is_none()) || duplicates {
         Signal::Ambiguous
     } else if job_in_progress(p) || usb_mode == Some(AppleMode::Restored) {
         Signal::Restoring
@@ -427,7 +361,7 @@ pub fn assess(
             .tracker
             .as_ref()
             .map(|target| target.observe(serial, snapshot));
-        if (identity == Some(Observation::Ambiguous) && signal != Signal::MultipleTransports)
+        if identity == Some(Observation::Ambiguous)
             || matches!(signal, Signal::Ambiguous | Signal::DifferentDevice)
         {
             return Outcome::TargetUnclear;
@@ -455,9 +389,6 @@ pub fn assess(
             } else {
                 Outcome::AttachmentChanged
             };
-        }
-        if signal == Signal::MultipleTransports {
-            return Outcome::TargetUnclear;
         }
         if matches!(identity, Some(Observation::IdentityMissing { .. }))
             && matches!(
@@ -584,57 +515,48 @@ mod tests {
     }
 
     #[test]
-    fn debug_usb_and_the_two_matching_mac_interfaces_do_not_select_a_dfu_target() {
+    fn debug_usb_carries_a_restore_os_left_on_the_port() {
         let mut s = snapshot();
-        let port = Port::ALL[2];
-        let slot = &mut s.ports[port.index()];
-        let super_path = Topology {
-            bus: "00".into(),
-            port_chain: vec![2, 3],
-        };
-        slot.superspeed = Companion::Mapped {
-            topology: super_path.clone(),
-        };
-        let mut direct = apple(AppleMode::Restored, 0x12ac, None);
-        direct.topology = super_path;
-        direct.product = Some("Mac".into());
+        let mut direct = apple(AppleMode::Restored, 0x12ac, Some(0x1234));
+        direct.topology = topology(P, "01");
+        direct.speed = Speed::SuperPlus;
         direct.serial_number = Some("00008140-0000000000001234".into());
-        let mut child = direct.clone();
-        child.topology = slot.usb2.clone();
-        child.topology.port_chain.push(1);
-        let mut debug = apple(AppleMode::Kis, 0x1881, None);
-        debug.topology = slot.usb2.clone();
-        slot.devices = vec![child, debug, direct];
-        let report = |s: &Snapshot| assess(8, port, &status(), s, None);
-        let seen = report(&s);
-        assert_eq!(seen.signal, Signal::MultipleTransports);
-        assert_eq!((seen.usb_mode, seen.ecid), (None, None));
-        assert!(direct_device(&s, port).is_none());
+        let mut tunnelled = direct.clone();
+        tunnelled.topology = topology(P, "00");
+        tunnelled.topology.port_chain.push(1);
+        tunnelled.speed = Speed::High;
+        let debug = apple(AppleMode::Kis, 0x1881, None);
+        s.ports[0].devices = vec![tunnelled, debug, direct];
+        let st = status();
+        let seen = report(&st, &s, None);
+        assert_eq!(seen.signal, Signal::Restoring);
+        assert_eq!(
+            (seen.usb_mode, seen.ecid),
+            (Some(AppleMode::Restored), Some(0x1234))
+        );
+        assert_eq!(
+            seen.restore_access(&st.ports[0], |_| true),
+            RestoreAccess::EnterDfu
+        );
 
-        for change in 0..8 {
+        for change in 0..5 {
             let mut other = s.clone();
-            let devices = &mut other.ports[port.index()].devices;
+            let devices = &mut other.ports[0].devices;
             match change {
                 0 => devices[0].serial_number = Some("different".into()),
-                1 => devices[0].topology.port_chain[2] = 2,
+                1 => devices[0].topology = topology(Port::ALL[1], "00"),
                 2 => devices[1].product_id = 0x1227,
-                3 => devices[2].serial_number = None,
-                4 => devices.push(devices[0].clone()),
-                6 => devices[0].product = Some("iPad".into()),
-                5 => {
-                    let copy = devices[2].clone();
-                    other.ports[0].devices.push(copy);
-                }
+                3 => devices[2].speed = Speed::High,
                 _ => {
-                    for (i, device) in devices.iter_mut().enumerate() {
-                        device.apple.as_mut().unwrap().identity = Identity::Known {
-                            ecid: i as u64 + 1,
-                            source: IdentitySource::UsbSerial,
-                        };
-                    }
+                    let copy = devices[2].clone();
+                    other.ports[1].devices.push(copy);
                 }
             }
-            assert_eq!(report(&other).signal, Signal::Ambiguous);
+            assert_eq!(
+                report(&st, &other, None).signal,
+                Signal::Ambiguous,
+                "{change}"
+            );
         }
     }
 
