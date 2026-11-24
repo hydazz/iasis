@@ -21,6 +21,10 @@ pub const USB3_SPEEDS: u32 = 0xbf80_3852;
 pub const RUNTIME_FLAGS: u32 = 0xbfd2_3400;
 /// Keeps the slave interface clocked while the upstream port is suspended.
 pub const BYPASS_MCU_SUSPEND: u8 = 0x40;
+/// I2S_FEAT_SEL. Its reset value gives the hub controller USB audio
+/// functions, which hosts list as speakers and a microphone; Iasis wires no
+/// I2S, so zero leaves them out.
+pub const I2S_FEATURES: u32 = 0xbfd2_3412;
 /// Configuration Register Access.
 pub const ACCESS: [u8; 3] = [0x99, 0x37, 0x00];
 /// USB Attach with SMBus Runtime Access.
