@@ -20,7 +20,7 @@ use anyhow::{Context, Result, bail, ensure};
 use iasis_api::{
     BoardView, FirmwareUpdate, Operation, Planned, Reply, Request, Selection, State, Target,
 };
-use iasis_protocol::{Port, PortAction};
+use iasis_protocol::{CommandResult, Port, PortAction};
 use nusb::DeviceInfo;
 
 use crate::{
@@ -290,7 +290,13 @@ impl Agent {
         let port = Port::try_from(port)
             .ok()
             .context("ports are numbered 1 to 5")?;
-        board.control(|board| board.command(port, action))?;
+        let result = board.control(|board| board.command(port, action))?;
+        // The target's reply shows its pins once it has mapped them.
+        ensure!(
+            !matches!(action, PortAction::MapDebugUsb | PortAction::UnmapDebugUsb)
+                || result == CommandResult::Complete,
+            "the target did not confirm its Debug USB mapping"
+        );
         Ok(())
     }
 
@@ -439,6 +445,15 @@ impl Agent {
                     PortAction::Enable
                 } else {
                     PortAction::Disable
+                },
+            ),
+            Request::DebugUsb { board, port, on } => self.command(
+                &board,
+                port,
+                if on {
+                    PortAction::MapDebugUsb
+                } else {
+                    PortAction::UnmapDebugUsb
                 },
             ),
             Request::Brightness { board, percent } => self

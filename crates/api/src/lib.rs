@@ -46,6 +46,12 @@ pub enum Request {
         port: u8,
         on: bool,
     },
+    /// Carry the target's Apple Debug USB on its USB 2 pair, or take it off.
+    DebugUsb {
+        board: String,
+        port: u8,
+        on: bool,
+    },
     Rename {
         board: String,
         name: String,
