@@ -179,6 +179,7 @@ fn run_batch(
     let logs = source.logs.unwrap_or_else(|| home.cache.join("restores"));
     let changes = Arc::<Watch>::default();
     let engine = RestoreEngine::for_host(logs, changes.clone());
+    let preparing = crate::awake::hold("Preparing a restore");
     // Take the board before the long image check, which another host's
     // session would make pointless.
     let link = Link::open(
@@ -254,6 +255,8 @@ fn run_batch(
         )
     };
     let running = start(&link, &engine, &images, targets, operation, failed, button)?;
+    // Each worker keeps the host awake while it restores.
+    drop(preparing);
     monitor(&link, running, &Endings::default())
 }
 
@@ -290,6 +293,7 @@ pub fn listen(
     // A declined or unavailable batch finishes this request. The listener
     // can immediately accept the next one.
     let request = (|| -> Result<_> {
+        let _awake = crate::awake::hold("Preparing a restore");
         let control = Board::open(device)
             .context("opening board for restore preparation")?
             .notified(link.notice());
