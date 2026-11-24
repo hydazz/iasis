@@ -21,9 +21,9 @@ struct IndicatorLightsView: View {
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 9) {
                 switch panel {
                 case .ports:
-                    light(nil, "Off", "Empty or turned off")
-                    light(.white, "White", "No power contract. Dim while connecting.")
-                    light(.green, "Green", "Device has a power contract or restore complete")
+                    light(nil, "Off", "Empty, turned off or identifying")
+                    light(.white, "White", "Device Iasis can't act on")
+                    light(.green, "Green", "Target Iasis can act on, or restore complete")
                     light(.blue, "Blue", "Host sees DFU or Recovery")
                     light(.blue, "Pulsing Blue", "DFU requested, waiting for the host", .pulse)
                     light(.orange, "Amber", "Waiting for power")

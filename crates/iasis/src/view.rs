@@ -67,7 +67,7 @@ pub fn board(info: &Info, status: &Status) -> BoardView {
                         iasis_protocol::Usb::Apple(mode) => Some(mode),
                         _ => None,
                     }),
-                    light: state.light(),
+                    light: status.light(port),
                     request: state.request.map(|request| match request.action {
                         PortAction::Reboot => SignalProgress::Restarting,
                         _ if request.pending(status.uptime_ms) => SignalProgress::EnteringDfu,
@@ -77,8 +77,7 @@ pub fn board(info: &Info, status: &Status) -> BoardView {
                     powered: matches!(state.state, PortState::Ready | PortState::Contract)
                         && state.supply != iasis_protocol::Supply::Off
                         && state.error.is_none(),
-                    wrong_dfu_port: state.restore_access
-                        == iasis_protocol::RestoreAccess::WrongMacPort,
+                    wrong_dfu_port: state.dfu_on_another_port(),
                     link: match state.link.filter(|_| state.occupied()) {
                         Some(Link::Usb2) => Some(UsbLink::Usb2),
                         Some(Link::Usb3) => Some(UsbLink::Usb3),
@@ -229,8 +228,10 @@ pub fn port_usb(port: &PortStatus) -> Option<Usb> {
 }
 
 /// The port's negotiated PD operating point, or its default USB allowance.
+/// What a port gives its target. Host power charges nothing: its 0 mA
+/// contract only carries Apple signalling.
 fn port_power(port: &PortStatus) -> Option<PortPower> {
-    if !port.occupied() {
+    if !port.occupied() || port.supply != iasis_protocol::Supply::Brick {
         return None;
     }
     if port.contract_mv > 0 {
@@ -241,7 +242,7 @@ fn port_power(port: &PortStatus) -> Option<PortPower> {
         });
     }
     let usb = iasis_pd::Contract::USB_DEFAULT;
-    (port.supply == iasis_protocol::Supply::Brick && port.allocated_mw > 0).then_some(PortPower {
+    (port.allocated_mw > 0).then_some(PortPower {
         source: PowerSource::Usb,
         millivolts: usb.millivolts,
         milliamps: usb.operating_ma,
@@ -279,8 +280,11 @@ mod tests {
                 milliamps: 900
             })
         );
+        // Host power funds no charging, whatever its contract carries.
         port.supply = iasis_protocol::Supply::HostPresence;
+        port.contract_mv = 5_000;
         assert_eq!(port_power(&port), None);
+        port.supply = iasis_protocol::Supply::Brick;
         port.contract_mv = 20_000;
         port.contract_ma = 780;
         assert_eq!(

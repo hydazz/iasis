@@ -118,6 +118,8 @@ pub struct Phy<'a> {
     hard_reset: Cell<bool>,
     hard_sent: Cell<bool>,
     sent: Cell<Option<Tx>>,
+    /// A frame reached the controller and its sender stopped waiting for it.
+    in_flight: Cell<bool>,
     inbox: RefCell<Deque<Packet, 4>>,
     failure: Cell<Option<PortError>>,
     retries: Cell<u16>,
@@ -150,6 +152,7 @@ impl<'a> Phy<'a> {
             hard_reset: Cell::new(false),
             hard_sent: Cell::new(false),
             sent: Cell::new(None),
+            in_flight: Cell::new(false),
             inbox: RefCell::new(Deque::new()),
             failure: Cell::new(None),
             retries: Cell::new(0),
@@ -181,6 +184,7 @@ impl<'a> Phy<'a> {
         self.hard_reset.set(false);
         self.hard_sent.set(false);
         self.sent.set(None);
+        self.in_flight.set(false);
         self.inbox.borrow_mut().clear();
         self.debug_reply.set(None);
         self.failure.set(None);
@@ -428,6 +432,11 @@ impl<'a> Phy<'a> {
 
     async fn send(&self, sop: [u8; 4], message: &[u8]) -> Result<Tx, PortError> {
         let _transmitter = self.transmitter.lock().await;
+        // A sender dropped mid-frame leaves the controller sending or
+        // retrying it, and its late result would read as this frame's.
+        if self.in_flight.take() {
+            self.flush().await?;
+        }
         let mut frame = Vec::<u8, 40>::new();
         let _ = frame.push(FIFO);
         let _ = frame.extend_from_slice(&sop);
@@ -444,6 +453,7 @@ impl<'a> Phy<'a> {
             };
             let result = match written {
                 Ok(()) => {
+                    self.in_flight.set(true);
                     let completion = async {
                         loop {
                             if let Some(result) = self.sent.take() {
@@ -455,9 +465,11 @@ impl<'a> Phy<'a> {
                             self.completed.wait().await;
                         }
                     };
-                    with_timeout(Duration::from_millis(20), completion)
+                    let result = with_timeout(Duration::from_millis(20), completion)
                         .await
-                        .unwrap_or(Tx::Unanswered)
+                        .unwrap_or(Tx::Unanswered);
+                    self.in_flight.set(false);
+                    result
                 }
                 Err(PortError::I2c {
                     failure: I2cFailure::NoAcknowledge | I2cFailure::OtherAbort(_),

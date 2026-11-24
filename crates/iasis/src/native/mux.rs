@@ -18,6 +18,6 @@ use macos as platform;
 #[cfg(windows)]
 use windows as platform;
 
-pub(crate) use platform::restore_environment;
+pub(crate) use platform::{reaches_running_devices, restore_environment};
 #[cfg(windows)]
 pub(super) use served::serve;
