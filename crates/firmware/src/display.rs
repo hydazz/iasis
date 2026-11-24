@@ -207,9 +207,7 @@ pub fn view(status: &Status, button: &Button, now: u64) -> View {
         view.lines = pair("Erase", "Hold 3s");
     } else if button.hold_ms(now).is_some()
         && selected.is_some_and(|port| {
-            port.restore_access == iasis_protocol::RestoreAccess::WrongMacPort
-                && port.error.is_none()
-                && !port.restoring()
+            port.dfu_on_another_port() && port.error.is_none() && !port.restoring()
         })
     {
         view.lines = pair("Not in DFU port", "");
@@ -297,10 +295,8 @@ pub fn label(port: &PortStatus) -> &'static str {
         PortState::Unattached => "--",
         PortState::Debouncing => "CC",
         PortState::Starting => "STRT",
-        PortState::Contract if port.offers(PortAction::Dfu) || port.offers(PortAction::Reboot) => {
-            "RDY"
-        }
         PortState::Ready if port.pd_transition => "STRT",
+        PortState::Ready | PortState::Contract if port.operable() => "RDY",
         PortState::Ready | PortState::Contract if port.usb_connected() => "USB",
         PortState::Contract => "PD",
         PortState::Ready => "ATCH",
@@ -425,6 +421,8 @@ fn watts(milliwatts: u32) -> u32 {
 }
 
 /// Connector readings and the negotiated contract or default USB allowance.
+/// Host power charges nothing; its 0 mA contract only carries Apple
+/// signalling.
 fn readings(port: &PortStatus) -> [String<32>; 2] {
     if !port.occupied() {
         return pair("No target", "");
@@ -443,6 +441,12 @@ fn readings(port: &PortStatus) -> [String<32>; 2] {
             lines[0].push(' ').unwrap();
         }
         lines[0].push_str(link).unwrap();
+    }
+    if port.supply == Supply::HostPresence {
+        if port.contract_mv > 0 {
+            lines[1].push_str("No charging").unwrap();
+        }
+        return lines;
     }
     let (kind, mv, ma) = if port.contract_mv > 0 {
         ("PD", port.contract_mv, port.contract_ma)
@@ -817,11 +821,12 @@ mod tests {
             ..contract(5000, 0)
         };
         assert_eq!(view(&status, &button, 0).lines[1], "PD 5V 0A (0W)");
+        // Host power funds no charging; its contract only carries signalling.
         status.ports[0] = PortStatus {
             supply: Supply::HostPresence,
             ..contract(5000, 0)
         };
-        assert_eq!(view(&status, &button, 0).lines, pair("", "PD 5V 0A (0W)"));
+        assert_eq!(view(&status, &button, 0).lines, pair("", "No charging"));
     }
 
     #[test]
@@ -961,12 +966,13 @@ mod tests {
     }
 
     #[test]
-    fn a_wrong_mac_connector_explains_the_missing_actions_only_on_hold() {
-        use iasis_protocol::RestoreAccess;
+    fn a_connector_without_dfu_usb_explains_the_missing_actions_only_on_hold() {
         let mut status = Status::default();
+        // What an M5 Air or a MacBook Neo lists on its other port.
         status.ports[4] = PortStatus {
-            debug_actions: DebugActions::Listed([0x0106, 0x0105, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
-            restore_access: RestoreAccess::WrongMacPort,
+            debug_actions: DebugActions::Listed([
+                0x4606, 0x0106, 0x0105, 0x0303, 0x0803, 0x0809, 0x0103, 0, 0, 0, 0, 0,
+            ]),
             ..contract(5000, 0)
         };
         let mut button = selecting(4);
@@ -981,17 +987,23 @@ mod tests {
         button.selected = None;
         assert!(view(&status, &button, 600).lines[0].is_empty());
         button.selected = Some(Port::ALL[4]);
-        status.ports[4].restore_access = RestoreAccess::Unavailable;
-        assert!(view(&status, &button, 600).lines[0].is_empty());
+        // The same target on its DFU port.
+        status.ports[4].debug_actions =
+            DebugActions::Listed([0x4606, 0x0606, 0x0106, 0x0105, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let held = view(&status, &button, 600);
+        assert!(held.lines[0].is_empty());
+        assert!(held.held.is_some());
     }
 
     #[test]
     fn a_highlighted_target_is_filled_and_any_other_port_outlined() {
         let mut status = Status::default();
         status.ports[0] = contract(9000, 3000);
+        // A sink that never answered PD.
         status.ports[1] = PortStatus {
             state: PortState::Ready,
             allocated_mw: iasis_pd::Contract::USB_DEFAULT.cost_mw(),
+            debug_actions: DebugActions::Silent,
             ..contract(0, 0)
         };
         status.ports[2].error = Some(PortError::Voltage);

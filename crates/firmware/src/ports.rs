@@ -68,10 +68,17 @@ const STAGE_REST: Duration = Duration::from_millis(250);
 /// New offers are sent once they have held, and the sink has been silent,
 /// for this long.
 const OFFER_SETTLE: Duration = Duration::from_secs(1);
+/// A sink that has not answered Source_Capabilities this long after VBUS
+/// came up does not speak PD, so it has no Apple debug actions either. The
+/// engine keeps offering in case it was only slow.
+const PD_SILENT: Duration = Duration::from_secs(1);
+/// Debug work waits for the sink to be silent this long. Apple sinks request
+/// again about 100 ms after PS_RDY; a sink's message cancels the work anyway.
+const DEBUG_QUIET: Duration = Duration::from_millis(300);
 /// A target is asked for its debug actions this many times before it counts
-/// as silent, once its contract has held for OFFER_SETTLE.
+/// as silent.
 const ACTION_ASKS: u8 = 3;
-const ACTION_ASK_SPACING: Duration = Duration::from_secs(1);
+const ACTION_ASK_SPACING: Duration = Duration::from_millis(250);
 /// Failures inside this window count towards holding the port off.
 const STRIKE_WINDOW: Duration = Duration::from_secs(30);
 const STRIKES: u8 = 3;
@@ -406,6 +413,7 @@ impl Ports {
             }),
             action => {
                 port.action.set(Some(action));
+                port.reoffer.signal(());
                 CommandResult::Pending
             }
         };
@@ -625,8 +633,6 @@ impl Port<'_> {
     fn advertise(&self, offers: [u32; 4]) {
         self.offers.set(offers);
         self.update(|status| status.pd_source_pdos = offers);
-        // Debug discovery waits for the advertised offers to be current.
-        self.shared.wake.signal(());
     }
 
     fn reset_debug_discovery(&self) {
@@ -800,6 +806,7 @@ impl Port<'_> {
         self.update(|status| {
             status.orientation = Some(orientation);
             status.generation = status.generation.wrapping_add(1);
+            status.attached_ms = now_ms() as u32;
             status.command_result = CommandResult::Idle;
             status.state = PortState::Debouncing;
         });
@@ -895,6 +902,7 @@ impl Port<'_> {
             port: self,
             accepted: false,
             candidate: None,
+            ask_due: Instant::MIN,
         };
         let driver = PdPhy {
             phy: &self.phy,
@@ -916,7 +924,6 @@ impl Port<'_> {
     async fn supervise(&self) -> Result<(), PortError> {
         let mut open_since = None;
         let mut invalid_since = None;
-        let mut ask_due = Instant::MIN;
         loop {
             let failure = self.phy.failure().or(self.fault.take());
             if let Some(error) = failure.or(self.shared.supply_fault.take()) {
@@ -938,30 +945,18 @@ impl Port<'_> {
             } else if now - *invalid_since.get_or_insert(now) >= UNDERVOLTAGE {
                 return Err(PortError::Voltage);
             }
-            if !transition {
-                if let Some((due, target)) = self.lowering.get()
-                    && now >= due
-                {
-                    self.apply_limit(target).await?;
-                    self.lowering.set(None);
-                }
-                if let Some(action) = self.shared.action.take() {
-                    self.signal(action).await?;
-                }
+            if !transition
+                && let Some((due, target)) = self.lowering.get()
+                && now >= due
+            {
+                self.apply_limit(target).await?;
+                self.lowering.set(None);
             }
-            // Ask for the debug actions under the rule new offers follow:
-            // the sink silent for OFFER_SETTLE and nothing waiting to be
-            // advertised, since revision 2.0 has no collision avoidance.
-            let asking = || {
-                !self.status().pd_transition
-                    && self.contract.get().is_some()
-                    && self.asks.get() > 0
-                    && self.offers.get() == self.current_offers()
-            };
-            let ask_at = |ask_due: Instant| (self.quiet.get() + OFFER_SETTLE).max(ask_due);
-            if asking() && Instant::now() >= ask_at(ask_due) {
-                self.discover().await?;
-                ask_due = Instant::now() + ACTION_ASK_SPACING;
+            let pd_silent_at = (self.contract.get().is_none()
+                && self.status().debug_actions == DebugActions::Pending)
+                .then(|| self.quiet.get() + PD_SILENT);
+            if pd_silent_at.is_some_and(|at| Instant::now() >= at) {
+                self.update(|status| status.debug_actions = DebugActions::Silent);
             }
             let expired = now_ms() >= self.shared.feedback_deadline.get();
             self.update(|status| {
@@ -990,8 +985,8 @@ impl Port<'_> {
             if let Some((due, _)) = self.lowering.get().filter(|_| !transition) {
                 sooner(&mut next, due);
             }
-            if asking() {
-                sooner(&mut next, ask_at(ask_due));
+            if let Some(at) = pd_silent_at.filter(|&at| Instant::now() < at) {
+                sooner(&mut next, at);
             }
             if self.status().restore.is_some_and(|restore| {
                 matches!(
@@ -1040,6 +1035,14 @@ impl Port<'_> {
             Timer::after_millis(20).await;
         }
         let mapping = matches!(action, PortAction::MapDebugUsb | PortAction::UnmapDebugUsb);
+        // The action goes out at most once: from here a dropped exchange
+        // leaves it sent with its effect unknown.
+        self.shared.action.set(None);
+        self.update(|status| status.command_result = CommandResult::Unconfirmed);
+        let tracker = self.shared.tracker.get();
+        if !mapping {
+            self.shared.tracker.set(Tracker::sent(action, now_ms()));
+        }
         let (sent, reply) = if mapping {
             self.phy.ask_debug(words).await?
         } else {
@@ -1056,13 +1059,8 @@ impl Port<'_> {
             Tx::Collision => CommandResult::Failed(CommandError::Transmission),
         };
         self.update(|status| status.command_result = result);
-        if !mapping
-            && matches!(
-                result,
-                CommandResult::Acknowledged | CommandResult::Unconfirmed
-            )
-        {
-            self.shared.tracker.set(Tracker::sent(action, now_ms()));
+        if matches!(result, CommandResult::Failed(_)) {
+            self.shared.tracker.set(tracker);
         }
         Ok(())
     }
@@ -1093,6 +1091,11 @@ impl Port<'_> {
         self.transitioning(true);
         let result = self.change_rail(target).await;
         if result.is_ok() {
+            // A slow sink first judged silent on PD speaks it after all.
+            if self.contract.get().is_none() && self.status().debug_actions == DebugActions::Silent
+            {
+                self.reset_debug_discovery();
+            }
             self.pending.set(None);
             let mut sink = self.sink.get();
             sink.accept(&self.offers.get(), rdo);
@@ -1212,7 +1215,7 @@ impl Port<'_> {
         self.first_offer_mw.set(0);
         self.lowering.set(None);
         self.sink.set(SinkDemand::default());
-        self.reset_debug_discovery();
+        // The same target stays attached and keeps its debug actions.
         self.update(|status| {
             status.state = PortState::Ready;
             status.pd_request = None;
@@ -1442,6 +1445,8 @@ struct Policy<'a, 'p> {
     accepted: bool,
     /// Offers that differ from the advertised ones, and since when.
     candidate: Option<([u32; 4], Instant)>,
+    /// The next debug action list ask.
+    ask_due: Instant,
 }
 
 impl DevicePolicyManager for Policy<'_, '_> {
@@ -1503,7 +1508,12 @@ impl DevicePolicyManager for Policy<'_, '_> {
         cycled.map_err(|error| self.port.fail(error))
     }
 
-    /// Advertise again when the pool changes what this port may offer.
+    /// Advertise again when the pool changes what this port may offer, and
+    /// do the port's Apple debug work.
+    ///
+    /// The engine polls this only while it is idle in Ready, with no message
+    /// sequence under way, and drops it when the sink sends anything, so a
+    /// debug exchange never crosses a power negotiation.
     ///
     /// Apple sinks request again about 100 ms after PS_RDY. Revision 2.0 has
     /// no collision avoidance, and an advertisement that crosses a request
@@ -1511,35 +1521,66 @@ impl DevicePolicyManager for Policy<'_, '_> {
     /// and the sink has been silent for OFFER_SETTLE.
     async fn get_event(&mut self) -> Event {
         loop {
-            let offers = self.port.current_offers();
-            if offers == self.port.offers.get() || offers[0] == 0 {
+            let port = self.port;
+            let offers = port.current_offers();
+            if offers == port.offers.get() || offers[0] == 0 {
                 self.candidate = None;
-            } else if self.port.contract.get().is_none() {
+            } else if port.contract.get().is_none() {
                 // The engine is waiting for a replacement after a first Request
                 // the current budget could no longer fund.
                 self.candidate = None;
-                self.port.advertise(offers);
+                port.advertise(offers);
                 return Event::UpdatedSourceCapabilities;
             } else if self.candidate.is_none_or(|(held, _)| held != offers) {
                 self.candidate = Some((offers, Instant::now()));
+            }
+            let mut next = None;
+            if port.contract.get().is_some() {
+                let quiet = port.quiet.get() + DEBUG_QUIET;
+                let (due, ask) = match port.shared.action.get() {
+                    Some(_) => (Some(quiet), false),
+                    None if port.asks.get() > 0 => (Some(quiet.max(self.ask_due)), true),
+                    None => (None, false),
+                };
+                if let Some(due) = due {
+                    if Instant::now() < due {
+                        sooner(&mut next, due);
+                    } else {
+                        let done = match port.shared.action.get() {
+                            Some(action) if !ask => port.signal(action).await,
+                            _ => port.discover().await,
+                        };
+                        if let Err(error) = done {
+                            port.fail(error);
+                            return pending().await;
+                        }
+                        if ask {
+                            self.ask_due = Instant::now() + ACTION_ASK_SPACING;
+                        }
+                        continue;
+                    }
+                }
             }
             // The offers wait for the board to change them; a candidate waits
             // for the last of the three settle times as well.
             let settled = self.candidate.map(|(_, since)| {
                 since
-                    .max(self.port.quiet.get())
-                    .max(self.port.last_offer_update.get())
+                    .max(port.quiet.get())
+                    .max(port.last_offer_update.get())
                     + OFFER_SETTLE
             });
-            if settled.is_some_and(|settled| Instant::now() >= settled) {
-                // A sink can change voltage even for a current-only update.
-                // Space unsolicited renegotiations across the shared input.
-                self.port.last_offer_update.set(Instant::now());
-                self.candidate = None;
-                self.port.advertise(offers);
-                return Event::UpdatedSourceCapabilities;
+            if let Some(settled) = settled {
+                if Instant::now() >= settled {
+                    // A sink can change voltage even for a current-only update.
+                    // Space unsolicited renegotiations across the shared input.
+                    port.last_offer_update.set(Instant::now());
+                    self.candidate = None;
+                    port.advertise(offers);
+                    return Event::UpdatedSourceCapabilities;
+                }
+                sooner(&mut next, settled);
             }
-            select(self.port.shared.reoffer.wait(), until(settled)).await;
+            select(port.shared.reoffer.wait(), until(next)).await;
         }
     }
 }

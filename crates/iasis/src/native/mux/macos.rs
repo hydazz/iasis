@@ -6,3 +6,8 @@ use std::{ffi::OsString, io};
 pub(crate) fn restore_environment() -> io::Result<Vec<(&'static str, OsString)>> {
     Ok(Vec::new())
 }
+
+/// Apple's usbmuxd serves every Apple device.
+pub(crate) fn reaches_running_devices() -> bool {
+    true
+}

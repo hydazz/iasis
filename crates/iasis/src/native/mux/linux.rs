@@ -12,3 +12,8 @@ pub(crate) fn restore_environment() -> io::Result<Vec<(&'static str, OsString)>>
         ("RESTOREKIT_SHARED_USBMUXD", "1".into()),
     ])
 }
+
+/// The system usbmuxd claims every Apple device, running ones included.
+pub(crate) fn reaches_running_devices() -> bool {
+    true
+}

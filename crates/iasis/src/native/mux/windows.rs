@@ -28,3 +28,9 @@ pub(crate) fn restore_environment() -> io::Result<Vec<(&'static str, OsString)>>
         ("RESTOREKIT_SHARED_USBMUXD", "1".into()),
     ])
 }
+
+/// Only Apple's service reaches a running iPhone or iPad; ours binds restore
+/// mode alone.
+pub(crate) fn reaches_running_devices() -> bool {
+    mux_port() == MuxPort::Apple
+}
