@@ -33,6 +33,12 @@ checksum_source = "mise-versions"
 url = "https://github.com/raspberrypi/pico-sdk-tools/releases/download/v2.3.1-0/picotool-2.3.1-mac.zip"
 url_api = "https://api.github.com/repos/raspberrypi/pico-sdk-tools/releases/assets/546002393"
 
+[tools."github:raspberrypi/pico-sdk-tools"."platforms.windows-x64"]
+checksum = "sha256:68730be0813f8f35be2cca147cf7f1572662d5dcf0f5ba468e02a6dd9e85db2b"
+checksum_source = "mise-versions"
+url = "https://github.com/raspberrypi/pico-sdk-tools/releases/download/v2.3.1-0/picotool-2.3.1-x64-win.zip"
+url_api = "https://api.github.com/repos/raspberrypi/pico-sdk-tools/releases/assets/546026947"
+
 [[tools.jactionlint]]
 version = "2.6.0"
 backend = "packslip:github.com/jdx/jactionlint"
@@ -158,7 +164,7 @@ specifiers = ["1.100.0"]
 
 [tools.rust.options]
 components = "clippy,rustfmt"
-targets = "thumbv8m.main-none-eabihf,x86_64-pc-windows-gnu"
+targets = "thumbv8m.main-none-eabihf"
 
 [[tools.uv]]
 version = "0.13.9"
