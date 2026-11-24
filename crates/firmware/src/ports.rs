@@ -20,9 +20,9 @@ use iasis_pd::{
     power::{self, PortDemand, SinkDemand},
 };
 use iasis_protocol::{
-    CommandError, CommandResult, DebugActions, FaultContract, FaultSample, HostReport, Link,
-    Orientation, PORT_COUNT, PortAction, PortCommand, PortError, PortFaults, PortReport, PortState,
-    PortStatus, RestorePhase, Supply,
+    CommandError, CommandResult, DEBUG_USB, DebugActions, FaultContract, FaultSample, HostReport,
+    Link, Orientation, PORT_COUNT, PortAction, PortCommand, PortError, PortFaults, PortReport,
+    PortState, PortStatus, RestorePhase, Supply,
 };
 use usbpd::{
     protocol_layer::message::data::{
@@ -956,26 +956,42 @@ impl Port<'_> {
     }
 
     /// Send an Apple debug action. Targets answer an empty vendor header
-    /// before they accept DFU.
+    /// before they accept anything but a reboot. A Debug USB mapping is
+    /// complete when the target's reply shows its pins that way.
     async fn signal(&self, action: PortAction) -> Result<(), PortError> {
-        let words = match action {
-            PortAction::Dfu => apple::DFU,
-            _ => apple::REBOOT,
+        let words: &[u32] = match action {
+            PortAction::Dfu => &apple::DFU,
+            PortAction::MapDebugUsb => &apple::MAP_DEBUG_USB,
+            PortAction::UnmapDebugUsb => &apple::UNMAP_DEBUG_USB,
+            _ => &apple::REBOOT,
         };
         if action != PortAction::Reboot {
             self.phy.send_debug(&apple::PROBE).await?;
             Timer::after_millis(20).await;
         }
-        let result = match self.phy.send_debug(&words).await? {
+        let mapping = matches!(action, PortAction::MapDebugUsb | PortAction::UnmapDebugUsb);
+        let (sent, reply) = if mapping {
+            self.phy.ask_debug(words).await?
+        } else {
+            (self.phy.send_debug(words).await?, None)
+        };
+        let confirmed = reply
+            .as_deref()
+            .and_then(apple::pin_actions)
+            .is_some_and(|pins| pins.contains(&DEBUG_USB) == (action == PortAction::MapDebugUsb));
+        let result = match sent {
+            Tx::Sent if confirmed => CommandResult::Complete,
             Tx::Sent => CommandResult::Acknowledged,
             Tx::Unanswered => CommandResult::Unconfirmed,
             Tx::Collision => CommandResult::Failed(CommandError::Transmission),
         };
         self.update(|status| status.command_result = result);
-        if matches!(
-            result,
-            CommandResult::Acknowledged | CommandResult::Unconfirmed
-        ) {
+        if !mapping
+            && matches!(
+                result,
+                CommandResult::Acknowledged | CommandResult::Unconfirmed
+            )
+        {
             self.shared.tracker.set(Tracker::sent(action, now_ms()));
         }
         Ok(())
