@@ -47,13 +47,13 @@ After a trip the port reports its `error` and `fault_sample` until an attachment
 
 `recoveries` counts trips since boot. `pd_write_retries` counts PD frames the port controller refused on a busy line and firmware wrote again. `hard_resets_sent` and `hard_resets_received` count PD hard resets by their sender; each removes VBUS from the target for about a second. `requests_rejected` counts requests the port answered with Reject.
 
-`debug_actions` is the target's answer to the Apple debug Get Action List query, asked once a contract has settled: `Pending` before an answer, `Silent` after three asks without one, or `Listed` with up to twelve action IDs, zero padded. A DFU or reboot command for a target that does not list its action (`0x0106` for DFU, `0x0105` for reboot), or a DFU command on a port that does not list DFU USB (`0x0606`), fails with `Unsupported`, or `NotReady` while the answer is pending.
+`debug_actions` is the target's answer to the Apple debug Get Action List query, asked once a contract has settled: `Pending` before an answer, `Silent` after three asks without one, or `Listed` with up to twelve action IDs, zero padded. A DFU, reboot or Debug USB command for a target that does not list its action (`0x0106` for DFU, `0x0105` for reboot, `0x4606` for Debug USB), or a DFU command on a port that does not list DFU USB (`0x0606`), fails with `Unsupported`, or `NotReady` while the answer is pending.
 
 `link` is the USB link the hub holds with the target, read from the hub's downstream port state: `Down`, `Usb2` or `Usb3`, or absent while the hub cannot be read.
 
 `PortProtection` identifies the local CC or power inputs that triggered the trip. The local power input is shared by the port’s host eFuse and charging converter. If it trips with the converter on, `converter_status` records TPS55288 STATUS after the output switch opens and before converter shutdown, when readable. `HostLimiter` identifies the shared host limiter. TPS55288 errors report the observed STATUS (0x07), MODE (0x06), current-limit (0x02) or failed readback register value. I²C errors identify the operation, 7-bit address, register or mux selection, exposed mux channel mask and failure reason.
 
-Send a `PortCommand` with a nonzero request ID. USB acceptance queues the command; the matching ID and its result then appear in status, and each step of the result is announced. DFU and reboot act on one attachment and must carry the port's latest generation; a stale generation is rejected. Enable and disable apply to the port itself. The USB command queue holds one request, and a port with an action pending rejects another.
+Send a `PortCommand` with a nonzero request ID. USB acceptance queues the command; the matching ID and its result then appear in status, and each step of the result is announced. DFU, reboot and the Debug USB mappings act on one attachment and must carry the port's latest generation; a stale generation is rejected. Enable and disable apply to the port itself. The USB command queue holds one request, and a port with an action pending rejects another.
 
 | Result                    | Meaning                                                                                     |
 | ------------------------- | ------------------------------------------------------------------------------------------- |
@@ -61,6 +61,7 @@ Send a `PortCommand` with a nonzero request ID. USB acceptance queues the comman
 | Power disabled            | Source requests are off and safe-zero has been reached, unless the port was already faulted |
 | Apple action acknowledged | PD transport acknowledged the message; inspect USB enumeration for DFU                      |
 | Apple action unconfirmed  | Sent without GoodCRC; the target may still have acted                                       |
+| Debug USB complete        | The target's reply shows Debug USB on its primary USB 2 pair, or off its pins               |
 | Bootloader accepted       | ROM reboot queued; use picotool to detect the updater                                       |
 
 `SettingsRequest` changes one field in `Status.settings`. A name holds up to 16 printable ASCII characters, with spaces allowed inside. An empty name clears it. Brightness ranges from 10 to 100 percent and defaults to 50. The board acknowledges a change after saving it to flash. `Status.settings_busy` means a target operation or an erase arm is in progress. Retry a change once it finishes. A full settings store rejects changes and sets `Status.settings_full`. Unplug the targets and retry once this flag clears.

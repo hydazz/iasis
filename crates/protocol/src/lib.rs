@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 21;
+pub const VERSION: u16 = 22;
 pub const MAX_PACKET: usize = 1408;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
@@ -359,7 +359,7 @@ impl PortStatus {
         }
         match (self.debug_actions, action.debug_action()) {
             (DebugActions::Listed(list), Some(id)) => {
-                list.contains(&id) && (action == PortAction::Reboot || list.contains(&DFU_USB))
+                list.contains(&id) && (action != PortAction::Dfu || list.contains(&DFU_USB))
             }
             _ => false,
         }
@@ -720,11 +720,17 @@ pub enum PortAction {
     Disable,
     Dfu,
     Reboot,
+    /// Carry the target's Apple Debug USB on its primary USB 2 pair.
+    MapDebugUsb,
+    /// Take Apple Debug USB off the primary USB 2 pair.
+    UnmapDebugUsb,
 }
 
 /// Apple debug action that puts the target's DFU USB on this port. A Mac
 /// lists it on its DFU port alone.
 pub const DFU_USB: u16 = 0x0606;
+/// Apple debug action that carries Debug USB (`05ac:1881`) on this port.
+pub const DEBUG_USB: u16 = 0x4606;
 
 impl PortAction {
     /// The Apple debug action ID a target must list to take this command.
@@ -733,6 +739,7 @@ impl PortAction {
             Self::Enable | Self::Disable => None,
             Self::Dfu => Some(0x0106),
             Self::Reboot => Some(0x0105),
+            Self::MapDebugUsb | Self::UnmapDebugUsb => Some(DEBUG_USB),
         }
     }
 }
@@ -1257,6 +1264,10 @@ mod tests {
         });
         assert_eq!(status.gesture_mask(Gesture::Restore), 0b10001);
         assert!(!status.ports[0].offers(PortAction::Enable));
+        // Debug USB needs only its own action.
+        assert!(status.ports[0].offers(PortAction::MapDebugUsb));
+        assert!(status.ports[2].offers(PortAction::UnmapDebugUsb));
+        assert!(!status.ports[1].offers(PortAction::MapDebugUsb));
         status.ports[0].pd_transition = true;
         assert_eq!(status.gesture_mask(Gesture::Dfu), 0);
     }

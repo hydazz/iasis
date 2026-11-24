@@ -34,7 +34,7 @@ impl Tracker {
     /// Drop a request whose effect is known or whose target has gone.
     pub fn update(&mut self, port: &PortStatus, now: u64) {
         let Some(request) = self.request else { return };
-        let dfu = request.action != PortAction::Reboot;
+        let dfu = request.action == PortAction::Dfu;
         let seen_dfu = dfu && port.observed.is_some_and(|seen| seen.dfu());
         let unplugged = if port.occupied() {
             self.vacant_since = None;
