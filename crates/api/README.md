@@ -26,6 +26,7 @@ A client writes requests and reads replies as JSON, one to a line. A request is 
 | `dfu`         | `board`, `port`          | Send DFU                                                             |
 | `reboot`      | `board`, `port`          | Send a reboot                                                        |
 | `power`       | `board`, `port`, `on`    | Enable or disable a port                                             |
+| `debug_usb`   | `board`, `port`, `on`    | Carry the target's Apple Debug USB on its USB 2 pair, or take it off |
 | `brightness`  | `board`, `percent`       | Save one board's light level                                         |
 | `rename`      | `board`, `name`          | Save one board's display name                                        |
 | `update`      | `board`, `bytes` or null | Write IasisOS: the image the agent carries, or the UF2 sent          |

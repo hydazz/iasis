@@ -15,6 +15,7 @@ nonisolated enum AgentRequest: Codable, Equatable {
     case dfu(board: String, port: Int)
     case reboot(board: String, port: Int)
     case power(board: String, port: Int, on: Bool)
+    case debugUsb(board: String, port: Int, on: Bool)
     case rename(board: String, name: String)
     case brightness(board: String, percent: Int)
     /// Write IasisOS to a board: the image the agent carries, or the UF2 file
@@ -57,6 +58,7 @@ nonisolated enum AgentRequest: Codable, Equatable {
         case "dfu": self = try .dfu(board: field(.board), port: field(.port))
         case "reboot": self = try .reboot(board: field(.board), port: field(.port))
         case "power": self = try .power(board: field(.board), port: field(.port), on: field(.on))
+        case "debug_usb": self = try .debugUsb(board: field(.board), port: field(.port), on: field(.on))
         case "rename": self = try .rename(board: field(.board), name: field(.name))
         case "brightness": self = try .brightness(board: field(.board), percent: field(.percent))
         case "update": self = try .update(board: field(.board), bytes: fields.decodeIfPresent(Int64.self, forKey: .bytes))
@@ -99,6 +101,11 @@ nonisolated enum AgentRequest: Codable, Equatable {
             try fields.encode(port, forKey: .port)
         case let .power(board, port, on):
             try fields.encode("power", forKey: .op)
+            try fields.encode(board, forKey: .board)
+            try fields.encode(port, forKey: .port)
+            try fields.encode(on, forKey: .on)
+        case let .debugUsb(board, port, on):
+            try fields.encode("debug_usb", forKey: .op)
             try fields.encode(board, forKey: .board)
             try fields.encode(port, forKey: .port)
             try fields.encode(on, forKey: .on)

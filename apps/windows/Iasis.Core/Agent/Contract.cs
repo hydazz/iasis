@@ -161,6 +161,7 @@ public sealed class SnakeCaseEnum<T>() : JsonStringEnumConverter<T>(JsonNamingPo
 [JsonDerivedType(typeof(DfuRequest), "dfu")]
 [JsonDerivedType(typeof(RebootRequest), "reboot")]
 [JsonDerivedType(typeof(PowerRequest), "power")]
+[JsonDerivedType(typeof(DebugUsbRequest), "debug_usb")]
 [JsonDerivedType(typeof(RenameRequest), "rename")]
 [JsonDerivedType(typeof(BrightnessRequest), "brightness")]
 [JsonDerivedType(typeof(UpdateRequest), "update")]
@@ -184,6 +185,7 @@ public sealed record ReviveRequest(IReadOnlyList<Selection> Boards, bool Latest)
 public sealed record DfuRequest(string Board, int Port) : Request;
 public sealed record RebootRequest(string Board, int Port) : Request;
 public sealed record PowerRequest(string Board, int Port, bool On) : Request;
+public sealed record DebugUsbRequest(string Board, int Port, bool On) : Request;
 public sealed record RenameRequest(string Board, string Name) : Request;
 public sealed record BrightnessRequest(string Board, int Percent) : Request;
 

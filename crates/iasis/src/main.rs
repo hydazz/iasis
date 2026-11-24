@@ -118,6 +118,13 @@ enum Command {
         #[arg(value_parser = parse_port)]
         port: Port,
     },
+    /// Carry the target's Apple Debug USB on its USB 2 pair, or take it off
+    DebugUsb {
+        #[arg(value_parser = parse_port)]
+        port: Port,
+        #[arg(value_enum)]
+        state: Power,
+    },
 }
 
 #[derive(Subcommand)]
@@ -335,6 +342,22 @@ fn main() -> Result<()> {
                 signal_result(result)
             );
         }
+        Command::DebugUsb { port, state } => {
+            let result = board.command(
+                port,
+                match state {
+                    Power::On => PortAction::MapDebugUsb,
+                    Power::Off => PortAction::UnmapDebugUsb,
+                },
+            )?;
+            ensure!(
+                result == CommandResult::Complete,
+                "Port {} Debug USB: {}; the target did not confirm its pins.",
+                port.number(),
+                signal_result(result)
+            );
+            println!("{}", debug_usb_text(port, state));
+        }
     }
     Ok(())
 }
@@ -348,6 +371,17 @@ fn power_text(port: Port, state: Power) -> String {
         match state {
             Power::On => "enabled",
             Power::Off => "disabled",
+        }
+    )
+}
+
+fn debug_usb_text(port: Port, state: Power) -> String {
+    format!(
+        "Port {} Debug USB {}.",
+        port.number(),
+        match state {
+            Power::On => "on",
+            Power::Off => "off",
         }
     )
 }
@@ -430,6 +464,15 @@ fn through_agent(
                 on: matches!(state, Power::On),
             })?;
             println!("{}", power_text(port, state));
+            Ok(())
+        }
+        Some(Command::DebugUsb { port, state }) => {
+            agent.request(&Request::DebugUsb {
+                board: board()?,
+                port: port.number(),
+                on: matches!(state, Power::On),
+            })?;
+            println!("{}", debug_usb_text(port, state));
             Ok(())
         }
         Some(Command::Rename { name }) => agent.request(&Request::Rename {
