@@ -322,6 +322,11 @@ fn requests() -> Vec<Request> {
             port: 2,
             on: true,
         },
+        Request::DebugUsb {
+            board: board(),
+            port: 1,
+            on: true,
+        },
         Request::Rename {
             board: board(),
             name: "Bench A".into(),

@@ -507,10 +507,12 @@ mod tests {
         use iasis_pd::apple;
         use iasis_protocol::PortAction;
         for (command, words) in [
-            (PortAction::Dfu, apple::DFU),
-            (PortAction::Reboot, apple::REBOOT),
+            (PortAction::Dfu, &apple::DFU[..]),
+            (PortAction::Reboot, &apple::REBOOT[..]),
+            (PortAction::MapDebugUsb, &apple::MAP_DEBUG_USB[..]),
+            (PortAction::UnmapDebugUsb, &apple::UNMAP_DEBUG_USB[..]),
         ] {
-            assert_eq!(command.debug_action(), Some(apple::action(&words)));
+            assert_eq!(command.debug_action(), Some(apple::action(words)));
         }
     }
 
