@@ -82,10 +82,10 @@ After a DFU the port pulses blue. It turns steady blue once a host sees the targ
 
 A steady white port light marks a device Iasis cannot act on, such as a USB peripheral or a laptop. It can use USB normally. DFU leaves target data intact and works with Apple Configurator. `power <port> off` disables a port. `power <port> on` enables it and retries a fault. The selected board stores its name and light brightness in flash.
 
-Native USB-C uses the host's advertised current. With a legacy A-to-C connection, set the remaining shared USB allowance, including Iasis and after subtracting other loads:
+Native USB-C uses the host's advertised current. An A-to-C connection gets what USB grants: 900 mA on a USB 3 port, which powers charged targets, and 500 mA on USB 2, which does not. Where the host's supply is shared or larger, declare the allowance for Iasis instead. A Raspberry Pi 5 without its 5 A supply limits all its USB ports to 600 mA:
 
 ```sh
-target/release/iasis --serial 0123456789abcdef host-budget 1200
+target/release/iasis --serial 0123456789abcdef host-budget 600
 ```
 
 The [firmware power table](crates/firmware/README.md#port-power) lists the limits.
