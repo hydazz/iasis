@@ -1,5 +1,6 @@
 use std::{
     collections::HashSet,
+    fmt,
     path::PathBuf,
     sync::{Arc, Mutex, OnceLock},
     thread,
@@ -249,8 +250,12 @@ fn run_batch(
             link.changed_after(status.revision, deadline);
         };
         let selected = select_ports(ports, &status)?;
-        let (targets, failed) = enter_dfu(board, &link, &engine, &selected)?;
-        (resolve(&link, &targets, &images, source.latest)?, failed)
+        let (targets, unready) = enter_dfu(board, &link, &engine, &selected)?;
+        unready.print();
+        (
+            resolve(&link, &targets, &images, source.latest)?,
+            !unready.0.is_empty(),
+        )
     };
     let running = start(&link, &engine, &images, targets, operation, failed, button)?;
     // Each worker keeps the host awake while it restores.
@@ -302,11 +307,8 @@ pub fn listen(
         let targets = if button {
             prepare_selected(&control, link, engine, &selected, images)?
         } else {
-            let (targets, failed) = enter_dfu(&control, link, engine, &selected)?;
-            ensure!(
-                !failed && targets.len() == selected.len(),
-                "not all selected targets reached verified DFU; no restore started"
-            );
+            let (targets, unready) = enter_dfu(&control, link, engine, &selected)?;
+            unready.check()?;
             let latest = matches!(asked, Asked::Client { latest: true, .. });
             resolve(link, &targets, images, latest)?
         };
@@ -334,7 +336,7 @@ pub fn listen(
                             ecid: target.ecid.map(|id| format!("{id:016x}")),
                             log_directory: None,
                             phase: RestorePhase::Failed,
-                            message: format!("{error:#}"),
+                            message: unstarted_message(&error, target.port),
                         },
                     },
                 );
@@ -445,6 +447,7 @@ fn start(
     // every physical slot immediately before launching destructive workers.
     let (status, snapshot) = link.observe()?;
     let mut modes = Vec::new();
+    let mut changed = Unready::default();
     targets.retain(|(target, generation, image)| {
         let mode = in_dfu(link.board(), target, &snapshot)
             .filter(|(_, model)| image.restores(model))
@@ -458,22 +461,20 @@ fn start(
                     && (!require_all || status.ready_mask() & (1 << target.port.index()) != 0)
             });
         if mode.is_none() {
-            eprintln!(
-                "port {}: target changed before restore launch",
-                target.port.number()
-            );
-            failed = true;
+            changed.add(target.port, "the target changed before its restore started");
         }
         modes.extend(mode);
         mode.is_some()
     });
-    ensure!(
-        !require_all || !failed,
-        "confirmed targets changed before launch; no restore started"
-    );
+    if require_all {
+        changed.check()?;
+    } else {
+        failed |= !changed.0.is_empty();
+        changed.print();
+    }
     ensure!(
         !targets.is_empty(),
-        "no selected target reached verified DFU; no restore started"
+        "no selected target reached DFU or recovery; no restore started"
     );
     let inputs: Vec<_> = targets
         .iter()
@@ -749,11 +750,8 @@ fn prepare_selected(
         draft.matches_targets(&status),
         "selected targets changed, are busy or are unavailable"
     );
-    let (targets, failed) = enter_dfu(board, link, engine, selected)?;
-    ensure!(
-        !failed && targets.len() == selected.len(),
-        "not all selected targets reached verified DFU; no erase armed"
-    );
+    let (targets, unready) = enter_dfu(board, link, engine, selected)?;
+    unready.check()?;
     // Fetching an image can take long enough for a target to leave.
     let targets = resolve(link, &targets, images, false)?;
     // The arm names each attachment as it is now, in DFU.
@@ -823,17 +821,75 @@ fn confirmed(arm: RestoreArm, status: &Status) -> Result<bool> {
     }
 }
 
-/// Bring each selected target to a DFU the host's engine restores, with its
-/// ECID verified there.
+/// Why each selected target that did not reach DFU or recovery stopped short,
+/// by port. As an error, it is why no restore started.
+#[derive(Debug, Default)]
+struct Unready(Vec<(Port, String)>);
+
+impl Unready {
+    fn add(&mut self, port: Port, reason: impl fmt::Display) {
+        self.0.push((port, reason.to_string()));
+    }
+
+    fn reason(&self, port: Port) -> Option<&str> {
+        self.0
+            .iter()
+            .find(|(other, _)| *other == port)
+            .map(|(_, reason)| reason.as_str())
+    }
+
+    /// Fail unless every selected target got there.
+    fn check(self) -> Result<()> {
+        if self.0.is_empty() {
+            Ok(())
+        } else {
+            Err(self.into())
+        }
+    }
+
+    /// Say why, for a run that goes on with the targets that got there.
+    fn print(&self) {
+        for (port, reason) in &self.0 {
+            eprintln!("port {}: {reason}", port.number());
+        }
+    }
+}
+
+impl fmt::Display for Unready {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (index, (port, reason)) in self.0.iter().enumerate() {
+            if index > 0 {
+                f.write_str("; ")?;
+            }
+            write!(f, "port {}: {reason}", port.number())?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for Unready {}
+
+/// What a port's result says when its restore did not start: why its own
+/// target stopped short, or else what stopped the batch.
+fn unstarted_message(error: &anyhow::Error, port: Port) -> String {
+    error
+        .downcast_ref::<Unready>()
+        .and_then(|unready| unready.reason(port))
+        .map_or_else(|| format!("{error:#}"), str::to_owned)
+}
+
+/// Bring each selected target to a DFU the host's engine restores, or an
+/// iPhone or iPad to recovery, with its ECID verified there. Returns the
+/// targets that got there and why the others did not.
 fn enter_dfu(
     board: &Board,
     link: &Link,
     engine: &RestoreEngine,
     selected: &[Target],
-) -> Result<(VerifiedTargets, bool)> {
+) -> Result<(VerifiedTargets, Unready)> {
     let mut pending = Vec::new();
     let mut targets = Vec::new();
-    let mut failed = false;
+    let mut unready = Unready::default();
     let mut recovering = false;
     for &Target {
         port,
@@ -847,40 +903,35 @@ fn enter_dfu(
         }
         let assessment = dfu::assess(board.info().serial, port, &status, &snapshot, None);
         if generation != assessment.generation || status.ready_mask() & (1 << port.index()) == 0 {
-            eprintln!(
-                "port {}: attachment changed or unavailable. {}",
-                port.number(),
-                assessment.describe()
+            unready.add(
+                port,
+                format_args!(
+                    "attachment changed or unavailable. {}",
+                    assessment.describe()
+                ),
             );
-            failed = true;
             continue;
         }
         // The board holds the identity of the attachment, on USB or not.
-        ensure!(
-            ecid.is_none_or(|id| status.ports[port.index()].ecid == Some(id)),
-            "the device on port {} is not the one selected",
-            port.number()
-        );
+        if ecid.is_some_and(|id| status.ports[port.index()].ecid != Some(id)) {
+            unready.add(port, "another device is there");
+            continue;
+        }
         match assessment.restore_access(&status.ports[port.index()], |mode| engine.restores(mode)) {
             protocol::RestoreAccess::InDfu | protocol::RestoreAccess::InRecovery => {
                 match TargetTracker::pin(board.info().serial, &snapshot, port) {
                     Ok(target) if ecid.is_some_and(|id| id != target.ecid) => {
-                        eprintln!("port {}: another device is there", port.number());
-                        failed = true;
+                        unready.add(port, "another device is there");
                     }
                     Ok(target) => targets.push((target, generation)),
-                    Err(error) => {
-                        eprintln!("port {}: {error}", port.number());
-                        failed = true;
-                    }
+                    Err(error) => unready.add(port, format_args!("{error:#}")),
                 }
                 continue;
             }
             protocol::RestoreAccess::EnterDfu => {}
             protocol::RestoreAccess::EnterRecovery => {
                 let Some(target) = assessment.ecid else {
-                    eprintln!("port {}: {}", port.number(), assessment.describe());
-                    failed = true;
+                    unready.add(port, assessment.describe());
                     continue;
                 };
                 match crate::restore::enter_recovery(target) {
@@ -902,16 +953,12 @@ fn enter_dfu(
                             ),
                         ));
                     }
-                    Err(error) => {
-                        eprintln!("port {}: {error}", port.number());
-                        failed = true;
-                    }
+                    Err(error) => unready.add(port, format_args!("{error:#}")),
                 }
                 continue;
             }
             _ => {
-                eprintln!("port {}: {}", port.number(), assessment.describe());
-                failed = true;
+                unready.add(port, assessment.describe());
                 continue;
             }
         }
@@ -925,10 +972,7 @@ fn enter_dfu(
                     Attempt::new(board.info().serial, port, &assessment, &snapshot, result),
                 ));
             }
-            Err(error) => {
-                eprintln!("port {}: {error}", port.number());
-                failed = true;
-            }
+            Err(error) => unready.add(port, format_args!("{error:#}")),
         }
     }
     // An iPhone or iPad takes longer to restart into recovery than a target
@@ -949,11 +993,7 @@ fn enter_dfu(
                 .and_then(|chosen| chosen.ecid);
             let current = status.ports[port.index()].generation;
             if current != *generation && pinned.is_none() && !acknowledged {
-                eprintln!(
-                    "port {}: attachment changed during DFU entry",
-                    port.number()
-                );
-                failed = true;
+                unready.add(*port, "attachment changed during DFU entry");
                 return false;
             }
             let assessment = dfu::assess(
@@ -978,8 +1018,7 @@ fn enter_dfu(
                     )
                 )
             {
-                eprintln!("port {}: {}", port.number(), assessment.describe());
-                failed = true;
+                unready.add(*port, assessment.describe());
                 return false;
             }
             if assessment.usb_mode.is_some_and(RestoreEngine::starts_from)
@@ -987,8 +1026,7 @@ fn enter_dfu(
                 && let Ok(target) = TargetTracker::pin(board.info().serial, &snapshot, *port)
             {
                 if pinned.is_some_and(|id| id != target.ecid) {
-                    eprintln!("port {}: another device took its place", port.number());
-                    failed = true;
+                    unready.add(*port, "another device took its place");
                 } else {
                     targets.push((target, current));
                 }
@@ -1004,22 +1042,10 @@ fn enter_dfu(
         }
     }
     for (port, _, _, _) in pending {
-        eprintln!(
-            "port {}: no verified identity in DFU or recovery before the deadline",
-            port.number()
+        unready.add(
+            port,
+            "no verified identity in DFU or recovery before the deadline",
         );
-        failed = true;
-    }
-    for selected in selected {
-        if let Some(expected) = selected.ecid {
-            ensure!(
-                targets
-                    .iter()
-                    .any(|(target, _)| target.port == selected.port && target.ecid == expected),
-                "port {} did not reach DFU or recovery with the selected ECID; no restore started",
-                selected.port.number()
-            );
-        }
     }
     if targets.iter().enumerate().any(|(i, (target, _))| {
         targets[..i]
@@ -1028,12 +1054,30 @@ fn enter_dfu(
     }) {
         bail!("duplicate ECID across selected ports; no restore started");
     }
-    Ok((targets, failed))
+    Ok((targets, unready))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_port_that_stopped_short_says_why_and_the_rest_say_which_port() {
+        let [one, .., five] = Port::ALL;
+        let mut unready = Unready::default();
+        unready.add(five, "the device is locked; unlock it and retry");
+        let error = unready.check().unwrap_err();
+        assert_eq!(
+            unstarted_message(&error, five),
+            "the device is locked; unlock it and retry"
+        );
+        assert_eq!(
+            unstarted_message(&error, one),
+            "port 5: the device is locked; unlock it and retry"
+        );
+        let other = anyhow::anyhow!("the board has reconnected");
+        assert_eq!(unstarted_message(&other, one), "the board has reconnected");
+    }
 
     #[test]
     fn port_reservations_survive_reattachment_and_reject_whole_overlapping_batches() {
