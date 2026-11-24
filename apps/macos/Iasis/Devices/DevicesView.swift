@@ -190,7 +190,7 @@ private struct AgentStatusBar: View {
                 Label("Downloading \(state.images.fetching?.title ?? "Image")", systemImage: DeviceSymbol.download)
                 ProgressView(value: fetch.fraction)
                     .frame(maxWidth: 160)
-                Text(fetch.fraction.formatted(.percent.precision(.fractionLength(0))))
+                Text("\(fetch.percent)%")
                     .monospacedDigit()
             }
         }

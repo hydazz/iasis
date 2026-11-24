@@ -219,6 +219,13 @@ nonisolated struct AgentState: Codable, Equatable {
             case .revive: "Revive"
             }
         }
+
+        var running: String {
+            switch self {
+            case .restore: "Restoring"
+            case .revive: "Reviving"
+            }
+        }
     }
 
     /// How an operation ended.
@@ -329,6 +336,11 @@ nonisolated struct AgentState: Codable, Equatable {
 
         var fraction: Double {
             bytes > 0 ? Double(done) / Double(bytes) : 0
+        }
+
+        /// Whole percent, rounded down as the agent rounds a port's.
+        var percent: Int64 {
+            done * 100 / max(bytes, 1)
         }
     }
 }

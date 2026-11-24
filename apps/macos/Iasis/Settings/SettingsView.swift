@@ -303,7 +303,7 @@ private struct ImageRow: View {
             return Activity("Not Downloaded", .caution)
         }
         if let fetch, fetch.id == image.id {
-            let percent = fetch.fraction.formatted(.percent.precision(.fractionLength(0)))
+            let percent = "\(fetch.percent)%"
             return Activity("Downloading \(percent)", .working(fetch.fraction), symbol: DeviceSymbol.download)
         }
         return Activity("Waiting to Download", .working(0), symbol: DeviceSymbol.download)

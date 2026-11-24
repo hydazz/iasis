@@ -70,7 +70,7 @@ struct DeviceTests {
         let activity = { (state: AgentState, port: Int) in state.devices[port - 1].activity }
         #expect(activity(state, 1) == .idle)
         #expect(activity(state, 2) == Activity("DFU", .none))
-        #expect(activity(state, 3) == Activity("Restore 43% (Sending Filesystem)", .working(0.43), symbol: "arrow.counterclockwise.circle"))
+        #expect(activity(state, 3) == Activity("Restoring 43%", .working(0.43), symbol: "arrow.counterclockwise.circle"))
         #expect(activity(state, 5) == Activity("Protection tripped", .failed))
         state.boards[0].ports[4].enabled = false
         #expect(activity(state, 5) == Activity("Protection tripped", .failed))
