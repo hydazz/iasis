@@ -955,26 +955,25 @@ fn dfu_through(agent: &mut Client, state: &State, board: &str, port: Port) -> Re
         port: port.number(),
     })?;
     let waiting = progress::waiting(format!("Waiting for USB DFU on port {}", port.number()));
-    // The board gives up on an unconfirmed signal well before this.
+    // The board gives up on an unconfirmed signal well before this. A target
+    // entering DFU over Debug USB re-attaches, so the port can be empty on the
+    // way.
     let deadline = Instant::now() + Duration::from_secs(30);
+    let mut last = before;
     let mut reply = Some(agent.ask(&Request::Watch)?);
     while let Some(Reply::State(state)) = reply {
-        let row = row(&state).context("the board left USB")?;
-        if in_dfu(&row) {
+        last = row(&state).context("the board left USB")?;
+        if in_dfu(&last) {
             waiting.finish_and_clear();
             println!("Port {} is in DFU.", port.number());
             return Ok(());
         }
-        ensure!(
-            row.generation == before.generation || row.occupied,
-            "port {} is empty",
-            port.number()
-        );
-        if row.fault.is_some() || row.request == Some(SignalProgress::DfuUnconfirmed) {
-            bail!("Port {}  {}", port.number(), activity(&row));
+        if last.fault.is_some() || last.request == Some(SignalProgress::DfuUnconfirmed) {
+            bail!("Port {}  {}", port.number(), activity(&last));
         }
         reply = agent.receive_by(deadline)?;
     }
+    ensure!(last.occupied, "port {} is empty", port.number());
     bail!("Port {} did not enter DFU", port.number())
 }
 
