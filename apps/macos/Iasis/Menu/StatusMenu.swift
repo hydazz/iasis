@@ -1,70 +1,91 @@
 import SwiftUI
 
+/// The menu bar item's menu: each board's devices with their actions, the
+/// download under way and the app's commands.
+///
+/// It reads the agent only through `menuSnapshot`, which holds while a menu
+/// is open, because SwiftUI resets the row under the pointer and closes its
+/// submenu whenever an open menu's content or label updates. An open menu
+/// shows the boards as they stood when it opened, so its actions reach a
+/// device only while the port still holds the attachment it showed.
 struct StatusMenu: View {
     let browser: DeviceBrowser
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         let model = browser.model
-        let live = model.state?.devices ?? []
         if let snapshot = model.menuSnapshot {
             if snapshot.boards.isEmpty {
                 Text("No Boards Connected")
             }
             ForEach(snapshot.boardDevices) { board in
                 Section(board.title) {
-                    let ports = board.devices.filter(\.isSelectable)
+                    let devices = board.devices.filter(\.isSelectable)
                     if let notice = board.board.notice {
-                        Text(notice)
+                        Label(notice, systemImage: "exclamationmark.triangle")
                     } else if board.board.update?.required == true {
-                        Button("Update IasisOS") { model.updateFirmware(of: board.board.serial) }
-                            .disabled(model.updating.contains(board.board.serial))
-                    } else if ports.isEmpty {
+                        Button("Update IasisOS", systemImage: DeviceSymbol.download) {
+                            model.updateFirmware(of: board.board.serial)
+                        }
+                        .disabled(model.updating.contains(board.board.serial))
+                    } else if devices.isEmpty {
                         Text("No Devices")
                     }
-                    ForEach(ports) { port in
-                        let device = live.first { port.sameAttachment(as: $0) }
+                    ForEach(devices) { device in
                         Menu {
                             Button("Get Info", systemImage: "info.circle") {
-                                browser.selection = [port.id]
+                                browser.selection = [device.id]
                                 browser.showsInspector = true
                                 showDevices()
                             }
                             Divider()
-                            if let device {
-                                DeviceActionButtons(actions: DeviceActions([device])) {
-                                    model.perform($0)
-                                } restore: { confirmation in
+                            DeviceActionButtons(actions: DeviceActions([device])) { requests in
+                                ifAttached(device) { model.perform(requests) }
+                            } restore: { confirmation in
+                                ifAttached(device) {
                                     showDevices()
                                     browser.confirm(confirmation)
                                 }
                             }
                         } label: {
-                            Text("\(port.port.number)  \(port.shortName)")
-                            if let status = device?.menuSubtitle {
+                            Label(device.shortName, systemImage: "\(device.port.number).circle")
+                            if let status = device.menuSubtitle {
                                 Text(status)
                             }
                         }
-                        .disabled(device == nil)
                     }
                 }
             }
-            if let fetch = model.state?.images.fetch, !live.contains(where: { $0.port.stage != nil && $0.port.job == nil }) {
-                Text("Downloading Image").badge(Text(fetch.fraction.formatted(.percent)))
+            if let fetch = snapshot.images.fetch {
+                Divider()
+                // A line of status, not a command.
+                Button {} label: {
+                    Label("Downloading \(snapshot.images.fetching?.title ?? "Image")", systemImage: DeviceSymbol.download)
+                    Text("\(fetch.percent)%")
+                }
+                .disabled(true)
             }
         } else {
             Text("Agent Not Running")
         }
         Divider()
-        Button("Open Iasis", action: showDevices).keyboardShortcut("o")
-        SettingsLink().keyboardShortcut(",")
+        Button("Open Iasis", action: showDevices)
+        SettingsLink().labelStyle(.titleOnly)
         Divider()
-        Button("Quit Iasis") { NSApp.terminate(nil) }.keyboardShortcut("q")
+        Button("Quit") { NSApp.terminate(nil) }
     }
 
     private func showDevices() {
         openWindow(id: DevicesView.windowID)
         NSApp.activate()
+    }
+
+    private func ifAttached(_ device: Device, _ action: () -> Void) {
+        guard browser.model.state?.devices.contains(where: device.sameAttachment(as:)) == true else {
+            NSSound.beep()
+            return
+        }
+        action()
     }
 }
 
