@@ -144,6 +144,59 @@ pub struct PortDevices {
     pub devices: Vec<UsbDevice>,
 }
 
+impl PortDevices {
+    /// The connector's target: its one device when that is directly on the
+    /// connector, or the target an Apple Debug USB device there carries.
+    /// macOS presents what a target sends through Debug USB as devices one
+    /// tier below it, and a restore OS appears there and directly on the
+    /// SuperSpeed link at once, with one serial. The direct one is preferred.
+    pub fn target(&self) -> Option<&UsbDevice> {
+        self.target_index().map(|index| &self.devices[index])
+    }
+
+    pub(crate) fn target_mut(&mut self) -> Option<&mut UsbDevice> {
+        self.target_index().map(|index| &mut self.devices[index])
+    }
+
+    fn target_index(&self) -> Option<usize> {
+        let direct = |device: &UsbDevice| {
+            device.topology == self.usb2
+                || matches!(&self.superspeed, Companion::Mapped { topology } if *topology == device.topology)
+        };
+        if let [device] = self.devices.as_slice() {
+            return direct(device).then_some(0);
+        }
+        let debug = self.devices.iter().position(|device| {
+            device.topology == self.usb2 && (device.vendor_id, device.product_id) == DEBUG_USB
+        })?;
+        let tunnel = &self.devices[debug].topology;
+        let mut serial = None;
+        let mut target = None;
+        for (index, device) in self.devices.iter().enumerate() {
+            if index == debug {
+                continue;
+            }
+            let tunnelled = device.topology.port_chain.len() > tunnel.port_chain.len()
+                && below(&device.topology, tunnel);
+            let linked = device.speed.is_superspeed() && direct(device);
+            let name = device
+                .serial_number
+                .as_deref()
+                .filter(|name| !name.trim().is_empty())?;
+            if device.apple.is_none()
+                || !(tunnelled || linked)
+                || serial.replace(name).is_some_and(|seen| seen != name)
+            {
+                return None;
+            }
+            if linked || target.is_none() {
+                target = Some(index);
+            }
+        }
+        target
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Snapshot {
     pub hub: Topology,
@@ -171,6 +224,20 @@ impl Snapshot {
             }),
             hub,
         }
+    }
+
+    /// The target on `port`: see [`PortDevices::target`].
+    pub fn target(&self, port: Port) -> Option<&UsbDevice> {
+        self.ports[port.index()].target()
+    }
+
+    /// Whether a device on another connector carries this ECID.
+    pub(crate) fn ecid_elsewhere(&self, port: Port, ecid: u64) -> bool {
+        self.ports
+            .iter()
+            .filter(|other| other.port != port)
+            .flat_map(|other| &other.devices)
+            .any(|device| device.apple.as_ref().and_then(AppleDevice::ecid) == Some(ecid))
     }
 
     /// Read identity information for the mapped Apple devices.
@@ -237,6 +304,8 @@ fn hub_path(management: &Topology) -> Result<&[u8], Error> {
 /// The board's Microchip USB7206: its USB 2 and SuperSpeed hub functions.
 const USB2_HUB: (u16, u16) = (0x0424, 0x4206);
 const SUPERSPEED_HUB: (u16, u16) = (0x0424, 0x7206);
+/// Apple Debug USB.
+const DEBUG_USB: (u16, u16) = (0x05ac, 0x1881);
 
 /// What the host reports about its USB ports and hubs.
 #[derive(Debug, Default)]
@@ -446,6 +515,64 @@ mod tests {
             USB2_HUB
         };
         hub
+    }
+
+    #[test]
+    fn debug_usb_carries_the_target_behind_it() {
+        let apple = |pid, chain: &[u8], speed, serial: Option<&str>| UsbDevice {
+            vendor_id: 0x05ac,
+            product_id: pid,
+            serial_number: serial.map(str::to_owned),
+            apple: AppleDevice::from_usb(0x05ac, pid, 0x1705, Some("Mac"), serial),
+            ..device("1", chain, speed)
+        };
+        let restore = "00008140-000E581A2253001C";
+        let debug = apple(0x1881, &[1, 1], Speed::High, None);
+        let recovery = apple(
+            0x1281,
+            &[1, 1, 1],
+            Speed::High,
+            Some("CPID:8140 ECID:000E581A2253001C"),
+        );
+        let tunnelled = apple(0x12ac, &[1, 1, 1], Speed::High, Some(restore));
+        let direct = apple(0x12ac, &[2, 1], Speed::SuperPlus, Some(restore));
+        let slot = |devices: Vec<UsbDevice>| PortDevices {
+            port: Port::ALL[0],
+            usb2: location("1", &[1, 1]),
+            superspeed: Companion::Mapped {
+                topology: location("1", &[2, 1]),
+            },
+            devices,
+        };
+        let target = |devices| {
+            slot(devices)
+                .target()
+                .map(|d| (d.product_id, d.topology.clone()))
+        };
+
+        assert_eq!(
+            target(vec![debug.clone()]),
+            Some((0x1881, location("1", &[1, 1])))
+        );
+        assert_eq!(
+            target(vec![debug.clone(), recovery.clone()]),
+            Some((0x1281, location("1", &[1, 1, 1])))
+        );
+        assert_eq!(
+            target(vec![tunnelled.clone(), debug.clone(), direct.clone()]),
+            Some((0x12ac, location("1", &[2, 1])))
+        );
+        let mut other = direct.clone();
+        other.serial_number = Some("00008140-000E581A2253001D".into());
+        assert_eq!(target(vec![debug.clone(), tunnelled.clone(), other]), None);
+        let mut nameless = recovery.clone();
+        nameless.serial_number = None;
+        assert_eq!(target(vec![debug.clone(), nameless]), None);
+        assert_eq!(
+            target(vec![debug, device("1", &[1, 1, 1], Speed::High)]),
+            None
+        );
+        assert_eq!(target(vec![recovery]), None);
     }
 
     #[test]

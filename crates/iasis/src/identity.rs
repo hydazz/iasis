@@ -210,13 +210,14 @@ impl TargetTracker {
     /// Pin exactly one verified target. A later observation cannot change the
     /// selected ECID or follow a target moved to another connector.
     pub fn pin(board_serial: u64, snapshot: &Snapshot, port: Port) -> Result<Self, SelectionError> {
-        let devices = targets(&snapshot.ports[port.index()].devices);
-        let [device] = devices.as_slice() else {
-            return Err(if devices.is_empty() {
-                SelectionError::Missing(port.number())
-            } else {
-                SelectionError::Ambiguous(port.number())
-            });
+        let Some(device) = snapshot.target(port).and_then(|d| d.apple.as_ref()) else {
+            return Err(
+                if targets(&snapshot.ports[port.index()].devices).is_empty() {
+                    SelectionError::Missing(port.number())
+                } else {
+                    SelectionError::Ambiguous(port.number())
+                },
+            );
         };
         if device.mode == AppleMode::PortDfu {
             return Err(SelectionError::PortDfu(port.number()));
@@ -247,17 +248,19 @@ impl TargetTracker {
         {
             return Observation::Moved { port: *port };
         }
-        let devices = targets(&snapshot.ports[self.port.index()].devices);
-        match devices.as_slice() {
-            [] => Observation::Missing,
-            [device] => match device.ecid() {
-                Some(ecid) if ecid == self.ecid && device.mode != AppleMode::PortDfu => {
-                    Observation::Present { mode: device.mode }
-                }
-                Some(ecid) if ecid != self.ecid => Observation::Replaced { ecid },
-                _ => Observation::IdentityMissing { mode: device.mode },
-            },
-            _ => Observation::Ambiguous,
+        let Some(device) = snapshot.target(self.port).and_then(|d| d.apple.as_ref()) else {
+            return if targets(&snapshot.ports[self.port.index()].devices).is_empty() {
+                Observation::Missing
+            } else {
+                Observation::Ambiguous
+            };
+        };
+        match device.ecid() {
+            Some(ecid) if ecid == self.ecid && device.mode != AppleMode::PortDfu => {
+                Observation::Present { mode: device.mode }
+            }
+            Some(ecid) if ecid != self.ecid => Observation::Replaced { ecid },
+            _ => Observation::IdentityMissing { mode: device.mode },
         }
     }
 }
@@ -269,16 +272,17 @@ fn targets(devices: &[UsbDevice]) -> Vec<&AppleDevice> {
         .collect()
 }
 
+/// The connectors with a device that carries this ECID.
 fn matching_ports(snapshot: &Snapshot, ecid: u64) -> Vec<Port> {
     snapshot
         .ports
         .iter()
-        .flat_map(|port| {
+        .filter(|port| {
             targets(&port.devices)
-                .into_iter()
-                .filter(move |device| device.ecid() == Some(ecid))
-                .map(move |_| port.port)
+                .iter()
+                .any(|device| device.ecid() == Some(ecid))
         })
+        .map(|port| port.port)
         .collect()
 }
 

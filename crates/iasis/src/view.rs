@@ -144,7 +144,7 @@ pub(crate) fn describe_devices(
         // A different USB target can arrive before the board echoes the report.
         let ecid = seen.identity(slot.ecid).filter(|id| Some(*id) == slot.ecid);
         row.ecid = ecid.map(|id| format!("{id:016x}"));
-        let live = dfu::direct_device(snapshot, port).filter(|_| agreed);
+        let live = snapshot.target(port).filter(|_| agreed);
         if row.link.is_none() && agreed && seen.usb != iasis_protocol::Usb::Absent {
             use crate::topology::Speed;
             row.link = Some(match live.map(|device| device.speed) {
