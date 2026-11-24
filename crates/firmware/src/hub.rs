@@ -17,6 +17,10 @@ pub const MANAGEMENT_PORT: u8 = 1 << 6;
 pub const USB2_SPEEDS: u32 = 0xbf80_3195;
 /// USB30_HUB_DN_SPEED_IND1 and IND2, laid out the same way.
 pub const USB3_SPEEDS: u32 = 0xbf80_3852;
+/// USB3 Hub Status; its low bit is set while the upstream port has a USB 3
+/// host.
+pub const USB3_HUB_STATUS: u32 = 0xbf80_3851;
+pub const USB3_HOST: u8 = 1;
 /// The low byte of RUNTIME_FLAGS.
 pub const RUNTIME_FLAGS: u32 = 0xbfd2_3400;
 /// Keeps the slave interface clocked while the upstream port is suspended.

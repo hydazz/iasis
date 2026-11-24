@@ -81,16 +81,25 @@ pub async fn start(bus: &mut Bus, outputs: &mut Outputs) -> bool {
     configured
 }
 
-/// Read each target port's link. The lock is taken for one register at a
-/// time so a port's PD reply never waits behind the whole reading.
-pub async fn links(io: &SharedIo) -> Option<[Link; PORT_COUNT]> {
+/// Read each target port's link, and whether the upstream link is USB 3.
+/// The lock is taken for one register at a time so a port's PD reply never
+/// waits behind the whole reading.
+pub async fn links(io: &SharedIo) -> Option<([Link; PORT_COUNT], bool)> {
     let mut usb2 = [0; 2];
     let mut usb3 = [0; 2];
+    let mut upstream = [0];
     read(&mut io.lock().await.bus, hub::USB2_SPEEDS, &mut usb2)
         .await
         .ok()?;
     read(&mut io.lock().await.bus, hub::USB3_SPEEDS, &mut usb3)
         .await
         .ok()?;
-    Some(hub::links(usb2, usb3))
+    read(
+        &mut io.lock().await.bus,
+        hub::USB3_HUB_STATUS,
+        &mut upstream,
+    )
+    .await
+    .ok()?;
+    Some((hub::links(usb2, usb3), upstream[0] & hub::USB3_HOST != 0))
 }

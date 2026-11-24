@@ -26,19 +26,19 @@ A port whose voltage or negotiation fails switches its output off, discharges VB
 
 | Supply path     | Target offer                               | Budget                                                                                                                                                 |
 | --------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Host presence   | Fixed 5 V / 0 mA PDO                       | Iasis reserves 800 mA. The remaining current selects the shared limiter below.                                                                         |
+| Host presence   | Fixed 5 V / 0 mA PDO                       | Iasis reserves 650 mA. The remaining current selects the shared limiter below.                                                                         |
 | Charging supply | Fixed 5, 9, 15 or 20 V, up to 3 A per port | The brick contract covers input cable and board losses, logic power and a 35 W reserve when the CM5 carrier is powered. The ports share the remainder. |
 
 With host USB alone, charged Apple targets use 5 V for attachment and PD signalling. A 5 V / 0 mA offer is how PD says a source has no power to give, so targets do not charge, and the OLED shows `No charging`. The port ADC measures connector voltage only. Ordinary USB peripherals draw their operating current from the same 5 V supply. Each port has a nominal 0.51 A current limit. Component tolerance can put the trip point below 500 mA. All five also share a limiter whose upper trip threshold is shown below.
 
 | Upstream allowance | Shared limiter threshold (max) |
 | ------------------ | ------------------------------ |
-| 900 mA             | Off                            |
-| 1200 mA            | 170 mA                         |
-| 1500 mA            | 550 mA                         |
+| 500 mA             | Off                            |
+| 900 mA             | 170 mA                         |
+| 1200 mA            | 550 mA                         |
 | 3000 mA            | 1890 mA                        |
 
-On a native USB-C connection, the current advertised on CC sets the allowance even while the host reconnects to the management interface. On legacy A-to-C connections, `host-budget <mA>` declares the remaining allowance including Iasis, up to 1600 mA. It clears on USB reset and never overrides native Rp.
+On a native USB-C connection, the current advertised on CC sets the allowance even while the host reconnects to the management interface. An A-to-C connection advertises Default USB power, so the allowance is what USB grants a configured device: 900 mA on a USB 3 port, 500 mA on USB 2, and none while the host suspends the board. `host-budget <mA>` declares another allowance including Iasis, up to 1600 mA: less where other devices share the host's supply, more on a charging port. It clears on USB reset and never overrides native Rp.
 
 On the charging input, Iasis requests the highest-power fixed profile it supports, up to 20 V. The host USB port stays at 5 V.
 
