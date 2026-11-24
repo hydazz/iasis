@@ -38,12 +38,16 @@ const PRESENCE_TIERS: [HostLimit; 4] = [
     },
 ];
 
-/// Reserve 3.5 W at 4.5 V, rounded up to 800 mA, before target presence.
-/// AP22653 upper bounds include 1% resistors and manufacturer limit curves.
+/// The board's own load on host power: the modelled 2.9 W with five Gen 2
+/// links, the OLED and five cable markers, at 4.5 V and rounded up.
+const BOARD_MA: u32 = 650;
+
+/// Reserve the board's load before target presence. AP22653 upper bounds
+/// include 1% resistors and manufacturer limit curves.
 pub fn host_limit(allowance_ma: u16) -> Option<HostLimit> {
     PRESENCE_TIERS
         .into_iter()
-        .find(|tier| u32::from(allowance_ma) >= 800 + u32::from(tier.upper_ma))
+        .find(|tier| u32::from(allowance_ma) >= BOARD_MA + u32::from(tier.upper_ma))
 }
 
 fn below_brick_handover(bus_adc: Option<u16>) -> bool {
@@ -863,14 +867,17 @@ mod tests {
     }
 
     #[test]
-    fn host_tiers_never_spend_the_board_reservation_or_guess_legacy_power() {
-        assert_eq!(host_limit(900), None);
-        assert_eq!(host_limit(1200).unwrap().bits, 0);
+    fn host_tiers_never_spend_the_board_reservation() {
+        // What USB grants a configured USB 3 device opens the smallest tier;
+        // USB 2's opens none.
+        assert_eq!(host_limit(500), None);
+        assert_eq!(host_limit(900).unwrap().bits, 0);
+        assert_eq!(host_limit(1200).unwrap().bits, 1);
         assert_eq!(host_limit(1500).unwrap().bits, 1);
         assert_eq!(host_limit(3000).unwrap().bits, 3);
         for allowance in 0..=3000 {
             if let Some(tier) = host_limit(allowance) {
-                assert!(tier.upper_ma + 800 <= allowance);
+                assert!(u32::from(tier.upper_ma) + BOARD_MA <= u32::from(allowance));
             }
         }
         assert_eq!(host_allowance(1), 0);
