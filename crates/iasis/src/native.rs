@@ -89,14 +89,11 @@ pub(crate) fn identify(snapshot: &mut Snapshot, mask: u8) {
         if mask & (1 << slot.port.index()) == 0 {
             continue;
         }
-        let [target] = slot.devices.as_mut_slice() else {
+        let Some(target) = slot.target_mut() else {
             continue;
         };
         let kis = target.product_id == 0x1881;
         if kis {
-            if target.topology != slot.usb2 {
-                continue;
-            }
             // The answer belongs to this read: a device that has left DFU loses it.
             if let Some(apple) = &mut target.apple
                 && matches!(

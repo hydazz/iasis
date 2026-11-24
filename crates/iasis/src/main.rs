@@ -564,16 +564,16 @@ fn request_dfu(board: &Board, port: Port) -> Result<()> {
                 println!("Port {}  {}", port.number(), report.describe());
                 return Ok(());
             }
+            _ if !final_read && result == CommandResult::Acknowledged && report.unclear() => {
+                changes.wait(seen, Some(deadline));
+            }
             Some(Outcome::IdentityChanged | Outcome::TargetUnclear | Outcome::BoardRestarted) => {
                 bail!("Port {}  {}", port.number(), report.describe())
             }
             _ if final_read
                 || matches!(
                     report.signal,
-                    Signal::Fault
-                        | Signal::Disabled
-                        | Signal::Restoring
-                        | Signal::MultipleTransports
+                    Signal::Fault | Signal::Disabled | Signal::Restoring
                 ) =>
             {
                 bail!("Port {}  {}", port.number(), report.describe())
