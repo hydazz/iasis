@@ -7,7 +7,7 @@ use iasis_protocol::{
 use serde::Serialize;
 
 use crate::{
-    identity::{AppleMode, Observation, TargetTracker},
+    identity::{AppleMode, Observation, TargetTracker, models::DeviceModel},
     topology::{Companion, Snapshot, UsbDevice},
 };
 
@@ -16,10 +16,17 @@ use crate::{
 pub enum Signal {
     Available,
     AlreadyDfu,
+    /// An iPhone or iPad in recovery; a Mac restores from DFU instead.
+    AlreadyRecovery,
+    /// A running iPhone or iPad the board cannot signal, which the host can
+    /// take into recovery.
+    Recoverable,
     PortDfu,
     Restoring,
     Disabled,
     NoAttachment,
+    /// The host's port gives the board no current for its targets.
+    NoTargetPower,
     WaitingPower,
     Fault,
     Busy,
@@ -27,7 +34,7 @@ pub enum Signal {
     NoPdContract,
     NoDebug,
     NotOffered,
-    WrongMacPort,
+    NotDfuPort,
     Ambiguous,
     DifferentDevice,
 }
@@ -37,10 +44,15 @@ impl Signal {
         match self {
             Self::Available => "Port ready to send a DFU request.",
             Self::AlreadyDfu => "DFU is already present.",
+            Self::AlreadyRecovery => "Recovery mode is present.",
+            Self::Recoverable => "The host can take the target into recovery to restore it.",
             Self::PortDfu => "Wait for the target's ordinary DFU interface.",
             Self::Restoring => "A restore is active or its completion is unknown.",
             Self::Disabled => "Port disabled. Enable it before signalling.",
             Self::NoAttachment => "No CC attachment.",
+            Self::NoTargetPower => {
+                "The host's USB port gives no current for targets. Connect a power supply."
+            }
             Self::WaitingPower => {
                 "Target power unavailable. Check the supply and available port budget."
             }
@@ -48,11 +60,9 @@ impl Signal {
             Self::Busy => "A port command is pending.",
             Self::Settling => "Waiting for a stable powered attachment.",
             Self::NoPdContract => "Attached without a PD contract. DFU signalling requires PD.",
-            Self::NoDebug => {
-                "The target does not answer Apple debug, so Iasis cannot signal it. Enter DFU on the device itself."
-            }
+            Self::NoDebug => "DFU signalling is unavailable on this connection.",
             Self::NotOffered => "The target does not offer DFU on this connection.",
-            Self::WrongMacPort => "Connect to the Mac's DFU port.",
+            Self::NotDfuPort => "This connector carries no DFU USB. Connect the target's DFU port.",
             Self::Ambiguous => {
                 "Multiple USB devices, a hub or conflicting identities prevent target selection."
             }
@@ -148,10 +158,10 @@ impl Assessment {
     pub(crate) fn restore_access(
         &self,
         port: &PortStatus,
-        supports: impl FnOnce(AppleMode) -> bool,
+        supports: impl Fn(AppleMode) -> bool,
     ) -> RestoreAccess {
         match self.signal {
-            Signal::AlreadyDfu if self.ecid.is_some() && self.usb_mode.is_some_and(supports) => {
+            Signal::AlreadyDfu if self.ecid.is_some() && self.usb_mode.is_some_and(&supports) => {
                 RestoreAccess::InDfu
             }
             Signal::Available => RestoreAccess::EnterDfu,
@@ -163,7 +173,12 @@ impl Assessment {
             {
                 RestoreAccess::EnterDfu
             }
-            Signal::WrongMacPort => RestoreAccess::WrongMacPort,
+            Signal::AlreadyRecovery if self.ecid.is_some() && supports(AppleMode::Recovery) => {
+                RestoreAccess::InRecovery
+            }
+            Signal::Recoverable if self.ecid.is_some() && supports(AppleMode::Normal) => {
+                RestoreAccess::EnterRecovery
+            }
             _ => RestoreAccess::Unavailable,
         }
     }
@@ -252,15 +267,23 @@ impl Attempt {
     }
 }
 
+/// A Mac by the model a running system names, or by its chip and board in
+/// RestoreKit's Mac table where its mode gives only those.
 fn is_mac(device: &UsbDevice) -> bool {
     let Some(apple) = &device.apple else {
         return false;
     };
     let mac_name = |name: &str| name.starts_with("Mac") || name.starts_with("iMac");
-    apple
-        .model
-        .as_deref()
-        .map_or_else(|| device.product.as_deref().is_some_and(mac_name), mac_name)
+    if let Some(model) = apple.model.as_deref() {
+        return mac_name(model);
+    }
+    if let Some((chip, board)) = DeviceModel::read(device).hardware() {
+        return u16::try_from(chip)
+            .ok()
+            .zip(u8::try_from(board).ok())
+            .is_some_and(|(chip, board)| restorekit::device::lookup(chip, board).is_some());
+    }
+    device.product.as_deref().is_some_and(mac_name)
 }
 
 pub fn job_in_progress(p: &PortStatus) -> bool {
@@ -292,6 +315,8 @@ pub fn assess(
         Signal::AlreadyDfu
     } else if usb_mode == Some(AppleMode::PortDfu) {
         Signal::PortDfu
+    } else if usb_mode == Some(AppleMode::Recovery) && !single.is_some_and(is_mac) {
+        Signal::AlreadyRecovery
     } else if status.i2c_root_fault
         || status.aggregate_power_fault
         || p.error.is_some()
@@ -304,7 +329,14 @@ pub fn assess(
     } else if p.state == PortState::WaitingPower
         || (p.state == PortState::Debouncing && p.supply == Supply::Off)
     {
-        Signal::WaitingPower
+        if status.supply == Supply::Off
+            && status.host_allowance_ma == 0
+            && status.charging_budget_mw == 0
+        {
+            Signal::NoTargetPower
+        } else {
+            Signal::WaitingPower
+        }
     } else if p.state == PortState::Unattached {
         Signal::NoAttachment
     } else if p.command_result == CommandResult::Pending {
@@ -330,6 +362,12 @@ pub fn assess(
         Signal::Settling
     } else if single.is_some() && apple.is_none() {
         Signal::DifferentDevice
+    } else if usb_mode == Some(AppleMode::Normal)
+        && ecid.is_some()
+        && !single.is_some_and(is_mac)
+        && (p.state != PortState::Contract || p.debug_actions == DebugActions::Silent)
+    {
+        Signal::Recoverable
     } else if p.state != PortState::Contract {
         Signal::NoPdContract
     } else if p.debug_actions == DebugActions::Pending {
@@ -337,10 +375,8 @@ pub fn assess(
     } else if p.debug_actions == DebugActions::Silent {
         Signal::NoDebug
     } else if !p.offers(PortAction::Dfu) {
-        if single.is_some_and(is_mac)
-            && matches!(p.debug_actions, DebugActions::Listed(ids) if !ids.contains(&iasis_protocol::DFU_USB))
-        {
-            Signal::WrongMacPort
+        if p.dfu_on_another_port() {
+            Signal::NotDfuPort
         } else {
             Signal::NotOffered
         }
@@ -569,7 +605,7 @@ mod tests {
             (AppleMode::KisDfu, Signal::AlreadyDfu),
             (AppleMode::Kis, Signal::Available),
             (AppleMode::PortDfu, Signal::PortDfu),
-            (AppleMode::Recovery, Signal::Available),
+            (AppleMode::Recovery, Signal::AlreadyRecovery),
             (AppleMode::Normal, Signal::Available),
             (AppleMode::Restored, Signal::Restoring),
         ] {
@@ -579,6 +615,18 @@ mod tests {
             assert_eq!(observation.usb_mode, Some(mode));
             assert!(observation.outcome.is_none());
         }
+        // A Mac in recovery, by its chip and board, restores from DFU.
+        let mut mac = apple(AppleMode::Recovery, 0x1281, Some(42));
+        mac.serial_number = Some("CPID:8103 CPRV:11 CPFM:03 SCEP:01 BDID:26 ECID:000000000000002A IBFL:3C SRTG:[iBoot-1234]".into());
+        s.ports[0].devices = vec![mac];
+        assert_eq!(report(&st, &s, None).signal, Signal::Available);
+        // A target behind Debug USB whose mode is unknown, running or asleep,
+        // is restored from the DFU the board sends.
+        s.ports[0].devices = vec![apple(AppleMode::Kis, 0x1881, None)];
+        assert_eq!(
+            report(&st, &s, None).restore_access(&st.ports[0], |_| true),
+            RestoreAccess::EnterDfu
+        );
     }
 
     #[test]
@@ -687,6 +735,12 @@ mod tests {
         st.ports[0].state = PortState::Unattached;
         assert_eq!(report(&st, &s, None).signal, Signal::NoAttachment);
         st.ports[0].state = PortState::WaitingPower;
+        // A USB-A host advertises no current, and nothing has declared any.
+        st.supply = Supply::Off;
+        assert_eq!(report(&st, &s, None).signal, Signal::NoTargetPower);
+        // A brick whose budget is spent.
+        st.supply = Supply::Brick;
+        st.charging_budget_mw = 60_000;
         assert_eq!(report(&st, &s, None).signal, Signal::WaitingPower);
         st.ports[0].error = Some(PortError::HostLimiter);
         assert_eq!(report(&st, &s, None).signal, Signal::Fault);
@@ -714,11 +768,25 @@ mod tests {
         st.ports[0].state = PortState::Ready;
         let mut usb = snapshot();
         for (mode, ecid, supports, expected) in [
+            // A running iPhone or iPad without PD, through recovery.
             (
                 AppleMode::Normal,
                 Some(42),
                 true,
+                RestoreAccess::EnterRecovery,
+            ),
+            (
+                AppleMode::Normal,
+                Some(42),
+                false,
                 RestoreAccess::Unavailable,
+            ),
+            (AppleMode::Normal, None, true, RestoreAccess::Unavailable),
+            (
+                AppleMode::Recovery,
+                Some(42),
+                true,
+                RestoreAccess::InRecovery,
             ),
             (
                 AppleMode::PortDfu,
@@ -745,22 +813,18 @@ mod tests {
     }
 
     #[test]
-    fn only_an_identified_mac_missing_dfu_usb_gets_the_connector_hint() {
+    fn a_connector_without_dfu_usb_gets_the_port_hint_whatever_is_on_usb() {
         let mut st = status();
         let mut usb = snapshot();
+        st.ports[0].debug_actions =
+            DebugActions::Listed([0x0106, 0x0105, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        // A locked Mac withholds its USB.
+        assert_eq!(report(&st, &usb, None).signal, Signal::NotDfuPort);
         usb.ports[0]
             .devices
             .push(apple(AppleMode::Normal, 0x1905, Some(42)));
-        st.ports[0].debug_actions =
-            DebugActions::Listed([0x0106, 0x0105, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-        for (model, expected) in [
-            (None, Signal::NotOffered),
-            (Some("iPad7,11"), Signal::NotOffered),
-            (Some("Mac15,8"), Signal::WrongMacPort),
-        ] {
-            usb.ports[0].devices[0].apple.as_mut().unwrap().model = model.map(str::to_owned);
-            assert_eq!(report(&st, &usb, None).signal, expected);
-        }
+        usb.ports[0].devices[0].apple.as_mut().unwrap().model = Some("Mac15,8".to_owned());
+        assert_eq!(report(&st, &usb, None).signal, Signal::NotDfuPort);
         st.ports[0].debug_actions = DebugActions::Silent;
         assert_eq!(report(&st, &usb, None).signal, Signal::NoDebug);
         // DFU USB present, but the DFU command is absent.
@@ -770,15 +834,53 @@ mod tests {
     }
 
     #[test]
-    fn a_port_that_lists_reboot_alone_is_not_ready_for_dfu() {
-        // What an M1 MacBook Air lists on the port that is not its DFU port.
+    fn a_macs_other_port_is_not_ready_for_dfu() {
+        // What an M1 MacBook Air lists on the port that is not its DFU port,
+        // then an M5 or a MacBook Neo, which list DFU there too.
         let mut st = status();
-        st.ports[0].debug_actions =
-            DebugActions::Listed([0x0105, 0x0303, 0x0803, 0x0809, 0x0103, 0, 0, 0, 0, 0, 0, 0]);
-        assert_eq!(report(&st, &snapshot(), None).signal, Signal::NotOffered);
-        // An M5 Mac lists DFU there too, without the DFU USB a restore needs.
-        st.ports[0].debug_actions =
-            DebugActions::Listed([0x4606, 0x0106, 0x0105, 0x0303, 0, 0, 0, 0, 0, 0, 0, 0]);
-        assert_eq!(report(&st, &snapshot(), None).signal, Signal::NotOffered);
+        for list in [
+            [0x0105, 0x0303, 0x0803, 0x0809, 0x0103, 0, 0, 0, 0, 0, 0, 0],
+            [
+                0x4606, 0x0106, 0x0105, 0x0303, 0x0803, 0x0809, 0x0103, 0, 0, 0, 0, 0,
+            ],
+        ] {
+            st.ports[0].debug_actions = DebugActions::Listed(list);
+            assert_eq!(report(&st, &snapshot(), None).signal, Signal::NotDfuPort);
+        }
+    }
+
+    #[test]
+    fn an_iphone_or_ipad_restores_through_recovery_and_a_mac_through_dfu() {
+        let mut st = status();
+        let mut usb = snapshot();
+        // A Lightning iPad: a contract through its cable, no Apple debug.
+        st.ports[0].debug_actions = DebugActions::Silent;
+        usb.ports[0]
+            .devices
+            .push(apple(AppleMode::Normal, 0x12ab, Some(42)));
+        usb.ports[0].devices[0].apple.as_mut().unwrap().model = Some("iPad12,1".to_owned());
+        let running = report(&st, &usb, None);
+        assert_eq!(running.signal, Signal::Recoverable);
+        assert_eq!(
+            running.restore_access(&st.ports[0], |_| true),
+            RestoreAccess::EnterRecovery
+        );
+        // Where the host's usbmuxd cannot reach a running device.
+        assert_eq!(
+            running.restore_access(&st.ports[0], |mode| mode != AppleMode::Normal),
+            RestoreAccess::Unavailable
+        );
+        // The same iPad in recovery.
+        usb.ports[0].devices = vec![apple(AppleMode::Recovery, 0x1281, Some(42))];
+        let recovery = report(&st, &usb, None);
+        assert_eq!(recovery.signal, Signal::AlreadyRecovery);
+        assert_eq!(
+            recovery.restore_access(&st.ports[0], |_| true),
+            RestoreAccess::InRecovery
+        );
+        // A running Mac takes the DFU path.
+        usb.ports[0].devices = vec![apple(AppleMode::Normal, 0x1905, Some(42))];
+        usb.ports[0].devices[0].apple.as_mut().unwrap().model = Some("Mac15,8".to_owned());
+        assert_ne!(report(&st, &usb, None).signal, Signal::Recoverable);
     }
 }

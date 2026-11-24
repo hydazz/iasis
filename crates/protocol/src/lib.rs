@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 22;
+pub const VERSION: u16 = 23;
 pub const MAX_PACKET: usize = 1408;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
@@ -115,6 +115,8 @@ pub struct PortStatus {
     pub fusb_device_id: Option<u8>,
     pub enabled: bool,
     pub generation: u32,
+    /// Board uptime when this attachment began, in milliseconds modulo 2^32.
+    pub attached_ms: u32,
     pub state: PortState,
     pub orientation: Option<Orientation>,
     pub error: Option<PortError>,
@@ -273,14 +275,43 @@ pub enum Hue {
 pub struct Light {
     pub hue: Hue,
     pub pulse: bool,
-    /// Half brightness: a target still attaching or waiting for power.
+    /// Half brightness: a target waiting for power.
     pub dim: bool,
 }
 
+/// How long a host may take to look at a new attachment that answers neither
+/// PD nor Apple debug before its port settles on what the board knows.
+pub const IDENTIFY_MS: u32 = 3000;
+
 impl PortStatus {
-    /// The port's light. Blue is DFU: pulsing once it is sent, and steady
-    /// once a host sees it, which only a host can.
-    pub fn light(&self) -> Light {
+    /// The target's capabilities are still being found: the board's PD and
+    /// Apple debug probe, then, while a host is attached, the host's first
+    /// look at a target that answers neither, which it may still restore.
+    pub fn identifying(&self, now: u64, host: bool) -> bool {
+        match self.debug_actions {
+            DebugActions::Pending => true,
+            DebugActions::Silent => {
+                host && self.restore_access == RestoreAccess::Unavailable
+                    && self.observed.is_none_or(|seen| seen.usb == Usb::Absent)
+                    && (now as u32).wrapping_sub(self.attached_ms) < IDENTIFY_MS
+            }
+            DebugActions::Listed(_) => false,
+        }
+    }
+
+    /// Iasis can act on the target through this port: the board signals DFU
+    /// or a reboot, or the session's host can prepare a restore.
+    pub fn operable(&self) -> bool {
+        self.lists(PortAction::Dfu)
+            || self.lists(PortAction::Reboot)
+            || self.restore_access != RestoreAccess::Unavailable
+    }
+
+    /// The port's light at board uptime `now`, with or without a host
+    /// session. Green is a target Iasis can act on and white anything else;
+    /// the light stays off until the board knows which. Blue is DFU: pulsing
+    /// once it is sent, and steady once a host sees it, which only a host can.
+    pub fn light(&self, now: u64, host: bool) -> Light {
         let light = |hue, pulse| Light {
             hue,
             pulse,
@@ -318,19 +349,20 @@ impl PortStatus {
             None => {}
         }
         match self.state {
-            PortState::Contract => light(Hue::Green, false),
-            // Powered, and silent on Power Delivery.
-            PortState::Ready if !self.pd_transition => light(Hue::White, false),
             PortState::WaitingPower => Light {
                 hue: Hue::Amber,
                 pulse: false,
                 dim: true,
             },
-            _ => Light {
-                hue: Hue::White,
-                pulse: false,
-                dim: true,
-            },
+            PortState::Ready | PortState::Contract if !self.identifying(now, host) => light(
+                if self.operable() {
+                    Hue::Green
+                } else {
+                    Hue::White
+                },
+                false,
+            ),
+            _ => light(Hue::Off, false),
         }
     }
 
@@ -353,10 +385,7 @@ impl PortStatus {
     /// The target's port lists the Apple debug action this command performs.
     /// DFU also needs DFU USB on the port: told to enter DFU from a port
     /// without it, a Mac restarts into DFU where no host can reach it.
-    pub fn offers(&self, action: PortAction) -> bool {
-        if self.state != PortState::Contract {
-            return false;
-        }
+    pub fn lists(&self, action: PortAction) -> bool {
         match (self.debug_actions, action.debug_action()) {
             (DebugActions::Listed(list), Some(id)) => {
                 list.contains(&id) && (action != PortAction::Dfu || list.contains(&DFU_USB))
@@ -365,11 +394,49 @@ impl PortStatus {
         }
     }
 
-    pub fn in_restorable_dfu(&self) -> bool {
-        self.restore_access == RestoreAccess::InDfu
-            && self.observed.is_some_and(|seen| {
-                seen.dfu() && seen.ecid.is_some_and(|id| id != 0 && Some(id) == self.ecid)
-            })
+    /// The board can send the action now: the target lists it and holds a
+    /// contract.
+    pub fn offers(&self, action: PortAction) -> bool {
+        self.state == PortState::Contract && self.lists(action)
+    }
+
+    /// The target answers Apple debug and takes DFU or a reboot, but this
+    /// connector carries no DFU USB: its DFU port is another one.
+    pub fn dfu_on_another_port(&self) -> bool {
+        match self.debug_actions {
+            DebugActions::Listed(list) => {
+                !list.contains(&DFU_USB)
+                    && [PortAction::Dfu, PortAction::Reboot]
+                        .into_iter()
+                        .filter_map(PortAction::debug_action)
+                        .any(|id| list.contains(&id))
+            }
+            _ => false,
+        }
+    }
+
+    /// The host sees the target, by the ECID this attachment carries, where
+    /// its restore access says: in DFU or recovery, or running and able to
+    /// go to recovery.
+    pub fn restore_target_seen(&self) -> bool {
+        let Some(seen) = self.observed else {
+            return false;
+        };
+        let mode = match self.restore_access {
+            RestoreAccess::InDfu => seen.dfu(),
+            RestoreAccess::InRecovery => seen.usb == Usb::Apple(AppleMode::Recovery),
+            RestoreAccess::EnterRecovery => seen.usb == Usb::Apple(AppleMode::Normal),
+            RestoreAccess::Unavailable | RestoreAccess::EnterDfu => false,
+        };
+        mode && seen.ecid.is_some_and(|id| id != 0 && Some(id) == self.ecid)
+    }
+
+    /// The target is in a mode a restore starts from: DFU or recovery.
+    pub fn in_restorable_mode(&self) -> bool {
+        matches!(
+            self.restore_access,
+            RestoreAccess::InDfu | RestoreAccess::InRecovery
+        ) && self.restore_target_seen()
     }
 
     /// A restore is under way or its outcome is unknown.
@@ -433,7 +500,7 @@ impl RestoreArm {
     pub fn prepared(&self, status: &Status) -> bool {
         self.matches_targets(status)
             && Port::ALL.into_iter().all(|p| {
-                self.ports & (1 << p.index()) == 0 || status.ports[p.index()].in_restorable_dfu()
+                self.ports & (1 << p.index()) == 0 || status.ports[p.index()].in_restorable_mode()
             })
     }
 
@@ -469,9 +536,12 @@ pub struct HostSession {
 pub enum RestoreAccess {
     #[default]
     Unavailable,
+    /// The board signals the target into DFU.
     EnterDfu,
     InDfu,
-    WrongMacPort,
+    /// The host takes the running target into recovery.
+    EnterRecovery,
+    InRecovery,
 }
 
 /// A host's view of one port, bound to the attachment it describes.
@@ -848,6 +918,11 @@ impl Status {
             .map(|host| host.id)
     }
 
+    /// A port's light at the status's own time.
+    pub fn light(&self, port: Port) -> Light {
+        self.ports[port.index()].light(self.uptime_ms, self.host.is_some())
+    }
+
     /// Ports the button can select and the panel lights.
     pub fn occupied_mask(&self) -> u8 {
         let mut mask = 0;
@@ -868,8 +943,7 @@ impl Status {
                     self.restore_session().is_some()
                         && match port.restore_access {
                             RestoreAccess::EnterDfu => port.offers(PortAction::Dfu),
-                            RestoreAccess::InDfu => port.in_restorable_dfu(),
-                            _ => false,
+                            _ => port.restore_target_seen(),
                         }
                 }
             };
@@ -1083,6 +1157,7 @@ mod tests {
                 fusb_device_id: Some(u8::MAX),
                 enabled: true,
                 generation: u32::MAX,
+                attached_ms: u32::MAX,
                 state: PortState::Contract,
                 orientation: Some(Orientation::Cc2),
                 error: Some(error),
@@ -1238,7 +1313,6 @@ mod tests {
             ..listed(&[0x0106, 0x0105])
         };
         status.ports[0].restore_access = RestoreAccess::EnterDfu;
-        status.ports[2].restore_access = RestoreAccess::WrongMacPort;
         // A USB-only target entered DFU manually.
         status.ports[4].restore_access = RestoreAccess::InDfu;
         status.ports[4].observed = Some(Observed {
@@ -1270,6 +1344,54 @@ mod tests {
         assert!(!status.ports[1].offers(PortAction::MapDebugUsb));
         status.ports[0].pd_transition = true;
         assert_eq!(status.gesture_mask(Gesture::Dfu), 0);
+        // DFU or a reboot without DFU USB names another port; a list
+        // without either names nothing.
+        assert!(status.ports[2].dfu_on_another_port());
+        assert!(!status.ports[0].dfu_on_another_port());
+        assert!(!status.ports[1].dfu_on_another_port());
+        assert!(!status.ports[3].dfu_on_another_port());
+        status.ports[1] = listed(&[0x0105, 0x0303, 0x0803, 0x0809, 0x0103]);
+        assert!(status.ports[1].dfu_on_another_port());
+    }
+
+    #[test]
+    fn a_running_or_recovery_target_restores_through_recovery() {
+        let seen = |usb, ecid| {
+            Some(Observed {
+                usb: Usb::Apple(usb),
+                ecid: Some(ecid),
+            })
+        };
+        let mut status = Status {
+            host: Some(HostSession {
+                id: 1,
+                restore_ready: true,
+                internet_sharing: false,
+            }),
+            ..Status::default()
+        };
+        // A Lightning iPad holds a contract through its cable and answers no
+        // Apple debug.
+        status.ports[0] = PortStatus {
+            state: PortState::Contract,
+            debug_actions: DebugActions::Silent,
+            restore_access: RestoreAccess::EnterRecovery,
+            observed: seen(AppleMode::Normal, 42),
+            ecid: Some(42),
+            ..PortStatus::default()
+        };
+        assert_eq!(status.gesture_mask(Gesture::Restore), 1);
+        assert!(!status.ports[0].in_restorable_mode());
+        // Another device on the connector is not the target.
+        status.ports[0].observed = seen(AppleMode::Normal, 7);
+        assert_eq!(status.gesture_mask(Gesture::Restore), 0);
+        status.ports[0].restore_access = RestoreAccess::InRecovery;
+        status.ports[0].observed = seen(AppleMode::Recovery, 42);
+        assert_eq!(status.gesture_mask(Gesture::Restore), 1);
+        assert!(status.ports[0].in_restorable_mode());
+        // Recovery seen under running access, or the reverse, is no restore.
+        status.ports[0].restore_access = RestoreAccess::EnterRecovery;
+        assert_eq!(status.gesture_mask(Gesture::Restore), 0);
     }
 
     #[test]

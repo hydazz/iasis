@@ -83,7 +83,7 @@ Each port has:
 | `light`                        | What the port's light shows: `hue`, `pulse` and `dim`                                                                         |
 | `request`                      | A signal in progress (`entering_dfu`, `restarting`) or `dfu_unconfirmed`, otherwise null                                      |
 | `waiting_for_power`, `powered` | The port is awaiting power, or has an active supply                                                                           |
-| `wrong_dfu_port`               | An identified Mac answered that this connector lacks DFU USB                                                                  |
+| `wrong_dfu_port`               | The target takes DFU or reboot, but this connector carries no DFU USB, as on a Mac's other port                               |
 | `link`                         | USB link: `usb2`, `usb3`, `usb` for unknown speed, or null                                                                    |
 | `power`                        | PD contract or default USB allowance with `source` (`pd` or `usb`), `millivolts` and operating `milliamps`, or null           |
 | `allocated_mw`                 | Power supply capacity committed to the port, including voltage tolerance and the USB starting allowance                       |

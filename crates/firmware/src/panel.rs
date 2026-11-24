@@ -6,9 +6,7 @@
 //! steady once a host sees the target's DFU. Only a host can make it steady.
 
 use crate::{button::Button, egg};
-use iasis_protocol::{
-    BRIGHTNESS_MAX, BRIGHTNESS_MIN, Gesture, Hue, Port, PortStatus, RestorePhase, Status,
-};
+use iasis_protocol::{BRIGHTNESS_MAX, BRIGHTNESS_MIN, Gesture, Hue, Port, RestorePhase, Status};
 
 const OFF: [u8; 3] = [0; 3];
 const RED: [u8; 3] = [32, 0, 0];
@@ -20,8 +18,8 @@ const PURPLE: [u8; 3] = [24, 0, 24];
 const PULSE_MS: u64 = 1200;
 
 /// A port's colour and whether it is steady.
-fn port(port: &PortStatus) -> ([u8; 3], bool) {
-    let light = port.light();
+fn port(status: &Status, index: Port, now: u64) -> ([u8; 3], bool) {
+    let light = status.ports[index.index()].light(now, status.host.is_some());
     let color = match light.hue {
         Hue::Off => OFF,
         Hue::Red => RED,
@@ -75,9 +73,9 @@ pub fn indicators(status: &Status, control: &Button, now: u64) -> [[u8; 3]; 6] {
         let mut pixels = egg::lights(played / egg::FRAME_MS);
         // A fault stays red.
         for index in Port::ALL {
-            let state = &status.ports[index.index()];
-            if state.light().hue == Hue::Red {
-                pixels[5 - index.index()] = port(state).0;
+            let (color, _) = port(status, index, now);
+            if color == RED {
+                pixels[5 - index.index()] = color;
             }
         }
         return pixels;
@@ -105,7 +103,7 @@ pub fn indicators(status: &Status, control: &Button, now: u64) -> [[u8; 3]; 6] {
     let marked = control.marked(status, now);
     for index in Port::ALL {
         let state = &status.ports[index.index()];
-        let (color, steady) = port(state);
+        let (color, steady) = port(status, index, now);
         let pixel = &mut pixels[5 - index.index()];
         *pixel = if steady { color } else { pulse(color, now) };
         let job = state.restore.map(|job| job.phase);
@@ -131,8 +129,9 @@ pub fn indicators(status: &Status, control: &Button, now: u64) -> [[u8; 3]; 6] {
 mod tests {
     use super::*;
     use iasis_protocol::{
-        AppleMode, BRIGHTNESS_DEFAULT, DebugActions, HostSession, Observed, PortAction, PortError,
-        PortState, Request, RestoreArm, RestoreStatus, Usb,
+        AppleMode, BRIGHTNESS_DEFAULT, DebugActions, HostSession, IDENTIFY_MS, Observed,
+        PortAction, PortError, PortState, PortStatus, Request, RestoreAccess, RestoreArm,
+        RestoreStatus, Usb,
     };
 
     fn ready() -> Status {
@@ -273,15 +272,25 @@ mod tests {
     }
 
     #[test]
-    fn a_powered_device_without_a_contract_is_white_and_never_a_target() {
+    fn a_light_shows_what_iasis_can_do_once_it_knows() {
         let mut status = ready();
-        status.ports[2].state = PortState::Ready;
         let mut button = Button::default();
+        // Still answering PD and the Apple debug probe: no hue to take back.
+        status.ports[2].debug_actions = DebugActions::Pending;
+        assert_eq!(indicators(&status, &button, 0)[3], OFF);
+        status.ports[2].state = PortState::Ready;
+        assert_eq!(indicators(&status, &button, 0)[3], OFF);
+        // A device without Apple debug, with or without PD, is white.
+        status.ports[2].debug_actions = DebugActions::Silent;
         assert_eq!(indicators(&status, &button, 0)[3], WHITE);
-        // A hard reset is a target between contracts, not an unknown device.
-        status.ports[2].pd_transition = true;
-        assert_eq!(steady(&status)[3], [4, 4, 4]);
-        status.ports[2].pd_transition = false;
+        status.ports[2].state = PortState::Contract;
+        assert_eq!(indicators(&status, &button, 0)[3], WHITE);
+        // A hard reset keeps the target it had.
+        status.ports[1].state = PortState::Ready;
+        status.ports[1].pd_transition = true;
+        assert_eq!(steady(&status)[4], GREEN);
+        status.ports[1].state = PortState::Contract;
+        status.ports[1].pd_transition = false;
         for (down, now) in [(false, 1), (true, 10), (true, 40), (true, 600)] {
             button.sample(&status, None, down, now);
         }
@@ -289,6 +298,34 @@ mod tests {
         assert_eq!(held[0], BLUE);
         assert_eq!(held[3], [2, 2, 2]);
         assert_eq!(held[4], GREEN);
+    }
+
+    #[test]
+    fn a_silent_target_waits_for_the_hosts_first_look() {
+        let mut status = ready();
+        status.ports[0].debug_actions = DebugActions::Silent;
+        status.ports[0].attached_ms = 1000;
+        status.host = Some(HostSession {
+            id: 1,
+            restore_ready: true,
+            internet_sharing: false,
+        });
+        assert_eq!(indicators(&status, &Button::default(), 2000)[5], OFF);
+        // A Lightning iPad the host can restore through recovery.
+        status.ports[0].restore_access = RestoreAccess::EnterRecovery;
+        assert_eq!(indicators(&status, &Button::default(), 2000)[5], GREEN);
+        // Nothing the host can do, or no answer in time: white.
+        status.ports[0].restore_access = RestoreAccess::Unavailable;
+        status.ports[0].observed = Some(Observed {
+            usb: Usb::Other,
+            ecid: None,
+        });
+        assert_eq!(indicators(&status, &Button::default(), 2000)[5], WHITE);
+        status.ports[0].observed = None;
+        assert_eq!(
+            indicators(&status, &Button::default(), 1000 + u64::from(IDENTIFY_MS))[5],
+            WHITE
+        );
     }
 
     #[test]
@@ -453,10 +490,11 @@ mod tests {
 
     #[test]
     fn board_order_and_brightness_reservation_are_preserved() {
-        let mut status = Status::default();
-        status.ports[0].state = PortState::Contract;
+        let mut status = ready();
+        for port in &mut status.ports[1..4] {
+            *port = PortStatus::default();
+        }
         assert_eq!(steady(&status)[5], GREEN);
-        status.ports[4].state = PortState::Contract;
         for phase in [
             RestorePhase::Preparing,
             RestorePhase::Running,
