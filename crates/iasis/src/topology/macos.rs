@@ -163,7 +163,7 @@ pub fn ncm_interfaces() -> io::Result<std::collections::BTreeMap<u64, String>> {
         let Some(mut ancestor) = parent(&iface) else {
             continue;
         };
-        if unsafe { IOObjectConformsTo(ancestor.0, c"AppleUSBNCM11Data".as_ptr()) } == 0 {
+        if unsafe { IOObjectConformsTo(ancestor.0, c"AppleUSBNCMData".as_ptr()) } == 0 {
             continue;
         }
         while let Some(next) = parent(&ancestor) {
