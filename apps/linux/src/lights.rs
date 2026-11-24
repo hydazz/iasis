@@ -4,18 +4,13 @@ use adw::prelude::*;
 use gtk::glib;
 
 const PORTS: &[(&str, &str, &str, &str)] = &[
-    ("off", "", "Off", "Empty or turned off"),
-    (
-        "white",
-        "",
-        "White",
-        "No power contract. Dim while connecting.",
-    ),
+    ("off", "", "Off", "Empty, turned off or identifying"),
+    ("white", "", "White", "Device Iasis can't act on"),
     (
         "green",
         "",
         "Green",
-        "Device has a power contract or restore complete",
+        "Target Iasis can act on, or restore complete",
     ),
     ("blue", "", "Blue", "Host sees DFU or Recovery"),
     (

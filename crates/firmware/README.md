@@ -29,7 +29,7 @@ A port whose voltage or negotiation fails switches its output off, discharges VB
 | Host presence   | Fixed 5 V / 0 mA PDO                       | Iasis reserves 800 mA. The remaining current selects the shared limiter below.                                                                         |
 | Charging supply | Fixed 5, 9, 15 or 20 V, up to 3 A per port | The brick contract covers input cable and board losses, logic power and a 35 W reserve when the CM5 carrier is powered. The ports share the remainder. |
 
-With host USB alone, charged Apple targets use 5 V for attachment and PD signalling. The 0 mA offer specifies the charging allowance. The port ADC measures connector voltage only. Ordinary USB peripherals draw their operating current from the same 5 V supply. Each port has a nominal 0.51 A current limit. Component tolerance can put the trip point below 500 mA. All five also share a limiter whose upper trip threshold is shown below.
+With host USB alone, charged Apple targets use 5 V for attachment and PD signalling. A 5 V / 0 mA offer is how PD says a source has no power to give, so targets do not charge, and the OLED shows `No charging`. The port ADC measures connector voltage only. Ordinary USB peripherals draw their operating current from the same 5 V supply. Each port has a nominal 0.51 A current limit. Component tolerance can put the trip point below 500 mA. All five also share a limiter whose upper trip threshold is shown below.
 
 | Upstream allowance | Shared limiter threshold (max) |
 | ------------------ | ------------------------------ |
@@ -57,9 +57,9 @@ A colour is what the port holds, a pulse is work under way or a result awaited, 
 
 | Port light      | Meaning                                                      |
 | --------------- | ------------------------------------------------------------ |
-| Off             | Empty or disabled target port                                |
-| Green           | Device with a PD contract, or restore complete               |
-| White           | Powered device without a PD contract; dim while one attaches |
+| Off             | Empty or disabled port, or a device still being identified   |
+| Green           | Target Iasis can act on, or restore complete                 |
+| White           | Device Iasis cannot act on, with or without a PD contract    |
 | Blue, steady    | A host sees the target in DFU or recovery                    |
 | Blue, pulsing   | DFU sent; no host has seen the result                        |
 | Amber, pulsing  | Reboot sent                                                  |
@@ -85,7 +85,7 @@ Iasis cannot tell a target in DFU from a running one: the target looks the same 
 | Blinking purple | Erase armed. Hold until confirmed, or tap to cancel.        |
 | Red             | Shared power protection or root I²C fault. Targets are off. |
 
-Some cables, including USB-C to Lightning, can keep the port green after the device is unplugged. Use `iasis ports` to list devices on the host.
+Some cables, including USB-C to Lightning, can keep the port white after the device is unplugged. Use `iasis ports` to list devices on the host.
 
 At the Erase prompt, hold for three seconds to start the restore. You can keep holding once it starts. Letting go earlier cancels.
 
@@ -108,7 +108,7 @@ A port reads `DFU` or `REC` while the host sees it in DFU or recovery, `DFU?` fo
 
 A target with a USB link shows `USB2` or `USB3` after its voltage, as the hub reports the port. A target in DFU holds USB 2 whatever its cable carries. Without a link nothing is shown, which a cable without data lines and a device that has not enumerated both look like.
 
-The selected port shows its negotiated voltage and current, for example `PD 20V 780mA (16W)`. A port on the brick’s default USB allowance shows `USB 5V 900mA (5W)`. The display preserves the negotiated current and rounds the derived wattage in parentheses to whole watts. The overview counts the capacity reserved from the brick, including the USB starting allowance and voltage tolerance. Holding the button lists the actions the selected targets take and highlights the one a release will send. A fault, restore progress or button feedback replaces the readings. Holding on an identified Mac connected through a non-DFU port shows `Not in DFU port`. Restore is available for the ports the host can put in DFU or already sees in a supported DFU mode.
+The selected port shows its negotiated voltage and current, for example `PD 20V 780mA (16W)`. A port on the brick’s default USB allowance shows `USB 5V 900mA (5W)`. The display preserves the negotiated current and rounds the derived wattage in parentheses to whole watts. The overview counts the capacity reserved from the brick, including the USB starting allowance and voltage tolerance. Holding the button lists the actions the selected targets take and highlights the one a release will send. A fault, restore progress or button feedback replaces the readings. Holding on a target whose connector carries no DFU USB, such as a Mac's other port, shows `Not in DFU port`. Restore is available for the ports the host can put in DFU or already sees in a supported DFU mode.
 
 `ATCH` means a powered USB-C attachment. `USB` means the hub has a data link or the host sees a USB device. `PD` indicates a power contract. `RDY` means the device offers Apple signalling.
 
