@@ -108,6 +108,7 @@ impl Image {
 /// Write `image` to the board with `serial` and return the IasisOS version it
 /// starts. The board leaves USB for a few seconds and its ports lose power.
 pub fn write(serial: u64, image: &Image, inventory: &Inventory) -> Result<[u16; 3]> {
+    let _awake = crate::awake::hold(&format!("Updating IasisOS on {serial:016x}"));
     if let Some(device) = boards(inventory.devices(), UsbIds::default(), Some(serial)).pop() {
         Board::open(&device)
             .and_then(|board| board.enter_bootloader())
