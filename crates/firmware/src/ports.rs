@@ -315,13 +315,6 @@ impl Ports {
             .any(|port| port.snapshot().settings_busy(now))
     }
 
-    pub fn restoring_on_host(&self) -> bool {
-        self.ports.iter().any(|port| {
-            let status = port.status.get();
-            status.supply == Supply::HostPresence && status.restoring()
-        })
-    }
-
     /// The host supply was withdrawn from the targets it powers.
     pub fn host_fault(&self, error: PortError) {
         for port in &self.ports {
