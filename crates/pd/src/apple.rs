@@ -16,6 +16,15 @@ use usbpd::{
 pub const DFU: [u32; 3] = [0x05ac_8012, 0x0106, 0x8001_0000];
 /// Set Action 0x0105: reboot.
 pub const REBOOT: [u32; 3] = [0x05ac_8012, 0x0105, 0x8000_0000];
+/// Perform Action 0x4606 on pin set 1, the primary D+/D−: Debug USB there,
+/// kept through a soft reset, after leaving conflicting modes. macvdmtool's
+/// `debugusb` sends the same.
+pub const MAP_DEBUG_USB: [u32; 2] = [0x05ac_8012, 0x0182_4606];
+/// Perform Action 0x4606 on pin set 1 with the exit bit.
+pub const UNMAP_DEBUG_USB: [u32; 2] = [0x05ac_8012, 0x0202_4606];
+const PERFORM_REPLY: u32 = 0x05ac_8052;
+/// The pin sets a Perform Action reply reports.
+pub const PIN_SETS: usize = 7;
 /// An empty vendor header. Targets answer it before accepting an action.
 pub const PROBE: [u32; 1] = [0];
 /// Get Action List. Each port of a target answers with what it offers; on a
@@ -25,9 +34,28 @@ const ACTION_LIST_REPLY: u32 = 0x05ac_8050;
 /// The most action IDs one reply carries: six objects after its header.
 pub const MAX_ACTIONS: usize = 12;
 
-/// The action ID a Set Action message performs.
-pub fn action(words: &[u32; 3]) -> u16 {
+/// The action ID a Set Action or Perform Action message performs.
+pub fn action(words: &[u32]) -> u16 {
     words[1] as u16
+}
+
+/// The action on each pin set after a Perform Action, from the target's
+/// reply: a state unit, then one action ID per pin set, 16-bit units packed
+/// high to low.
+pub fn pin_actions(reply: &[u32]) -> Option<[u16; PIN_SETS]> {
+    let (&header, objects) = reply.split_first()?;
+    if header != PERFORM_REPLY {
+        return None;
+    }
+    let mut pins = [0; PIN_SETS];
+    let units = objects
+        .iter()
+        .flat_map(|object| [(object >> 16) as u16, *object as u16])
+        .skip(1);
+    for (slot, unit) in pins.iter_mut().zip(units) {
+        *slot = unit;
+    }
+    Some(pins)
 }
 
 /// Action IDs from a Get Action List reply: 16-bit units packed high to low
@@ -77,6 +105,25 @@ mod tests {
             ]
         );
         assert_eq!(message(8, &PROBE).as_slice(), &[0x6f, 0x11, 0, 0, 0, 0]);
+        assert_eq!(
+            message(2, &MAP_DEBUG_USB).as_slice(),
+            &[0x6f, 0x25, 0x12, 0x80, 0xac, 0x05, 0x06, 0x46, 0x82, 0x01]
+        );
+    }
+
+    #[test]
+    fn a_perform_action_reply_names_each_pin_set() {
+        // A MacBook Neo's replies to MAP_DEBUG_USB and UNMAP_DEBUG_USB.
+        let mapped = [0x05ac_8052, 0x910c_0000, 0x4606_0000, 0, 0];
+        assert_eq!(pin_actions(&mapped), Some([0, 0x4606, 0, 0, 0, 0, 0]));
+        let unmapped = [0x05ac_8052, 0x9100_0000, 0, 0, 0];
+        assert_eq!(pin_actions(&unmapped), Some([0; PIN_SETS]));
+        // Asahi's example: the debug UART on pin set 2.
+        assert_eq!(
+            pin_actions(&[0x05ac_8052, 0x4474_0000, 0x306, 0, 0]),
+            Some([0, 0, 0x306, 0, 0, 0, 0])
+        );
+        assert_eq!(pin_actions(&[0x05ac_8050, 0x4606_0606]), None);
     }
 
     #[test]
