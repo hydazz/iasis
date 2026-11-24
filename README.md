@@ -38,7 +38,7 @@ mise run host:build
 
 The host tools are `target/release/iasis` for board control and `target/release/iasisd`, the [host agent](#host-agent). Keep `iasis-gateway` beside both. The agent needs read/write access to the management USB device. On Linux, the [Debian package](crates/iasis/README.md#debian-package) installs them with that access.
 
-The build compiles the restore engine's C libraries from source. Install their build tools first: on macOS, the Xcode command line tools and `brew install autoconf automake libtool pkg-config cmake`; on Debian or Ubuntu, `build-essential git autoconf automake libtool pkg-config cmake libpcap-dev`.
+The build compiles the restore engine's C libraries from source. Install their build tools first: on macOS, the Xcode command line tools and `brew install autoconf automake libtool pkg-config cmake`; on Debian or Ubuntu, `build-essential git autoconf automake libtool pkg-config cmake libpcap-dev libusb-1.0-0-dev`.
 
 | Task               | Output                                                            |
 | ------------------ | ----------------------------------------------------------------- |
