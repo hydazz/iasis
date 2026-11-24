@@ -1,11 +1,10 @@
 monorepo_root = true
 
 [tools]
+# On Windows the host tools build under MSYS2, with rustup's default host set
+# to x86_64-pc-windows-gnu as RestoreKit does.
 python = { version = "3.14.10", os = ["linux", "macos"] }
-rust = { version = "1.100.0", components = "rustfmt,clippy", targets = "thumbv8m.main-none-eabihf,x86_64-pc-windows-gnu", os = [
-  "linux",
-  "macos",
-] }
+rust = { version = "1.100.0", components = "rustfmt,clippy", targets = "thumbv8m.main-none-eabihf" }
 uv = { version = "0.13.9", os = ["linux", "macos"] }
 ruff = { version = "0.17.6", os = ["linux", "macos"] }
 lefthook = { version = "2.2.2", os = ["linux", "macos"] }
@@ -13,10 +12,7 @@ jactionlint = { version = "v2.6.0", os = ["linux", "macos"] }
 oxfmt = { version = "0.75.0", os = ["linux", "macos"] }
 node = { version = "26.13.1", os = ["linux", "macos"] }
 "npm:pyright" = { version = "1.1.414", os = ["linux", "macos"] }
-"github:raspberrypi/pico-sdk-tools" = { version = "2.3.1-0", matching = "picotool", os = [
-  "linux",
-  "macos",
-] }
+"github:raspberrypi/pico-sdk-tools" = { version = "2.3.1-0", matching = "picotool" }
 "cargo:cargo-deb" = { version = "3.8.0", os = ["linux"] }
 
 [settings]
@@ -41,8 +37,8 @@ config_roots = [
 [hooks]
 postinstall = "lefthook install"
 
-# The host tools' C stack. The Windows host tools cross-build here with
-# mingw-w64: their C stack needs GNU autotools.
+# The host tools' C stack. On Windows the bootstrap task installs RestoreKit's
+# MSYS2 packages instead.
 [bootstrap.packages]
 "apt:build-essential" = { os = "linux" }
 "apt:autoconf" = { os = "linux" }
@@ -54,13 +50,12 @@ postinstall = "lefthook install"
 "apt:patch" = { os = "linux" }
 "apt:libpcap-dev" = { os = "linux" }
 "apt:libusb-1.0-0-dev" = { os = "linux" }
-"apt:gcc-mingw-w64-x86-64" = { os = "linux" }
-"apt:g++-mingw-w64-x86-64" = { os = "linux" }
 "brew:autoconf" = { os = "macos" }
 "brew:automake" = { os = "macos" }
 "brew:libtool" = { os = "macos" }
 "brew:pkgconf" = { os = "macos" }
 "brew:cmake" = { os = "macos" }
+"winget:MSYS2.MSYS2" = { os = "windows" }
 
 [tasks.deps]
 run = ["uv sync --locked", "cargo fetch --locked"]
@@ -109,13 +104,24 @@ depends = ["firmware:build"]
 env = { IASIS_OS_UF2 = "{{config_root}}/target/thumbv8m.main-none-eabihf/release/IasisOS.uf2" }
 run = "cargo build --locked --release -p iasis"
 
-[tasks."host:build-windows"]
-depends = ["firmware:build"]
-env = { IASIS_OS_UF2 = "{{config_root}}/target/thumbv8m.main-none-eabihf/release/IasisOS.uf2" }
-run = "cargo build --locked --release -p iasis --target x86_64-pc-windows-gnu"
-
-[tasks."host:lint-windows"]
-run = "cargo clippy --locked -p iasis -p iasis-api --all-targets --target x86_64-pc-windows-gnu -- -D warnings"
+[tasks.bootstrap]
+run = []
+shell = "C:/msys64/usr/bin/bash.exe -lc"
+run_windows = '''
+pacman -S --needed --noconfirm \
+    base-devel \
+    autoconf \
+    automake \
+    libtool \
+    autoconf-archive \
+    gettext-devel \
+    pkgconf \
+    perl \
+    mingw-w64-x86_64-gcc \
+    mingw-w64-x86_64-pkgconf \
+    mingw-w64-x86_64-cmake \
+    mingw-w64-x86_64-nasm
+'''
 
 [tasks."firmware:build"]
 run = [
