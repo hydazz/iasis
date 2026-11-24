@@ -116,9 +116,9 @@ jobs:
         run: mise run host:build
 
   windows:
-    name: Windows app
+    name: Windows
     runs-on: windows-2025
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       contents: read
     defaults:
@@ -130,10 +130,33 @@ jobs:
         with:
           persist-credentials: false
 
+      # Rust's GNU host, as RestoreKit builds on Windows: the host tools' build
+      # scripts then link with MinGW rather than MSVC.
+      - name: Use the GNU Rust host
+        run: rustup set default-host x86_64-pc-windows-gnu
+
       - name: Setup Mise
         uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
           working_directory: apps/windows
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@3c51bf698df1e37b2261f53cb67797b97761185c # v2.34.0
+        with:
+          msystem: MINGW64
+          update: false
+          path-type: inherit
+          install: >-
+            base-devel autoconf automake libtool autoconf-archive gettext-devel pkgconf perl
+            mingw-w64-x86_64-gcc mingw-w64-x86_64-pkgconf mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-nasm
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Build host software
+        shell: msys2 {0}
+        run: mise run host:build-windows
 
       - name: Lint Windows app
         run: mise run //apps/windows:lint
