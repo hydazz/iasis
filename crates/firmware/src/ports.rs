@@ -119,6 +119,19 @@ fn holds(supply: Supply, millivolts: u16, vbus: Option<u16>) -> bool {
     }
 }
 
+/// What an idle port's controller presents on CC.
+#[derive(Clone, Copy, PartialEq)]
+enum Watch {
+    /// Not set since the controller last reset or failed.
+    Unset,
+    /// No termination.
+    Released,
+    /// Rp alternating between the lines until one shows Rd.
+    Looking,
+    /// Rp on the line a sink holds.
+    Holding(Orientation),
+}
+
 async fn until(deadline: Option<Instant>) {
     match deadline {
         Some(deadline) => Timer::at(deadline).await,
@@ -434,7 +447,7 @@ impl Ports {
         let mut strikes = 0;
         let mut struck = Instant::MIN;
         loop {
-            port.idle().await;
+            port.idle(&mut int).await;
             let outcome = port.attachment(&mut int).await;
             let Some((error, orientation)) = port.finish(outcome).await else {
                 continue;
@@ -684,24 +697,88 @@ impl Port<'_> {
         }
     }
 
-    /// Disabled or waiting for a supply.
-    async fn idle(&self) {
+    /// Disabled, or waiting for a supply. A waiting port looks for a sink
+    /// with Rp alone, so a target shows as waiting for power. The
+    /// controller's reset state is Rd on both CC lines, which a dual-role
+    /// target answers by powering the port itself; a disabled port presents
+    /// nothing.
+    async fn idle(&self, int: &mut Input<'static>) {
+        let mut watch = Watch::Unset;
+        let mut open_since = None;
         loop {
             let enabled = self.status().enabled;
+            if enabled && self.shared.grant.get().supply != Supply::Off {
+                return;
+            }
             self.update(|status| {
                 status.state = if enabled {
                     PortState::WaitingPower
                 } else {
                     PortState::Disabled
                 };
+                status.orientation = match watch {
+                    Watch::Holding(orientation) => Some(orientation),
+                    _ => None,
+                };
                 if !enabled && status.command_result == CommandResult::Pending {
                     status.command_result = CommandResult::Complete;
                 }
             });
-            if enabled && self.shared.grant.get().supply != Supply::Off {
-                return;
+            if !enabled {
+                if watch != Watch::Released {
+                    let released = match self.io.lock().await.port(self.index).await {
+                        Ok(bus) => phy::release(bus).await.is_ok(),
+                        Err(_) => false,
+                    };
+                    watch = if released {
+                        Watch::Released
+                    } else {
+                        Watch::Unset
+                    };
+                }
+                self.shared.wake.wait().await;
+                continue;
             }
-            self.shared.wake.wait().await;
+            if matches!(watch, Watch::Unset | Watch::Released) {
+                if self.phy.init().await.is_err() || self.phy.toggle().await.is_err() {
+                    watch = Watch::Unset;
+                    self.shared.wake.wait().await;
+                    continue;
+                }
+                watch = Watch::Looking;
+                open_since = None;
+            }
+            let detached = open_since.map(|since| Instant::from_millis(since) + CC_DEBOUNCE);
+            if self.attend(int, detached).await.is_err() {
+                watch = Watch::Unset;
+                continue;
+            }
+            match watch {
+                Watch::Looking => {
+                    if let Some(orientation) = self.phy.toggled() {
+                        // Rp on the sink's line shows it leave.
+                        watch = match self.phy.attach(orientation).await {
+                            Ok(()) => Watch::Holding(orientation),
+                            Err(_) => Watch::Unset,
+                        };
+                    }
+                }
+                Watch::Holding(_) => {
+                    if power::cc_detached(
+                        &mut open_since,
+                        self.phy.cc_open(),
+                        now_ms(),
+                        CC_DEBOUNCE.as_millis(),
+                    ) {
+                        open_since = None;
+                        watch = match self.phy.toggle().await {
+                            Ok(()) => Watch::Looking,
+                            Err(_) => Watch::Unset,
+                        };
+                    }
+                }
+                Watch::Unset | Watch::Released => {}
+            }
         }
     }
 
