@@ -449,8 +449,6 @@ async fn main(_spawner: Spawner) {
                 || board.bus.brick_upgrade_pending(&next)
             {
                 Supply::Off
-            } else if host_tier.is_some() && ports.restoring_on_host() {
-                Supply::HostPresence
             } else if brick_ports > 0 {
                 Supply::Brick
             } else if host_tier.is_some() {
