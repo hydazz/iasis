@@ -188,6 +188,7 @@ async fn main(_spawner: Spawner) {
     let configured = Cell::new(false);
     let suspended = Cell::new(false);
     let host_budget = Cell::new(0u16);
+    let usb3_host = Cell::new(false);
     let session = usb::Session::default();
     let mut management = usb::Management {
         info,
@@ -280,9 +281,11 @@ async fn main(_spawner: Spawner) {
     let measured = Cell::new(Measured::default());
     let edges = RefCell::new(Edges::default());
     let revised = Signal::<NoopRawMutex, ()>::new();
+    // A host that advertises Default USB power on CC gives a configured
+    // device what USB grants on its link, or the allowance it declared.
     let legacy_ma = || {
         if configured.get() && !suspended.get() {
-            host_budget.get()
+            iasis_pd::power::default_allowance(host_budget.get(), usb3_host.get())
         } else {
             0
         }
@@ -389,7 +392,9 @@ async fn main(_spawner: Spawner) {
             let readings = measured.get();
             next.aggregate_power_fault = readings.host_limiter_fault;
             if hub_readable && Instant::now().as_millis() >= links_due {
-                ports.links(hublink::links(&io).await);
+                let hub = hublink::links(&io).await;
+                usb3_host.set(hub.is_some_and(|(_, usb3)| usb3));
+                ports.links(hub.map(|(links, _)| links));
                 links_due = Instant::now().as_millis() + 500;
             }
             next.ports = ports.statuses();

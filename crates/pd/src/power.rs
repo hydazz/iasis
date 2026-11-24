@@ -38,12 +38,16 @@ const PRESENCE_TIERS: [HostLimit; 4] = [
     },
 ];
 
-/// Reserve 3.5 W at 4.5 V, rounded up to 800 mA, before target presence.
-/// AP22653 upper bounds include 1% resistors and manufacturer limit curves.
+/// The board's own load on host power: the modelled 2.9 W with five Gen 2
+/// links, the OLED and five cable markers, at 4.5 V and rounded up.
+const BOARD_MA: u32 = 650;
+
+/// Reserve the board's load before target presence. AP22653 upper bounds
+/// include 1% resistors and manufacturer limit curves.
 pub fn host_limit(allowance_ma: u16) -> Option<HostLimit> {
     PRESENCE_TIERS
         .into_iter()
-        .find(|tier| u32::from(allowance_ma) >= 800 + u32::from(tier.upper_ma))
+        .find(|tier| u32::from(allowance_ma) >= BOARD_MA + u32::from(tier.upper_ma))
 }
 
 fn below_brick_handover(bus_adc: Option<u16>) -> bool {
@@ -82,8 +86,19 @@ pub fn presence_limit(
     })
 }
 
-/// Default Rp carries no evidence of a Pi's shared allowance. The explicit
-/// hint includes this board's load and is used only on a configured USB link.
+/// What a configured link with Default USB power on CC gives, this board's
+/// own load included: the allowance its host declared, else what USB grants
+/// a configured device, 900 mA on USB 3 and 500 mA on USB 2.
+pub fn default_allowance(declared_ma: u16, usb3: bool) -> u16 {
+    match declared_ma {
+        0 if usb3 => 900,
+        0 => 500,
+        declared => declared,
+    }
+}
+
+/// The host's allowance from its CC level, with a configured link's
+/// allowance for Default USB power.
 pub fn host_allowance(cc_level: u8, hint_ma: u16) -> u16 {
     match cc_level {
         3 => 3000,
@@ -865,14 +880,20 @@ mod tests {
     }
 
     #[test]
-    fn host_tiers_never_spend_the_board_reservation_or_guess_legacy_power() {
-        assert_eq!(host_limit(900), None);
-        assert_eq!(host_limit(1200).unwrap().bits, 0);
+    fn host_tiers_never_spend_the_board_reservation() {
+        // What USB grants a configured USB 3 device opens the smallest tier;
+        // USB 2's opens none.
+        assert_eq!(default_allowance(0, true), 900);
+        assert_eq!(default_allowance(0, false), 500);
+        assert_eq!(default_allowance(600, true), 600);
+        assert_eq!(host_limit(500), None);
+        assert_eq!(host_limit(900).unwrap().bits, 0);
+        assert_eq!(host_limit(1200).unwrap().bits, 1);
         assert_eq!(host_limit(1500).unwrap().bits, 1);
         assert_eq!(host_limit(3000).unwrap().bits, 3);
         for allowance in 0..=3000 {
             if let Some(tier) = host_limit(allowance) {
-                assert!(tier.upper_ma + 800 <= allowance);
+                assert!(u32::from(tier.upper_ma) + BOARD_MA <= u32::from(allowance));
             }
         }
         assert_eq!(host_allowance(1, 0), 0);
