@@ -15,6 +15,7 @@ iasis-api.workspace = true
 iasis-protocol.workspace = true
 iasis-pd.workspace = true
 indicatif = { version = "0.18", default-features = false, features = ["unicode-width"] }
+keepawake = "0.6.1"
 nusb = "0.2.9"
 plist = "1.10.3"
 serde = { workspace = true, features = ["std"] }
@@ -79,6 +80,11 @@ assets = [
   [
     "debian/com.hydaz.iasis.policy",
     "usr/share/polkit-1/actions/",
+    "644",
+  ],
+  [
+    "debian/com.hydaz.iasis.rules",
+    "usr/share/polkit-1/rules.d/",
     "644",
   ],
   [
