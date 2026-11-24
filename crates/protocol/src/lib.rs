@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 20;
+pub const VERSION: u16 = 21;
 pub const MAX_PACKET: usize = 1408;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
@@ -169,8 +169,6 @@ pub enum AppleMode {
     /// Apple Debug USB; whether the target is in DFU is not established.
     Kis,
     KisDfu,
-    /// A usbmux-capable descriptor whose service has not been identified.
-    Mux,
     Restored,
     Normal,
 }
