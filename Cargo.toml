@@ -21,14 +21,14 @@ iasis-api = { path = "crates/api" }
 iasis-protocol = { path = "crates/protocol" }
 iasis-pd = { path = "crates/pd" }
 postcard = { version = "1.1", default-features = false }
-restorekit = { version = "=0.6.4", default-features = false }
-restorekit-sys = "=0.6.4"
+restorekit = { version = "=0.6.6", default-features = false }
+restorekit-sys = "=0.6.6"
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 
-# RestoreKit 0.6.4 with fixes not yet released upstream.
+# RestoreKit 0.6.6 with fixes not yet released upstream.
 [patch.crates-io]
-restorekit = { git = "https://github.com/hydazz/restorekit", rev = "b9d6c874c827e0bc3ac8361089076cec36a42c39" }
-restorekit-sys = { git = "https://github.com/hydazz/restorekit", rev = "b9d6c874c827e0bc3ac8361089076cec36a42c39" }
+restorekit = { git = "https://github.com/hydazz/restorekit", rev = "73f349ff9694cb6295e8774049269a9550c76bb5" }
+restorekit-sys = { git = "https://github.com/hydazz/restorekit", rev = "73f349ff9694cb6295e8774049269a9550c76bb5" }
 
 [profile.release]
 codegen-units = 1
