@@ -109,12 +109,7 @@ fn sharing_target(status: &Status, snapshot: &Snapshot, port: Port) -> Option<u6
     #[cfg(target_os = "linux")]
     {
         // Linux may have to switch a booted device into its network configuration.
-        if state.restoring()
-            || !matches!(
-                device.apple.as_ref()?.mode,
-                AppleMode::Mux | AppleMode::Normal
-            )
-        {
+        if state.restoring() || device.apple.as_ref()?.mode != AppleMode::Normal {
             return None;
         }
         topology::linux_usb_id(
@@ -212,12 +207,10 @@ type Identified = [Option<(Enumeration, AppleDevice)>; PORT_COUNT];
 
 fn unidentified_usb(snapshot: &Snapshot, port: Port) -> Option<&UsbDevice> {
     dfu::direct_device(snapshot, port).filter(|device| {
-        device.apple.as_ref().is_some_and(|apple| {
-            matches!(
-                apple.mode,
-                AppleMode::Kis | AppleMode::Mux | AppleMode::Normal
-            )
-        })
+        device
+            .apple
+            .as_ref()
+            .is_some_and(|apple| matches!(apple.mode, AppleMode::Kis | AppleMode::Normal))
     })
 }
 
@@ -1016,12 +1009,7 @@ mod tests {
             serial_number: serial.clone(),
             product: None,
             speed: Speed::High,
-            apple: AppleDevice::from_usb(
-                vendor,
-                product,
-                serial.as_deref(),
-                crate::identity::tests::functions(product),
-            ),
+            apple: AppleDevice::from_usb(vendor, product, 0, None, serial.as_deref()),
             #[cfg(target_os = "macos")]
             macos_attachment: None,
             #[cfg(not(target_os = "macos"))]
@@ -1116,7 +1104,7 @@ mod tests {
             let apple = device.apple.as_mut().unwrap();
             apple.identity = Identity::Known {
                 ecid,
-                source: IdentitySource::Lockdown,
+                source: IdentitySource::UsbSerial,
             };
             apple.model = Some(model.into());
             device
@@ -1137,7 +1125,7 @@ mod tests {
         let row = sample(&mut status, &usb, &models);
         assert_eq!(row.device.as_deref(), Some("iPad (10th generation)"));
         assert_eq!(row.ecid.as_deref(), Some("000000000000002a"));
-        assert_eq!(row.mode, Some(AppleMode::Mux));
+        assert_eq!(row.mode, Some(AppleMode::Normal));
 
         // A target that leaves USB is still the target on the connector.
         usb.ports[0].devices.clear();
@@ -1181,7 +1169,7 @@ mod tests {
         assert_eq!(dfu.identity(None), Some(42));
         assert_eq!(seen(Usb::Absent, None).identity(Some(42)), Some(42));
         assert_eq!(
-            seen(Usb::Apple(AppleMode::Mux), None).identity(Some(42)),
+            seen(Usb::Apple(AppleMode::Normal), None).identity(Some(42)),
             Some(42)
         );
         assert_eq!(
@@ -1224,7 +1212,7 @@ mod tests {
         );
         // Apple Debug USB alone does not say the target is in DFU.
         assert_eq!(mode(&usb, two), Usb::Apple(AppleMode::Kis));
-        assert_eq!(mode(&usb, three), Usb::Apple(AppleMode::Mux));
+        assert_eq!(mode(&usb, three), Usb::Apple(AppleMode::Normal));
         assert_eq!(mode(&usb, four), Usb::Other);
         assert_eq!(mode(&usb, five), Usb::Apple(AppleMode::Recovery));
         // A KIS read of the same enumeration names the mode.
@@ -1263,7 +1251,7 @@ mod tests {
             progress: 50,
         };
         let seen = Observed {
-            usb: Usb::Apple(AppleMode::Mux),
+            usb: Usb::Apple(AppleMode::Normal),
             ecid: None,
         };
         let mut status = attached([Some(3), Some(4), None, None, None]);
@@ -1314,7 +1302,7 @@ mod tests {
         let mut usb = snapshot();
         usb.ports[0].devices.push(device(one, 0x05ac, 0x12ab, None));
         let booted = Observed {
-            usb: Usb::Apple(AppleMode::Mux),
+            usb: Usb::Apple(AppleMode::Normal),
             ecid: None,
         };
         let dfu = Observed {

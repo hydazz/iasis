@@ -126,7 +126,6 @@ nonisolated struct AgentState: Codable, Equatable {
         case recovery
         case kis
         case kisDfu = "kis_dfu"
-        case mux
         case restored
         case normal
     }
