@@ -1,6 +1,7 @@
 //! USB management of an Iasis board.
 
 pub mod agent;
+mod awake;
 pub mod batch;
 pub mod dfu;
 pub mod home;

@@ -1,0 +1,8 @@
+// The iasis service holds a sleep lock while it restores a device or updates
+// a board. It has no login session, so logind asks polkit for it.
+polkit.addRule(function (action, subject) {
+    if (action.id == "org.freedesktop.login1.inhibit-block-sleep" &&
+        subject.user == "iasis") {
+        return polkit.Result.YES;
+    }
+});
