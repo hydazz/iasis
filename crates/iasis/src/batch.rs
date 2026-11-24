@@ -357,7 +357,7 @@ fn in_dfu(
     target: &TargetTracker,
     snapshot: &topology::Snapshot,
 ) -> Option<(AppleMode, DeviceModel)> {
-    let device = dfu::direct_device(snapshot, target.port)?;
+    let device = snapshot.target(target.port)?;
     match target.observe(board.info().serial, snapshot) {
         Observation::Present { mode } if engine.restores(mode) => {
             Some((mode, DeviceModel::read(device)))
@@ -927,12 +927,12 @@ fn enter_dfu(
                 &snapshot,
                 Some(previous),
             );
+            if *acknowledged && assessment.unclear() {
+                return true;
+            }
             if matches!(
                 assessment.signal,
-                Signal::MultipleTransports
-                    | Signal::Ambiguous
-                    | Signal::DifferentDevice
-                    | Signal::Fault
+                Signal::Ambiguous | Signal::DifferentDevice | Signal::Fault
             ) || (assessment.signal == Signal::Restoring
                 && dfu::job_in_progress(&status.ports[port.index()]))
                 || matches!(

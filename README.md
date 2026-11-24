@@ -160,8 +160,6 @@ target/release/iasis --serial 0123456789abcdef restore --ports 1,2,3,4,5 --erase
 
 Iasis starts one restore process for each authorized ECID. A failed restore ends that target’s job.
 
-Iasis cannot restore or revive the MacBook Neo yet. After its first boot stage the Neo stays on Apple Debug USB, and RestoreKit waits for it to leave. Apple Configurator can restore it once `iasis dfu` has put it in DFU.
-
 The progress bar follows the whole restore. The host shows the current stage alongside it. Repeated firmware and image transfers can hold the bar at the same percentage until the next milestone. Logs and working files go under `restores/` in the cache directory, or the directory passed to `--logs`. Allow space for an extracted OS image per worker. Iasis matches each image to the target's chip and board IDs, or to its product type when only a model identifier is available. The restore program checks Apple signing.
 
 On macOS 27.3, run this once as the user running Finder to suppress automatic DFU windows. This undocumented preference also affects automatic reveals for other connected Apple devices.
