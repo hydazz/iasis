@@ -92,7 +92,7 @@ enum Command {
         #[arg(long)]
         watch: bool,
     },
-    /// Declare remaining USB-A host current, including Iasis; zero clears it
+    /// Declare a USB-A host's current for Iasis, in place of what USB grants; zero clears it
     HostBudget {
         #[arg(value_parser = clap::value_parser!(u16).range(0..=1600))]
         milliamps: u16,
@@ -374,9 +374,13 @@ fn main() -> Result<()> {
 const SELECT: &str = "select a board with --board NAME or --serial SERIAL; see `iasis list`";
 
 fn host_budget_text(milliamps: u16) -> String {
-    format!(
-        "Legacy allowance set to {milliamps} mA including Iasis; native USB-C advertisement takes priority."
-    )
+    if milliamps == 0 {
+        "Allowance cleared; the board takes what USB grants on its link.".to_owned()
+    } else {
+        format!(
+            "Allowance set to {milliamps} mA including Iasis; native USB-C advertisement takes priority."
+        )
+    }
 }
 
 fn power_text(port: Port, state: Power) -> String {
