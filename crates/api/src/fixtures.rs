@@ -86,7 +86,6 @@ fn state() -> State {
         AppleMode::Recovery,
         AppleMode::Kis,
         AppleMode::KisDfu,
-        AppleMode::Mux,
         AppleMode::Restored,
         AppleMode::Normal,
     ];

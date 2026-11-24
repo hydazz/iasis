@@ -168,7 +168,6 @@ private extension AgentState.Port {
         case .portDfu: "Port DFU"
         case .restored: "Restore Service"
         case .normal: "Started Up"
-        case .mux: "System"
         case nil: nil
         }
     }

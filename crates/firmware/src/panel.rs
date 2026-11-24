@@ -318,12 +318,7 @@ mod tests {
         }
         // A host that sees the running system leaves the request pulsing
         // until the board withdraws it.
-        for mode in [
-            AppleMode::Normal,
-            AppleMode::Mux,
-            AppleMode::PortDfu,
-            AppleMode::Kis,
-        ] {
+        for mode in [AppleMode::Normal, AppleMode::PortDfu, AppleMode::Kis] {
             status.ports[0].observed = seen(mode);
             assert_eq!(indicators(&status, &button, 0)[5], [0, 2, 6]);
             status.ports[0].request = None;

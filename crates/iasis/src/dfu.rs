@@ -179,7 +179,6 @@ impl Assessment {
             Some(AppleMode::Kis) => "Apple Debug USB (05ac:1881)",
             Some(AppleMode::Recovery) => "Recovery mode",
             Some(AppleMode::PortDfu) => "Port DFU",
-            Some(AppleMode::Mux) => "Apple usbmux interface",
             Some(AppleMode::Normal) => "Normal mode",
             Some(AppleMode::Restored) => "Restore service",
             None => "",
@@ -596,7 +595,7 @@ mod tests {
         slot.superspeed = Companion::Mapped {
             topology: super_path.clone(),
         };
-        let mut direct = apple(AppleMode::Mux, 0x12ac, None);
+        let mut direct = apple(AppleMode::Restored, 0x12ac, None);
         direct.topology = super_path;
         direct.product = Some("Mac".into());
         direct.serial_number = Some("00008140-0000000000001234".into());
@@ -793,7 +792,12 @@ mod tests {
         st.ports[0].state = PortState::Ready;
         let mut usb = snapshot();
         for (mode, ecid, supports, expected) in [
-            (AppleMode::Mux, Some(42), true, RestoreAccess::Unavailable),
+            (
+                AppleMode::Normal,
+                Some(42),
+                true,
+                RestoreAccess::Unavailable,
+            ),
             (
                 AppleMode::PortDfu,
                 Some(42),
@@ -824,7 +828,7 @@ mod tests {
         let mut usb = snapshot();
         usb.ports[0]
             .devices
-            .push(apple(AppleMode::Mux, 0x12ac, Some(42)));
+            .push(apple(AppleMode::Normal, 0x1905, Some(42)));
         st.ports[0].debug_actions =
             DebugActions::Listed([0x0106, 0x0105, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         for (model, expected) in [
