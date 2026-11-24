@@ -61,6 +61,7 @@ async fn configure(bus: &mut Bus, outputs: &mut Outputs) -> Result<(), PortError
         read(bus, register, &mut flags).await?;
         write(bus, register, flags[0] | mask).await?;
     }
+    write(bus, hub::I2S_FEATURES, 0).await?;
     bus.write(hub::ADDRESS, &hub::ATTACH).await
 }
 
