@@ -448,6 +448,7 @@ impl RestoreEngine {
             let spawn = thread::Builder::new()
                 .name(format!("restore-{ecid:x}"))
                 .spawn(move || {
+                    let _awake = crate::awake::hold(&format!("{operation:?} of {ecid:016x}"));
                     let result = image.check_unchanged().and_then(|()| {
                         run_worker(command, &worker_status, stdout, stderr, &changes)
                     });
