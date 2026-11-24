@@ -250,10 +250,7 @@ fn run_batch(
         };
         let selected = select_ports(ports, &status)?;
         let (targets, failed) = enter_dfu(board, &link, &engine, &selected)?;
-        (
-            resolve(&link, &engine, &targets, &images, source.latest)?,
-            failed,
-        )
+        (resolve(&link, &targets, &images, source.latest)?, failed)
     };
     let running = start(&link, &engine, &images, targets, operation, failed, button)?;
     // Each worker keeps the host awake while it restores.
@@ -311,7 +308,7 @@ pub fn listen(
                 "not all selected targets reached verified DFU; no restore started"
             );
             let latest = matches!(asked, Asked::Client { latest: true, .. });
-            resolve(link, engine, &targets, images, latest)?
+            resolve(link, &targets, images, latest)?
         };
         start(link, engine, images, targets, operation, false, true)
     })();
@@ -355,17 +352,16 @@ pub fn listen(
     Ok(None)
 }
 
-/// The DFU a verified target is in, when the host restores that mode, and
-/// its model.
+/// The mode a verified target is in, when a restore starts from it, and its
+/// model.
 fn in_dfu(
     board: &Board,
-    engine: &RestoreEngine,
     target: &TargetTracker,
     snapshot: &topology::Snapshot,
 ) -> Option<(AppleMode, DeviceModel)> {
     let device = snapshot.target(target.port)?;
     match target.observe(board.info().serial, snapshot) {
-        Observation::Present { mode } if engine.restores(mode) => {
+        Observation::Present { mode } if RestoreEngine::starts_from(mode) => {
             Some((mode, DeviceModel::read(device)))
         }
         _ => None,
@@ -378,7 +374,6 @@ fn in_dfu(
 /// release, and fetches what it lacks, which the target's port shows.
 fn resolve(
     link: &Link,
-    engine: &RestoreEngine,
     targets: &VerifiedTargets,
     images: &Images,
     latest: bool,
@@ -386,7 +381,7 @@ fn resolve(
     let (_, snapshot) = link.observe()?;
     let mut models = Vec::new();
     for (target, _) in targets {
-        let (_, model) = in_dfu(link.board(), engine, target, &snapshot)
+        let (_, model) = in_dfu(link.board(), target, &snapshot)
             .with_context(|| format!("port {} lost its DFU identity", target.port.number()))?;
         models.push(model);
     }
@@ -451,7 +446,7 @@ fn start(
     let (status, snapshot) = link.observe()?;
     let mut modes = Vec::new();
     targets.retain(|(target, generation, image)| {
-        let mode = in_dfu(link.board(), engine, target, &snapshot)
+        let mode = in_dfu(link.board(), target, &snapshot)
             .filter(|(_, model)| image.restores(model))
             .map(|(mode, _)| mode)
             .filter(|_| {
@@ -760,7 +755,7 @@ fn prepare_selected(
         "not all selected targets reached verified DFU; no erase armed"
     );
     // Fetching an image can take long enough for a target to leave.
-    let targets = resolve(link, engine, &targets, images, false)?;
+    let targets = resolve(link, &targets, images, false)?;
     // The arm names each attachment as it is now, in DFU.
     for (target, generation, _) in &targets {
         draft.generations[target.port.index()] = *generation;
@@ -839,6 +834,7 @@ fn enter_dfu(
     let mut pending = Vec::new();
     let mut targets = Vec::new();
     let mut failed = false;
+    let mut recovering = false;
     for &Target {
         port,
         generation,
@@ -866,10 +862,10 @@ fn enter_dfu(
             port.number()
         );
         match assessment.restore_access(&status.ports[port.index()], |mode| engine.restores(mode)) {
-            protocol::RestoreAccess::InDfu => {
+            protocol::RestoreAccess::InDfu | protocol::RestoreAccess::InRecovery => {
                 match TargetTracker::pin(board.info().serial, &snapshot, port) {
                     Ok(target) if ecid.is_some_and(|id| id != target.ecid) => {
-                        eprintln!("port {}: another device is in DFU", port.number());
+                        eprintln!("port {}: another device is there", port.number());
                         failed = true;
                     }
                     Ok(target) => targets.push((target, generation)),
@@ -881,6 +877,38 @@ fn enter_dfu(
                 continue;
             }
             protocol::RestoreAccess::EnterDfu => {}
+            protocol::RestoreAccess::EnterRecovery => {
+                let Some(target) = assessment.ecid else {
+                    eprintln!("port {}: {}", port.number(), assessment.describe());
+                    failed = true;
+                    continue;
+                };
+                match crate::restore::enter_recovery(target) {
+                    Ok(()) => {
+                        println!("port {} entering recovery", port.number());
+                        recovering = true;
+                        // The target restarts into recovery, which its ECID
+                        // ties to the selection.
+                        pending.push((
+                            port,
+                            generation,
+                            true,
+                            Attempt::new(
+                                board.info().serial,
+                                port,
+                                &assessment,
+                                &snapshot,
+                                protocol::CommandResult::Acknowledged,
+                            ),
+                        ));
+                    }
+                    Err(error) => {
+                        eprintln!("port {}: {error}", port.number());
+                        failed = true;
+                    }
+                }
+                continue;
+            }
             _ => {
                 eprintln!("port {}: {}", port.number(), assessment.describe());
                 failed = true;
@@ -903,7 +931,9 @@ fn enter_dfu(
             }
         }
     }
-    let deadline = Instant::now() + Duration::from_secs(30);
+    // An iPhone or iPad takes longer to restart into recovery than a target
+    // takes to enter DFU.
+    let deadline = Instant::now() + Duration::from_secs(if recovering { 120 } else { 30 });
     let mut seen = link.changes().count();
     while !pending.is_empty() && Instant::now() < deadline {
         let (status, snapshot) = link.observe()?;
@@ -952,14 +982,12 @@ fn enter_dfu(
                 failed = true;
                 return false;
             }
-            if assessment
-                .usb_mode
-                .is_some_and(|mode| engine.restores(mode))
+            if assessment.usb_mode.is_some_and(RestoreEngine::starts_from)
                 && assessment.outcome != Some(Outcome::IdentityUnverified)
                 && let Ok(target) = TargetTracker::pin(board.info().serial, &snapshot, *port)
             {
                 if pinned.is_some_and(|id| id != target.ecid) {
-                    eprintln!("port {}: another device entered DFU", port.number());
+                    eprintln!("port {}: another device took its place", port.number());
                     failed = true;
                 } else {
                     targets.push((target, current));
@@ -977,7 +1005,7 @@ fn enter_dfu(
     }
     for (port, _, _, _) in pending {
         eprintln!(
-            "port {}: no verified DFU identity before deadline",
+            "port {}: no verified identity in DFU or recovery before the deadline",
             port.number()
         );
         failed = true;
@@ -988,7 +1016,7 @@ fn enter_dfu(
                 targets
                     .iter()
                     .any(|(target, _)| target.port == selected.port && target.ecid == expected),
-                "port {} did not reach DFU with the selected ECID; no restore started",
+                "port {} did not reach DFU or recovery with the selected ECID; no restore started",
                 selected.port.number()
             );
         }

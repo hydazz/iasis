@@ -80,7 +80,7 @@ Port lights outside the selection dim. While the button is held, only the ports 
 
 After a DFU the port pulses blue. It turns steady blue once a host sees the target in DFU, which needs the [host agent](#host-agent). The [light table](crates/firmware/README.md#controls-and-status) lists every colour.
 
-A steady white port light marks a powered device without a PD contract. It can use USB normally. DFU leaves target data intact and works with Apple Configurator. `power <port> off` disables a port. `power <port> on` enables it and retries a fault. The selected board stores its name and light brightness in flash.
+A steady white port light marks a device Iasis cannot act on, such as a USB peripheral or a laptop. It can use USB normally. DFU leaves target data intact and works with Apple Configurator. `power <port> off` disables a port. `power <port> on` enables it and retries a fault. The selected board stores its name and light brightness in flash.
 
 Native USB-C uses the host's advertised current. With a legacy A-to-C connection, set the remaining shared USB allowance, including Iasis and after subtracting other loads:
 
@@ -154,7 +154,7 @@ While an image is being fetched for a target, its port pulses purple, the OLED l
 
 ### Restore
 
-Restores are built into the host tools through [RestoreKit](https://github.com/fcjr/restorekit), for targets in ordinary DFU and Apple Debug USB DFU. On Linux they go through the system usbmuxd.
+Restores are built into the host tools through [RestoreKit](https://github.com/fcjr/restorekit), for targets in ordinary DFU and Apple Debug USB DFU. On Linux they go through the system usbmuxd. An iPhone or iPad the board can't signal into DFU, such as one on a Lightning cable, restarts into recovery mode at the host's request and restores from there. It must trust the host: unlock it and tap Trust when it asks.
 
 ```sh
 target/release/iasis --serial 0123456789abcdef restore --ports 1,2,3,4,5 --erase
@@ -178,7 +178,7 @@ To restore the default behaviour, run `defaults delete com.apple.AMPDeviceDiscov
 
 #### Button restores
 
-With the agent running, the board's Restore hold needs nothing else. Tap to select targets, then hold until the status light turns purple and release. Preparation puts the targets into DFU and fetches any image the agent lacks. Once the erase is ready, the status light blinks purple: hold for three seconds to confirm, or tap to cancel. The agent keeps listening after cancellation and while workers run.
+With the agent running, the board's Restore hold needs nothing else. Tap to select targets, then hold until the status light turns purple and release. Preparation puts the targets into DFU or recovery and fetches any image the agent lacks. Once the erase is ready, the status light blinks purple: hold for three seconds to confirm, or tap to cancel. The agent keeps listening after cancellation and while workers run.
 
 An erase stays ready for 20 seconds. If a long download outlasts your wait, make the Restore hold again once the port is steady blue: the image is in the store by then.
 
@@ -203,7 +203,7 @@ Use USB 2 as a planning estimate for M1–M3 and USB 3 for M4 or newer Macs with
 
 ### Revive
 
-Revive repairs a device and keeps its data: a Mac gets its firmware and recoveryOS reinstalled, an iPhone or iPad its system. It installs the image a restore would and enters DFU the same way, through the agent or without it.
+Revive repairs a device and keeps its data: a Mac gets its firmware and recoveryOS reinstalled, an iPhone or iPad its system. It installs the image a restore would and enters DFU or recovery the same way, through the agent or without it.
 
 ```sh
 target/release/iasis --serial 0123456789abcdef revive --ports 2
