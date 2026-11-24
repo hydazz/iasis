@@ -21,7 +21,7 @@ sudo ln -sf /Applications/Iasis.app/Contents/Helpers/iasis /usr/local/bin/iasis
 
 The cable dims when no board is connected. A ring over its tail shows work under way, and a red mark means a board or port needs attention.
 
-The menu groups devices by board and shows the physical port number beside each name. Choose a device for its actions or choose Get Info to open its inspector. Operation progress updates while the menu is open. Its port list refreshes when it closes.
+The menu groups devices by board, each under its physical port number with a line on what it is doing. Choose a device for its actions or choose Get Info to open its inspector. The menu shows the boards as they were when it opened; the window follows them live.
 
 ## Window
 

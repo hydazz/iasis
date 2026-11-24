@@ -18,7 +18,7 @@ struct IasisApp: App {
         MenuBarExtra {
             StatusMenu(browser: browser)
         } label: {
-            MenuBarLabel(status: MenuBarStatus(model.state), delegate: delegate)
+            MenuBarLabel(status: MenuBarStatus(model.menuSnapshot), delegate: delegate)
         }
         .menuBarExtraStyle(.menu)
 

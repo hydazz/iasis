@@ -7,7 +7,9 @@ import OSLog
 final class AgentModel {
     /// The agent's latest state, or nil while no agent answers.
     private(set) var state: AgentState?
-    /// Keep the titles under the pointer until AppKit finishes tracking the menu.
+    /// The state as of the last time no menu was open, and all the menu bar
+    /// item reads. AppKit tracks a menu in its own run loop mode, so the copy
+    /// waits for the default one.
     private(set) var menuSnapshot: AgentState?
     /// An archive on its way into the agent's store.
     private(set) var importing: Importing?

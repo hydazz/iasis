@@ -66,7 +66,7 @@ struct Device: Identifiable, Equatable {
                 return Activity(job.phase, operation: job.operation)
             }
             return Activity(
-                "\(job.operation.title) \(stage.percent)% (\(stage.name))",
+                "\(job.operation.running) \(stage.percent)%",
                 .working(Double(stage.percent) / 100),
                 symbol: "\(job.operation.symbol).circle"
             )
@@ -177,7 +177,7 @@ struct Activity: Equatable {
     init(_ phase: AgentState.RestorePhase, operation: AgentState.Operation) {
         switch phase {
         case .preparing: self.init("Preparing", .working(nil))
-        case .running: self.init(operation == .revive ? "Reviving" : "Restoring", .working(nil))
+        case .running: self.init(operation.running, .working(nil))
         case .reported: self.init("\(operation.title) Complete", .done)
         case .failed: self.init("\(operation.title) Failed", .failed)
         case .unconfirmed: self.init("\(operation.title) Outcome Unknown", .uncertain)
