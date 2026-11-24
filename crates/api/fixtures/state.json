@@ -401,42 +401,6 @@
           "identifying": false,
           "ecid": "001a79d10e6bc01c",
           "usb": "apple",
-          "mode": "mux",
-          "light": {
-            "hue": "green",
-            "pulse": false,
-            "dim": false
-          },
-          "request": null,
-          "waiting_for_power": false,
-          "powered": true,
-          "wrong_dfu_port": false,
-          "link": "usb2",
-          "power": {
-            "source": "pd",
-            "millivolts": 20000,
-            "milliamps": 3250
-          },
-          "allocated_mw": 68250,
-          "short": false,
-          "fault": null,
-          "dfu": false,
-          "reboot": true,
-          "restore": true,
-          "enabled": true,
-          "job": null,
-          "fetch": null,
-          "stage": null,
-          "result": null
-        },
-        {
-          "number": 1,
-          "generation": 7,
-          "occupied": true,
-          "device": "MacBook Air (M1, 2020)",
-          "identifying": false,
-          "ecid": "001a79d10e6bc01c",
-          "usb": "apple",
           "mode": "restored",
           "light": {
             "hue": "green",
@@ -466,7 +430,7 @@
           "result": null
         },
         {
-          "number": 2,
+          "number": 1,
           "generation": 7,
           "occupied": true,
           "device": "MacBook Air (M1, 2020)",

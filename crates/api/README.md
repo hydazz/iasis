@@ -78,7 +78,7 @@ Each port has:
 | `identifying`                  | A newly attached device is awaiting its first name                                                                            |
 | `ecid`                         | The target's ECID as sixteen hexadecimal digits, once read on this attachment, or null                                        |
 | `usb`                          | What the host finds on the port's USB: `absent`, `other`, `ambiguous` (several devices) or `apple`; null until it has looked  |
-| `mode`                         | With `usb` `apple`, its mode: `dfu`, `port_dfu`, `kis_dfu`, `kis`, `recovery`, `restored`, `mux` or `normal`                  |
+| `mode`                         | With `usb` `apple`, its mode: `dfu`, `port_dfu`, `kis_dfu`, `kis`, `recovery`, `restored` or `normal`                         |
 | `light`                        | What the port's light shows: `hue`, `pulse` and `dim`                                                                         |
 | `request`                      | A signal in progress (`entering_dfu`, `restarting`) or `dfu_unconfirmed`, otherwise null                                      |
 | `waiting_for_power`, `powered` | The port is awaiting power, or has an active supply                                                                           |

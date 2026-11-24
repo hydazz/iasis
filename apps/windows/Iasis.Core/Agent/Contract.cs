@@ -127,7 +127,7 @@ public enum Supply { Brick, Host, Off }
 public enum Usb { Absent, Other, Ambiguous, Apple }
 
 [JsonConverter(typeof(SnakeCaseEnum<AppleMode>))]
-public enum AppleMode { Dfu, PortDfu, Recovery, Kis, KisDfu, Mux, Restored, Normal }
+public enum AppleMode { Dfu, PortDfu, Recovery, Kis, KisDfu, Restored, Normal }
 
 [JsonConverter(typeof(SnakeCaseEnum<Hue>))]
 public enum Hue { Off, Red, Green, White, Blue, Amber, Purple }
