@@ -250,6 +250,13 @@ fn manifest_id(value: &plist::Value) -> Option<u32> {
     }
 }
 
+/// Take a running iPhone or iPad into recovery through the host's usbmuxd.
+/// Since iOS 14.5 this needs the host to be paired with the device, as a
+/// trusted computer is.
+pub fn enter_recovery(ecid: u64) -> Result<()> {
+    restorekit::recovery::enter(ecid, None).map_err(|error| anyhow::anyhow!("{error}"))
+}
+
 /// The chip and board IDs in an ordinary DFU USB serial descriptor.
 pub fn dfu_hardware(serial_descriptor: &str) -> Result<(u32, u32)> {
     let id = |key| -> Result<u32> {
@@ -358,9 +365,20 @@ impl RestoreEngine {
         }
     }
 
-    /// Whether the host restores a target found in this USB mode.
+    /// Whether a restore starts from a target in this USB mode.
+    pub fn starts_from(mode: AppleMode) -> bool {
+        matches!(
+            mode,
+            AppleMode::Dfu | AppleMode::KisDfu | AppleMode::Recovery
+        )
+    }
+
+    /// Whether the host restores a target found in this USB mode: one a
+    /// restore starts from, or a running iPhone or iPad it first takes into
+    /// recovery, where the host's usbmuxd reaches running devices.
     pub fn restores(&self, mode: AppleMode) -> bool {
-        matches!(mode, AppleMode::Dfu | AppleMode::KisDfu)
+        Self::starts_from(mode)
+            || (mode == AppleMode::Normal && crate::native::mux::reaches_running_devices())
     }
 
     /// Start a deliberately selected erase batch. The caller must establish
@@ -399,7 +417,7 @@ impl RestoreEngine {
         for (ipsw, _, mode) in targets {
             ipsw.check_unchanged()?;
             ensure!(
-                self.restores(*mode),
+                Self::starts_from(*mode),
                 "RestoreKit does not restore a target in {mode:?}"
             );
         }
@@ -841,7 +859,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn an_engine_restores_dfu_and_gives_each_worker_its_operation() {
+    fn an_engine_restores_from_dfu_or_recovery_and_gives_each_worker_its_operation() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("image.ipsw");
         archive(&path, Some(MANIFEST));
@@ -855,15 +873,16 @@ mod tests {
             (AppleMode::Dfu, true),
             (AppleMode::KisDfu, true),
             (AppleMode::Kis, false),
-            (AppleMode::Recovery, false),
+            (AppleMode::Recovery, true),
             (AppleMode::PortDfu, false),
-            (AppleMode::Normal, false),
+            // Through recovery, which the host enters first.
+            (AppleMode::Normal, true),
         ] {
             assert_eq!(engine.restores(mode), restores, "{mode:?}");
         }
         assert!(
             engine
-                .start_selected(&[(&ipsw, 0x31, AppleMode::Recovery)], Operation::Revive)
+                .start_selected(&[(&ipsw, 0x31, AppleMode::Normal)], Operation::Revive)
                 .is_err()
         );
         for (ecid, operation, verb) in [
