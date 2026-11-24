@@ -52,9 +52,6 @@ postinstall = "lefthook install"
 "apt:cmake" = { os = "linux" }
 "apt:git" = { os = "linux" }
 "apt:patch" = { os = "linux" }
-"apt:libssl-dev" = { os = "linux" }
-"apt:libcurl4-openssl-dev" = { os = "linux" }
-"apt:zlib1g-dev" = { os = "linux" }
 "apt:libpcap-dev" = { os = "linux" }
 "apt:libusb-1.0-0" = { os = "linux" }
 "apt:dpkg-dev" = { os = "linux" }
@@ -65,7 +62,6 @@ postinstall = "lefthook install"
 "brew:libtool" = { os = "macos" }
 "brew:pkgconf" = { os = "macos" }
 "brew:cmake" = { os = "macos" }
-"brew:openssl@4" = { os = "macos" }
 
 [tasks.deps]
 run = ["uv sync --locked", "cargo fetch --locked"]
