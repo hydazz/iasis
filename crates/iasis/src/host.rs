@@ -70,22 +70,22 @@ pub struct PortJob {
 /// A port's attachment generation and what the host finds there.
 pub type Seen = [Option<(u32, Observed)>; PORT_COUNT];
 
-/// What the host finds on one connector. A device is the port's target only
-/// when it is alone there and directly on the connector.
+/// What the host finds on one connector: its target, as
+/// [`PortDevices::target`](topology::PortDevices::target) names it.
 pub fn observe(snapshot: &Snapshot, port: Port) -> Observed {
     let devices = &snapshot.ports[port.index()].devices;
     let none = |usb| Observed { usb, ecid: None };
     if devices.is_empty() {
         return none(Usb::Absent);
     }
-    let Some(device) = dfu::direct_device(snapshot, port) else {
+    let Some(device) = snapshot.target(port) else {
         return none(Usb::Ambiguous);
     };
     let Some(apple) = &device.apple else {
         return none(Usb::Other);
     };
     let ecid = apple.ecid();
-    if ecid.is_some_and(|ecid| appears_elsewhere(snapshot, port, ecid)) {
+    if ecid.is_some_and(|ecid| snapshot.ecid_elsewhere(port, ecid)) {
         return none(Usb::Ambiguous);
     }
     Observed {
@@ -97,7 +97,7 @@ pub fn observe(snapshot: &Snapshot, port: Port) -> Observed {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn sharing_target(status: &Status, snapshot: &Snapshot, port: Port) -> Option<u64> {
     let state = &status.ports[port.index()];
-    let device = dfu::direct_device(snapshot, port)?;
+    let device = snapshot.target(port)?;
     if !state.occupied() || device.vendor_id != 0x05ac {
         return None;
     }
@@ -118,15 +118,6 @@ fn sharing_target(status: &Status, snapshot: &Snapshot, port: Port) -> Option<u6
             &device.topology.port_chain,
         )
     }
-}
-
-fn appears_elsewhere(snapshot: &Snapshot, port: Port, ecid: u64) -> bool {
-    snapshot
-        .ports
-        .iter()
-        .filter(|other| other.port != port)
-        .flat_map(|other| &other.devices)
-        .any(|device| device.apple.as_ref().and_then(AppleDevice::ecid) == Some(ecid))
 }
 
 /// Reports a port only once its view has held for [`AGREE`]. The board and
@@ -206,7 +197,7 @@ impl From<&UsbDevice> for Enumeration {
 type Identified = [Option<(Enumeration, AppleDevice)>; PORT_COUNT];
 
 fn unidentified_usb(snapshot: &Snapshot, port: Port) -> Option<&UsbDevice> {
-    dfu::direct_device(snapshot, port).filter(|device| {
+    snapshot.target(port).filter(|device| {
         device
             .apple
             .as_ref()
@@ -244,7 +235,7 @@ fn ages(status: &Status, attached_at_ms: &[u64; PORT_COUNT]) -> bool {
 fn remember_models(snapshot: &Snapshot, models: &Models) {
     for port in Port::ALL {
         if let Some(ecid) = observe(snapshot, port).identity(None)
-            && let Some(device) = dfu::direct_device(snapshot, port)
+            && let Some(device) = snapshot.target(port)
         {
             models.remember(ecid, device);
         }
@@ -333,7 +324,7 @@ impl Shared {
             let Some((enumeration, apple)) = &identified[port.index()] else {
                 continue;
             };
-            if let [device] = snapshot.ports[port.index()].devices.as_mut_slice()
+            if let Some(device) = snapshot.ports[port.index()].target_mut()
                 && Enumeration::from(&*device) == *enumeration
             {
                 device.apple = Some(apple.clone());
@@ -633,13 +624,15 @@ impl Shared {
             if mask & (1 << index) == 0 {
                 continue;
             }
-            match snapshot.ports[index].devices.as_slice() {
-                [device] if device.apple.is_some() => {
-                    let apple = device.apple.clone().unwrap();
+            match snapshot
+                .target(port)
+                .and_then(|device| device.apple.clone())
+            {
+                Some(apple) => {
                     unnamed |= apple.ecid().is_none();
                     identified[index] = Some((enumeration, apple));
                 }
-                _ => unnamed = true,
+                None => unnamed = true,
             }
         }
         if *identified != before {
