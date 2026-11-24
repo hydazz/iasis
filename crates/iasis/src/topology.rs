@@ -107,11 +107,9 @@ impl From<DeviceInfo> for UsbDevice {
             apple: AppleDevice::from_usb(
                 device.vendor_id(),
                 device.product_id(),
+                device.device_version(),
+                device.product_string(),
                 device.serial_number(),
-                &device
-                    .interfaces()
-                    .map(|i| (i.class(), i.subclass(), i.protocol()))
-                    .collect::<Vec<_>>(),
             ),
             #[cfg(target_os = "macos")]
             macos_attachment: Some(MacAttachment {
