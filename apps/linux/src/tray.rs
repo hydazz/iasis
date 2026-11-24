@@ -83,15 +83,10 @@ impl Tray {
 
     fn device(&self, device: &Device) -> MenuItem<Self> {
         let actions = Actions::new(std::slice::from_ref(device));
-        let activity = device.activity().text;
-        let label = if activity.is_empty() {
-            format!("{}  {}", device.port.number, device.short_name())
-        } else {
-            format!(
-                "{}  {} — {activity}",
-                device.port.number,
-                device.short_name()
-            )
+        let name = format!("{}  {}", device.port.number, device.short_name());
+        let label = match status(device) {
+            Some(status) => format!("{name} — {status}"),
+            None => name,
         };
         let perform =
             |requests: Vec<Request>| (!requests.is_empty()).then_some(Command::Perform(requests));
@@ -141,6 +136,16 @@ impl Tray {
         }
         items.extend(devices.into_iter().map(|device| self.device(device)));
         items
+    }
+}
+
+/// One line on what the port is doing, or the PORT limitation.
+fn status(device: &Device) -> Option<String> {
+    let text = device.activity().text;
+    if !text.is_empty() {
+        Some(text)
+    } else {
+        device.port.wrong_dfu_port.then(|| "PORT".to_owned())
     }
 }
 
@@ -194,13 +199,16 @@ impl ksni::Tray for Tray {
                 }
                 if let Some(fetch) = &state.images.fetch {
                     let percent = fetch.done.saturating_mul(100) / fetch.bytes.max(1);
-                    items.push(self.item(
-                        format!(
-                            "Downloading {} ({}), {percent}%",
-                            fetch.version, fetch.build
-                        ),
-                        None,
-                    ));
+                    let image = state
+                        .images
+                        .images
+                        .iter()
+                        .find(|image| image.id == fetch.id)
+                        .map_or_else(
+                            || "Image".to_owned(),
+                            |image| format!("{} {}", image.os, image.version).trim().to_owned(),
+                        );
+                    items.push(self.item(format!("Downloading {image} — {percent}%"), None));
                 }
             }
         }
@@ -212,5 +220,46 @@ impl ksni::Tray for Tray {
         items.push(MenuItem::Separator);
         items.push(self.item("Quit", Some(Command::Quit)));
         items
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use iasis_api::Progress;
+    use ksni::Tray as _;
+
+    use super::*;
+
+    #[test]
+    fn a_device_shows_its_port_name_and_status_and_the_download_its_whole_percent() {
+        let mut state: State =
+            serde_json::from_str(include_str!("../../../crates/api/fixtures/state.json")).unwrap();
+        let port = &mut state.boards[0].ports[0];
+        port.fetch = None;
+        port.stage = Some(Progress {
+            name: "Sending Filesystem".into(),
+            percent: 43,
+            steps: Vec::new(),
+            step: 0,
+        });
+        let tray = Tray {
+            state: Some(state),
+            commands: async_channel::unbounded().0,
+        };
+        let labels: Vec<String> = tray
+            .menu()
+            .into_iter()
+            .filter_map(|item| match item {
+                MenuItem::Standard(item) => Some(item.label),
+                MenuItem::SubMenu(item) => Some(item.label),
+                _ => None,
+            })
+            .collect();
+        for label in [
+            "1  MacBook Air — Restoring 43%",
+            "Downloading iPadOS 26.2 — 12%",
+        ] {
+            assert!(labels.iter().any(|shown| shown == label), "{labels:?}");
+        }
     }
 }
