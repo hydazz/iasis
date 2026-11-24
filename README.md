@@ -62,7 +62,7 @@ target/release/iasis --board "Bench A" dfu 1
 target/release/iasis --board "Bench A" ports --watch
 ```
 
-`iasis` alone lists every board and its ports; `iasis watch` keeps the list current. Select a board by name or by the serial from `iasis list`. Names match without case, can contain spaces and punctuation, and fit the OLED’s 16 printable ASCII characters. If two boards share a name, select by serial. An empty name clears the label. Use `ports --watch` to see the USB mode, identity and link (none, USB 2 or USB 3) on each port. If a Mac acknowledges the DFU request and then disappears from USB, check the data cable and the Mac’s [DFU socket](https://support.apple.com/en-us/120694).
+`iasis` alone lists every board and its ports; `iasis watch` keeps the list current. Select a board by name or by the serial from `iasis list`. Names match without case, can contain spaces and punctuation, and fit the OLED’s 16 printable ASCII characters. If two boards share a name, select by serial. An empty name clears the label. Use `ports --watch` to see the USB mode, identity and link (none, USB 2 or USB 3) on each port. If a Mac acknowledges the DFU request and then disappears from USB, check the data cable and the Mac’s [DFU socket](https://support.apple.com/en-us/120694). A locked Mac laptop withholds USB data from an accessory it has not allowed until someone unlocks it and allows it ([Apple](https://support.apple.com/en-us/102282)); until then its port shows power and no link, and DFU still works.
 
 The button selects targets with a tap and acts on them with a hold, with or without an OLED.
 
