@@ -144,12 +144,7 @@ impl Device {
         if let Some(job) = &port.job {
             return match &port.stage {
                 Some(stage) => Activity::new(
-                    format!(
-                        "{} {}%: {}",
-                        operation_title(job.operation),
-                        stage.percent,
-                        stage.name
-                    ),
+                    format!("{} {}%", operation_running(job.operation), stage.percent),
                     Mark::Working(Some(f64::from(stage.percent) / 100.0)),
                 ),
                 None => Activity::phase(job.phase, job.operation),
@@ -266,6 +261,13 @@ pub fn operation_title(operation: Operation) -> &'static str {
     match operation {
         Operation::Restore => "Restore",
         Operation::Revive => "Revive",
+    }
+}
+
+fn operation_running(operation: Operation) -> &'static str {
+    match operation {
+        Operation::Restore => "Restoring",
+        Operation::Revive => "Reviving",
     }
 }
 
@@ -388,14 +390,7 @@ impl Activity {
         let title = operation_title(operation);
         match phase {
             RestorePhase::Preparing => Self::new("Preparing", Mark::Working(None)),
-            RestorePhase::Running => Self::new(
-                if operation == Operation::Revive {
-                    "Reviving"
-                } else {
-                    "Restoring"
-                },
-                Mark::Working(None),
-            ),
+            RestorePhase::Running => Self::new(operation_running(operation), Mark::Working(None)),
             RestorePhase::Reported => Self::new(format!("{title} complete"), Mark::Done),
             RestorePhase::Failed => Self::new(format!("{title} failed"), Mark::Failed),
             RestorePhase::Unconfirmed => {
