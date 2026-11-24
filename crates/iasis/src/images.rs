@@ -109,15 +109,22 @@ pub struct Network {
 impl Default for Network {
     fn default() -> Self {
         let agent = concat!("iasis/", env!("CARGO_PKG_VERSION"));
+        let tls = || {
+            ureq::tls::TlsConfig::builder()
+                .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+                .build()
+        };
         Self {
             listings: ureq::Agent::config_builder()
                 .user_agent(agent)
+                .tls_config(tls())
                 .timeout_global(Some(Duration::from_secs(10)))
                 .build()
                 .into(),
             // An archive takes as long as it takes, unless it stalls.
             archives: ureq::Agent::config_builder()
                 .user_agent(agent)
+                .tls_config(tls())
                 .timeout_connect(Some(Duration::from_secs(20)))
                 .timeout_recv_response(Some(Duration::from_secs(30)))
                 .timeout_per_read(Some(Duration::from_secs(60)))
