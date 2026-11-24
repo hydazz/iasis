@@ -304,7 +304,6 @@ pub fn mode_title(mode: AppleMode) -> &'static str {
         AppleMode::PortDfu => "Port DFU",
         AppleMode::Restored => "Restore service",
         AppleMode::Normal => "Started up",
-        AppleMode::Mux => "System",
     }
 }
 

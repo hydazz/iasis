@@ -78,9 +78,8 @@ pub(crate) fn worker_command(
 }
 
 /// Read what RestoreKit finds of each masked port's unnamed Apple target: the
-/// DFU identity of one on Apple Debug USB over KIS, a booted Mac's ECID from
-/// its BOS descriptor and its model from its release number, and the ECID a
-/// restore OS or an iPhone or iPad carries in its serial.
+/// DFU identity of one on Apple Debug USB over KIS, and the ECID a running
+/// system without it in its serial carries in its BOS descriptor.
 pub(crate) fn identify(snapshot: &mut Snapshot, mask: u8) {
     use nusb::MaybeFuture;
     use restorekit::{UsbMode, device};
@@ -112,9 +111,11 @@ pub(crate) fn identify(snapshot: &mut Snapshot, mask: u8) {
                 apple.identity = Identity::Missing;
                 apple.model = None;
             }
-        } else if !target.apple.as_ref().is_some_and(|apple| {
-            apple.ecid().is_none() && matches!(apple.mode, AppleMode::Mux | AppleMode::Normal)
-        }) {
+        } else if !target
+            .apple
+            .as_ref()
+            .is_some_and(|apple| apple.ecid().is_none() && apple.mode == AppleMode::Normal)
+        {
             continue;
         }
         let attached = attached.get_or_insert_with(|| {
@@ -140,27 +141,20 @@ pub(crate) fn identify(snapshot: &mut Snapshot, mask: u8) {
         let Some(apple) = &mut target.apple else {
             continue;
         };
-        if apple.mode == AppleMode::Normal {
+        if !kis {
             if let Some(ecid) = device::read_ecid(info).filter(|&ecid| ecid != 0) {
                 apple.identity = Identity::Known {
                     ecid,
                     source: IdentitySource::Bos,
                 };
             }
-            apple.model = device::model_from_device_version(info.device_version())
-                .map(|model| model.identifier.to_owned());
             continue;
         }
         let read = device::from_usb(info);
         let Some(ecid) = read.ecid.filter(|&ecid| ecid != 0) else {
             continue;
         };
-        if !kis {
-            apple.identity = Identity::Known {
-                ecid,
-                source: IdentitySource::UsbSerial,
-            };
-        } else if read.mode == UsbMode::Kis
+        if read.mode == UsbMode::Kis
             && let Some(identity) = &read.identity
         {
             apple.identity = Identity::Known {
