@@ -14,6 +14,12 @@ nonisolated struct AgentState: Codable, Equatable {
     var sharing: Sharing
     var supervision: Supervision
 
+    /// How many ports wait for the image being downloaded.
+    var waitingForDownload: Int {
+        guard let id = images.fetch?.id else { return 0 }
+        return boards.flatMap(\.ports).filter { $0.awaiting == id }.count
+    }
+
     func title(for board: Board) -> String {
         let matches = boards.filter { $0.displayName.caseInsensitiveCompare(board.displayName) == .orderedSame }
         guard matches.count > 1 else { return board.displayName }
@@ -101,8 +107,9 @@ nonisolated struct AgentState: Codable, Equatable {
         var restore: Bool
         var enabled: Bool
         var job: Job?
-        /// Percent of the restore image fetched, while the port waits for one.
-        var fetch: UInt8?
+        /// The store's id for the image the port's restore waits for, while
+        /// it waits.
+        var awaiting: String?
         var stage: Stage?
         var result: Ending?
 

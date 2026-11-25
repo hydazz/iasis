@@ -319,8 +319,19 @@ impl Window {
     fn show_banner(&self, state: &State) {
         let message = state.images.fetch.as_ref().map(|fetch| {
             let percent = fetch.done.saturating_mul(100) / fetch.bytes.max(1);
+            let waiting = state
+                .boards
+                .iter()
+                .flat_map(|board| &board.ports)
+                .filter(|port| port.awaiting.as_deref() == Some(fetch.id.as_str()))
+                .count();
+            let waiting = match waiting {
+                0 => String::new(),
+                1 => ", 1 device waiting".into(),
+                waiting => format!(", {waiting} devices waiting"),
+            };
             format!(
-                "Downloading {} ({}), {percent}%",
+                "Downloading {} ({}), {percent}%{waiting}",
                 fetch.version, fetch.build
             )
         });

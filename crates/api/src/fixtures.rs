@@ -56,7 +56,7 @@ fn port(number: u8) -> PortView {
         restore: true,
         enabled: true,
         job: None,
-        fetch: None,
+        awaiting: None,
         stage: None,
         result: None,
     }
@@ -75,7 +75,7 @@ fn state() -> State {
             steps: vec!["Preparing".into(), "Restoring the system".into()],
             step: 1,
         }),
-        fetch: Some(12),
+        awaiting: Some("iPad_Fall_2022_26.2_24C101_Restore.ipsw".into()),
         light: Light {
             hue: Hue::Purple,
             pulse: true,

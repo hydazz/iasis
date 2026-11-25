@@ -96,7 +96,7 @@ Each port has:
 | `dfu`, `reboot`, `restore`     | The actions the target would take now. A target that can be restored can be revived                                           |
 | `enabled`                      | Port power is enabled                                                                                                         |
 | `job`                          | `operation` (`restore` or `revive`) and its `phase` (`Preparing`, `Running`, `Reported`, `Unconfirmed`, `Failed`), or null    |
-| `fetch`                        | Percent of the restore image fetched while the port waits for one, otherwise null                                             |
+| `awaiting`                     | The `id` of the image the port's restore waits for, otherwise null; the images' `fetch` says how much is here                 |
 | `stage`                        | The worker's current `name`, overall job `percent`, the job's `steps` in order and the index of the `step` under way, or null |
 | `result`                       | How the last operation ended: `operation`, `ecid`, `phase`, `message` and the worker's `log_directory`, or null               |
 
