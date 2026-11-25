@@ -14,7 +14,7 @@ use iasis_api::{Reply, Request, State};
 use crate::{
     agent::{self, Event},
     device::{self, Actions, Board, Device, DeviceId},
-    inspector::{Inspector, Shown},
+    inspector::Inspector,
     preferences::Preferences,
     row::PortRow,
 };
@@ -29,6 +29,8 @@ pub struct Window {
     boards: gtk::Box,
     groups: RefCell<Vec<BoardGroup>>,
     inspector: Inspector,
+    /// Whether the pane shows while one device is selected.
+    show_inspector: gtk::ToggleButton,
     select: gtk::ToggleButton,
     action_bar: gtk::ActionBar,
     title: adw::WindowTitle,
@@ -92,6 +94,7 @@ impl Window {
             .icon_name("sidebar-show-right-symbolic")
             .tooltip_text("Device Details")
             .active(true)
+            .sensitive(false)
             .build();
         let title = adw::WindowTitle::new("Iasis", "");
         let header = adw::HeaderBar::builder().title_widget(&title).build();
@@ -148,11 +151,8 @@ impl Window {
             .sidebar(&inspector.widget)
             .min_sidebar_width(280.0)
             .max_sidebar_width(360.0)
-            .build();
-        split
-            .bind_property("show-sidebar", &show_inspector, "active")
-            .bidirectional()
-            .sync_create()
+            .pin_sidebar(true)
+            .show_sidebar(false)
             .build();
         let toasts = adw::ToastOverlay::new();
         toasts.set_child(Some(&split));
@@ -173,6 +173,7 @@ impl Window {
             boards,
             groups: RefCell::default(),
             inspector,
+            show_inspector,
             select,
             action_bar,
             title,
@@ -180,6 +181,22 @@ impl Window {
             model: RefCell::default(),
         });
         this.add_actions();
+        let weak = Rc::downgrade(&this);
+        this.show_inspector.connect_toggled(move |_| {
+            if let Some(this) = weak.upgrade() {
+                this.refresh();
+            }
+        });
+        // Dismissing the pane from over a narrow window turns it off.
+        let weak = Rc::downgrade(&this);
+        this.split.connect_show_sidebar_notify(move |split| {
+            if let Some(this) = weak.upgrade()
+                && !split.shows_sidebar()
+                && this.show_inspector.is_sensitive()
+            {
+                this.show_inspector.set_active(false);
+            }
+        });
         let weak = Rc::downgrade(&this);
         this.select.connect_toggled(move |button| {
             if let Some(this) = weak.upgrade() {
@@ -254,8 +271,8 @@ impl Window {
         if self.model.borrow().selecting {
             self.select.set_active(false);
         }
+        self.show_inspector.set_active(true);
         self.select_one(id);
-        self.split.set_show_sidebar(true);
     }
 
     pub fn toast(&self, message: &str) {
@@ -418,11 +435,17 @@ impl Window {
             (true, 1) => "1 Device Selected".to_owned(),
             (true, count) => format!("{count} Devices Selected"),
         });
-        self.inspector.show(match (selecting, selected.as_slice()) {
-            (_, []) => Shown::Nothing,
-            (_, [device]) => Shown::Device(Box::new(device.clone())),
-            (_, devices) => Shown::Many(devices.len()),
-        });
+        // The pane shows only while one device is selected.
+        let one = match selected.as_slice() {
+            [device] => Some(device),
+            _ => None,
+        };
+        if let Some(device) = one {
+            self.inspector.show(device);
+        }
+        self.show_inspector.set_sensitive(one.is_some());
+        self.split
+            .set_show_sidebar(one.is_some() && self.show_inspector.is_active());
         self.model.borrow_mut().actions = actions;
     }
 
