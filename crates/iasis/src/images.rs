@@ -769,6 +769,9 @@ impl Store {
                 models,
                 ready: true,
                 error: None,
+                path: Some(image.ipsw.path().display().to_string()),
+                fetched: image.fetched,
+                in_use: state.leased.contains_key(image.id()),
             }
         });
         let coming = state.downloads.iter().map(|download| iasis_api::Image {
@@ -780,6 +783,9 @@ impl Store {
             models: vec![download.name.clone()],
             ready: false,
             error: download.error.clone(),
+            path: None,
+            fetched: true,
+            in_use: false,
         });
         Images {
             images: held.chain(coming).collect(),

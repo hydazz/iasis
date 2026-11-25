@@ -456,6 +456,12 @@ pub struct Image {
     pub ready: bool,
     /// Why it could not be fetched.
     pub error: Option<String>,
+    /// The archive's file, once it is in the store.
+    pub path: Option<String>,
+    /// Fetched from Apple's catalog, as opposed to added from a file.
+    pub fetched: bool,
+    /// A restore is reading it, so `remove` refuses it.
+    pub in_use: bool,
 }
 
 /// A download under way.
