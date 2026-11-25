@@ -36,7 +36,7 @@ mise run deps
 mise run host:build
 ```
 
-The host tools are `target/release/iasis` for board control and `target/release/iasisd`, the [host agent](#host-agent). Keep `iasis-gateway` beside both. The agent needs read/write access to the management USB device. On Linux, the [Debian package](crates/iasis/README.md#debian-package) installs them with that access.
+The host tools are `target/release/iasis` for board control and `target/release/iasisd`, the [host agent](#host-agent). Keep `iasis-gateway` beside both. The agent needs read/write access to the management USB device. On Linux, the [Debian package](crates/iasis/README.md#debian-package) installs them with that access, and on Windows the [installer](crates/iasis/README.md#windows-installer).
 
 The build compiles the restore engine's C libraries from source. Install their build tools first: on macOS, the Xcode command line tools and `brew install autoconf automake libtool pkg-config cmake`; on Debian or Ubuntu, `build-essential git autoconf automake libtool pkg-config cmake libpcap-dev libusb-1.0-0-dev`; on Windows, `mise bootstrap` (MSYS2 and its MINGW64 packages) with rustup's default host set to `x86_64-pc-windows-gnu`, building from MSYS2's MINGW64 shell.
 
@@ -101,9 +101,9 @@ While the agent is running:
 - It runs the restores that a board's button or a client asks for.
 - On Linux and macOS, it can share an internet connection with attached devices over USB.
 
-The status light is green and the OLED shows a USB symbol while a host is attached. One host holds a board at a time. With the agent running, every `iasis` command except `status` and `ports` goes through it. Other clients use its [local socket](crates/api/README.md).
+The status light is green and the OLED shows a USB symbol while a host is attached. One host holds a board at a time. With the agent running, every `iasis` command except `status` and `ports` goes through it; on Windows those two can't open a board while the agent holds it. Other clients use its [local socket](crates/api/README.md).
 
-On Linux, the [Debian package](crates/iasis/README.md#debian-package) runs the agent at boot for the person signed in at the computer and members of the `iasis` group. On macOS, the [menu bar app](apps/macos/README.md) shows the same boards and ports, sends the same actions and runs the agent it carries while you are logged in. To run your own build in the background, turn Iasis off under Background App Activity in Login Items & Extensions, then prefix the command with `launchctl submit -l local.iasisd --`.
+On Linux, the [Debian package](crates/iasis/README.md#debian-package) runs the agent at boot for the person signed in at the computer and members of the `iasis` group. On Windows, the [installer](crates/iasis/README.md#windows-installer) runs it at boot for Administrators and the person signed in at the computer. On macOS, the [menu bar app](apps/macos/README.md) shows the same boards and ports, sends the same actions and runs the agent it carries while you are logged in. To run your own build in the background, turn Iasis off under Background App Activity in Login Items & Extensions, then prefix the command with `launchctl submit -l local.iasisd --`.
 
 ### USB Internet Sharing
 
