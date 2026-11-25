@@ -22,14 +22,14 @@ Development USB IDs are `1209:0001`. Set `IASIS_USB_VID` and `IASIS_USB_PID` as 
 
 Ports start enabled and reserve power only while attached. Disabling a port removes Rp and discharges VBUS. PD-capable targets negotiate fixed supplies over USB PD revision 2.0.
 
-A port whose voltage or negotiation fails switches its output off, discharges VBUS and attaches again. Three failures within 30 seconds, or a protection trip, hold the port off until the target is unplugged or the port is enabled again.
+A port whose voltage or negotiation fails switches its output off, discharges VBUS and attaches again. A protection trip holds the port off until the target is unplugged or the port is enabled again. Three failures within 30 seconds hold it off the same way, or until the board's supply changes.
 
 | Supply path     | Target offer                               | Budget                                                                                                                                                 |
 | --------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Host presence   | Fixed 5 V / 0 mA PDO                       | Iasis reserves 650 mA. The remaining current selects the shared limiter below.                                                                         |
 | Charging supply | Fixed 5, 9, 15 or 20 V, up to 3 A per port | The brick contract covers input cable and board losses, logic power and a 35 W reserve when the CM5 carrier is powered. The ports share the remainder. |
 
-With host USB alone, charged Apple targets use 5 V for attachment and PD signalling. A 5 V / 0 mA offer is how PD says a source has no power to give, and the OLED shows `No charging`. Targets running their own OS take nothing on it. iPads draw anyway while they restore, roughly 0.15–0.3 A each while iBEC loads and about 55 mA in the restore OS, all through the shared limiter below; M5 Macs draw nothing measurable. The port ADC measures connector voltage only. Ordinary USB peripherals draw their operating current from the same 5 V supply. Each port has a nominal 0.51 A current limit. Component tolerance can put the trip point below 500 mA. All five also share a limiter whose upper trip threshold is shown below.
+With host USB alone, charged Apple targets use 5 V for attachment and PD signalling. A 5 V / 0 mA offer is how PD says a source has no power to give, and the OLED shows `No charging`. Targets running their own OS take nothing on it. iPads draw anyway while they restore, roughly 0.15–0.3 A each while iBEC loads and about 55 mA in the restore OS, all through the shared limiter below; M5 Macs draw nothing measurable. The port ADC measures connector voltage only. Ordinary USB peripherals draw their operating current from the same 5 V supply. Each port has a nominal 0.51 A current limit. Component tolerance can put the trip point below 500 mA. All five also share a limiter, which holds their total current to the threshold below.
 
 | Upstream allowance | Shared limiter threshold (max) |
 | ------------------ | ------------------------------ |

@@ -249,7 +249,7 @@ impl Button {
             return Some(Event::Decision(RestoreDecision::Confirmed(arm)));
         }
         // An erase to confirm or a board fault keeps the screen and lights.
-        if self.armed.is_some() || status.i2c_root_fault || status.aggregate_power_fault {
+        if self.armed.is_some() || status.i2c_root_fault || status.brick_input_fault {
             self.egg = None;
         } else if self.pressed
             && !self.consumed
@@ -830,7 +830,7 @@ mod tests {
         r.sample(true, EGG_MS);
         r.release();
         assert!(r.button.egg(r.now).is_some());
-        r.status.aggregate_power_fault = true;
+        r.status.brick_input_fault = true;
         assert_eq!(r.sample(false, 10), None);
         assert_eq!(r.button.egg(r.now), None);
         r.press();
