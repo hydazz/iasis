@@ -101,7 +101,7 @@ mod service {
         }) {
             Ok(status) => status,
             Err(error) => {
-                eprintln!("iasisd: {error}");
+                log::error!("{error}");
                 return;
             }
         };
@@ -148,7 +148,7 @@ mod service {
     /// End the process without reporting a stop, which the service manager
     /// takes for a failure and restarts the service after.
     fn fail(error: &anyhow::Error) -> ! {
-        eprintln!("iasisd: {error:#}");
+        log::error!("{error:#}");
         std::process::exit(1)
     }
 }
