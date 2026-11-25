@@ -204,6 +204,7 @@ fn run_batch(
         Some(_) => None,
         None => Some(Store::open(
             home.cache.join("images"),
+            home.state.join("images"),
             Network::default(),
             changes,
         )?),
