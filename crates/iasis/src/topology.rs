@@ -4,6 +4,8 @@
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "windows")]
+mod windows;
 #[cfg(target_os = "linux")]
 pub use linux::{linux_usb_id, ncm_interfaces, public_ncm_control};
 #[cfg(target_os = "macos")]
@@ -287,7 +289,11 @@ pub fn locate(management: &Topology, devices: Vec<DeviceInfo>) -> Result<Snapsho
     };
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     let host = Host::default();
-    group_devices(management, devices.into_iter().map(UsbDevice::from), &host)
+    #[cfg(target_os = "windows")]
+    let devices = windows::devices(devices);
+    #[cfg(not(target_os = "windows"))]
+    let devices = devices.into_iter().map(UsbDevice::from);
+    group_devices(management, devices, &host)
 }
 
 fn hub_path(management: &Topology) -> Result<&[u8], Error> {
