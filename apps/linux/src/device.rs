@@ -702,6 +702,7 @@ mod tests {
 
     fn port(number: u8) -> PortView {
         PortView {
+            needs: None,
             number,
             generation: 4,
             occupied: true,

@@ -67,6 +67,7 @@ printf '{"op":"state"}\n' | nc -U /run/iasis/agent.sock
 | `images`      | The image store                                               |
 | `sharing`     | USB Internet Sharing                                          |
 | `supervision` | The supervision identity                                      |
+| `missing`     | Software the host lacks that some of Iasis needs              |
 
 Each board has its `serial`, `name` (empty for an unnamed board), `session` ID, the IasisOS `firmware` version it runs, `upstream_mbps` (the negotiated rate between the host and the board's hub, or null), `supply`, `pool`, `host` and `restores` (a host holds the board, and it takes restore requests), `brightness`, its `ports` and a `notice`: why the board cannot be read, or why its last restore request came to nothing. A board that cannot be read has no ports.
 
@@ -99,7 +100,8 @@ Each port has:
 | `job`                          | `operation` (`restore` or `revive`) and its `phase` (`Preparing`, `Running`, `Reported`, `Unconfirmed`, `Failed`), or null    |
 | `awaiting`                     | The `id` of the image the port's restore waits for, otherwise null; the images' `fetch` says how much is here                 |
 | `stage`                        | The worker's current `name`, overall job `percent`, the job's `steps` in order and the index of the `step` under way, or null |
-| `result`                       | How the last operation ended: `operation`, `ecid`, `phase` and `message`, or null               |
+| `result`                       | How the last operation ended: `operation`, `ecid`, `phase` and `message`, or null                                             |
+| `needs`                        | The `id` of the entry in `missing` the target's restore waits for, or null                                                    |
 
 The board keeps a target's `ecid` for as long as its attachment lasts, so a Mac that has started up and left USB is still the device on its port. A device moved to another connector is identified again there. The agent notes the model of each ECID it identifies, so a mode that gives the ECID alone still names the device.
 
@@ -124,5 +126,7 @@ The board drops a job when its target leaves, which a restored target does by re
 Archives for different models share version and build numbers, so only the `id` names one.
 
 `sharing.enabled` is the saved USB Internet Sharing setting. Each entry in `sharing.ports` names a `board` and `port`; `active` means the port's gateway is running. A `problem` on the sharing state or on a port describes a failure.
+
+Each entry in `missing` has an `id`, the `name` of what to install, a `url` to get it from and a `reason`, a sentence saying what can't be done without it. The agent looks again every few seconds, so installing it takes effect without a restart. On Windows, Apple Devices or iTunes brings Apple's service, without which the host can't take a running iPhone or iPad into recovery to restore or revive it.
 
 `supervision` is the identity the host pairs with as the supervisor of iPhones and iPads that list its certificate: the certificate's common `name` and the `certificate` in base64 DER, for an enrollment profile's supervising host certificates. A `problem` says why the host has no usable identity. `import_supervision` and `export_supervision` carry the identity, private key included, in a PKCS #12 archive in base64, encrypted with `password`.

@@ -228,6 +228,21 @@ pub struct State {
     pub images: Images,
     pub sharing: Sharing,
     pub supervision: Supervision,
+    /// What this host lacks that some of Iasis needs.
+    pub missing: Vec<Prerequisite>,
+}
+
+/// Software the host lacks, and what goes without it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Prerequisite {
+    /// What a port that waits for it calls it.
+    pub id: String,
+    /// What to install.
+    pub name: String,
+    /// Where to get it.
+    pub url: String,
+    /// What can't be done without it, as a sentence.
+    pub reason: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -351,6 +366,8 @@ pub struct PortView {
     pub stage: Option<Progress>,
     /// How the port's last operation ended, from the agent that ran it.
     pub result: Option<Ending>,
+    /// The missing prerequisite the target's restore waits for.
+    pub needs: Option<String>,
 }
 
 /// What a host finds on a port's USB.

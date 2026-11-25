@@ -105,6 +105,7 @@ pub fn board(info: &Info, status: &Status) -> BoardView {
                     awaiting: None,
                     stage: None,
                     result: None,
+                    needs: None,
                 }
             })
             .into(),
@@ -142,6 +143,11 @@ pub(crate) fn describe_devices(
         // A different USB target can arrive before the board echoes the report.
         let ecid = seen.identity(slot.ecid).filter(|id| Some(*id) == slot.ecid);
         row.ecid = ecid.map(|id| format!("{id:016x}"));
+        // A running iPhone or iPad that the host would take into recovery
+        // but for what it lacks.
+        if agreed && assessment.signal == Signal::Recoverable && assessment.ecid.is_some() {
+            row.needs = crate::native::mux::missing().map(|prerequisite| prerequisite.id);
+        }
         let live = snapshot.target(port).filter(|_| agreed);
         if row.link.is_none() && agreed && seen.usb != iasis_protocol::Usb::Absent {
             use crate::topology::Speed;

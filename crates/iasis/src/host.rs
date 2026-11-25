@@ -986,6 +986,12 @@ impl Link {
         }
     }
 
+    /// Decide again what each target allows, after the host has gained or
+    /// lost something a restore needs.
+    pub(crate) fn reassess(&self) {
+        let _ = self.shared.refresh(None, None);
+    }
+
     pub(crate) fn board_view(&self, store: &crate::images::Store) -> Option<iasis_api::BoardView> {
         let view = self.shared.view.lock().unwrap();
         let (status, snapshot) = view.sample.as_ref()?;
