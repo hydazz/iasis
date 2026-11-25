@@ -163,7 +163,7 @@ struct Shared {
     demand: Cell<PortDemand>,
     action: Cell<Option<PortAction>>,
     rearm: Cell<bool>,
-    supply_fault: Cell<Option<PortError>>,
+    withdrawn: Cell<bool>,
     feedback_deadline: Cell<u64>,
     /// The host's view and its image fetch, with the attachment they
     /// describe.
@@ -316,11 +316,12 @@ impl Ports {
         })
     }
 
-    /// The host supply was withdrawn from the targets it powers.
-    pub fn host_fault(&self, error: PortError) {
+    /// The host's allowance lapsed and the ports it powered are switched off.
+    /// Each attaches its target again once the board has power for it.
+    pub fn withdraw_host(&self) {
         for port in &self.ports {
             if port.status.get().supply == Supply::HostPresence {
-                port.supply_fault.set(Some(error));
+                port.withdrawn.set(true);
                 port.wake.signal(());
             }
         }
@@ -453,7 +454,10 @@ impl Ports {
             strikes += 1;
             struck = Instant::now();
             if strikes >= STRIKES || holds_off(error) {
-                port.hold_off(orientation, &mut int).await;
+                // Failures that keep recurring may be the supply's doing, so a
+                // new supply ends their hold. A protection trip waits for a person.
+                let supply = (!holds_off(error)).then(|| port.supply.get());
+                port.hold_off(orientation, supply, &mut int).await;
                 strikes = 0;
             }
         }
@@ -777,6 +781,7 @@ impl Port<'_> {
 
     /// One attachment, from looking for a sink until it leaves or fails.
     async fn attachment(&self, int: &mut Input<'static>) -> Result<(), PortError> {
+        self.shared.withdrawn.set(false);
         let supply = self.shared.grant.get().supply;
         self.hold(supply, None);
         let id = self.phy.init().await?;
@@ -919,9 +924,11 @@ impl Port<'_> {
         let mut open_since = None;
         let mut invalid_since = None;
         loop {
-            let failure = self.phy.failure().or(self.fault.take());
-            if let Some(error) = failure.or(self.shared.supply_fault.take()) {
+            if let Some(error) = self.phy.failure().or(self.fault.take()) {
                 return Err(error);
+            }
+            if self.shared.withdrawn.take() {
+                return Ok(());
             }
             self.pins()?;
             if self.stopping() || self.shared.grant.get().budget_mw == 0 {
@@ -1389,8 +1396,14 @@ impl Port<'_> {
         result
     }
 
-    /// Stay off until the port is enabled again or the sink is unplugged.
-    async fn hold_off(&self, orientation: Option<Orientation>, int: &mut Input<'static>) {
+    /// Stay off until the port is enabled again or the sink is unplugged. A
+    /// hold for failures on `supply` also ends when the board's supply changes.
+    async fn hold_off(
+        &self,
+        orientation: Option<Orientation>,
+        supply: Option<Supply>,
+        int: &mut Input<'static>,
+    ) {
         self.update(|status| status.state = PortState::Fault);
         self.publish();
         self.shared.rearm.set(false);
@@ -1403,6 +1416,9 @@ impl Port<'_> {
         };
         let mut open_since = None;
         while !self.shared.rearm.take() {
+            if supply.is_some_and(|held| self.shared.grant.get().supply != held) {
+                break;
+            }
             if !watching {
                 self.shared.wake.wait().await;
                 continue;
