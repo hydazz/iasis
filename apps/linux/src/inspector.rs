@@ -4,7 +4,7 @@
 use std::cell::RefCell;
 
 use adw::prelude::*;
-use gtk::{gio, glib};
+use gtk::glib;
 
 use crate::device::{self, Device, Mark, OperationStatus, StepState};
 
@@ -196,23 +196,6 @@ fn operation_rows(group: &adw::PreferencesGroup, operation: &OperationStatus) {
             .title_lines(0)
             .css_classes(["dim-label"])
             .build();
-        group.add(&row);
-    }
-    if let Some(directory) = &operation.log_directory {
-        let row = adw::ActionRow::builder()
-            .title("Open Logs")
-            .activatable(true)
-            .build();
-        row.add_suffix(&gtk::Image::from_icon_name("folder-open-symbolic"));
-        let directory = gio::File::for_path(directory);
-        row.connect_activated(move |row| {
-            let window = row.root().and_downcast::<gtk::Window>();
-            gtk::FileLauncher::new(Some(&directory)).launch(
-                window.as_ref(),
-                gio::Cancellable::NONE,
-                |_| {},
-            );
-        });
         group.add(&row);
     }
 }

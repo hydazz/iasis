@@ -42,9 +42,6 @@ pub struct Source {
     /// image store has an older one that fits
     #[arg(long, conflicts_with = "ipsw")]
     pub latest: bool,
-    /// Worker logs and scratch directories; the cache directory by default
-    #[arg(long)]
-    pub logs: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -175,10 +172,9 @@ fn run_batch(
     button: bool,
 ) -> Result<()> {
     let home = Home::locate()?;
-    let logs = source.logs.unwrap_or_else(|| home.cache.join("restores"));
     let changes = Arc::<Watch>::default();
     let supervision = Arc::new(crate::supervision::Supervision::read(&home.supervision()));
-    let engine = RestoreEngine::for_host(logs, supervision, changes.clone());
+    let engine = RestoreEngine::for_host(home.cache.join("restores"), supervision, changes.clone());
     let preparing = crate::awake::hold("Preparing a restore");
     // Take the board before the long image check, which another host's
     // session would make pointless.
@@ -306,7 +302,6 @@ pub fn listen(
                 ending: Ending {
                     operation,
                     ecid: target.ecid.map(|id| format!("{id:016x}")),
-                    log_directory: None,
                     phase: RestorePhase::Failed,
                     message,
                 },
@@ -351,14 +346,14 @@ pub fn listen(
             for target in &selected {
                 fail(target, unstarted_message(&error, target.port));
             }
-            eprintln!("Restore request: {error:#}");
+            log::error!("Restore request: {error:#}");
             return Ok(Some(format!("{error:#}")));
         }
     };
     let (reporter, endings) = (link.clone(), endings.clone());
     thread::spawn(move || {
         if let Err(error) = monitor(&reporter, running, &endings) {
-            eprintln!("Restore: {error:#}");
+            log::error!("Restore: {error:#}");
         }
     });
     Ok(None)
@@ -649,7 +644,6 @@ fn monitor(link: &Link, running: Running, endings: &Endings) -> Result<()> {
                         attachment: None,
                         ending: Ending {
                             operation: job.operation,
-                            log_directory: Some(job.directory.clone()),
                             ecid: Some(format!("{:016x}", job.ecid)),
                             phase,
                             message: job.message.clone(),
@@ -684,7 +678,7 @@ fn monitor(link: &Link, running: Running, endings: &Endings) -> Result<()> {
     }
     ensure!(
         !failed,
-        "one or more selected targets failed or remain unconfirmed; inspect worker logs"
+        "one or more selected targets failed or remain unconfirmed"
     );
     Ok(())
 }
@@ -976,7 +970,7 @@ fn enter_dfu(
                 };
                 match engine.enter_recovery(target) {
                     Ok(()) => {
-                        println!("port {} entering recovery", port.number());
+                        log::info!("Port {} entering recovery", port.number());
                         recovering = true;
                         // The target restarts into recovery, which its ECID
                         // ties to the selection.
@@ -1004,7 +998,7 @@ fn enter_dfu(
         }
         match board.command_for_generation(port, generation, PortAction::Dfu) {
             Ok(result) => {
-                println!("port {} DFU signalling: {result:?}", port.number());
+                log::info!("Port {} DFU signalling: {result:?}", port.number());
                 pending.push((
                     port,
                     generation,
@@ -1150,7 +1144,6 @@ mod tests {
                     ecid: Some("0000000000000011".into()),
                     phase: RestorePhase::Failed,
                     message: "Device disconnected".into(),
-                    log_directory: None,
                 },
             },
         );

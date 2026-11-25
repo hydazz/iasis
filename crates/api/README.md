@@ -98,7 +98,7 @@ Each port has:
 | `job`                          | `operation` (`restore` or `revive`) and its `phase` (`Preparing`, `Running`, `Reported`, `Unconfirmed`, `Failed`), or null    |
 | `awaiting`                     | The `id` of the image the port's restore waits for, otherwise null; the images' `fetch` says how much is here                 |
 | `stage`                        | The worker's current `name`, overall job `percent`, the job's `steps` in order and the index of the `step` under way, or null |
-| `result`                       | How the last operation ended: `operation`, `ecid`, `phase`, `message` and the worker's `log_directory`, or null               |
+| `result`                       | How the last operation ended: `operation`, `ecid`, `phase` and `message`, or null               |
 
 The board keeps a target's `ecid` for as long as its attachment lasts, so a Mac that has started up and left USB is still the device on its port. A device moved to another connector is identified again there. The agent notes the model of each ECID it identifies, so a mode that gives the ECID alone still names the device.
 

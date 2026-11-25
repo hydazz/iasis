@@ -134,7 +134,7 @@ impl Models {
         if let Some(path) = &self.file
             && let Err(error) = save(path, &entries)
         {
-            eprintln!(
+            log::error!(
                 "Could not save device models at {}: {error}",
                 path.display()
             );

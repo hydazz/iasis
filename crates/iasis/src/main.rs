@@ -182,6 +182,7 @@ fn parse_id(value: &str) -> Result<u16, String> {
 
 fn main() -> Result<()> {
     iasis::native::run_if_worker();
+    iasis::logging::terminal();
     let cli = Cli::parse();
     let ids = UsbIds {
         vendor: cli.vid,
@@ -1369,9 +1370,6 @@ fn follow_work(agent: &mut Client, board: &str, ports: &[Port]) -> Result<()> {
             let mut success = true;
             for (port, ending) in ports.iter().zip(state.submitted.iter().flatten()) {
                 println!("Port {}  {}", port.number(), ending.message);
-                if let Some(directory) = &ending.log_directory {
-                    println!("  Logs: {}", directory.display());
-                }
                 success &= ending.phase == RestorePhase::Reported;
             }
             ensure!(
