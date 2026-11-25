@@ -248,7 +248,6 @@ pub struct BoardView {
     /// The host takes restore requests for the board.
     pub restores: bool,
     pub brightness: u8,
-    pub settings_busy: bool,
     pub ports: Vec<PortView>,
     /// Why the board cannot be read, or why its last restore request came
     /// to nothing.
@@ -270,7 +269,6 @@ impl BoardView {
             host: false,
             restores: false,
             brightness: 0,
-            settings_busy: false,
             ports: Vec::new(),
             notice: Some(notice),
         }

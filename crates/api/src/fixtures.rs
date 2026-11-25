@@ -210,7 +210,6 @@ fn state() -> State {
                 host: true,
                 restores: true,
                 brightness: 50,
-                settings_busy: true,
                 ports,
                 notice: Some("the board did not accept the restore request".into()),
             },

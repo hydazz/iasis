@@ -66,7 +66,7 @@ printf '{"op":"state"}\n' | nc -U /run/iasis/agent.sock
 | `sharing`     | USB Internet Sharing                                          |
 | `supervision` | The supervision identity                                      |
 
-Each board has its `serial`, `name` (empty for an unnamed board), `session` ID, the IasisOS `firmware` version it runs, `upstream_mbps` (the negotiated rate between the host and the board's hub, or null), `supply`, `pool`, `host` and `restores` (a host holds the board, and it takes restore requests), `brightness`, `settings_busy`, its `ports` and a `notice`: why the board cannot be read, or why its last restore request came to nothing. A board that cannot be read has no ports.
+Each board has its `serial`, `name` (empty for an unnamed board), `session` ID, the IasisOS `firmware` version it runs, `upstream_mbps` (the negotiated rate between the host and the board's hub, or null), `supply`, `pool`, `host` and `restores` (a host holds the board, and it takes restore requests), `brightness`, its `ports` and a `notice`: why the board cannot be read, or why its last restore request came to nothing. A board that cannot be read has no ports.
 
 `update` is the IasisOS the agent carries when the board runs another: its `version`, and whether it is `required`. A board on a build the agent cannot talk to has no ports and no notice until it takes it; an `update` request with no file writes it.
 
