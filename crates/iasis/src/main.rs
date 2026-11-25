@@ -803,6 +803,17 @@ fn agent_text(state: &State) -> String {
         text.push_str(&fetch);
         text.push('\n');
     }
+    // What the host lacks, once a target waits for it.
+    for missing in &state.missing {
+        if state
+            .boards
+            .iter()
+            .flat_map(|board| &board.ports)
+            .any(|port| port.needs.as_ref() == Some(&missing.id))
+        {
+            text.push_str(&format!("{} Get it from {}\n", missing.reason, missing.url));
+        }
+    }
     text
 }
 

@@ -70,7 +70,8 @@
             "ecid": "001a79d10e6bc01c",
             "phase": "Reported",
             "message": "Restore finished"
-          }
+          },
+          "needs": null
         },
         {
           "number": 2,
@@ -114,7 +115,8 @@
             "ecid": "001a79d10e6bc01c",
             "phase": "Failed",
             "message": "Restore finished"
-          }
+          },
+          "needs": null
         },
         {
           "number": 3,
@@ -153,7 +155,8 @@
           },
           "awaiting": null,
           "stage": null,
-          "result": null
+          "result": null,
+          "needs": null
         },
         {
           "number": 4,
@@ -188,7 +191,8 @@
           },
           "awaiting": null,
           "stage": null,
-          "result": null
+          "result": null,
+          "needs": null
         },
         {
           "number": 5,
@@ -227,7 +231,8 @@
           },
           "awaiting": null,
           "stage": null,
-          "result": null
+          "result": null,
+          "needs": null
         }
       ],
       "notice": "the board did not accept the restore request"
@@ -279,7 +284,8 @@
           "job": null,
           "awaiting": null,
           "stage": null,
-          "result": null
+          "result": null,
+          "needs": null
         },
         {
           "number": 2,
@@ -315,7 +321,8 @@
           "job": null,
           "awaiting": null,
           "stage": null,
-          "result": null
+          "result": null,
+          "needs": null
         },
         {
           "number": 3,
@@ -351,7 +358,8 @@
           "job": null,
           "awaiting": null,
           "stage": null,
-          "result": null
+          "result": null,
+          "needs": null
         },
         {
           "number": 4,
@@ -387,7 +395,8 @@
           "job": null,
           "awaiting": null,
           "stage": null,
-          "result": null
+          "result": null,
+          "needs": null
         },
         {
           "number": 5,
@@ -423,7 +432,8 @@
           "job": null,
           "awaiting": null,
           "stage": null,
-          "result": null
+          "result": null,
+          "needs": null
         },
         {
           "number": 1,
@@ -459,7 +469,8 @@
           "job": null,
           "awaiting": null,
           "stage": null,
-          "result": null
+          "result": null,
+          "needs": "apple-devices"
         }
       ],
       "notice": null
@@ -564,5 +575,13 @@
     "name": "Iasis on bench",
     "certificate": "MIIBszCCAVmgAwIBAgIIb3Vy",
     "problem": "supervision.pem: unusable supervision identity: no certificate"
-  }
+  },
+  "missing": [
+    {
+      "id": "apple-devices",
+      "name": "Apple Devices",
+      "url": "https://apps.microsoft.com/detail/9NP83LWLPZ9K",
+      "reason": "Restoring or reviving a running iPhone or iPad needs Apple Devices."
+    }
+  ]
 }

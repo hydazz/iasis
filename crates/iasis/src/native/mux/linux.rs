@@ -13,7 +13,8 @@ pub(crate) fn restore_environment() -> io::Result<Vec<(&'static str, OsString)>>
     ])
 }
 
-/// The system usbmuxd claims every Apple device, running ones included.
-pub(crate) fn reaches_running_devices() -> bool {
-    true
+/// Nothing: the system usbmuxd claims every Apple device, running ones
+/// included.
+pub(crate) fn missing() -> Option<iasis_api::Prerequisite> {
+    None
 }
