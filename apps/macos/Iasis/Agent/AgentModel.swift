@@ -125,6 +125,17 @@ final class AgentModel {
         }
     }
 
+    /// The supervision identity as a PKCS #12 archive in base64, or nil once
+    /// the agent's refusal has been shown.
+    func exportSupervision(password: String) async -> String? {
+        do {
+            return try await agent.exportSupervision(password: password)
+        } catch {
+            report(error)
+            return nil
+        }
+    }
+
     @discardableResult
     func send(_ request: AgentRequest) async -> Bool {
         do {
