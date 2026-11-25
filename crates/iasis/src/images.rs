@@ -8,7 +8,7 @@
 //! that Apple no longer signs it.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
@@ -24,7 +24,9 @@ use sha2::{Digest, Sha256};
 
 use crate::{identity::models::DeviceModel, restore::PreparedIpsw, watch::Watch};
 
-const CATALOG: &str = "https://api.ipsw.me/v4";
+const CATALOG: &str = "https://api.ipsw.me";
+/// The most a catalog answer may hold: every model's every release is 7 MB.
+const CATALOG_BYTES: u64 = 64 << 20;
 /// The hosts Apple serves restore images from.
 const IMAGE_HOSTS: [&str; 3] = [
     "updates.cdn-apple.com",
@@ -87,6 +89,8 @@ pub struct Device {
 /// Where releases are listed and fetched from.
 pub trait Catalog: Send + Sync + 'static {
     fn devices(&self) -> Result<Vec<Device>>;
+    /// The models Apple signs a release for.
+    fn signed_models(&self) -> Result<BTreeSet<String>>;
     /// The releases Apple signs for a model, newest first.
     fn releases(&self, identifier: &str) -> Result<Vec<Firmware>>;
     /// Complete `part` with the release's archive, checked against its
@@ -118,7 +122,7 @@ impl Default for Network {
             listings: ureq::Agent::config_builder()
                 .user_agent(agent)
                 .tls_config(tls())
-                .timeout_global(Some(Duration::from_secs(10)))
+                .timeout_global(Some(Duration::from_secs(30)))
                 .build()
                 .into(),
             // An archive takes as long as it takes, unless it stalls.
@@ -163,6 +167,23 @@ struct Listing {
     firmwares: Vec<ListedFirmware>,
 }
 
+/// Every model's releases, of which only whether Apple signs each is read.
+#[derive(Deserialize)]
+struct Signing {
+    devices: BTreeMap<String, SignedReleases>,
+}
+
+#[derive(Deserialize)]
+struct SignedReleases {
+    firmwares: Vec<SignedRelease>,
+}
+
+#[derive(Deserialize)]
+struct SignedRelease {
+    #[serde(default)]
+    signed: bool,
+}
+
 impl Network {
     fn json<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T> {
         let text = self
@@ -171,6 +192,8 @@ impl Network {
             .call()
             .context("asking the image catalog")?
             .body_mut()
+            .with_config()
+            .limit(CATALOG_BYTES)
             .read_to_string()
             .context("reading the image catalog")?;
         serde_json::from_str(&text).context("reading the image catalog's answer")
@@ -207,7 +230,7 @@ fn signed(listing: Listing) -> Result<Vec<Firmware>> {
 
 impl Catalog for Network {
     fn devices(&self) -> Result<Vec<Device>> {
-        let listed: Vec<ListedDevice> = self.json("devices")?;
+        let listed: Vec<ListedDevice> = self.json("v4/devices")?;
         Ok(listed
             .into_iter()
             .map(|device| Device {
@@ -222,6 +245,18 @@ impl Catalog for Network {
             .collect())
     }
 
+    /// Only ipsw.me's older listing says of every model at once whether
+    /// Apple signs a release for it.
+    fn signed_models(&self) -> Result<BTreeSet<String>> {
+        let listing: Signing = self.json("v2.1/firmwares.json/condensed")?;
+        Ok(listing
+            .devices
+            .into_iter()
+            .filter(|(_, model)| model.firmwares.iter().any(|release| release.signed))
+            .map(|(identifier, _)| identifier)
+            .collect())
+    }
+
     fn releases(&self, identifier: &str) -> Result<Vec<Firmware>> {
         ensure!(
             identifier
@@ -229,7 +264,7 @@ impl Catalog for Network {
                 .all(|b| b.is_ascii_alphanumeric() || b == b','),
             "invalid model identifier"
         );
-        signed(self.json(&format!("device/{identifier}?type=ipsw"))?)
+        signed(self.json(&format!("v4/device/{identifier}?type=ipsw"))?)
     }
 
     fn fetch(
@@ -433,6 +468,8 @@ struct State {
     leased: BTreeMap<String, usize>,
     /// What the catalog last listed for each model, and when.
     listings: BTreeMap<String, (Instant, Vec<Firmware>)>,
+    /// The models the catalog last said Apple signs a release for, and when.
+    signing: Option<(Instant, BTreeSet<String>)>,
     devices_asked: Option<Instant>,
     stop: bool,
 }
@@ -813,19 +850,39 @@ impl Store {
             .map(|device| device.name.clone())
     }
 
-    /// Every model the catalog lists.
+    /// The catalog's models that Apple signs a release for.
     pub fn catalog(&self) -> Result<Vec<CatalogModel>> {
+        let signed = self.signed_models()?;
         let mut devices = self.0.lock().saved.devices.clone();
-        if devices.is_empty() {
+        // A model newer than the saved list is in a fresh one.
+        let unlisted = signed.iter().any(|identifier| {
+            system(identifier).is_some()
+                && !devices
+                    .iter()
+                    .any(|device| &device.identifier == identifier)
+        });
+        if unlisted {
             devices = self.0.devices()?;
         }
         Ok(devices
             .into_iter()
+            .filter(|device| signed.contains(&device.identifier))
             .map(|device| CatalogModel {
                 identifier: device.identifier,
                 name: device.name,
             })
             .collect())
+    }
+
+    fn signed_models(&self) -> Result<BTreeSet<String>> {
+        if let Some((listed, models)) = &self.0.lock().signing
+            && listed.elapsed() < LISTING
+        {
+            return Ok(models.clone());
+        }
+        let models = self.0.catalog.signed_models()?;
+        self.0.lock().signing = Some((Instant::now(), models.clone()));
+        Ok(models)
     }
 
     /// The catalog's entry for a model, from a fresh list when the saved one
@@ -1380,6 +1437,16 @@ mod tests {
                 .into())
         }
 
+        fn signed_models(&self) -> Result<BTreeSet<String>> {
+            ensure!(!self.offline.load(Ordering::SeqCst), "no route");
+            let releases = self.releases.lock().unwrap();
+            Ok(releases
+                .iter()
+                .filter(|(_, signed)| !signed.is_empty())
+                .map(|(model, _)| model.clone())
+                .collect())
+        }
+
         fn releases(&self, identifier: &str) -> Result<Vec<Firmware>> {
             ensure!(!self.offline.load(Ordering::SeqCst), "no route");
             let shared = self.shared.lock().unwrap();
@@ -1443,7 +1510,29 @@ mod tests {
 
     /// A store whose listings are asked for afresh each time.
     fn relist(store: &Store) {
-        store.0.lock().listings.clear();
+        let mut state = store.0.lock();
+        state.listings.clear();
+        state.signing = None;
+    }
+
+    fn catalog(store: &Store) -> Vec<String> {
+        let models = store.catalog().unwrap().into_iter();
+        models.map(|model| model.identifier).collect()
+    }
+
+    #[test]
+    fn the_catalog_lists_only_models_apple_signs_a_release_for() {
+        let temp = tempfile::tempdir().unwrap();
+        let shelf = Shelf::new();
+        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
+        assert_eq!(catalog(&store), ["Macmini9,1", "iPad13,18"]);
+        shelf.release("iPad13,19", "26.0", "23A340");
+        shelf.sign("iPad13,18", &[]);
+        relist(&store);
+        assert_eq!(catalog(&store), ["Macmini9,1", "iPad13,19"]);
+        shelf.offline.store(true, Ordering::SeqCst);
+        relist(&store);
+        assert!(store.catalog().is_err());
     }
 
     #[test]
@@ -1759,13 +1848,7 @@ mod tests {
         let shelf = Shelf::new();
         shelf.release("iBridge2,1", "10.2", "23P2101");
         let store = Store::open(temp.path(), shelf, Arc::default()).unwrap();
-        let models: Vec<String> = store
-            .catalog()
-            .unwrap()
-            .into_iter()
-            .map(|device| device.identifier)
-            .collect();
-        assert_eq!(models, ["Macmini9,1", "iPad13,18", "iPad13,19"]);
+        assert_eq!(catalog(&store), ["Macmini9,1", "iPad13,18"]);
         assert!(store.offer(0x8103, board("iBridge2,1")).latest.is_none());
         store.close();
     }
