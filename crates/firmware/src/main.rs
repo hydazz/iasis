@@ -51,7 +51,7 @@ const FLASH_BYTES: usize = 2 * 1024 * 1024;
 type SettingsStore =
     iasis_firmware::settings::Store<Flash<'static, peripherals::FLASH, Blocking, FLASH_BYTES>>;
 
-/// What the board measures beside the ports' VBUS.
+/// What the hub measures beside the ports' VBUS.
 #[derive(Clone, Copy, Default)]
 struct Measured {
     bus_voltage_adc: Option<u16>,
@@ -301,7 +301,7 @@ async fn main(_spawner: Spawner) {
         }
     };
     // VBUS, the input bus and the thermistors are converted every
-    // millisecond, apart from the I²C work that the rest of the board waits
+    // millisecond, apart from the I²C work that the rest of the hub waits
     // on. The fault pins are read with them.
     let measure = async {
         let mut asserted = false;
@@ -346,7 +346,7 @@ async fn main(_spawner: Spawner) {
         }
     };
     // Announce each new revision to a host listening on the event interface.
-    // A host that reads slower than the board changes gets the newest.
+    // A host that reads slower than the hub changes gets the newest.
     let announce = async {
         let mut announced = 0;
         loop {

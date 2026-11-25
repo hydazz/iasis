@@ -49,7 +49,7 @@ fn main() {
         .spawn()
         .unwrap();
     let read = watching.recv_timeout(Duration::from_secs(30));
-    // Give the window time to lay out and draw the boards.
+    // Give the window time to lay out and draw the hubs.
     thread::sleep(Duration::from_secs(3));
     let running = app.try_wait().unwrap().is_none();
     let _ = app.kill();

@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    Board,
+    Hub,
     dfu::{self, Attempt, Outcome, Signal},
     home::Home,
     host::{Awaiting, Jobs, Link, PortJob},
@@ -52,7 +52,7 @@ pub struct Options {
     #[arg(long, value_delimiter = ',', value_parser = super::parse_port, required_unless_present = "button")]
     pub ports: Vec<Port>,
     /// Prepare DFU targets and require a fresh three-second button hold to erase.
-    /// Omit --ports to select targets from the board's Restore menu.
+    /// Omit --ports to select targets from the hub's Restore menu.
     #[arg(long)]
     pub button: bool,
     /// Authorize erasing the selected targets
@@ -77,7 +77,7 @@ pub enum Images<'a> {
     Store(&'a Store),
 }
 
-/// Targets a client asked the board's host to restore: each port with the
+/// Targets a client asked the hub's host to restore: each port with the
 /// attachment that was on it when the client asked.
 pub struct Submission {
     pub session: u32,
@@ -90,10 +90,10 @@ pub struct Submission {
     pub accepted: std::sync::mpsc::SyncSender<Result<(), String>>,
 }
 
-/// A client's request waiting for the board's attendant.
+/// A client's request waiting for the hub's attendant.
 pub type Requests = Arc<Mutex<Option<Submission>>>;
 
-/// How a port's last operation ended. The board forgets a result when its
+/// How a port's last operation ended. The hub forgets a result when its
 /// target leaves, which a restored target does by restarting.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ended {
@@ -136,13 +136,13 @@ fn finish(endings: &Endings, changes: &Watch, port: Port, ended: Ended) {
     changes.changed();
 }
 
-/// Restore a batch as the board's host. The command holds the board's host
+/// Restore a batch as the hub's host. The command holds the hub's host
 /// session until its workers finish.
-pub fn run(device: &nusb::DeviceInfo, board: &Board, options: Options) -> Result<()> {
+pub fn run(device: &nusb::DeviceInfo, hub: &Hub, options: Options) -> Result<()> {
     ensure!(options.erase, "restore requires --erase");
     run_batch(
         device,
-        board,
+        hub,
         Operation::Restore,
         options.source,
         &options.ports,
@@ -150,12 +150,12 @@ pub fn run(device: &nusb::DeviceInfo, board: &Board, options: Options) -> Result
     )
 }
 
-/// Revive a batch as the board's host: install each target from the image a
+/// Revive a batch as the hub's host: install each target from the image a
 /// restore would use and keep its data.
-pub fn revive(device: &nusb::DeviceInfo, board: &Board, options: Revive) -> Result<()> {
+pub fn revive(device: &nusb::DeviceInfo, hub: &Hub, options: Revive) -> Result<()> {
     run_batch(
         device,
-        board,
+        hub,
         Operation::Revive,
         options.source,
         &options.ports,
@@ -165,7 +165,7 @@ pub fn revive(device: &nusb::DeviceInfo, board: &Board, options: Revive) -> Resu
 
 fn run_batch(
     device: &nusb::DeviceInfo,
-    board: &Board,
+    hub: &Hub,
     operation: Operation,
     source: Source,
     ports: &[Port],
@@ -176,7 +176,7 @@ fn run_batch(
     let supervision = Arc::new(crate::supervision::Supervision::read(&home.supervision()));
     let engine = RestoreEngine::for_host(home.cache.join("restores"), supervision, changes.clone());
     let preparing = crate::awake::hold("Preparing a restore");
-    // Take the board before the long image check, which another host's
+    // Take the hub before the long image check, which another host's
     // session would make pointless.
     let link = Link::open(
         device,
@@ -185,7 +185,7 @@ fn run_batch(
         &engine,
         Inventory::follow(changes.clone())?,
     )?;
-    let board = &board.clone().notified(link.notice());
+    let hub = &hub.clone().notified(link.notice());
     let given = match &source.ipsw {
         Some(path) => {
             let ipsw = progress::check_ipsw(path)?;
@@ -212,8 +212,8 @@ fn run_batch(
     };
     let selected = if button {
         ensure!(
-            board.info().capabilities & protocol::CAP_RESTORE_ARM != 0,
-            "board does not support prepared erase confirmation"
+            hub.info().capabilities & protocol::CAP_RESTORE_ARM != 0,
+            "hub does not support prepared erase confirmation"
         );
         link.restore_ready(true)?;
         if ports.is_empty() {
@@ -225,7 +225,7 @@ fn run_batch(
     } else {
         let deadline = Instant::now() + Duration::from_secs(3);
         let status = loop {
-            let status = board.status()?;
+            let status = hub.status()?;
             if ports.iter().all(|port| {
                 matches!(
                     status.ports[port.index()].state,
@@ -240,12 +240,12 @@ fn run_batch(
         };
         select_ports(ports, &status)?
     };
-    let (targets, unready) = enter_dfu(board, &link, &engine, &selected)?;
+    let (targets, unready) = enter_dfu(hub, &link, &engine, &selected)?;
     unready.print();
     let (targets, unresolved) = resolve(&link, &targets, &images, source.latest)?;
     unresolved.print();
     if button {
-        confirm_erase(board, &link, &targets)?;
+        confirm_erase(hub, &link, &targets)?;
         link.restore_ready(false)?;
     }
     let failed = !unready.0.is_empty() || !unresolved.0.is_empty();
@@ -257,9 +257,9 @@ fn run_batch(
 }
 
 /// Handle one restore request while other workers keep reporting: a Restore
-/// hold on the board, which the board then confirms, or a client's request,
+/// hold on the hub, which the hub then confirms, or a client's request,
 /// which the client confirmed. Returns why a request came to nothing. Fails
-/// once the link has lost the board.
+/// once the link has lost the hub.
 pub fn listen(
     link: &Arc<Link>,
     device: &nusb::DeviceInfo,
@@ -275,10 +275,10 @@ pub fn listen(
         Err(error) if link.alive() => return Ok(Some(format!("{error:#}"))),
         Err(error) => return Err(error),
     };
-    let button = matches!(asked, Asked::Board);
+    let button = matches!(asked, Asked::Hub);
     let operation = match asked {
         Asked::Client { operation, .. } => operation,
-        Asked::Board => Operation::Restore,
+        Asked::Hub => Operation::Restore,
     };
     if button {
         if let Err(error) = reserve(endings, &selected) {
@@ -322,12 +322,12 @@ pub fn listen(
     // can immediately accept the next one.
     let request = (|| -> Result<_> {
         let _awake = crate::awake::hold("Preparing a restore");
-        let control = Board::open(device)
-            .context("opening board for restore preparation")?
+        let control = Hub::open(device)
+            .context("opening hub for restore preparation")?
             .notified(link.notice());
         ensure!(
-            control.info().serial == link.board().info().serial,
-            "board serial changed"
+            control.info().serial == link.hub().info().serial,
+            "hub serial changed"
         );
         let (targets, unready) = enter_dfu(&control, link, engine, &selected)?;
         report(&unready);
@@ -363,12 +363,12 @@ pub fn listen(
 /// The mode a verified target is in, when a restore starts from it, and its
 /// model.
 fn in_dfu(
-    board: &Board,
+    hub: &Hub,
     target: &TargetTracker,
     snapshot: &topology::Snapshot,
 ) -> Option<(AppleMode, DeviceModel)> {
     let device = snapshot.target(target.port)?;
-    match target.observe(board.info().serial, snapshot) {
+    match target.observe(hub.info().serial, snapshot) {
         Observation::Present { mode } if RestoreEngine::starts_from(mode) => {
             Some((mode, DeviceModel::read(device)))
         }
@@ -395,8 +395,8 @@ fn resolve(
     let mut waiting = Vec::new();
     for (target, generation) in targets {
         let pick = (|| -> Result<Pick> {
-            let (_, model) = in_dfu(link.board(), target, &snapshot)
-                .context("the target left DFU or recovery")?;
+            let (_, model) =
+                in_dfu(link.hub(), target, &snapshot).context("the target left DFU or recovery")?;
             match images {
                 Images::Given(images) => Ok(Pick::Held(image_for_model(images, &model)?.clone())),
                 Images::Store(store) => {
@@ -423,7 +423,7 @@ fn resolve(
             asked.push(wanted.id());
         }
     }
-    let serial = link.board().info().serial;
+    let serial = link.hub().info().serial;
     let inventory = link.inventory();
     let mut seen = link.changes().count();
     let mut placed = None;
@@ -432,7 +432,7 @@ fn resolve(
         let version = inventory.version();
         let snapshot = match placed.take() {
             Some((at, snapshot)) if at == version => Ok(snapshot),
-            _ => topology::locate(link.board().topology(), inventory.devices()),
+            _ => topology::locate(link.hub().topology(), inventory.devices()),
         };
         let status = link.status();
         waiting.retain_mut(|(target, generation, wanted)| {
@@ -482,7 +482,7 @@ fn resolve(
             }
         });
         if !waiting.is_empty() {
-            // The download, the store and the board all advance this count.
+            // The download, the store and the hub all advance this count.
             // A tree that could not be placed is tried again shortly.
             let again = snapshot
                 .is_err()
@@ -495,8 +495,8 @@ fn resolve(
 }
 
 /// Launch a worker for each target that is still the one prepared. Returns
-/// the batch and why each other target did not start. `board_ready` also
-/// needs the board to report each port ready.
+/// the batch and why each other target did not start. `hub_ready` also
+/// needs the hub to report each port ready.
 fn start(
     link: &Link,
     engine: &RestoreEngine,
@@ -504,7 +504,7 @@ fn start(
     mut targets: ChosenTargets,
     operation: Operation,
     failed: bool,
-    board_ready: bool,
+    hub_ready: bool,
 ) -> Result<(Running, Unready)> {
     // Waiting for another port may outlive the earlier selection. Revalidate
     // every physical slot immediately before launching destructive workers.
@@ -512,7 +512,7 @@ fn start(
     let mut modes = Vec::new();
     let mut changed = Unready::default();
     targets.retain(|(target, generation, image)| {
-        let mode = in_dfu(link.board(), target, &snapshot)
+        let mode = in_dfu(link.hub(), target, &snapshot)
             .filter(|(_, model)| image.restores(model))
             .map(|(mode, _)| mode)
             .filter(|_| {
@@ -521,7 +521,7 @@ fn start(
                         status.ports[target.port.index()].state,
                         PortState::Ready | PortState::Contract
                     )
-                    && (!board_ready || status.ready_mask() & (1 << target.port.index()) != 0)
+                    && (!hub_ready || status.ready_mask() & (1 << target.port.index()) != 0)
             });
         if mode.is_none() {
             changed.add(target.port, "the target changed before its restore started");
@@ -569,7 +569,7 @@ struct Running {
     _leases: Vec<Lease>,
 }
 
-/// Follow the workers to their end. The link reports each job to the board.
+/// Follow the workers to their end. The link reports each job to the hub.
 fn monitor(link: &Link, running: Running, endings: &Endings) -> Result<()> {
     let Running {
         targets,
@@ -577,7 +577,7 @@ fn monitor(link: &Link, running: Running, endings: &Endings) -> Result<()> {
         mut failed,
         _leases,
     } = running;
-    let board = link.board();
+    let hub = link.hub();
     let mut active: HashSet<Port> = targets.iter().map(|(target, _)| target.port).collect();
     let display = MultiProgress::with_draw_target(ProgressDrawTarget::stdout());
     let rows = targets
@@ -585,7 +585,7 @@ fn monitor(link: &Link, running: Running, endings: &Endings) -> Result<()> {
         .map(|(target, _)| progress::restore_row(&display, target.port, target.ecid))
         .collect::<Vec<_>>();
     // The workers say when a job moves and the inventory when a device
-    // comes or goes. The link may have lost the board by then.
+    // comes or goes. The link may have lost the hub by then.
     let changes = link.changes();
     let inventory = link.inventory();
     let mut seen = changes.count();
@@ -594,7 +594,7 @@ fn monitor(link: &Link, running: Running, endings: &Endings) -> Result<()> {
         let version = inventory.version();
         let snapshot = match placed.take() {
             Some((at, snapshot)) if at == version => Ok(snapshot),
-            _ => topology::locate(board.topology(), inventory.devices()),
+            _ => topology::locate(hub.topology(), inventory.devices()),
         };
         let jobs = batch.snapshots();
         // Do not open a competing restored service while the restore owns it.
@@ -605,7 +605,7 @@ fn monitor(link: &Link, running: Running, endings: &Endings) -> Result<()> {
             }
             let identity = snapshot
                 .as_ref()
-                .map(|snapshot| target.observe(board.info().serial, snapshot));
+                .map(|snapshot| target.observe(hub.info().serial, snapshot));
             progress::update(&rows[index], job, &identity);
             let phase = match job.state {
                 RestoreState::Starting => RestorePhase::Preparing,
@@ -619,7 +619,7 @@ fn monitor(link: &Link, running: Running, endings: &Endings) -> Result<()> {
                 Ok(Observation::Moved { .. }
                     | Observation::Replaced { .. }
                     | Observation::Ambiguous
-                    | Observation::BoardChanged)
+                    | Observation::HubChanged)
             );
             failed |= moved;
             // A target that moved is no longer the one on this port.
@@ -663,7 +663,7 @@ fn monitor(link: &Link, running: Running, endings: &Endings) -> Result<()> {
         placed = snapshot.ok().map(|snapshot| (version, snapshot));
         seen = changes.wait(seen, again);
     }
-    // Leave once the board has the results, which it keeps until each target
+    // Leave once the hub has the results, which it keeps until each target
     // leaves.
     let deadline = Instant::now() + Duration::from_secs(3);
     while link.alive() && link.reporting() && Instant::now() < deadline {
@@ -706,13 +706,13 @@ fn select_ports(ports: &[Port], status: &Status) -> Result<Vec<Target>> {
     Ok(selected)
 }
 
-/// The ports to restore, and whether the board's button chose them: those
-/// named, those a client asks for, or those the board's Restore hold selects.
+/// The ports to restore, and whether the hub's button chose them: those
+/// named, those a client asks for, or those the hub's Restore hold selects.
 /// Who asked for a restore.
 #[derive(Clone, Copy)]
 enum Asked {
-    /// A hold on the board, or the ports a command named.
-    Board,
+    /// A hold on the hub, or the ports a command named.
+    Hub,
     /// A client, which says whether to fetch the newest release and whether
     /// to erase or revive.
     Client { latest: bool, operation: Operation },
@@ -724,11 +724,11 @@ fn selection(
     requests: Option<&Requests>,
 ) -> Result<(Vec<Target>, Asked)> {
     if !ports.is_empty() {
-        return Ok((select_ports(ports, &link.board().status()?)?, Asked::Board));
+        return Ok((select_ports(ports, &link.hub().status()?)?, Asked::Hub));
     }
-    // The link reads the board when it announces a change, and a client's
+    // The link reads the hub when it announces a change, and a client's
     // request advances the same count.
-    let read = || link.status().context("the board has not been read");
+    let read = || link.status().context("the hub has not been read");
     let mut seen = link.changes().count();
     let mut last = read()?.button.map_or(0, |e| e.id);
     loop {
@@ -771,21 +771,21 @@ fn selection(
                         Target {
                             port,
                             generation,
-                            // The device the board holds on that attachment.
+                            // The device the hub holds on that attachment.
                             ecid: held.ecid.filter(|_| held.generation == generation),
                         }
                     })
                     .collect();
-                return Ok((selected, Asked::Board));
+                return Ok((selected, Asked::Hub));
             }
         }
         seen = link.changes().wait(seen, None);
     }
 }
 
-/// Have the board confirm the erase of the prepared targets with a fresh
+/// Have the hub confirm the erase of the prepared targets with a fresh
 /// three-second hold.
-fn confirm_erase(board: &Board, link: &Link, targets: &ChosenTargets) -> Result<()> {
+fn confirm_erase(hub: &Hub, link: &Link, targets: &ChosenTargets) -> Result<()> {
     ensure!(
         !targets.is_empty(),
         "no selected target reached DFU or recovery; no erase armed"
@@ -802,10 +802,10 @@ fn confirm_erase(board: &Board, link: &Link, targets: &ChosenTargets) -> Result<
         draft.ports |= 1 << target.port.index();
         draft.generations[target.port.index()] = *generation;
     }
-    // The board must have received the host observation for the new enumeration.
+    // The hub must have received the host observation for the new enumeration.
     let deadline = Instant::now() + Duration::from_millis(protocol::HOST_SESSION_MS);
     let status = loop {
-        let status = board.status()?;
+        let status = hub.status()?;
         ensure!(
             status.restore_session() == Some(link.session()) && draft.matches_targets(&status),
             "prepared targets changed; no erase armed"
@@ -815,7 +815,7 @@ fn confirm_erase(board: &Board, link: &Link, targets: &ChosenTargets) -> Result<
         }
         ensure!(
             Instant::now() < deadline,
-            "board has no verified DFU or recovery report for the prepared targets"
+            "hub has no verified DFU or recovery report for the prepared targets"
         );
         ensure!(link.alive(), link.failure());
         link.changed_after(status.revision, deadline);
@@ -841,13 +841,13 @@ fn confirm_erase(board: &Board, link: &Link, targets: &ChosenTargets) -> Result<
     loop {
         ensure!(link.alive(), "host session lost; erase cancelled");
         ensure!(Instant::now() < deadline, "erase arm expired");
-        let status = board.status()?;
+        let status = hub.status()?;
         if confirmed(arm, &status)? {
             break;
         }
         link.changed_after(status.revision, deadline);
     }
-    // The confirmation counts only while this host still holds the board.
+    // The confirmation counts only while this host still holds the hub.
     link.check().context("host session lost; erase cancelled")?;
     Ok(())
 }
@@ -917,7 +917,7 @@ fn unstarted_message(error: &anyhow::Error, port: Port) -> String {
 /// iPhone or iPad to recovery, with its ECID verified there. Returns the
 /// targets that got there and why the others did not.
 fn enter_dfu(
-    board: &Board,
+    hub: &Hub,
     link: &Link,
     engine: &RestoreEngine,
     selected: &[Target],
@@ -936,7 +936,7 @@ fn enter_dfu(
         if status.ready_mask() & (1 << port.index()) != 0 {
             snapshot.query_port_identity(port);
         }
-        let assessment = dfu::assess(board.info().serial, port, &status, &snapshot, None);
+        let assessment = dfu::assess(hub.info().serial, port, &status, &snapshot, None);
         if generation != assessment.generation || status.ready_mask() & (1 << port.index()) == 0 {
             unready.add(
                 port,
@@ -947,14 +947,14 @@ fn enter_dfu(
             );
             continue;
         }
-        // The board holds the identity of the attachment, on USB or not.
+        // The hub holds the identity of the attachment, on USB or not.
         if ecid.is_some_and(|id| status.ports[port.index()].ecid != Some(id)) {
             unready.add(port, "another device is there");
             continue;
         }
         match assessment.restore_access(&status.ports[port.index()], |mode| engine.restores(mode)) {
             protocol::RestoreAccess::InDfu | protocol::RestoreAccess::InRecovery => {
-                match TargetTracker::pin(board.info().serial, &snapshot, port) {
+                match TargetTracker::pin(hub.info().serial, &snapshot, port) {
                     Ok(target) if ecid.is_some_and(|id| id != target.ecid) => {
                         unready.add(port, "another device is there");
                     }
@@ -980,7 +980,7 @@ fn enter_dfu(
                             generation,
                             true,
                             Attempt::new(
-                                board.info().serial,
+                                hub.info().serial,
                                 port,
                                 &assessment,
                                 &snapshot,
@@ -997,14 +997,14 @@ fn enter_dfu(
                 continue;
             }
         }
-        match board.command_for_generation(port, generation, PortAction::Dfu) {
+        match hub.command_for_generation(port, generation, PortAction::Dfu) {
             Ok(result) => {
                 log::info!("Port {} DFU signalling: {result:?}", port.number());
                 pending.push((
                     port,
                     generation,
                     result == protocol::CommandResult::Acknowledged,
-                    Attempt::new(board.info().serial, port, &assessment, &snapshot, result),
+                    Attempt::new(hub.info().serial, port, &assessment, &snapshot, result),
                 ));
             }
             Err(error) => unready.add(port, format_args!("{error:#}")),
@@ -1031,13 +1031,8 @@ fn enter_dfu(
                 unready.add(*port, "attachment changed during DFU entry");
                 return false;
             }
-            let assessment = dfu::assess(
-                board.info().serial,
-                *port,
-                &status,
-                &snapshot,
-                Some(previous),
-            );
+            let assessment =
+                dfu::assess(hub.info().serial, *port, &status, &snapshot, Some(previous));
             if *acknowledged && assessment.unclear() {
                 return true;
             }
@@ -1048,9 +1043,7 @@ fn enter_dfu(
                 && dfu::job_in_progress(&status.ports[port.index()]))
                 || matches!(
                     assessment.outcome,
-                    Some(
-                        Outcome::IdentityChanged | Outcome::BoardRestarted | Outcome::TargetUnclear
-                    )
+                    Some(Outcome::IdentityChanged | Outcome::HubRestarted | Outcome::TargetUnclear)
                 )
             {
                 unready.add(*port, assessment.describe());
@@ -1058,7 +1051,7 @@ fn enter_dfu(
             }
             if assessment.usb_mode.is_some_and(RestoreEngine::starts_from)
                 && assessment.outcome != Some(Outcome::IdentityUnverified)
-                && let Ok(target) = TargetTracker::pin(board.info().serial, &snapshot, *port)
+                && let Ok(target) = TargetTracker::pin(hub.info().serial, &snapshot, *port)
             {
                 if pinned.is_some_and(|id| id != target.ecid) {
                     unready.add(*port, "another device took its place");
@@ -1070,7 +1063,7 @@ fn enter_dfu(
             true
         });
         if !pending.is_empty() {
-            // The board or the host's USB devices.
+            // The hub or the host's USB devices.
             // The devices are enumerated again each second regardless.
             let again = Instant::now() + Duration::from_secs(1);
             seen = link.changes().wait(seen, Some(again.min(deadline)));
@@ -1110,8 +1103,8 @@ mod tests {
             unstarted_message(&error, one),
             "port 5: the device is locked; unlock it and retry"
         );
-        let other = anyhow::anyhow!("the board has reconnected");
-        assert_eq!(unstarted_message(&other, one), "the board has reconnected");
+        let other = anyhow::anyhow!("the hub has reconnected");
+        assert_eq!(unstarted_message(&other, one), "the hub has reconnected");
     }
 
     #[test]

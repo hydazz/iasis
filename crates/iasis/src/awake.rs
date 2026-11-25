@@ -1,5 +1,5 @@
 //! Keeping the host out of idle sleep through work that a sleep would break:
-//! a restore, the preparation of a batch and a board update. The display may
+//! a restore, the preparation of a batch and a hub update. The display may
 //! still sleep and the session lock.
 
 use std::marker::PhantomData;

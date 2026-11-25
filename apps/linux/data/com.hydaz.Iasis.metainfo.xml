@@ -7,7 +7,7 @@
   <summary>Put Apple devices in DFU and restore them</summary>
   <description>
     <p>
-      Iasis shows every port of every Iasis board connected to this computer. It puts the Macs, iPads and iPhones on them into DFU, restarts them, and erases and restores them with a system Apple still signs.
+      Iasis shows every port of every Iasis hub connected to this computer. It puts the Macs, iPads and iPhones on them into DFU, restarts them, and erases and restores them with a system Apple still signs.
     </p>
   </description>
   <developer id="com.hydaz">

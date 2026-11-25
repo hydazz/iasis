@@ -42,7 +42,7 @@
         <ServiceInstall
             Name="iasisd"
             DisplayName="Iasis"
-            Description="Attends Iasis boards and runs the restores they and the Iasis apps ask for."
+            Description="Attends Iasis hubs and runs the restores they and the Iasis apps ask for."
             Type="ownProcess"
             Start="auto"
             ErrorControl="normal"

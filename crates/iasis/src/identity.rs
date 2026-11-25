@@ -189,7 +189,7 @@ pub enum SelectionError {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct TargetTracker {
-    pub board_serial: u64,
+    pub hub_serial: u64,
     pub port: Port,
     pub ecid: u64,
 }
@@ -203,13 +203,13 @@ pub enum Observation {
     Ambiguous,
     Replaced { ecid: u64 },
     Moved { port: Port },
-    BoardChanged,
+    HubChanged,
 }
 
 impl TargetTracker {
     /// Pin exactly one verified target. A later observation cannot change the
     /// selected ECID or follow a target moved to another connector.
-    pub fn pin(board_serial: u64, snapshot: &Snapshot, port: Port) -> Result<Self, SelectionError> {
+    pub fn pin(hub_serial: u64, snapshot: &Snapshot, port: Port) -> Result<Self, SelectionError> {
         let Some(device) = snapshot.target(port).and_then(|d| d.apple.as_ref()) else {
             return Err(
                 if targets(&snapshot.ports[port.index()].devices).is_empty() {
@@ -229,15 +229,15 @@ impl TargetTracker {
             return Err(SelectionError::Ambiguous(port.number()));
         }
         Ok(Self {
-            board_serial,
+            hub_serial,
             port,
             ecid,
         })
     }
 
-    pub fn observe(&self, board_serial: u64, snapshot: &Snapshot) -> Observation {
-        if board_serial != self.board_serial {
-            return Observation::BoardChanged;
+    pub fn observe(&self, hub_serial: u64, snapshot: &Snapshot) -> Observation {
+        if hub_serial != self.hub_serial {
+            return Observation::HubChanged;
         }
         let matches = matching_ports(snapshot, self.ecid);
         if matches.len() > 1 {
@@ -486,7 +486,7 @@ pub(crate) mod tests {
                 mode: AppleMode::Normal
             }
         );
-        assert_eq!(target.observe(8, &snapshot), Observation::BoardChanged);
+        assert_eq!(target.observe(8, &snapshot), Observation::HubChanged);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! The host agent.
 //!
-//! It attends every board, keeps the restore images, runs the restores the
-//! boards and its clients ask for, and tells clients what it sees on a local
+//! It attends every hub, keeps the restore images, runs the restores the
+//! hubs and its clients ask for, and tells clients what it sees on a local
 //! socket. Requests and replies are JSON, one to a line.
 
 use std::{
@@ -18,7 +18,7 @@ use std::{
 use anyhow::{Context, Result, bail, ensure};
 use base64::Engine;
 use iasis_api::{
-    BoardView, FirmwareUpdate, Operation, Planned, Reply, Request, Selection, State, Target,
+    FirmwareUpdate, HubView, Operation, Planned, Reply, Request, Selection, State, Target,
 };
 use iasis_protocol::{CommandResult, Port, PortAction};
 use nusb::DeviceInfo;
@@ -26,11 +26,11 @@ use secrecy::SecretString;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
-    Board, UsbIds,
+    Hub, UsbIds,
     batch::{self, Endings, Images, PortWork, Requests, Submission},
-    boards,
     home::Home,
     host::{Jobs, Link},
+    hubs,
     identity::models::Models,
     images::{Network, Store},
     inventory::Inventory,
@@ -40,7 +40,7 @@ use crate::{
     watch::Watch,
 };
 
-/// A board whose session could not be taken is tried again this often
+/// A hub whose session could not be taken is tried again this often
 /// while it stays attached.
 const RETRY: Duration = Duration::from_secs(2);
 /// How often the agent looks for software the host has gained or lost.
@@ -49,11 +49,11 @@ const PREREQUISITES: Duration = Duration::from_secs(5);
 const UF2_BYTES: u64 = 4 << 20;
 
 pub struct Options {
-    /// Attend one board instead of every board.
+    /// Attend one hub instead of every hub.
     pub serial: Option<u64>,
 }
 
-/// A board the agent has seen. Its jobs outlive each session with it.
+/// A hub the agent has seen. Its jobs outlive each session with it.
 #[derive(Default)]
 struct Attendance {
     jobs: Jobs,
@@ -64,25 +64,25 @@ struct Attendance {
     /// Clients' commands take the management interface in turn.
     turn: Mutex<()>,
     notice: Mutex<Option<String>>,
-    /// The IasisOS version of a board that runs a build this agent cannot
+    /// The IasisOS version of a hub that runs a build this agent cannot
     /// talk to.
     outdated: Mutex<Option<String>>,
     present: AtomicBool,
 }
 
 impl Attendance {
-    /// Run one command on the board's management interface. The session goes
+    /// Run one command on the hub's management interface. The session goes
     /// on beside it, and says when the command has had its effect.
-    fn control<T>(&self, command: impl FnOnce(&Board) -> Result<T, crate::Error>) -> Result<T> {
+    fn control<T>(&self, command: impl FnOnce(&Hub) -> Result<T, crate::Error>) -> Result<T> {
         let _turn = self.turn.lock().unwrap();
         let device = self.device.lock().unwrap().clone();
-        let board = Board::open(&device.context("the board is not attended")?)
-            .context("another tool is controlling the board")?;
-        let board = match &*self.link.lock().unwrap() {
-            Some(link) => board.notified(link.notice()),
-            None => board,
+        let hub = Hub::open(&device.context("the hub is not attended")?)
+            .context("another tool is controlling the hub")?;
+        let hub = match &*self.link.lock().unwrap() {
+            Some(link) => hub.notified(link.notice()),
+            None => hub,
         };
-        Ok(command(&board)?)
+        Ok(command(&hub)?)
     }
 }
 
@@ -93,7 +93,7 @@ pub struct Agent {
     store: Store,
     models: Arc<Models>,
     engine: RestoreEngine,
-    boards: Mutex<BTreeMap<u64, Arc<Attendance>>>,
+    hubs: Mutex<BTreeMap<u64, Arc<Attendance>>>,
     inventory: Arc<Inventory>,
     /// Advances whenever anything a client is shown, or a worker waits on,
     /// changes.
@@ -129,10 +129,10 @@ fn restore_targets(status: &iasis_protocol::Status, selected: &[Target]) -> Resu
     Ok(targets)
 }
 
-/// Leave a checked request for the board's attendant and wait for it to
+/// Leave a checked request for the hub's attendant and wait for it to
 /// take it.
 fn submit(
-    board: &Attendance,
+    hub: &Attendance,
     session: u32,
     targets: Vec<Target>,
     latest: bool,
@@ -142,10 +142,10 @@ fn submit(
     let (accepted, receipt) = std::sync::mpsc::sync_channel(0);
     let ports: Vec<Port> = targets.iter().map(|target| target.port).collect();
     let work = {
-        let mut slot = board.requests.lock().unwrap();
-        ensure!(slot.is_none(), "the board is preparing another restore");
-        let work = batch::reserve(&board.endings, &targets)?;
-        *board.notice.lock().unwrap() = None;
+        let mut slot = hub.requests.lock().unwrap();
+        ensure!(slot.is_none(), "the hub is preparing another restore");
+        let work = batch::reserve(&hub.endings, &targets)?;
+        *hub.notice.lock().unwrap() = None;
         *slot = Some(Submission {
             session,
             targets,
@@ -161,14 +161,14 @@ fn submit(
     let result = receipt.recv_timeout(Duration::from_secs(2));
     drop(receipt);
     if !matches!(result, Ok(Ok(()))) {
-        let mut slots = board.endings.lock().unwrap();
+        let mut slots = hub.endings.lock().unwrap();
         for port in ports {
             slots[port.index()] = None;
         }
         changes.changed();
     }
     result
-        .context("the board did not accept the restore request")?
+        .context("the hub did not accept the restore request")?
         .map_err(anyhow::Error::msg)?;
     Ok(work)
 }
@@ -192,7 +192,7 @@ impl Agent {
                 changes.clone(),
             ),
             supervision,
-            boards: Mutex::default(),
+            hubs: Mutex::default(),
             sharing: crate::sharing::Sharing::open(
                 home.state.join("usb-sharing.json"),
                 changes.clone(),
@@ -204,16 +204,16 @@ impl Agent {
     }
 
     pub fn state(&self) -> State {
-        let boards = self.boards.lock().unwrap();
+        let hubs = self.hubs.lock().unwrap();
         State {
             version: env!("CARGO_PKG_VERSION").into(),
-            boards: boards
+            hubs: hubs
                 .iter()
-                .filter(|(_, board)| board.present.load(Ordering::Relaxed))
-                .map(|(serial, board)| {
-                    let link = board.link.lock().unwrap().clone();
-                    let notice = board.notice.lock().unwrap().clone();
-                    match link.as_ref().and_then(|link| link.board_view(&self.store)) {
+                .filter(|(_, hub)| hub.present.load(Ordering::Relaxed))
+                .map(|(serial, hub)| {
+                    let link = hub.link.lock().unwrap().clone();
+                    let notice = hub.notice.lock().unwrap().clone();
+                    match link.as_ref().and_then(|link| link.hub_view(&self.store)) {
                         Some(mut view) => {
                             view.update = update::carried()
                                 .filter(|carried| *carried != view.firmware)
@@ -221,7 +221,7 @@ impl Agent {
                                     version: carried.into(),
                                     required: false,
                                 });
-                            let endings = board.endings.lock().unwrap();
+                            let endings = hub.endings.lock().unwrap();
                             for (port, ending) in view.ports.iter_mut().zip(endings.iter()) {
                                 if let Some(work) = ending {
                                     if let Some(ended) = work.get() {
@@ -237,12 +237,12 @@ impl Agent {
                             view
                         }
                         None => {
-                            let mut view = BoardView::unreadable(
+                            let mut view = HubView::unreadable(
                                 format!("{serial:016x}"),
                                 notice.unwrap_or_else(|| "not attended".into()),
                             );
-                            // A board on another build waits for the one carried here.
-                            if let Some(firmware) = board.outdated.lock().unwrap().clone()
+                            // A hub on another build waits for the one carried here.
+                            if let Some(firmware) = hub.outdated.lock().unwrap().clone()
                                 && let Some(carried) = update::carried()
                             {
                                 view.firmware = firmware;
@@ -265,36 +265,36 @@ impl Agent {
         }
     }
 
-    /// Give every board's host session up, for an agent that is stopping.
+    /// Give every hub's host session up, for an agent that is stopping.
     pub fn release(&self) {
-        for board in self.boards.lock().unwrap().values() {
-            if let Some(link) = &*board.link.lock().unwrap() {
+        for hub in self.hubs.lock().unwrap().values() {
+            if let Some(link) = &*hub.link.lock().unwrap() {
                 link.end();
             }
         }
     }
 
-    fn board(&self, serial: &str) -> Result<(Arc<Attendance>, Arc<Link>)> {
+    fn hub(&self, serial: &str) -> Result<(Arc<Attendance>, Arc<Link>)> {
         let serial = parse_serial(serial).map_err(anyhow::Error::msg)?;
-        let board = self
-            .boards
+        let hub = self
+            .hubs
             .lock()
             .unwrap()
             .get(&serial)
             .cloned()
-            .context("no such board")?;
-        let link = board
+            .context("no such hub")?;
+        let link = hub
             .link
             .lock()
             .unwrap()
             .clone()
             .filter(|link| link.alive())
-            .context("the board is not attended")?;
-        Ok((board, link))
+            .context("the hub is not attended")?;
+        Ok((hub, link))
     }
 
     fn command(&self, serial: &str, port: u8, action: PortAction) -> Result<()> {
-        let (board, link) = self.board(serial)?;
+        let (hub, link) = self.hub(serial)?;
         let port = Port::try_from(port)
             .ok()
             .context("ports are numbered 1 to 5")?;
@@ -304,7 +304,7 @@ impl Agent {
         if mapping && let Some(status) = link.status() {
             link.presenting(port, status.ports[port.index()].generation);
         }
-        let result = board.control(|board| board.command(port, action))?;
+        let result = hub.control(|hub| hub.command(port, action))?;
         // The target's reply shows its pins once it has mapped them.
         ensure!(
             !mapping || result == CommandResult::Complete,
@@ -313,23 +313,23 @@ impl Agent {
         Ok(())
     }
 
-    /// Hand a client's restore request to each board's attendant. Every
-    /// selection is checked before any board is asked, so a stale one
+    /// Hand a client's restore request to each hub's attendant. Every
+    /// selection is checked before any hub is asked, so a stale one
     /// starts nothing.
     /// What the store and the catalog offer each target. A target whose
     /// model this host has not learned has no offer until it is in DFU.
     fn plan(&self, selections: &[Selection]) -> Result<Vec<Planned>> {
         let mut planned = Vec::new();
         for selection in selections {
-            let (_, link) = self.board(&selection.board)?;
-            let status = link.status().context("the board has not been read yet")?;
+            let (_, link) = self.hub(&selection.hub)?;
+            let status = link.status().context("the hub has not been read yet")?;
             for target in &selection.targets {
                 let ecid = target.ecid.or(status.ports[target.port.index()].ecid);
                 let hardware = ecid
                     .and_then(|ecid| self.models.model(ecid))
                     .and_then(|model| self.store.hardware_for(&model).ok());
                 planned.push(Planned {
-                    board: selection.board.clone(),
+                    hub: selection.hub.clone(),
                     port: target.port.number(),
                     offer: hardware.map(|(chip, board)| self.store.offer(chip, board)),
                 });
@@ -347,25 +347,25 @@ impl Agent {
         ensure!(!selections.is_empty(), "no ports selected");
         let mut checked = Vec::new();
         for selection in selections {
-            let (board, link) = self.board(&selection.board)?;
+            let (hub, link) = self.hub(&selection.hub)?;
             ensure!(
                 !checked
                     .iter()
-                    .any(|(other, _, _): &(Arc<Attendance>, _, _)| Arc::ptr_eq(other, &board)),
-                "a board is named twice"
+                    .any(|(other, _, _): &(Arc<Attendance>, _, _)| Arc::ptr_eq(other, &hub)),
+                "a hub is named twice"
             );
-            let status = link.status().context("the board has not been read yet")?;
+            let status = link.status().context("the hub has not been read yet")?;
             ensure!(
                 selection.session == link.session(),
-                "the board has reconnected"
+                "the hub has reconnected"
             );
             let targets = restore_targets(&status, &selection.targets)?;
-            checked.push((board, selection.session, targets));
+            checked.push((hub, selection.session, targets));
         }
         let mut work = Vec::new();
-        for (board, session, targets) in checked {
+        for (hub, session, targets) in checked {
             work.extend(submit(
-                &board,
+                &hub,
                 session,
                 targets,
                 latest,
@@ -376,7 +376,7 @@ impl Agent {
         Ok(work)
     }
 
-    /// Write IasisOS to a board that is not restoring. The board leaves USB
+    /// Write IasisOS to a hub that is not restoring. The hub leaves USB
     /// while it is written and is attended again when it returns.
     fn update(&self, serial: &str, bytes: Option<u64>, payload: &mut dyn Read) -> Result<()> {
         let image = match bytes {
@@ -392,8 +392,8 @@ impl Agent {
             )?,
         };
         let serial = parse_serial(serial).map_err(anyhow::Error::msg)?;
-        if let Some(board) = self.boards.lock().unwrap().get(&serial) {
-            let status = board
+        if let Some(hub) = self.hubs.lock().unwrap().get(&serial) {
+            let status = hub
                 .link
                 .lock()
                 .unwrap()
@@ -401,17 +401,17 @@ impl Agent {
                 .and_then(|link| link.status());
             let restoring = status
                 .is_some_and(|status| status.ports.iter().any(|port| port.restoring()))
-                || board
+                || hub
                     .endings
                     .lock()
                     .unwrap()
                     .iter()
                     .flatten()
                     .any(|work| work.get().is_none());
-            ensure!(!restoring, "the board is restoring");
+            ensure!(!restoring, "the hub is restoring");
         }
         let [major, minor, patch] = update::write(serial, &image, &self.inventory)?;
-        log::info!("Board {serial:016x}: IasisOS {major}.{minor}.{patch} written");
+        log::info!("Hub {serial:016x}: IasisOS {major}.{minor}.{patch} written");
         Ok(())
     }
 
@@ -437,22 +437,22 @@ impl Agent {
                     Err(error) => Reply::Error(format!("{error:#}")),
                 };
             }
-            Request::Plan { boards } => {
-                return match self.plan(&boards) {
+            Request::Plan { hubs } => {
+                return match self.plan(&hubs) {
                     Ok(planned) => Reply::Plan(planned),
                     Err(error) => Reply::Error(format!("{error:#}")),
                 };
             }
-            Request::Restore { boards, latest } => self
-                .restore(&boards, latest, Operation::Restore)
+            Request::Restore { hubs, latest } => self
+                .restore(&hubs, latest, Operation::Restore)
                 .map(|work| *submitted = work),
-            Request::Revive { boards, latest } => self
-                .restore(&boards, latest, Operation::Revive)
+            Request::Revive { hubs, latest } => self
+                .restore(&hubs, latest, Operation::Revive)
                 .map(|work| *submitted = work),
-            Request::Dfu { board, port } => self.command(&board, port, PortAction::Dfu),
-            Request::Reboot { board, port } => self.command(&board, port, PortAction::Reboot),
-            Request::Power { board, port, on } => self.command(
-                &board,
+            Request::Dfu { hub, port } => self.command(&hub, port, PortAction::Dfu),
+            Request::Reboot { hub, port } => self.command(&hub, port, PortAction::Reboot),
+            Request::Power { hub, port, on } => self.command(
+                &hub,
                 port,
                 if on {
                     PortAction::Enable
@@ -460,8 +460,8 @@ impl Agent {
                     PortAction::Disable
                 },
             ),
-            Request::DebugUsb { board, port, on } => self.command(
-                &board,
+            Request::DebugUsb { hub, port, on } => self.command(
+                &hub,
                 port,
                 if on {
                     PortAction::MapDebugUsb
@@ -469,13 +469,13 @@ impl Agent {
                     PortAction::UnmapDebugUsb
                 },
             ),
-            Request::Brightness { board, percent } => self
-                .board(&board)
-                .and_then(|(board, _)| board.control(|board| board.brightness(percent))),
-            Request::Rename { board, name } => self
-                .board(&board)
-                .and_then(|(board, _)| board.control(|board| board.rename(&name))),
-            Request::Update { board, bytes } => self.update(&board, bytes, payload),
+            Request::Brightness { hub, percent } => self
+                .hub(&hub)
+                .and_then(|(hub, _)| hub.control(|hub| hub.brightness(percent))),
+            Request::Rename { hub, name } => self
+                .hub(&hub)
+                .and_then(|(hub, _)| hub.control(|hub| hub.rename(&name))),
+            Request::Update { hub, bytes } => self.update(&hub, bytes, payload),
             Request::Download { model, build } => self.store.download(&model, build.as_deref()),
             Request::Import { name, bytes } => self.store.import(&name, payload, bytes).map(|_| ()),
             Request::Remove { image } => self.store.remove(&image),
@@ -505,21 +505,21 @@ impl Agent {
         }
     }
 
-    /// Hold one board's host session until the board or the session is lost.
-    fn attend(&self, device: &DeviceInfo, board: &Attendance) -> Result<()> {
+    /// Hold one hub's host session until the hub or the session is lost.
+    fn attend(&self, device: &DeviceInfo, hub: &Attendance) -> Result<()> {
         let link = Arc::new(Link::open(
             device,
-            board.jobs.clone(),
+            hub.jobs.clone(),
             self.models.clone(),
             &self.engine,
             self.inventory.clone(),
         )?);
-        log::info!("Board {:016x}: attending", link.board().info().serial);
-        *board.device.lock().unwrap() = Some(device.clone());
-        *board.link.lock().unwrap() = Some(link.clone());
-        // Whatever kept an earlier attempt from the board is over.
-        *board.notice.lock().unwrap() = None;
-        *board.outdated.lock().unwrap() = None;
+        log::info!("Hub {:016x}: attending", link.hub().info().serial);
+        *hub.device.lock().unwrap() = Some(device.clone());
+        *hub.link.lock().unwrap() = Some(link.clone());
+        // Whatever kept an earlier attempt from the hub is over.
+        *hub.notice.lock().unwrap() = None;
+        *hub.outdated.lock().unwrap() = None;
         self.changes.changed();
         let result = (|| -> Result<()> {
             loop {
@@ -528,14 +528,14 @@ impl Agent {
                     device,
                     &self.engine,
                     &Images::Store(&self.store),
-                    &board.requests,
-                    &board.endings,
+                    &hub.requests,
+                    &hub.endings,
                 )?;
-                *board.notice.lock().unwrap() = outcome;
+                *hub.notice.lock().unwrap() = outcome;
                 self.changes.changed();
             }
         })();
-        *board.link.lock().unwrap() = None;
+        *hub.link.lock().unwrap() = None;
         self.changes.changed();
         result
     }
@@ -545,31 +545,31 @@ impl Agent {
     fn present(&self) {
         loop {
             let seen = self.changes.count();
-            let boards: Vec<(u64, Arc<Attendance>)> = self
-                .boards
+            let hubs: Vec<(u64, Arc<Attendance>)> = self
+                .hubs
                 .lock()
                 .unwrap()
                 .iter()
-                .map(|(serial, board)| (*serial, board.clone()))
+                .map(|(serial, hub)| (*serial, hub.clone()))
                 .collect();
-            for (serial, board) in boards {
-                let Some(link) = board.link.lock().unwrap().clone() else {
+            for (serial, hub) in hubs {
+                let Some(link) = hub.link.lock().unwrap().clone() else {
                     continue;
                 };
-                if !board.present.load(Ordering::Relaxed) || !link.alive() {
+                if !hub.present.load(Ordering::Relaxed) || !link.alive() {
                     continue;
                 }
                 for (port, generation) in link.unpresented() {
                     link.presenting(port, generation);
                     let number = port.number();
-                    match board.control(|board| {
-                        board.command_for_generation(port, generation, PortAction::MapDebugUsb)
+                    match hub.control(|hub| {
+                        hub.command_for_generation(port, generation, PortAction::MapDebugUsb)
                     }) {
                         Ok(result) => log::info!(
-                            "Board {serial:016x}: port {number} Debug USB for its silent target: {result:?}"
+                            "Hub {serial:016x}: port {number} Debug USB for its silent target: {result:?}"
                         ),
                         Err(error) => {
-                            log::warn!("Board {serial:016x}: port {number} Debug USB: {error:#}")
+                            log::warn!("Hub {serial:016x}: port {number} Debug USB: {error:#}")
                         }
                     }
                 }
@@ -579,7 +579,7 @@ impl Agent {
     }
 
     /// Look for software the host has gained or lost, such as Apple's
-    /// service on Windows, and have each board decide again what its
+    /// service on Windows, and have each hub decide again what its
     /// targets allow.
     fn follow_prerequisites(&self) {
         let mut missing = crate::native::mux::missing();
@@ -591,11 +591,11 @@ impl Agent {
             }
             missing = now;
             let links: Vec<Arc<Link>> = self
-                .boards
+                .hubs
                 .lock()
                 .unwrap()
                 .values()
-                .filter_map(|board| board.link.lock().unwrap().clone())
+                .filter_map(|hub| hub.link.lock().unwrap().clone())
                 .collect();
             for link in links {
                 link.reassess();
@@ -604,7 +604,7 @@ impl Agent {
         }
     }
 
-    /// Attend boards as they come and go. Returns only on a failure that
+    /// Attend hubs as they come and go. Returns only on a failure that
     /// leaves the agent without its socket.
     pub fn run(self: &Arc<Self>, options: &Options) -> Result<()> {
         socket::serve(self.clone())?;
@@ -616,13 +616,13 @@ impl Agent {
                 .spawn(move || {
                     agent.sharing.run(|| {
                         agent
-                            .boards
+                            .hubs
                             .lock()
                             .unwrap()
                             .iter()
-                            .filter_map(|(serial, board)| {
-                                let link = board.link.lock().unwrap().clone()?;
-                                (board.present.load(Ordering::Relaxed) && link.alive())
+                            .filter_map(|(serial, hub)| {
+                                let link = hub.link.lock().unwrap().clone()?;
+                                (hub.present.load(Ordering::Relaxed) && link.alive())
                                     .then_some((*serial, link))
                             })
                             .collect()
@@ -643,7 +643,7 @@ impl Agent {
         }
         let mut attendants: BTreeMap<u64, Attendant> = BTreeMap::new();
         let mut errors: BTreeMap<u64, String> = BTreeMap::new();
-        // The enumeration each board's last attendant held, and when it ended.
+        // The enumeration each hub's last attendant held, and when it ended.
         let mut ended: BTreeMap<u64, (nusb::DeviceId, Instant)> = BTreeMap::new();
         loop {
             let seen = self.changes.count();
@@ -679,30 +679,30 @@ impl Agent {
                 if errors.get(&serial) != Some(&message)
                     || started.elapsed() > Duration::from_secs(5)
                 {
-                    log::warn!("Board {serial:016x}: {message}");
+                    log::warn!("Hub {serial:016x}: {message}");
                 }
-                if let Some(board) = self.boards.lock().unwrap().get(&serial) {
-                    *board.notice.lock().unwrap() = Some(message.clone());
-                    *board.outdated.lock().unwrap() = outdated;
+                if let Some(hub) = self.hubs.lock().unwrap().get(&serial) {
+                    *hub.notice.lock().unwrap() = Some(message.clone());
+                    *hub.outdated.lock().unwrap() = outdated;
                 }
                 errors.insert(serial, message);
                 self.changes.changed();
             }
-            let mut boards = self.boards.lock().unwrap();
-            let was: Vec<bool> = boards
+            let mut hubs = self.hubs.lock().unwrap();
+            let was: Vec<bool> = hubs
                 .values()
-                .map(|board| board.present.swap(false, Ordering::Relaxed))
+                .map(|hub| hub.present.swap(false, Ordering::Relaxed))
                 .collect();
-            for device in boards_among(self.inventory.devices(), options.serial) {
+            for device in hubs_among(self.inventory.devices(), options.serial) {
                 let Some(serial) = device.serial_number().and_then(|s| parse_serial(s).ok()) else {
                     continue;
                 };
-                let board = boards.entry(serial).or_default().clone();
-                board.present.store(true, Ordering::Relaxed);
+                let hub = hubs.entry(serial).or_default().clone();
+                hub.present.store(true, Ordering::Relaxed);
                 if attendants.contains_key(&serial) {
                     continue;
                 }
-                // A board that has just enumerated is attended at once. The
+                // A hub that has just enumerated is attended at once. The
                 // one an attendant gave up on is tried again after a while.
                 if let Some((id, at)) = ended.get(&serial)
                     && *id == device.id()
@@ -718,7 +718,7 @@ impl Agent {
                 let thread = thread::spawn({
                     let done = done.clone();
                     move || {
-                        let result = agent.attend(&device, &board);
+                        let result = agent.attend(&device, &hub);
                         // Marked before the loop above is woken to collect it.
                         done.store(true, Ordering::Release);
                         agent.changes.changed();
@@ -735,11 +735,11 @@ impl Agent {
                     },
                 );
             }
-            let now: Vec<bool> = boards
+            let now: Vec<bool> = hubs
                 .values()
-                .map(|board| board.present.load(Ordering::Relaxed))
+                .map(|hub| hub.present.load(Ordering::Relaxed))
                 .collect();
-            drop(boards);
+            drop(hubs);
             if was != now {
                 self.changes.changed();
             }
@@ -748,19 +748,19 @@ impl Agent {
     }
 }
 
-/// The thread holding one board's session.
+/// The thread holding one hub's session.
 struct Attendant {
     thread: JoinHandle<Result<()>>,
     started: Instant,
-    /// The enumeration of the board it attends.
+    /// The enumeration of the hub it attends.
     device: nusb::DeviceId,
     /// Set as its last act, so the agent's loop never waits on an attendant
     /// that has already said it ended.
     done: Arc<AtomicBool>,
 }
 
-fn boards_among(devices: Vec<DeviceInfo>, serial: Option<u64>) -> Vec<DeviceInfo> {
-    boards(devices, UsbIds::default(), serial)
+fn hubs_among(devices: Vec<DeviceInfo>, serial: Option<u64>) -> Vec<DeviceInfo> {
+    hubs(devices, UsbIds::default(), serial)
 }
 
 /// Who the agent serves on Linux, decided from each client's credentials as
@@ -1167,7 +1167,7 @@ mod socket {
     }
 
     #[test]
-    fn watch_delivers_the_submitted_result_after_the_board_disappears() {
+    fn watch_delivers_the_submitted_result_after_the_hub_disappears() {
         use crate::restore::Operation;
         use iasis_protocol::RestorePhase;
         let (mut server, reader) = UnixStream::pair().unwrap();
@@ -1196,7 +1196,7 @@ mod socket {
             // Each frame changes what the next one shows.
             changes.changed();
             match frame {
-                1 => state.boards.push(BoardView::unreadable(
+                1 => state.hubs.push(HubView::unreadable(
                     "0000000000000001".into(),
                     "connecting".into(),
                 )),
@@ -1230,13 +1230,13 @@ mod socket {
             _ => panic!("expected a watch frame"),
         };
         let present = receive();
-        assert_eq!(present.boards.len(), 1);
+        assert_eq!(present.hubs.len(), 1);
         assert_eq!(present.submitted, [None]);
         let absent = receive();
-        assert!(absent.boards.is_empty());
+        assert!(absent.hubs.is_empty());
         assert_eq!(absent.submitted, [None]);
         let finished = receive();
-        assert!(finished.boards.is_empty());
+        assert!(finished.hubs.is_empty());
         assert_eq!(finished.submitted, [Some(result)]);
     }
 

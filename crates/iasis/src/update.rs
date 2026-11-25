@@ -1,9 +1,9 @@
-//! Writing IasisOS to a board through the RP2350 boot ROM.
+//! Writing IasisOS to a hub through the RP2350 boot ROM.
 //!
-//! The board restarts into the ROM's PICOBOOT interface, which takes the
-//! image, and is then restarted into the new IasisOS. A board found in the
-//! ROM is written directly. A ROM is this board's only when it answers with
-//! the board's chip ID from port 6 of the board's own USB2 hub, where the
+//! The hub restarts into the ROM's PICOBOOT interface, which takes the
+//! image, and is then restarted into the new IasisOS. A hub found in the
+//! ROM is written directly. A ROM is this hub's only when it answers with
+//! the hub's chip ID from port 6 of its own USB 2 hub, where the
 //! RP2354 sits; any other RP2350 is left alone.
 
 use std::{
@@ -15,17 +15,17 @@ use anyhow::{Context, Result, ensure};
 use nusb::DeviceInfo;
 use picoboot::{Picoboot, RebootType};
 
-use crate::{Board, UsbIds, boards, inventory::Inventory};
+use crate::{Hub, UsbIds, hubs, inventory::Inventory};
 
-/// The board's application flash. Its last two sectors, above this, hold the
-/// board's settings (`crates/firmware/memory.x`).
+/// The hub's application flash. Its last two sectors, above this, hold the
+/// hub's settings (`crates/firmware/memory.x`).
 const FLASH: std::ops::Range<u32> = 0x1000_0000..0x1000_0000 + 2040 * 1024;
 const PAGE: usize = 256;
 const SECTOR: u32 = 4096;
 /// UF2 family of an RP2350 Arm Secure image, which IasisOS is.
 const RP2350_ARM_S: u32 = 0xe48b_ff59;
 
-/// How long the board has to leave IasisOS and enumerate as its ROM, and to
+/// How long the hub has to leave IasisOS and enumerate as its ROM, and to
 /// come back as IasisOS after the write.
 const ENUMERATION: Duration = Duration::from_secs(15);
 
@@ -105,23 +105,23 @@ impl Image {
     }
 }
 
-/// Write `image` to the board with `serial` and return the IasisOS version it
-/// starts. The board leaves USB for a few seconds and its ports lose power.
+/// Write `image` to the hub with `serial` and return the IasisOS version it
+/// starts. The hub leaves USB for a few seconds and its ports lose power.
 pub fn write(serial: u64, image: &Image, inventory: &Inventory) -> Result<[u16; 3]> {
     let _awake = crate::awake::hold(&format!("Updating IasisOS on {serial:016x}"));
-    if let Some(device) = boards(inventory.devices(), UsbIds::default(), Some(serial)).pop() {
-        Board::open(&device)
-            .and_then(|board| board.enter_bootloader())
+    if let Some(device) = hubs(inventory.devices(), UsbIds::default(), Some(serial)).pop() {
+        Hub::open(&device)
+            .and_then(|hub| hub.enter_bootloader())
             .context("asking IasisOS to restart into its ROM")?;
     }
     let rom = arrival(inventory, |devices| rom(devices, serial))
-        .context("the board did not enumerate in its ROM")?;
+        .context("the hub did not enumerate in its ROM")?;
     pollster::block_on(flash(rom, image))?;
-    let board = arrival(inventory, |devices| {
-        boards(devices.to_vec(), UsbIds::default(), Some(serial)).pop()
+    let hub = arrival(inventory, |devices| {
+        hubs(devices.to_vec(), UsbIds::default(), Some(serial)).pop()
     })
-    .context("the board did not return to IasisOS")?;
-    Ok(Board::observe(&board)?.info().firmware_version)
+    .context("the hub did not return to IasisOS")?;
+    Ok(Hub::observe(&hub)?.info().firmware_version)
 }
 
 async fn flash(rom: DeviceInfo, image: &Image) -> Result<()> {
@@ -142,7 +142,7 @@ async fn flash(rom: DeviceInfo, image: &Image) -> Result<()> {
     Ok(())
 }
 
-/// The ROM of the board with this chip ID, on its hub's management port.
+/// The ROM of the hub with this chip ID, on its USB hub's management port.
 fn rom(devices: &[DeviceInfo], serial: u64) -> Option<DeviceInfo> {
     let chip = format!("{serial:016x}");
     devices
@@ -157,7 +157,7 @@ fn rom(devices: &[DeviceInfo], serial: u64) -> Option<DeviceInfo> {
         .cloned()
 }
 
-/// The device sits on port 6 of an Iasis board's USB2 hub function.
+/// The device sits on port 6 of an Iasis hub's USB2 hub function.
 fn on_management_port(device: &DeviceInfo, devices: &[DeviceInfo]) -> bool {
     let Some((&6, hub)) = device.port_chain().split_last() else {
         return false;

@@ -1,4 +1,4 @@
-//! What the board's lights mean, port by port and for the status light.
+//! What the hub's lights mean, port by port and for the status light.
 
 use adw::prelude::*;
 use gtk::glib;
@@ -37,7 +37,7 @@ const PORTS: &[(&str, &str, &str, &str)] = &[
 ];
 
 const STATUS: &[(&str, &str, &str, &str)] = &[
-    ("white", "", "White", "Board running on its own"),
+    ("white", "", "White", "Hub running on its own"),
     ("green", "", "Green", "Host connected"),
     ("blue", "", "Blue", "Release the button to enter DFU"),
     ("amber", "", "Amber", "Release the button to restart"),

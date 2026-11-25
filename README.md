@@ -17,12 +17,12 @@ See the [main board](hardware/boards/iasis/README.md) for fabrication files and 
 
 ## Software
 
-| Part                                    | Role                                         |
-| --------------------------------------- | -------------------------------------------- |
-| [IasisOS](crates/firmware/README.md)    | Firmware on the board's RP2354               |
-| [`iasisd`](#host-agent)                 | Host agent: follows boards and runs restores |
-| `iasis`                                 | Command-line control of boards and the agent |
-| [Iasis for macOS](apps/macos/README.md) | Menu bar app, with the host tools inside     |
+| Part                                    | Role                                       |
+| --------------------------------------- | ------------------------------------------ |
+| [IasisOS](crates/firmware/README.md)    | Firmware on the hub's RP2354               |
+| [`iasisd`](#host-agent)                 | Host agent: follows hubs and runs restores |
+| `iasis`                                 | Command-line control of hubs and the agent |
+| [Iasis for macOS](apps/macos/README.md) | Menu bar app, with the host tools inside   |
 
 They share one version and are released together.
 
@@ -36,7 +36,7 @@ mise run deps
 mise run host:build
 ```
 
-The host tools are `target/release/iasis` for board control and `target/release/iasisd`, the [host agent](#host-agent). Keep `iasis-gateway` beside both. The agent needs read/write access to the management USB device. On Linux, the [Debian package](crates/iasis/README.md#debian-package) installs them with that access, and on Windows the [installer](crates/iasis/README.md#windows-installer).
+The host tools are `target/release/iasis` for hub control and `target/release/iasisd`, the [host agent](#host-agent). Keep `iasis-gateway` beside both. The agent needs read/write access to the management USB device. On Linux, the [Debian package](crates/iasis/README.md#debian-package) installs them with that access, and on Windows the [installer](crates/iasis/README.md#windows-installer).
 
 The build compiles the restore engine's C libraries from source. Install their build tools first: on macOS, the Xcode command line tools and `brew install autoconf automake libtool pkg-config cmake`; on Debian or Ubuntu, `build-essential git autoconf automake libtool pkg-config cmake libpcap-dev libusb-1.0-0-dev`; on Windows, `mise bootstrap` (MSYS2 and its MINGW64 packages) with rustup's default host set to `x86_64-pc-windows-gnu`, building from MSYS2's MINGW64 shell.
 
@@ -58,11 +58,11 @@ Connect the host and charged targets. Ports are numbered 1–5, starting at the 
 target/release/iasis
 target/release/iasis list
 target/release/iasis --serial 0123456789abcdef rename "Bench A"
-target/release/iasis --board "Bench A" dfu 1
-target/release/iasis --board "Bench A" ports --watch
+target/release/iasis --hub "Bench A" dfu 1
+target/release/iasis --hub "Bench A" ports --watch
 ```
 
-`iasis` alone lists every board and its ports; `iasis watch` keeps the list current. Select a board by name or by the serial from `iasis list`. Names match without case, can contain spaces and punctuation, and fit the OLED’s 16 printable ASCII characters. If two boards share a name, select by serial. An empty name clears the label. Use `ports --watch` to see the USB mode, identity and link (none, USB 2 or USB 3) on each port. If a Mac acknowledges the DFU request and then disappears from USB, check the data cable and the Mac’s [DFU socket](https://support.apple.com/en-us/120694). A locked Mac laptop withholds USB data from an accessory it has not allowed until someone unlocks it and allows it ([Apple](https://support.apple.com/en-us/102282)); until then its port shows power and no link, and DFU still works.
+`iasis` alone lists every hub and its ports; `iasis watch` keeps the list current. Select a hub by name or by the serial from `iasis list`. Names match without case, can contain spaces and punctuation, and fit the OLED’s 16 printable ASCII characters. If two hubs share a name, select by serial. An empty name clears the label. Use `ports --watch` to see the USB mode, identity and link (none, USB 2 or USB 3) on each port. If a Mac acknowledges the DFU request and then disappears from USB, check the data cable and the Mac’s [DFU socket](https://support.apple.com/en-us/120694). A locked Mac laptop withholds USB data from an accessory it has not allowed until someone unlocks it and allows it ([Apple](https://support.apple.com/en-us/102282)); until then its port shows power and no link, and DFU still works.
 
 The button selects targets with a tap and acts on them with a hold, with or without an OLED.
 
@@ -80,7 +80,7 @@ Port lights outside the selection dim. While the button is held, only the ports 
 
 After a DFU the port pulses blue. It turns steady blue once a host sees the target in DFU, which needs the [host agent](#host-agent). The [light table](crates/firmware/README.md#controls-and-status) lists every colour.
 
-A steady white port light marks a device Iasis cannot act on, such as a USB peripheral or a laptop. It can use USB normally. DFU leaves target data intact and works with Apple Configurator. `power <port> off` disables a port. `power <port> on` enables it and retries a fault. The selected board stores its name and light brightness in flash.
+A steady white port light marks a device Iasis cannot act on, such as a USB peripheral or a laptop. It can use USB normally. DFU leaves target data intact and works with Apple Configurator. `power <port> off` disables a port. `power <port> on` enables it and retries a fault. The selected hub stores its name and light brightness in flash.
 
 A USB-C host advertising 1.5 A or 3 A can power the targets. Default USB requires the charging input.
 
@@ -88,7 +88,7 @@ The [firmware power table](crates/firmware/README.md#port-power) lists the limit
 
 ### Host agent
 
-`iasisd` attends every connected board and needs no arguments:
+`iasisd` attends every connected hub and needs no arguments:
 
 ```sh
 target/release/iasisd
@@ -96,14 +96,14 @@ target/release/iasisd
 
 While the agent is running:
 
-- It tells each board which USB mode its targets are in, so a port light turns steady blue when its target really is in DFU, however it got there.
+- It tells each hub which USB mode its targets are in, so a port light turns steady blue when its target really is in DFU, however it got there.
 - It keeps the [restore images](#images) and fetches the ones it lacks.
-- It runs the restores that a board's button or a client asks for.
+- It runs the restores that a hub's button or a client asks for.
 - On Linux and macOS, it can share an internet connection with attached devices over USB.
 
-The status light is green and the OLED shows a USB symbol while a host is attached. One host holds a board at a time. With the agent running, every `iasis` command except `status` and `ports` goes through it; on Windows those two can't open a board while the agent holds it. Other clients use its [local socket](crates/api/README.md).
+The status light is green and the OLED shows a USB symbol while a host is attached. One host holds a hub at a time. With the agent running, every `iasis` command except `status` and `ports` goes through it; on Windows those two can't open a hub while the agent holds it. Other clients use its [local socket](crates/api/README.md).
 
-On Linux, the [Debian package](crates/iasis/README.md#debian-package) runs the agent at boot for the person signed in at the computer and members of the `iasis` group. On Windows, the [installer](crates/iasis/README.md#windows-installer) runs it at boot for Administrators and the person signed in at the computer. On macOS, the [menu bar app](apps/macos/README.md) shows the same boards and ports, sends the same actions and runs the agent it carries while you are logged in. To run your own build in the background, turn Iasis off under Background App Activity in Login Items & Extensions, then prefix the command with `launchctl submit -l local.iasisd --`.
+On Linux, the [Debian package](crates/iasis/README.md#debian-package) runs the agent at boot for the person signed in at the computer and members of the `iasis` group. On Windows, the [installer](crates/iasis/README.md#windows-installer) runs it at boot for Administrators and the person signed in at the computer. On macOS, the [menu bar app](apps/macos/README.md) shows the same hubs and ports, sends the same actions and runs the agent it carries while you are logged in. To run your own build in the background, turn Iasis off under Background App Activity in Login Items & Extensions, then prefix the command with `launchctl submit -l local.iasisd --`.
 
 ### USB Internet Sharing
 
@@ -115,7 +115,7 @@ iasis sharing       # show the setting and ports being served
 iasis sharing off
 ```
 
-A directly attached Apple device that offers USB Ethernet can use the host’s internet connection over its charging and restore cable. Sharing follows the host’s routing and resumes when a device restarts. The OLED shows a network symbol while the agent serves at least one port on that board.
+A directly attached Apple device that offers USB Ethernet can use the host’s internet connection over its charging and restore cable. Sharing follows the host’s routing and resumes when a device restarts. The OLED shows a network symbol while the agent serves at least one port on that hub.
 
 On Linux, a Mac is served once the kernel’s `cdc_ncm` driver lists its USB ID: from Linux 7.2 for the M5 MacBook Air (`linux-oem-26.04b` on Ubuntu 26.04) and 7.4 for the M1 MacBook Air. iPhones and iPads won’t be served until Debian and Ubuntu ship a usbmuxd newer than 1.1.1.
 
@@ -154,13 +154,13 @@ While an image is being fetched for a target, its port pulses purple, the OLED l
 
 ### Restore
 
-Restores are built into the host tools through [RestoreKit](https://github.com/fcjr/restorekit), for targets in ordinary DFU and Apple Debug USB DFU. On Linux they go through the system usbmuxd. An iPhone or iPad the board can't signal into DFU, such as one on a Lightning cable, restarts into recovery mode at the host's request and restores from there. It must trust the host: unlock it and tap Trust when it asks, unless its enrollment profile lists the host's [supervision certificate](#supervised-iphones-and-ipads).
+Restores are built into the host tools through [RestoreKit](https://github.com/fcjr/restorekit), for targets in ordinary DFU and Apple Debug USB DFU. On Linux they go through the system usbmuxd. An iPhone or iPad the hub can't signal into DFU, such as one on a Lightning cable, restarts into recovery mode at the host's request and restores from there. It must trust the host: unlock it and tap Trust when it asks, unless its enrollment profile lists the host's [supervision certificate](#supervised-iphones-and-ipads).
 
 ```sh
 target/release/iasis --serial 0123456789abcdef restore --ports 1,2,3,4,5 --erase
 ```
 
-**`--erase` erases the selected targets.** With the agent running, the request goes to it and the command follows the restore to its end. Without the agent, the command hosts the board for its own run; there, `--button` confirms the erase on the board, and `--button` without `--ports` chooses the targets there too. Name an IPSW before the options to restore from that file instead of the newest release.
+**`--erase` erases the selected targets.** With the agent running, the request goes to it and the command follows the restore to its end. Without the agent, the command hosts the hub for its own run; there, `--button` confirms the erase on the hub, and `--button` without `--ports` chooses the targets there too. Name an IPSW before the options to restore from that file instead of the newest release.
 
 Iasis starts one restore process for each authorized ECID. A failed restore ends that target’s job. A target that can’t be prepared, such as an iPad waiting for Trust, ends with the reason on its port while the others restore.
 
@@ -186,7 +186,7 @@ To back the identity up or give another host the same one, export it with its pr
 
 #### Button restores
 
-With the agent running, the board's Restore hold needs nothing else. Tap to select targets, then hold until the status light turns purple and release. Preparation puts the targets into DFU or recovery and fetches any image the agent lacks. Once the erase is ready, the status light blinks purple: hold for three seconds to confirm, or tap to cancel. The agent keeps listening after cancellation and while workers run.
+With the agent running, the hub's Restore hold needs nothing else. Tap to select targets, then hold until the status light turns purple and release. Preparation puts the targets into DFU or recovery and fetches any image the agent lacks. Once the erase is ready, the status light blinks purple: hold for three seconds to confirm, or tap to cancel. The agent keeps listening after cancellation and while workers run.
 
 An erase stays ready for 20 seconds. If a long download outlasts your wait, make the Restore hold again once the port is steady blue: the image is in the store by then.
 
@@ -200,7 +200,7 @@ These Rev A timings use cached macOS 27 IPSWs. The single-Mac column times the r
 | M1 Air | USB 2          | idevicerestore, experimental binary FileData |       12m 36s |       47m 57s |
 | M5 Air | USB 3, 10 Gb/s | RestoreKit                                   | 3m 59s–4m 21s |             — |
 
-The five M1s shared a 480 Mb/s uplink and reached 45 MB/s combined. Across two boards, ten jobs overlapped for 4m 52s and at least eight Macs transferred data together.
+The five M1s shared a 480 Mb/s uplink and reached 45 MB/s combined. Across two hubs, ten jobs overlapped for 4m 52s and at least eight Macs transferred data together.
 
 Use USB 2 as a planning estimate for M1–M3 and USB 3 for M4 or newer Macs with a SuperSpeed restore link. Five-Mac USB 3 time is unmeasured.
 
@@ -221,7 +221,7 @@ A revived Mac can start in recoveryOS and ask for an administrator's password be
 
 ## IasisOS and protocol
 
-`iasis --board "Bench A" update` writes the IasisOS that the host tools carry, so a board and its host run the same release. The board leaves USB for a few seconds and its ports lose power. [Build, update and recover IasisOS](crates/firmware/README.md) through the same host USB connection. The [protocol README](crates/protocol/README.md) describes the management interface for host applications.
+`iasis --hub "Bench A" update` writes the IasisOS that the host tools carry, so a hub and its host run the same release. The hub leaves USB for a few seconds and its ports lose power. [Build, update and recover IasisOS](crates/firmware/README.md) through the same host USB connection. The [protocol README](crates/protocol/README.md) describes the management interface for host applications.
 
 ## License
 

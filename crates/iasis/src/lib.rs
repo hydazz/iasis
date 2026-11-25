@@ -1,4 +1,4 @@
-//! USB management of an Iasis board.
+//! USB management of an Iasis hub.
 
 #[cfg(windows)]
 mod acl;
@@ -42,7 +42,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
 const TIMEOUT: Duration = Duration::from_secs(2);
-/// A client without the board's announcements looks again this often.
+/// A client without the hub's announcements looks again this often.
 const UNANNOUNCED: Duration = Duration::from_millis(20);
 
 #[derive(Debug, Error)]
@@ -55,13 +55,13 @@ pub enum Error {
     Protocol(protocol::DecodeError),
     #[error("could not encode Iasis request")]
     Encode,
-    #[error("this board connection is read-only")]
+    #[error("this hub connection is read-only")]
     ReadOnly,
-    #[error("this request requires exclusive control of the board")]
+    #[error("this request requires exclusive control of the hub")]
     ExclusiveControlRequired,
-    #[error("board does not support ROM updates")]
+    #[error("hub does not support ROM updates")]
     UpdateUnsupported,
-    #[error("board does not support port control")]
+    #[error("hub does not support port control")]
     PortControlUnsupported,
     #[error("port command failed: {0:?}")]
     Command(CommandError),
@@ -71,11 +71,11 @@ pub enum Error {
     InvalidSetting(&'static str),
     #[error("settings storage is full; unplug targets briefly, then retry")]
     SettingsFull,
-    #[error("IasisOS on this board is from another build; update it with `iasis update`")]
+    #[error("IasisOS on this hub is from another build; update it with `iasis update`")]
     Firmware {
-        /// The protocol version the board speaks.
-        board: u16,
-        /// The IasisOS version the board runs.
+        /// The protocol version the hub speaks.
+        hub: u16,
+        /// The IasisOS version the hub runs.
         version: [u16; 3],
     },
 }
@@ -101,8 +101,8 @@ pub struct Topology {
     pub port_chain: Vec<u8>,
 }
 
-/// The Iasis boards among `devices`: every one, or the one with `serial`.
-pub fn boards(
+/// The Iasis hubs among `devices`: every one, or the one with `serial`.
+pub fn hubs(
     devices: impl IntoIterator<Item = DeviceInfo>,
     ids: UsbIds,
     serial: Option<u64>,
@@ -121,10 +121,10 @@ pub fn boards(
 }
 
 pub fn discover(ids: UsbIds, serial: Option<u64>) -> Result<Vec<DeviceInfo>, Error> {
-    Ok(boards(nusb::list_devices().wait()?, ids, serial))
+    Ok(hubs(nusb::list_devices().wait()?, ids, serial))
 }
 
-/// The board's announcements that its status has changed. One client holds
+/// The hub's announcements that its status has changed. One client holds
 /// them at a time; any client can read the status they announce.
 pub struct Events {
     endpoint: Endpoint<Interrupt, In>,
@@ -166,11 +166,11 @@ impl Events {
     }
 }
 
-/// Waits for the board's status to move past a revision, until a deadline.
+/// Waits for the hub's status to move past a revision, until a deadline.
 pub type Notice = Arc<dyn Fn(u32, Instant) + Send + Sync>;
 
 #[derive(Clone)]
-pub struct Board {
+pub struct Hub {
     device: nusb::Device,
     access: Access,
     info: Info,
@@ -212,14 +212,14 @@ fn share(device: &DeviceInfo) -> Result<(nusb::Device, Shared), Error> {
     Ok((handle.clone(), handle))
 }
 
-// On Windows the shared board is the claimed one.
+// On Windows the shared hub is the claimed one.
 #[cfg(windows)]
 use winusb::{claim, claim as share};
 
 /// WinUSB opens each USB function once per process and has no device-level
-/// control transfers. Every board this process opens shares one claim of the
+/// control transfers. Every hub this process opens shares one claim of the
 /// management interface, released with the last, so a process that holds the
-/// board keeps others from it.
+/// hub keeps others from it.
 #[cfg(windows)]
 mod winusb {
     use std::sync::{Arc, Mutex, Weak};
@@ -277,14 +277,14 @@ mod winusb {
     }
 }
 
-impl Board {
+impl Hub {
     /// Claim the management interface for power, port commands and firmware updates.
     pub fn open(device: &DeviceInfo) -> Result<Self, Error> {
         let (handle, claimed) = claim(device)?;
         Self::connect(device, handle, Access::Control(claimed))
     }
 
-    /// Read board status without claiming the management interface.
+    /// Read hub status without claiming the management interface.
     pub fn observe(device: &DeviceInfo) -> Result<Self, Error> {
         let (handle, shared) = share(device)?;
         Self::connect(device, handle, Access::Observer(shared))
@@ -312,13 +312,13 @@ impl Board {
         })
     }
 
-    /// Take the board's announcements for the life of the returned value.
+    /// Take the hub's announcements for the life of the returned value.
     pub fn events(&self) -> Result<Events, Error> {
         self.current()?;
         Events::claim(&self.device)
     }
 
-    /// Learn of status changes from the holder of the board's announcements.
+    /// Learn of status changes from the holder of the hub's announcements.
     pub fn notified(mut self, notice: Notice) -> Self {
         self.notice = Some(notice);
         self
@@ -341,7 +341,7 @@ impl Board {
     /// Wait for a status newer than `revision`, until `deadline`. The
     /// status may or may not have changed when this returns: without the
     /// announcements, which another client may hold, the wait is short and
-    /// the caller reads the board again.
+    /// the caller reads the hub again.
     fn changed_after(&self, revision: u32, deadline: Instant) {
         if let Some(notice) = &self.notice {
             return notice(revision, deadline);
@@ -368,14 +368,14 @@ impl Board {
         &self.topology
     }
 
-    /// The board answers this tool's protocol. A board that does not can
+    /// The hub answers this tool's protocol. A hub that does not can
     /// still be named and sent to its updater.
     pub fn current(&self) -> Result<(), Error> {
         if self.protocol == protocol::VERSION {
             Ok(())
         } else {
             Err(Error::Firmware {
-                board: self.protocol,
+                hub: self.protocol,
                 version: self.info.firmware_version,
             })
         }
@@ -387,7 +387,7 @@ impl Board {
     }
 
     pub fn rename(&self, name: &str) -> Result<(), Error> {
-        let name = protocol::BoardName::new(name).map_err(Error::InvalidSetting)?;
+        let name = protocol::HubName::new(name).map_err(Error::InvalidSetting)?;
         self.setting(protocol::Setting::Name(name))
     }
 
@@ -418,8 +418,8 @@ impl Board {
         result
     }
 
-    /// Take or renew the board's host session and replace the host's view
-    /// of its targets. The board refuses a second host.
+    /// Take or renew the hub's host session and replace the host's view
+    /// of its targets. The hub refuses a second host.
     pub fn host_report(&self, report: &protocol::HostReport) -> Result<(), Error> {
         self.write(protocol::HOST_REPORT, report)
     }
@@ -467,8 +467,8 @@ impl Board {
         self.write(protocol::PORT_COMMAND, &command)?;
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            let board = self.status()?;
-            let status = board.ports[port.index()];
+            let hub = self.status()?;
+            let status = hub.ports[port.index()];
             if status.command_id == command.id {
                 match status.command_result {
                     CommandResult::Failed(error) => return Err(Error::Command(error)),
@@ -492,7 +492,7 @@ impl Board {
                 *self.events.lock().unwrap() = None;
                 return Err(Error::CommandTimeout);
             }
-            self.changed_after(board.revision, deadline);
+            self.changed_after(hub.revision, deadline);
         }
     }
 
