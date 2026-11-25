@@ -439,6 +439,29 @@ pub(crate) enum Poll {
     Coming(Option<Fetch>),
 }
 
+/// A restore image that Apple's own tools downloaded, by its file name and
+/// size: Finder keeps them in folders under `~/Library/iTunes`.
+fn apple_copy(name: &str, bytes: u64) -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    let folders: Vec<PathBuf> = std::env::home_dir()
+        .and_then(|home| fs::read_dir(home.join("Library/iTunes")).ok())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .is_some_and(|folder| folder.to_string_lossy().ends_with(" Software Updates"))
+        })
+        .collect();
+    #[cfg(not(target_os = "macos"))]
+    let folders: Vec<PathBuf> = Vec::new();
+    folders
+        .into_iter()
+        .map(|folder| folder.join(name))
+        .find(|path| fs::metadata(path).is_ok_and(|file| file.is_file() && file.len() == bytes))
+}
+
 /// The system a product type runs, for the families the store keeps.
 fn system(product_type: &str) -> Option<&'static str> {
     let families = [
@@ -681,7 +704,7 @@ impl Inner {
             firmware.bytes as f64 / 1e9
         );
         let mut reported = Instant::now();
-        let fetched = self.catalog.fetch(firmware, &part, &mut |done| {
+        let mut progress = |done| {
             if reported.elapsed() < Duration::from_millis(250) {
                 return Ok(());
             }
@@ -695,7 +718,24 @@ impl Inner {
             drop(state);
             self.changes.changed();
             Ok(())
+        };
+        // A copy Apple's own tools downloaded is checked like the rest of a
+        // partial download, and then needs none. Copying clones it where the
+        // file system can.
+        let copied = apple_copy(name, firmware.bytes).filter(|copy| {
+            log::info!("Copying {}", copy.display());
+            fs::copy(copy, &part)
+                .inspect_err(|error| log::warn!("Copying {}: {error}", copy.display()))
+                .is_ok()
         });
+        let mut fetched = self.catalog.fetch(firmware, &part, &mut progress);
+        if let (Some(copy), Err(error)) = (&copied, &fetched)
+            && self.lock().fetching(firmware)
+        {
+            log::warn!("{}: {error:#}", copy.display());
+            fs::remove_file(&part).ok();
+            fetched = self.catalog.fetch(firmware, &part, &mut progress);
+        }
         if fetched.is_err() && !self.lock().fetching(firmware) {
             fs::remove_file(&part).ok();
         }
