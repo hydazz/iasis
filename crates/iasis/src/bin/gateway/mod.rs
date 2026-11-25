@@ -13,7 +13,7 @@ use std::{
     fs::File,
     io::{self, Read, Write},
     net::Ipv4Addr,
-    os::fd::{AsFd, AsRawFd},
+    os::fd::{AsFd, AsRawFd, BorrowedFd},
     sync::Arc,
 };
 
@@ -30,25 +30,106 @@ use pktkit::{Frame, MacAddr};
 
 use network::{Gateway, unicast};
 
+/// Where the gateway's frames come and go.
+pub(super) enum Link<'a> {
+    /// The host's network interface for a target's USB device, and the
+    /// host's ID for that attachment.
+    Interface { name: &'a str, target: u64 },
+    /// A socket from the agent, one frame to a message.
+    #[cfg(target_os = "linux")]
+    Tunnel(std::os::fd::OwnedFd),
+}
+
+impl Link<'_> {
+    /// The agent's socket, on descriptor 3.
+    #[cfg(target_os = "linux")]
+    pub(super) fn tunnel() -> Result<Self> {
+        use nix::libc;
+        use std::os::fd::FromRawFd;
+
+        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+        // SAFETY: fstat fills `stat` when it succeeds.
+        let socket = unsafe { libc::fstat(3, stat.as_mut_ptr()) } == 0
+            && unsafe { stat.assume_init() }.st_mode & libc::S_IFMT == libc::S_IFSOCK;
+        ensure!(socket, "descriptor 3 is not the agent's frame socket");
+        // SAFETY: the agent opened descriptor 3 for this process alone.
+        Ok(Self::Tunnel(unsafe {
+            std::os::fd::OwnedFd::from_raw_fd(3)
+        }))
+    }
+}
+
+/// Frames as the link delivers them.
+enum Frames {
+    Capture(Capture<Active>),
+    #[cfg(target_os = "linux")]
+    Socket(std::os::fd::OwnedFd, Vec<u8>),
+}
+
+enum Next<'a> {
+    Frame(&'a [u8]),
+    /// One the capture truncated.
+    Skipped,
+    /// None waiting.
+    Drained,
+    /// The agent has ended the link.
+    #[cfg(target_os = "linux")]
+    Closed,
+}
+
+impl Frames {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        match self {
+            Self::Capture(capture) => capture.as_fd(),
+            #[cfg(target_os = "linux")]
+            Self::Socket(socket, _) => socket.as_fd(),
+        }
+    }
+
+    fn next(&mut self) -> Result<Next<'_>> {
+        match self {
+            Self::Capture(capture) => match capture.next_packet() {
+                Ok(packet) if packet.header.caplen == packet.header.len => {
+                    Ok(Next::Frame(packet.data))
+                }
+                Ok(_) => Ok(Next::Skipped),
+                Err(Error::TimeoutExpired) => Ok(Next::Drained),
+                Err(err) => bail!("read USB Ethernet: {err}"),
+            },
+            #[cfg(target_os = "linux")]
+            Self::Socket(socket, buffer) => {
+                match recv(socket.as_raw_fd(), buffer, MsgFlags::MSG_DONTWAIT) {
+                    Ok(0) => Ok(Next::Closed),
+                    Ok(size) => Ok(Next::Frame(&buffer[..size])),
+                    Err(Errno::EAGAIN | Errno::EINTR) => Ok(Next::Drained),
+                    Err(err) => bail!("read the agent's frames: {err}"),
+                }
+            }
+        }
+    }
+}
+
 struct Addresses {
     mac: MacAddr,
     host: HashSet<Ipv4Addr>,
 }
 
 impl Addresses {
-    fn read(link: &str) -> Result<Self> {
+    /// The host's IPv4 addresses, and the MAC address of `interface`, the
+    /// host's own station on the link. A tunnel has none.
+    fn read(interface: Option<&str>) -> Result<Self> {
         let mut mac = None;
         let mut host = HashSet::new();
-        for interface in getifaddrs()? {
-            if interface.interface_name == link
-                && let Some(addr) = interface
+        for interface_addrs in getifaddrs()? {
+            if Some(interface_addrs.interface_name.as_str()) == interface
+                && let Some(addr) = interface_addrs
                     .address
                     .as_ref()
                     .and_then(SockaddrStorage::as_link_addr)
             {
                 mac = addr.addr().map(MacAddr::new);
             }
-            for addr in [interface.address, interface.broadcast]
+            for addr in [interface_addrs.address, interface_addrs.broadcast]
                 .into_iter()
                 .flatten()
             {
@@ -57,10 +138,11 @@ impl Addresses {
                 }
             }
         }
-        Ok(Self {
-            mac: mac.context("USB Ethernet interface disappeared")?,
-            host,
-        })
+        let mac = match interface {
+            Some(_) => mac.context("USB Ethernet interface disappeared")?,
+            None => MacAddr::zero(),
+        };
+        Ok(Self { mac, host })
     }
 }
 
@@ -98,12 +180,19 @@ fn capture(link: &str) -> Result<Capture<Active>> {
     Ok(rx.setnonblock()?)
 }
 
-pub(super) fn run(link: &str, network: Ipv4Addr, target: u64, dns: Ipv4Addr) -> Result<()> {
+pub(super) fn run(link: Link, network: Ipv4Addr, dns: Ipv4Addr) -> Result<()> {
     ensure!(
         network.octets()[3] == 0 && unicast(network),
         "invalid IPv4 /24 network"
     );
-    verify_attachment(link, target)?;
+    let interface = match &link {
+        Link::Interface { name, target } => Some((*name, *target)),
+        #[cfg(target_os = "linux")]
+        Link::Tunnel(_) => None,
+    };
+    if let Some((name, target)) = interface {
+        verify_attachment(name, target)?;
+    }
     // A login agent inherits 256 descriptors. One enrolling Mac can open more
     // concurrent DNS, QUIC and TCP flows than that on its own.
     let resource = Resource::RLIMIT_NOFILE;
@@ -113,14 +202,27 @@ pub(super) fn run(link: &str, network: Ipv4Addr, target: u64, dns: Ipv4Addr) -> 
         setrlimit(resource, wanted, hard).context("allow concurrent USB network connections")?;
     }
     let routes = platform::address_monitor()?;
-    let mut addresses = Addresses::read(link)?;
+    let mut addresses = Addresses::read(interface.map(|(name, _)| name))?;
     ensure!(
         unicast(dns) && !addresses.host.contains(&dns),
         "need a reachable IPv4 DNS server"
     );
-    let (mut rx, tx) = platform::open_link(link, target)?;
-    let tx = File::from(tx);
-    verify_attachment(link, target)?;
+    let (mut frames, tx) = match link {
+        Link::Interface { name, target } => {
+            let (rx, tx) = platform::open_link(name, target)?;
+            verify_attachment(name, target)?;
+            (Frames::Capture(rx), File::from(tx))
+        }
+        #[cfg(target_os = "linux")]
+        Link::Tunnel(socket) => {
+            let flags = nix::fcntl::fcntl(&socket, nix::fcntl::FcntlArg::F_GETFL)?;
+            let flags =
+                nix::fcntl::OFlag::from_bits_truncate(flags) | nix::fcntl::OFlag::O_NONBLOCK;
+            nix::fcntl::fcntl(&socket, nix::fcntl::FcntlArg::F_SETFL(flags))?;
+            let tx = File::from(socket.try_clone()?);
+            (Frames::Socket(socket, vec![0; 0x10000]), tx)
+        }
+    };
     let output = Arc::new(move |frame: &Frame| {
         let data = frame.as_bytes();
         loop {
@@ -148,7 +250,7 @@ pub(super) fn run(link: &str, network: Ipv4Addr, target: u64, dns: Ipv4Addr) -> 
 
     let mut buffered = false;
     loop {
-        let mut fds = [owner.as_fd(), routes.as_fd(), rx.as_fd()]
+        let mut fds = [owner.as_fd(), routes.as_fd(), frames.as_fd()]
             .map(|fd| PollFd::new(fd, PollFlags::POLLIN));
         let timeout = if buffered {
             PollTimeout::ZERO
@@ -161,7 +263,7 @@ pub(super) fn run(link: &str, network: Ipv4Addr, target: u64, dns: Ipv4Addr) -> 
             }
             return Err(err.into());
         }
-        let [stdin_ready, routes_ready, captured] = fds.map(|fd| fd.any().unwrap_or(true));
+        let [stdin_ready, routes_ready, received] = fds.map(|fd| fd.any().unwrap_or(true));
         if stdin_ready && owner.read(&mut [0; 64])? == 0 {
             return Ok(());
         }
@@ -170,23 +272,24 @@ pub(super) fn run(link: &str, network: Ipv4Addr, target: u64, dns: Ipv4Addr) -> 
             let size = recv(routes.as_raw_fd(), &mut message, MsgFlags::empty())?;
             ensure!(size >= 4, "lost interface address monitor");
             if platform::addresses_changed(&message[..size]) {
-                addresses = Addresses::read(link)?;
+                addresses = Addresses::read(interface.map(|(name, _)| name))?;
             }
         }
-        if captured || buffered {
+        if received || buffered {
             // Bound each batch so an unplug or parent exit is observed even on a busy link.
             buffered = true;
             for _ in 0..64 {
-                match rx.next_packet() {
-                    Ok(packet) if packet.header.caplen == packet.header.len => {
-                        gateway.receive(Frame::from_slice(packet.data), &addresses.host)?;
+                match frames.next()? {
+                    Next::Frame(frame) => {
+                        gateway.receive(Frame::from_slice(frame), &addresses.host)?;
                     }
-                    Ok(_) => {}
-                    Err(Error::TimeoutExpired) => {
+                    Next::Skipped => {}
+                    Next::Drained => {
                         buffered = false;
                         break;
                     }
-                    Err(err) => bail!("read {link}: {err}"),
+                    #[cfg(target_os = "linux")]
+                    Next::Closed => return Ok(()),
                 }
             }
         }
