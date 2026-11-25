@@ -58,6 +58,7 @@ fn port(number: u8) -> PortView {
         awaiting: None,
         stage: None,
         result: None,
+        needs: None,
     }
 }
 
@@ -180,6 +181,7 @@ fn state() -> State {
         .enumerate()
         .map(|(index, mode)| PortView {
             mode: Some(*mode),
+            needs: (*mode == AppleMode::Normal).then(|| "apple-devices".into()),
             light: Light {
                 hue: if index == 0 { Hue::Blue } else { Hue::Green },
                 pulse: false,
@@ -293,6 +295,12 @@ fn state() -> State {
             certificate: Some("MIIBszCCAVmgAwIBAgIIb3Vy".into()),
             problem: Some("supervision.pem: unusable supervision identity: no certificate".into()),
         },
+        missing: vec![Prerequisite {
+            id: "apple-devices".into(),
+            name: "Apple Devices".into(),
+            url: "https://apps.microsoft.com/detail/9NP83LWLPZ9K".into(),
+            reason: "Restoring or reviving a running iPhone or iPad needs Apple Devices.".into(),
+        }],
     }
 }
 

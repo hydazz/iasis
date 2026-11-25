@@ -378,7 +378,7 @@ impl RestoreEngine {
     /// recovery, where the host's usbmuxd reaches running devices.
     pub fn restores(&self, mode: AppleMode) -> bool {
         Self::starts_from(mode)
-            || (mode == AppleMode::Normal && crate::native::mux::reaches_running_devices())
+            || (mode == AppleMode::Normal && crate::native::mux::missing().is_none())
     }
 
     /// Take a running iPhone or iPad into recovery through the host's
