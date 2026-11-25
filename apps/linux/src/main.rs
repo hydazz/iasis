@@ -166,11 +166,10 @@ impl Shell {
     }
 
     fn show(&self, event: Event) {
-        // A package upgrade replaced this program and restarted the agent.
-        if let Event::State(state) = &event
-            && state.version != env!("CARGO_PKG_VERSION")
-            && replaced()
-        {
+        // A package upgrade replaced this program. The agent it restarts may
+        // already speak a contract this one cannot read, and a rebuild keeps
+        // the version, so any word from the agent hands over to the new one.
+        if replaced() {
             self.restart.set(Some(!self.window.window.is_visible()));
             self.app.quit();
             return;
@@ -179,7 +178,7 @@ impl Shell {
         if let Some(tray) = &self.tray {
             let state = match &event {
                 Event::State(state) => Some(state.as_ref().clone()),
-                Event::Absent | Event::Refused(_) => None,
+                Event::Absent | Event::Refused(_) | Event::Unreadable => None,
             };
             tray.update(|tray| tray.state = state);
         }

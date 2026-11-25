@@ -55,6 +55,10 @@ public sealed partial class MainWindow : Window
             {
                 ShowProblem(refused.Message, InfoBarSeverity.Error);
             }
+            catch (System.Text.Json.JsonException)
+            {
+                ShowProblem("Iasis and its service are different versions. Quit Iasis and open it again.", InfoBarSeverity.Error);
+            }
             catch (Exception) when (!stop.IsCancellationRequested)
             {
                 ShowProblem("The Iasis service isn’t running.", InfoBarSeverity.Warning);
