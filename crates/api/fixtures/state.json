@@ -1,6 +1,6 @@
 {
   "version": "0.2.0",
-  "boards": [
+  "hubs": [
     {
       "serial": "817a23bd502453b4",
       "name": "Bench A",
@@ -235,7 +235,7 @@
           "needs": null
         }
       ],
-      "notice": "the board did not accept the restore request"
+      "notice": "the hub did not accept the restore request"
     },
     {
       "serial": "a0e012192cdfdb67",
@@ -564,7 +564,7 @@
     "problem": "no route to the internet",
     "ports": [
       {
-        "board": "817a23bd502453b4",
+        "hub": "817a23bd502453b4",
         "port": 2,
         "active": true,
         "problem": "DHCP failed"

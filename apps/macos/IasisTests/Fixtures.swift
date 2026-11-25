@@ -1,11 +1,11 @@
 import Foundation
 @testable import Iasis
 
-/// A state as the agent sends it: one board with a port in each condition
+/// A state as the agent sends it: one hub with a port in each condition
 /// the panel has to show, and a download under way.
 nonisolated enum Fixtures {
     static let stateLine = #"""
-    {"state":{"version":"0.1.0","boards":[{"serial":"a0e012192cdfdb67","name":"Repair Bench","session":77,"firmware":"0.1.0","upstream_mbps":10000,"supply":"brick","pool":{"budget_mw":70443,"allocated_mw":68970},"host":true,"restores":true,"brightness":50,"notice":null,"ports":[
+    {"state":{"version":"0.1.0","hubs":[{"serial":"a0e012192cdfdb67","name":"Repair Bench","session":77,"firmware":"0.1.0","upstream_mbps":10000,"supply":"brick","pool":{"budget_mw":70443,"allocated_mw":68970},"host":true,"restores":true,"brightness":50,"notice":null,"ports":[
     {"number":1,"light":{"hue":"off","pulse":false,"dim":false},"occupied":false,"generation":1,"usb":null,"link":null,"power":null,"allocated_mw":0,"short":false,"fault":null,"dfu":false,"reboot":false,"restore":false,"enabled":true,"job":null,"result":null,"identifying":false,"waiting_for_power":false,"powered":false,"wrong_dfu_port":false},
     {"number":2,"light":{"hue":"blue","pulse":false,"dim":false},"occupied":true,"generation":2,"device":"MacBook Air (13-inch, M5)","mode":"kis_dfu","ecid":"001a79d10e6bc01c","usb":"apple","link":"usb2","power":{"source":"pd","millivolts":9000,"milliamps":3000},"allocated_mw":28350,"short":false,"fault":null,"dfu":false,"reboot":true,"restore":false,"enabled":true,"job":null,"result":null,"identifying":false,"waiting_for_power":false,"powered":true,"wrong_dfu_port":false},
     {"number":3,"light":{"hue":"purple","pulse":true,"dim":false},"occupied":true,"generation":3,"device":"iPad","mode":"restored","stage":{"name":"Sending Filesystem","percent":43,"steps":["Detecting Device","Preparing Device","Sending Filesystem","Verifying Filesystem"],"step":2},"usb":"apple","link":"usb2","power":{"source":"pd","millivolts":5000,"milliamps":3000},"allocated_mw":16050,"short":true,"fault":null,"dfu":false,"reboot":false,"restore":false,"enabled":true,"job":{"phase":"Running","operation":"restore"},"result":null,"identifying":false,"waiting_for_power":false,"powered":true,"wrong_dfu_port":false},
@@ -16,7 +16,7 @@ nonisolated enum Fixtures {
     {"id":"iPad_Fall_2022_27.2.1_24B156_Restore.ipsw","os":"iPadOS","version":"27.2.1","build":"24B156","bytes":10941876409,"models":["iPad (WiFi, 10th generation)"],"ready":false,"error":null,"path":null,"fetched":true,"in_use":false}],
     "fetch":{"id":"iPad_Fall_2022_27.2.1_24B156_Restore.ipsw","version":"27.2.1","build":"24B156","bytes":10941876409,"done":4704986855}},
     "sharing":{"enabled":true,"problem":null,
-    "ports":[{"board":"a0e012192cdfdb67","port":3,"active":true},{"board":"a0e012192cdfdb67","port":4,"active":false,"problem":"Cannot open USB interface"}]},
+    "ports":[{"hub":"a0e012192cdfdb67","port":3,"active":true},{"hub":"a0e012192cdfdb67","port":4,"active":false,"problem":"Cannot open USB interface"}]},
     "supervision":{"name":"Iasis on bench","certificate":"MIIBszCCAVmgAwIBAgIIb3Vy","problem":null},
     "missing":[]}}
     """#

@@ -22,7 +22,7 @@ final class DeviceBrowser {
         guard planning == nil else { return }
         planning = Task {
             defer { planning = nil }
-            guard let planned = await model.plan(restore.boards) else { return }
+            guard let planned = await model.plan(restore.hubs) else { return }
             var confirmation = restore
             confirmation.planned = planned
             confirming = confirmation

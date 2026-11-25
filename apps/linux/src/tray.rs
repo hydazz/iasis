@@ -1,4 +1,4 @@
-//! The tray icon, where the desktop shows StatusNotifierItems: each board's
+//! The tray icon, where the desktop shows StatusNotifierItems: each hub's
 //! devices with their actions, the download under way, and the window,
 //! Preferences and Quit.
 
@@ -9,7 +9,7 @@ use ksni::{
     menu::{CheckmarkItem, StandardItem, SubMenu},
 };
 
-use crate::device::{self, Actions, Board, Device, DeviceId};
+use crate::device::{self, Actions, Device, DeviceId, Hub};
 
 /// What a choice in the tray asks the app to do.
 #[derive(Clone, Debug)]
@@ -38,7 +38,7 @@ pub fn spawn(commands: async_channel::Sender<Command>) -> Option<Handle<Tray>> {
     .ok()
 }
 
-/// How the boards stand, as the icon shows it.
+/// How the hubs stand, as the icon shows it.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Status {
     Offline,
@@ -52,11 +52,11 @@ impl Tray {
         let Some(state) = &self.state else {
             return Status::Offline;
         };
-        if state.boards.is_empty() {
+        if state.hubs.is_empty() {
             return Status::Offline;
         }
-        let mut ports = state.boards.iter().flat_map(|board| &board.ports);
-        if state.boards.iter().any(|board| board.notice.is_some())
+        let mut ports = state.hubs.iter().flat_map(|hub| &hub.ports);
+        if state.hubs.iter().any(|hub| hub.notice.is_some())
             || ports.clone().any(|port| port.light.hue == Hue::Red)
         {
             Status::Attention
@@ -124,21 +124,21 @@ impl Tray {
         .into()
     }
 
-    fn board(&self, board: &Board) -> Vec<MenuItem<Self>> {
-        let mut items = vec![self.item(board.title.clone(), None)];
-        let view = &board.view;
+    fn hub(&self, hub: &Hub) -> Vec<MenuItem<Self>> {
+        let mut items = vec![self.item(hub.title.clone(), None)];
+        let view = &hub.view;
         if let Some(update) = view.update.as_ref().filter(|update| update.required) {
             items.push(self.item(
                 format!("Update IasisOS to {}", update.version),
                 Some(Command::Perform(vec![Request::Update {
-                    board: view.serial.clone(),
+                    hub: view.serial.clone(),
                     bytes: None,
                 }])),
             ));
         } else if let Some(notice) = &view.notice {
             items.push(self.item(notice.clone(), None));
         }
-        let devices: Vec<&Device> = board
+        let devices: Vec<&Device> = hub
             .devices
             .iter()
             .filter(|device| device.selectable())
@@ -183,7 +183,7 @@ impl ksni::Tray for Tray {
     fn tool_tip(&self) -> ToolTip {
         ToolTip {
             title: match self.status() {
-                Status::Offline => "Iasis, no board connected",
+                Status::Offline => "Iasis, no hub connected",
                 Status::Ready => "Iasis, ready",
                 Status::Busy => "Iasis, busy",
                 Status::Attention => "Iasis, needs attention",
@@ -201,12 +201,12 @@ impl ksni::Tray for Tray {
         let mut items = Vec::new();
         match &self.state {
             None => items.push(self.item("Iasis Service Not Running", None)),
-            Some(state) if state.boards.is_empty() => {
-                items.push(self.item("No Boards Connected", None));
+            Some(state) if state.hubs.is_empty() => {
+                items.push(self.item("No Hubs Connected", None));
             }
             Some(state) => {
-                for board in device::boards(state) {
-                    items.extend(self.board(&board));
+                for hub in device::hubs(state) {
+                    items.extend(self.hub(&hub));
                     items.push(MenuItem::Separator);
                 }
                 if let Some(fetch) = &state.images.fetch {
@@ -246,7 +246,7 @@ mod tests {
     fn a_device_shows_its_port_name_and_status_and_the_download_its_whole_percent() {
         let mut state: State =
             serde_json::from_str(include_str!("../../../crates/api/fixtures/state.json")).unwrap();
-        let port = &mut state.boards[0].ports[0];
+        let port = &mut state.hubs[0].ports[0];
         port.awaiting = None;
         port.stage = Some(Progress {
             name: "Sending Filesystem".into(),

@@ -42,35 +42,35 @@ private struct DeviceMenuItems: View {
     }
 }
 
-/// The Board menu: each board's own actions.
-struct BoardCommands: Commands {
+/// The Hub menu: each hub's own actions.
+struct HubCommands: Commands {
     let model: AgentModel
 
     var body: some Commands {
-        CommandMenu("Board") {
-            BoardMenuItems(model: model)
+        CommandMenu("Hub") {
+            HubMenuItems(model: model)
         }
     }
 }
 
-struct BoardMenuItems: View {
+struct HubMenuItems: View {
     let model: AgentModel
 
     var body: some View {
-        if let state = model.state, !state.boards.isEmpty {
-            ForEach(state.boards) { board in
-                Section(state.title(for: board)) {
-                    Button("Update IasisOS") { model.updateFirmware(of: board.serial) }
-                        .disabled(board.update == nil || model.updating.contains(board.serial))
+        if let state = model.state, !state.hubs.isEmpty {
+            ForEach(state.hubs) { hub in
+                Section(state.title(for: hub)) {
+                    Button("Update IasisOS") { model.updateFirmware(of: hub.serial) }
+                        .disabled(hub.update == nil || model.updating.contains(hub.serial))
                 }
             }
         } else {
-            Text(model.state == nil ? "Agent Not Running" : "No Boards Connected")
+            Text(model.state == nil ? "Agent Not Running" : "No Hubs Connected")
         }
     }
 }
 
-/// Help explains the lights, which are the board's own interface.
+/// Help explains the lights, which are the hub's own interface.
 struct HelpCommands: Commands {
     @Environment(\.openWindow) private var openWindow
 

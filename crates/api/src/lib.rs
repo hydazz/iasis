@@ -15,59 +15,59 @@ pub enum Request {
     Watch,
     /// Reply with what a restore would install on each of these targets.
     Plan {
-        boards: Vec<Selection>,
+        hubs: Vec<Selection>,
     },
-    /// Erase and restore the selected targets, on any number of boards. The
+    /// Erase and restore the selected targets, on any number of hubs. The
     /// client has asked its user to confirm. Each target gets the newest
     /// image in the store that Apple still signs, or with `latest` the
     /// newest release Apple signs, fetched first if the store lacks it.
     Restore {
-        boards: Vec<Selection>,
+        hubs: Vec<Selection>,
         latest: bool,
     },
     /// Repair the selected targets from the images a restore would install
     /// and keep their data, otherwise as `Restore`.
     Revive {
-        boards: Vec<Selection>,
+        hubs: Vec<Selection>,
         latest: bool,
     },
     Dfu {
-        board: String,
+        hub: String,
         port: u8,
     },
     Reboot {
-        board: String,
+        hub: String,
         port: u8,
     },
     Power {
-        board: String,
+        hub: String,
         port: u8,
         on: bool,
     },
     /// Carry the target's Apple Debug USB on its USB 2 pair, or take it off.
     DebugUsb {
-        board: String,
+        hub: String,
         port: u8,
         on: bool,
     },
     Rename {
-        board: String,
+        hub: String,
         name: String,
     },
     Brightness {
-        board: String,
+        hub: String,
         percent: u8,
     },
     /// Declare the remaining current of a legacy USB-A host port, including
-    /// the board; zero clears it.
+    /// the hub; zero clears it.
     HostBudget {
-        board: String,
+        hub: String,
         milliamps: u16,
     },
-    /// Write IasisOS to a board: the image the agent carries, or the UF2
+    /// Write IasisOS to a hub: the image the agent carries, or the UF2
     /// file of `bytes` bytes that follows the request.
     Update {
-        board: String,
+        hub: String,
         bytes: Option<u64>,
     },
     /// Share a host network connection with attached USB devices.
@@ -135,10 +135,10 @@ pub enum Reply {
     Supervision(String),
 }
 
-/// The targets selected on one board, in the session the client saw.
+/// The targets selected on one hub, in the session the client saw.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Selection {
-    pub board: String,
+    pub hub: String,
     pub session: u32,
     pub targets: Vec<Target>,
 }
@@ -181,7 +181,7 @@ mod ecid {
 /// What a restore would install on one target.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Planned {
-    pub board: String,
+    pub hub: String,
     pub port: u8,
     /// Absent while the target's model is not known, which DFU settles.
     pub offer: Option<Offer>,
@@ -220,7 +220,7 @@ pub struct CatalogModel {
 pub struct State {
     /// The agent's release version.
     pub version: String,
-    pub boards: Vec<BoardView>,
+    pub hubs: Vec<HubView>,
     /// A submitting connection's watch receives its work's results in target
     /// order, each null until it has one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -246,35 +246,35 @@ pub struct Prerequisite {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct BoardView {
+pub struct HubView {
     pub serial: String,
-    /// Empty for an unnamed board.
+    /// Empty for an unnamed hub.
     pub name: String,
     pub session: Option<u32>,
-    /// The IasisOS version the board runs; empty while the board cannot be
+    /// The IasisOS version the hub runs; empty while the hub cannot be
     /// read.
     pub firmware: String,
-    /// The IasisOS the agent carries, when the board runs another.
+    /// The IasisOS the agent carries, when the hub runs another.
     pub update: Option<FirmwareUpdate>,
-    /// The negotiated rate between the host and the board's hub.
+    /// The negotiated rate between the host and the hub.
     pub upstream_mbps: Option<u16>,
     pub supply: Supply,
     /// What the power supply gives the targets and what the ports have
     /// committed of it.
     pub pool: Option<Pool>,
-    /// A host holds the board.
+    /// A host holds the hub.
     pub host: bool,
-    /// The host takes restore requests for the board.
+    /// The host takes restore requests for the hub.
     pub restores: bool,
     pub brightness: u8,
     pub ports: Vec<PortView>,
-    /// Why the board cannot be read, or why its last restore request came
+    /// Why the hub cannot be read, or why its last restore request came
     /// to nothing.
     pub notice: Option<String>,
 }
 
-impl BoardView {
-    /// A board that is attached and cannot be read. It has no ports.
+impl HubView {
+    /// A hub that is attached and cannot be read. It has no ports.
     pub fn unreadable(serial: String, notice: String) -> Self {
         Self {
             serial,
@@ -294,11 +294,11 @@ impl BoardView {
     }
 }
 
-/// IasisOS the agent can write to a board.
+/// IasisOS the agent can write to a hub.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FirmwareUpdate {
     pub version: String,
-    /// The board runs a build the agent cannot talk to, so it has no ports
+    /// The hub runs a build the agent cannot talk to, so it has no ports
     /// until it takes this one.
     pub required: bool,
 }
@@ -307,7 +307,7 @@ pub struct FirmwareUpdate {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Supply {
-    /// A USB-C power supply on the board's power input.
+    /// A USB-C power supply on the hub's power input.
     Brick,
     /// The host's USB port alone.
     Host,
@@ -330,10 +330,10 @@ pub struct PortView {
     pub device: Option<String>,
     /// A newly attached device is awaiting its first name.
     pub identifying: bool,
-    /// The target's ECID, kept by the board for as long as the attachment
+    /// The target's ECID, kept by the hub for as long as the attachment
     /// lasts.
     pub ecid: Option<String>,
-    /// What the board's host finds on the port's USB.
+    /// What the hub's host finds on the port's USB.
     pub usb: Option<Usb>,
     /// The Apple target's USB mode, when `usb` is `apple`.
     pub mode: Option<AppleMode>,
@@ -349,7 +349,7 @@ pub struct PortView {
     pub allocated_mw: u32,
     /// The target reported a Capability Mismatch on a highest-power offer.
     pub short: bool,
-    /// Why the port faulted, in the words the board's display uses.
+    /// Why the port faulted, in the words the hub's display uses.
     pub fault: Option<String>,
     /// The actions the target would take now.
     pub dfu: bool,
@@ -505,7 +505,7 @@ pub struct Sharing {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SharingPort {
-    pub board: String,
+    pub hub: String,
     pub port: u8,
     /// The port's gateway is running.
     pub active: bool,

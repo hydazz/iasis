@@ -24,7 +24,7 @@ const STAGE: Duration = Duration::from_millis(50);
 ///
 /// The RP2 driver waits without limit for each stage of a control transfer
 /// and does not notice a new SETUP while it waits. A host process that dies
-/// part way through a transfer leaves the board deaf to every later
+/// part way through a transfer leaves the hub deaf to every later
 /// request, or leaves the old reply armed for the next request to collect.
 /// Each stage here ends when a new SETUP arrives or the host has left it
 /// too long, and takes its buffer back.
@@ -196,7 +196,7 @@ impl Handler for Management<'_> {
             return None;
         }
         let result = match request.request {
-            // A tool of any protocol version can name the board.
+            // A tool of any protocol version can name the hub.
             protocol::GET_INFO => protocol::encode(&self.info, buffer),
             _ if request.value != protocol::VERSION => return Some(InResponse::Rejected),
             protocol::GET_STATUS => {
@@ -230,7 +230,7 @@ impl Handler for Management<'_> {
             return Some(OutResponse::Rejected);
         }
         match request.request {
-            // A tool of any protocol version can update the board.
+            // A tool of any protocol version can update the hub.
             protocol::ENTER_BOOTLOADER if self.command.get().is_none() => {
                 match protocol::decode_any::<BootloaderRequest>(data) {
                     Ok((_, command)) if command.serial == self.info.serial => {

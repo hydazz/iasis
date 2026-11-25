@@ -4,7 +4,7 @@
 
 ## USB transport
 
-Messages use vendor control transfers on endpoint zero, addressed to interface 0. On macOS and Linux, clients can read identity and status and hold the host session without claiming the interface. Clients claim interface 0 before issuing a port command, changing a board setting or host power allowance, or requesting a firmware update.
+Messages use vendor control transfers on endpoint zero, addressed to interface 0. On macOS and Linux, clients can read identity and status and hold the host session without claiming the interface. Clients claim interface 0 before issuing a port command, changing a hub setting or host power allowance, or requesting a firmware update.
 
 | Field                    | Value                                                     |
 | ------------------------ | --------------------------------------------------------- |
@@ -15,24 +15,24 @@ Messages use vendor control transfers on endpoint zero, addressed to interface 0
 | Payload header           | ASCII `IASI`, then a little-endian `u16` protocol version |
 | Payload body             | Postcard-encoded message                                  |
 
-| Request | Direction     | Message                                                          |
-| ------- | ------------- | ---------------------------------------------------------------- |
-| `1`     | Device → host | `Info`: board serial, firmware version, flash size, capabilities |
-| `2`     | Device → host | `Status`: the board's state and its latest readings              |
-| `3`     | Host → device | `BootloaderRequest`: board serial                                |
-| `4`     | Host → device | `PortCommand`: serial, port, generation, request ID, action      |
-| `5`     | Host → device | `HostBudget`: serial, legacy host allowance in mA                |
-| `6`     | Host → device | `HostReport`: serial, session and the host's view of each port   |
-| `7`     | Host → device | `HostControlRequest`: serial and a restore arm or session end    |
-| `8`     | Host → device | `SettingsRequest`: serial and a name or brightness change        |
+| Request | Direction     | Message                                                        |
+| ------- | ------------- | -------------------------------------------------------------- |
+| `1`     | Device → host | `Info`: hub serial, firmware version, flash size, capabilities |
+| `2`     | Device → host | `Status`: the hub's state and its latest readings              |
+| `3`     | Host → device | `BootloaderRequest`: hub serial                                |
+| `4`     | Host → device | `PortCommand`: serial, port, generation, request ID, action    |
+| `5`     | Host → device | `HostBudget`: serial, legacy host allowance in mA              |
+| `6`     | Host → device | `HostReport`: serial, session and the host's view of each port |
+| `7`     | Host → device | `HostControlRequest`: serial and a restore arm or session end  |
+| `8`     | Host → device | `SettingsRequest`: serial and a name or brightness change      |
 
 The decoder rejects unknown versions, invalid ports, incomplete messages and trailing bytes. Wire changes require a protocol version bump, independently of the Cargo package version.
 
-`Info` and `BootloaderRequest` keep one layout, and the board answers them whatever version `wValue` and the payload header carry. The `Info` header gives the version the firmware speaks, so a tool built for another version can still name the board and send it to its updater.
+`Info` and `BootloaderRequest` keep one layout, and the hub answers them whatever version `wValue` and the payload header carry. The `Info` header gives the version the firmware speaks, so a tool built for another version can still name the hub and send it to its updater.
 
 ### Change announcements
 
-Interface 1 has one interrupt IN endpoint, `0x81`. Whenever `Status.revision` advances the board sends the new revision there as a little-endian `u32`. The packet carries no state: a client that receives one reads `Status`. Revisions that pass while a packet waits to be collected are announced as one, so a client compares revisions and does not count packets.
+Interface 1 has one interrupt IN endpoint, `0x81`. Whenever `Status.revision` advances the hub sends the new revision there as a little-endian `u32`. The packet carries no state: a client that receives one reads `Status`. Revisions that pass while a packet waits to be collected are announced as one, so a client compares revisions and does not count packets.
 
 One client claims interface 1 at a time, normally the host that holds the session. Other clients read `Status` when they need it. A client also reads it at an interval of its own choosing, for the readings and in case a packet was lost, and keeps its own deadline for anything it waits on.
 
@@ -65,19 +65,19 @@ Send a `PortCommand` with a nonzero request ID. USB acceptance queues the comman
 | Debug USB complete        | The target's reply shows Debug USB on its primary USB 2 pair, or off its pins               |
 | Bootloader accepted       | ROM reboot queued; use picotool to detect the updater                                       |
 
-`SettingsRequest` changes one field in `Status.settings`. A name holds up to 16 printable ASCII characters, with spaces allowed inside. An empty name clears it. Brightness ranges from 10 to 100 percent and defaults to 50. The board acknowledges a change after saving it to flash. A full settings store rejects changes and sets `Status.settings_full`. Unplug the targets and retry once this flag clears.
+`SettingsRequest` changes one field in `Status.settings`. A name holds up to 16 printable ASCII characters, with spaces allowed inside. An empty name clears it. Brightness ranges from 10 to 100 percent and defaults to 50. The hub acknowledges a change after saving it to flash. A full settings store rejects changes and sets `Status.settings_full`. Unplug the targets and retry once this flag clears.
 
-`HostBudget` is the remaining legacy USB allowance including Iasis. Zero clears it; values above 1600 mA are rejected. It applies to Default-current Rp while the management interface is configured and awake. A USB reset or deconfiguration clears the hint. With 1.5 A or 3 A Rp and valid upstream VBUS, the board uses the advertised current independently of management USB.
+`HostBudget` is the remaining legacy USB allowance including Iasis. Zero clears it; values above 1600 mA are rejected. It applies to Default-current Rp while the management interface is configured and awake. A USB reset or deconfiguration clears the hint. With 1.5 A or 3 A Rp and valid upstream VBUS, the hub uses the advertised current independently of management USB.
 
 ## Host session and reports
 
-The board cannot tell a target in DFU from a running one. A host can, from the target's USB, and says so in a `HostReport`. One host at a time holds the board's session. The first report carrying a new nonzero session ID takes a free board; later reports with that ID renew a three-second lease. A report from another host is refused while the lease runs, and a session whose lease has lapsed cannot resume: its host starts a new one. USB reset, suspend and `End` release the session at once. `Status.host` names the session. Its `restore_ready` flag means the host can prepare a restore. Its `internet_sharing` flag means the host is serving Internet access on at least one of this board's ports.
+The hub cannot tell a target in DFU from a running one. A host can, from the target's USB, and says so in a `HostReport`. One host at a time holds the hub's session. The first report carrying a new nonzero session ID takes a free hub; later reports with that ID renew a three-second lease. A report from another host is refused while the lease runs, and a session whose lease has lapsed cannot resume: its host starts a new one. USB reset, suspend and `End` release the session at once. `Status.host` names the session. Its `restore_ready` flag means the host can prepare a restore. Its `internet_sharing` flag means the host is serving Internet access on at least one of this hub's ports.
 
 Each report replaces the last. A port entry carries the attachment generation it describes; an entry for another generation is ignored, and a port without one has no host view. `observed` gives what is on the port's USB: `absent`, `other`, `ambiguous` (several devices, a hub, or one ECID on two connectors) or an Apple mode with its ECID when known. `kis` is Apple Debug USB whose mode nothing has established; `kis_dfu` is DFU confirmed over it. Status returns the view as `observed` on each port and drops it when the attachment changes or the session ends.
 
-`ecid` on a port is the target's ECID, set once a report carries one for the attachment. The board keeps it for as long as the attachment lasts: through a target that leaves USB or changes mode, and after the session ends, so the next host knows what is on the connector. A report of `other` or `ambiguous` clears it, a report with a different ECID replaces it, and an ECID reported on one port is cleared from any other. Port DFU carries the port controller's ECID and does not set it.
+`ecid` on a port is the target's ECID, set once a report carries one for the attachment. The hub keeps it for as long as the attachment lasts: through a target that leaves USB or changes mode, and after the session ends, so the next host knows what is on the connector. A report of `other` or `ambiguous` clears it, a report with a different ECID replaces it, and an ECID reported on one port is cleared from any other. Port DFU carries the port controller's ECID and does not set it.
 
-`request` on a port is the last DFU or reboot the board sent, from the button or a `PortCommand`, with the uptime it went out. The target's acknowledgement does not establish the result, so the request stays until one of these:
+`request` on a port is the last DFU or reboot the hub sent, from the button or a `PortCommand`, with the uptime it went out. The target's acknowledgement does not establish the result, so the request stays until one of these:
 
 | Request | Cleared when                                                              |
 | ------- | ------------------------------------------------------------------------- |
@@ -99,6 +99,6 @@ A port entry can also carry the host's restore job for that attachment: a nonzer
 
 Local DFU and reboot events carry the selected physical port mask and attachment generations. The session must report `restore_ready` to offer Restore. Each generation-bound port report carries `restore_access`: the host can signal DFU on this connector, sees the identified device in a DFU mode its restore engine supports, recognizes a Mac on a connector without DFU USB, or has no restore path. Only the first two offer Restore. Holding to Restore sends a preparation request for the selected targets to that session. The host prepares the image and targets before issuing a restore arm.
 
-A restore arm identifies the session, operation, target mask, attachment generations and deadline in board uptime. Arm IDs rise within a session and each is issued once. The arm expires within 20 seconds. A fresh three-second hold confirms the arm once. A tap cancels. USB reset, host-session loss and attachment changes invalidate pending confirmation. The host checks the confirmed identifiers, target ECIDs and current attachments before launching workers.
+A restore arm identifies the session, operation, target mask, attachment generations and deadline in hub uptime. Arm IDs rise within a session and each is issued once. The arm expires within 20 seconds. A fresh three-second hold confirms the arm once. A tap cancels. USB reset, host-session loss and attachment changes invalidate pending confirmation. The host checks the confirmed identifiers, target ECIDs and current attachments before launching workers.
 
 `RestoreReported` means the restore program reported success and exited zero. It is not a post-restore boot check.

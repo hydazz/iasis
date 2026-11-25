@@ -1,7 +1,7 @@
 [
   "ok",
   {
-    "error": "the board has reconnected"
+    "error": "the hub has reconnected"
   },
   {
     "catalog": [
@@ -24,7 +24,7 @@
   {
     "plan": [
       {
-        "board": "817a23bd502453b4",
+        "hub": "817a23bd502453b4",
         "port": 2,
         "offer": {
           "latest": {
@@ -43,7 +43,7 @@
         }
       },
       {
-        "board": "817a23bd502453b4",
+        "hub": "817a23bd502453b4",
         "port": 3,
         "offer": null
       }

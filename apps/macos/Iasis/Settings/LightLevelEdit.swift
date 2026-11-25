@@ -1,4 +1,4 @@
-/// The watch can still have the previous board reading after a save is acknowledged.
+/// The watch can still have the previous hub reading after a save is acknowledged.
 struct LightLevelEdit {
     private var dragValue: Double?
     private(set) var submitted: Int?

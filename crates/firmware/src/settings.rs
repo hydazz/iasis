@@ -1,4 +1,4 @@
-//! Board settings in the last two sectors of flash.
+//! Hub settings in the last two sectors of flash.
 
 use embedded_storage::nor_flash::NorFlash;
 use iasis_protocol::{BRIGHTNESS_MAX, BRIGHTNESS_MIN, Setting, Settings};
@@ -137,7 +137,7 @@ impl<F: NorFlash> Store<F> {
 mod tests {
     use super::*;
     use embedded_storage::nor_flash::{ErrorType, NorFlashErrorKind, ReadNorFlash};
-    use iasis_protocol::BoardName;
+    use iasis_protocol::HubName;
 
     // Two slots per sector exercise rollover without hundreds of writes.
     const SECTOR: usize = 2 * RECORD;
@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn each_change_is_durable_or_rejected_and_collection_preserves_the_latest() {
         let mut store = Store::open(Flash::default()).unwrap();
-        let name = BoardName::new("Desk A").unwrap();
+        let name = HubName::new("Desk A").unwrap();
         assert_eq!(store.settings, Settings::default());
         assert!(store.save(Setting::Name(name)));
         assert!(!store.save(Setting::Brightness(0)));
@@ -227,11 +227,11 @@ mod tests {
             reboot.reclaim().unwrap();
             assert!(reboot.save(Setting::Brightness(percent)));
         }
-        assert!(reboot.save(Setting::Name(BoardName::default())));
+        assert!(reboot.save(Setting::Name(HubName::default())));
         assert_eq!(
             Store::open(reboot.flash).unwrap().settings,
             Settings {
-                name: BoardName::default(),
+                name: HubName::default(),
                 brightness: 100
             }
         );

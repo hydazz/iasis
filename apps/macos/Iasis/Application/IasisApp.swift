@@ -32,7 +32,7 @@ struct IasisApp: App {
             FileCommands(model: model)
             InspectorCommands()
             DeviceCommands()
-            BoardCommands(model: model)
+            HubCommands(model: model)
             HelpCommands()
         }
 

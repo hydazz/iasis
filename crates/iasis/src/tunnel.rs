@@ -132,7 +132,7 @@ impl Drop for Handle {
     }
 }
 
-/// The tunnels of one board's Debug USB devices.
+/// The tunnels of one hub's Debug USB devices.
 pub(crate) struct Tunnels {
     changes: Arc<Watch>,
     jobs: Jobs,
