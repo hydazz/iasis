@@ -318,7 +318,7 @@ pub fn assess(
     } else if usb_mode == Some(AppleMode::Recovery) && !single.is_some_and(is_mac) {
         Signal::AlreadyRecovery
     } else if status.i2c_root_fault
-        || status.aggregate_power_fault
+        || status.brick_input_fault
         || p.error.is_some()
         || p.state == PortState::Fault
         || p.faults.is_some_and(|f| f.power || f.cc)
@@ -664,7 +664,7 @@ mod tests {
             report(&st, &s, Some(&attempt)).outcome,
             Some(Outcome::NoDfuObserved)
         );
-        st.aggregate_power_fault = true;
+        st.brick_input_fault = true;
         assert_eq!(report(&st, &s, Some(&attempt)).signal, Signal::Fault);
     }
 
@@ -735,14 +735,14 @@ mod tests {
         st.ports[0].state = PortState::Unattached;
         assert_eq!(report(&st, &s, None).signal, Signal::NoAttachment);
         st.ports[0].state = PortState::WaitingPower;
-        // A USB-A host advertises no current, and nothing has declared any.
+        // A USB 2 host's default allowance leaves no current for targets.
         st.supply = Supply::Off;
         assert_eq!(report(&st, &s, None).signal, Signal::NoTargetPower);
         // A brick whose budget is spent.
         st.supply = Supply::Brick;
         st.charging_budget_mw = 60_000;
         assert_eq!(report(&st, &s, None).signal, Signal::WaitingPower);
-        st.ports[0].error = Some(PortError::HostLimiter);
+        st.ports[0].error = Some(PortError::DischargeTimeout);
         assert_eq!(report(&st, &s, None).signal, Signal::Fault);
         assert!(report(&st, &s, None).transport_result.is_none());
     }

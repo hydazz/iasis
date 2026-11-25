@@ -1398,13 +1398,19 @@ fn follow_work(agent: &mut Client, board: &str, ports: &[Port]) -> Result<()> {
 fn print_status(status: &Status) {
     let host_limiter = match status.host_limit_ma {
         0 => "off".into(),
-        ma => format!("{ma} mA (upper trip threshold)"),
+        ma => format!("{ma} mA (upper limit)"),
     };
     println!(
-        "supply {:?}  upstream host allowance {} mA  shared host-port limiter {}  isolated I²C branches {:02x}  recoveries {}  button {:?}",
+        "supply {:?}  upstream host allowance {} mA  shared host-port limiter {}, FAULT {} ({} since boot)  isolated I²C branches {:02x}  recoveries {}  button {:?}",
         status.supply,
         status.host_allowance_ma,
         host_limiter,
+        if status.host_limiter_fault {
+            "asserted"
+        } else {
+            "clear"
+        },
+        status.host_limiter_assertions,
         status.i2c_isolated,
         status.i2c_recoveries,
         status.button

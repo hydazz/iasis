@@ -57,6 +57,7 @@ struct Measured {
     bus_voltage_adc: Option<u16>,
     thermistor_adc: [Option<u16>; 2],
     host_limiter_fault: bool,
+    host_limiter_assertions: u32,
 }
 
 /// Have Windows load WinUSB for a function's interface.
@@ -135,7 +136,7 @@ async fn main(_spawner: Spawner) {
         Input::new(p.PIN_16, Pull::None),
         Input::new(p.PIN_19, Pull::None),
     ];
-    let aggregate_fault = Input::new(p.PIN_4, Pull::None);
+    let host_limiter_fault = Input::new(p.PIN_4, Pull::None);
     let mut confirm = Input::new(p.PIN_21, Pull::None);
     let pio::Pio {
         mut common, sm0, ..
@@ -294,7 +295,7 @@ async fn main(_spawner: Spawner) {
                 .check_limit(now, tier, &mut deadline)
                 && board::allow_host_requests(false)
             {
-                ports.host_fault(protocol::PortError::HostAllowanceExpired);
+                ports.withdraw_host();
             }
             Timer::after_millis(2).await;
         }
@@ -303,6 +304,8 @@ async fn main(_spawner: Spawner) {
     // millisecond, apart from the I²C work that the rest of the board waits
     // on. The fault pins are read with them.
     let measure = async {
+        let mut asserted = false;
+        let mut assertions = 0u32;
         loop {
             for index in 0..protocol::PORT_COUNT {
                 let pins = PortFaults {
@@ -311,17 +314,19 @@ async fn main(_spawner: Spawner) {
                 };
                 ports.sample(index, adc.blocking_read(&mut channels[index]).ok(), pins);
             }
-            let host_limiter_fault = aggregate_fault.is_low();
-            if host_limiter_fault {
-                ports.host_fault(protocol::PortError::HostLimiter);
+            let fault = host_limiter_fault.is_low();
+            if fault && !asserted {
+                assertions = assertions.saturating_add(1);
             }
+            asserted = fault;
             measured.set(Measured {
                 bus_voltage_adc: adc.blocking_read(&mut channels[5]).ok(),
                 thermistor_adc: [
                     adc.blocking_read(&mut channels[6]).ok(),
                     adc.blocking_read(&mut channels[7]).ok(),
                 ],
-                host_limiter_fault,
+                host_limiter_fault: fault,
+                host_limiter_assertions: assertions,
             });
             Timer::after_millis(1).await;
         }
@@ -376,7 +381,8 @@ async fn main(_spawner: Spawner) {
             let published = status.get();
             let mut next = published;
             let readings = measured.get();
-            next.aggregate_power_fault = readings.host_limiter_fault;
+            next.host_limiter_fault = readings.host_limiter_fault;
+            next.host_limiter_assertions = readings.host_limiter_assertions;
             if hub_readable && Instant::now().as_millis() >= links_due {
                 ports.links(hublink::links(&io).await);
                 links_due = Instant::now().as_millis() + 500;
@@ -394,7 +400,7 @@ async fn main(_spawner: Spawner) {
             let brick_power_good = next
                 .expander_inputs
                 .is_some_and(|inputs| inputs & 0x40 == 0);
-            next.aggregate_power_fault |= iasis_pd::power::brick_input_fault(
+            next.brick_input_fault = iasis_pd::power::brick_input_fault(
                 next.expander_inputs
                     .is_some_and(|inputs| inputs & 0x20 == 0),
                 brick_power_good,
@@ -413,7 +419,7 @@ async fn main(_spawner: Spawner) {
             next.host_allowance_ma = allowance();
             let side_power = board.controls.side_power_enabled();
             let qualified_mv = board.bus.brick_voltage_mv(&next);
-            next.charging_budget_mw = if next.i2c_root_fault || next.aggregate_power_fault {
+            next.charging_budget_mw = if next.i2c_root_fault || next.brick_input_fault {
                 0
             } else {
                 qualified_mv.map_or(0, |mv| {
@@ -433,7 +439,7 @@ async fn main(_spawner: Spawner) {
                 .min(protocol::PORT_COUNT as u32) as u8;
             let previous_supply = next.supply;
             next.supply = if next.i2c_root_fault
-                || next.aggregate_power_fault
+                || next.brick_input_fault
                 || board.outputs.is_err()
                 || board.bus.brick_upgrade_pending(&next)
             {
