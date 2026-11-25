@@ -29,8 +29,14 @@ pub(crate) fn restore_environment() -> io::Result<Vec<(&'static str, OsString)>>
     ])
 }
 
-/// Only Apple's service reaches a running iPhone or iPad; ours binds restore
-/// mode alone.
-pub(crate) fn reaches_running_devices() -> bool {
-    mux_port() == MuxPort::Apple
+/// Apple's service while it does not run: only it reaches a running iPhone
+/// or iPad, and ours binds restore mode alone. Apple Devices and iTunes
+/// install it.
+pub(crate) fn missing() -> Option<iasis_api::Prerequisite> {
+    (mux_port() != MuxPort::Apple).then(|| iasis_api::Prerequisite {
+        id: "apple-devices".into(),
+        name: "Apple Devices".into(),
+        url: "https://apps.microsoft.com/detail/9NP83LWLPZ9K".into(),
+        reason: "Restoring or reviving a running iPhone or iPad needs Apple Devices.".into(),
+    })
 }
