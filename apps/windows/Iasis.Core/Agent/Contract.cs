@@ -34,7 +34,6 @@ public sealed record Board
     public required bool Host { get; init; }
     public required bool Restores { get; init; }
     public required int Brightness { get; init; }
-    public required bool SettingsBusy { get; init; }
     public required IReadOnlyList<Port> Ports { get; init; }
     public string? Notice { get; init; }
 }

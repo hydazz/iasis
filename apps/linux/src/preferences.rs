@@ -789,13 +789,6 @@ impl BoardSettings {
     fn show(&self, board: &BoardView) {
         self.group
             .set_title(&glib::markup_escape_text(device::display_name(board)));
-        self.group.set_description(
-            board
-                .settings_busy
-                .then_some("Settings are locked while the board is busy."),
-        );
-        self.name.set_sensitive(!board.settings_busy);
-        self.brightness.set_sensitive(!board.settings_busy);
         if !self.name.has_focus() && self.name.text() != board.name {
             self.name.set_text(&board.name);
         }
