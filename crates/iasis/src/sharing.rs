@@ -48,7 +48,7 @@ impl Sharing {
             Err(e) => Err(e),
         }
         .unwrap_or_else(|error| {
-            eprintln!(
+            log::error!(
                 "Sharing disabled: could not read {}: {error}",
                 file.display()
             );

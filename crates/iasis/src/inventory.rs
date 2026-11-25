@@ -71,7 +71,7 @@ impl Inventory {
     pub fn reconcile(&self) {
         let listed = match enumerate() {
             Ok(listed) => listed,
-            Err(error) => return eprintln!("USB enumeration: {error}"),
+            Err(error) => return log::error!("USB enumeration: {error}"),
         };
         let mut devices = self.devices.lock().unwrap();
         let changed = !same(&devices, &listed);

@@ -111,7 +111,6 @@ struct DeviceTests {
         let ended = try #require(state.devices[3].operation)
         #expect(ended.title == "Restore Complete")
         #expect(ended.mark == .done)
-        #expect(ended.logDirectory == "/tmp/iasis-logs/repair")
         #expect(state.devices[0].operation == nil)
         #expect(state.devices[4].operation == nil)
     }

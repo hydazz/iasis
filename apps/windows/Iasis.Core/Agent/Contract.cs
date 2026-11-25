@@ -85,8 +85,7 @@ public sealed record Ending(
     Operation Operation,
     string? Ecid,
     RestorePhase Phase,
-    string Message,
-    string? LogDirectory);
+    string Message);
 
 public sealed record ImageStore(IReadOnlyList<Image> Images, Fetch? Fetch);
 
