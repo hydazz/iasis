@@ -14,6 +14,8 @@ pub mod progress;
 pub mod restore;
 pub mod sharing;
 pub mod topology;
+#[cfg(target_os = "linux")]
+mod tunnel;
 pub mod update;
 pub mod view;
 pub mod watch;

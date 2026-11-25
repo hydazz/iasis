@@ -1,4 +1,4 @@
-//! Supervise one gateway for each direct, public NCM target on an attended board.
+//! Supervise one gateway for each public NCM target on an attended board.
 
 use std::{
     collections::BTreeMap,
@@ -22,7 +22,11 @@ use anyhow::{Context, Result, bail, ensure};
 use iasis_api::SharingPort as PortState;
 
 use super::Sharing;
-use crate::{host::Link, topology, watch::Watch};
+use crate::{
+    host::{Link, Medium},
+    topology,
+    watch::Watch,
+};
 
 /// A gateway says when it is ready. It is asked this often whether it has
 /// exited.
@@ -34,8 +38,8 @@ const REFRESH: Duration = Duration::from_secs(30);
 /// again after this long.
 const RETRY: Duration = Duration::from_secs(5);
 
-/// A board, its port and the host's id for the target's USB device.
-type Target = (u64, u8, u64);
+/// A board, its port and where the target's network reaches the host.
+type Target = (u64, u8, Medium);
 
 /// What the gateways are built from, and what it was read for.
 struct Inputs {
@@ -100,7 +104,7 @@ impl Network {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 enum Gateway {
     Serve {
         interface: String,
@@ -110,6 +114,13 @@ enum Gateway {
     },
     #[cfg(target_os = "linux")]
     Prepare(u64),
+    /// Frames to and from a running Mac behind Debug USB.
+    #[cfg(target_os = "linux")]
+    Tunnel {
+        session: Arc<crate::tunnel::Session>,
+        dns: Ipv4Addr,
+        subnet: Ipv4Addr,
+    },
 }
 
 struct Worker {
@@ -138,6 +149,8 @@ impl Worker {
     fn start(gateway: &Gateway, changes: &Arc<Watch>) -> Result<Self> {
         let executable = std::env::current_exe()?.with_file_name("iasis-gateway");
         let mut cmd = Command::new(&executable);
+        #[cfg(target_os = "linux")]
+        let mut frames = None;
         match gateway {
             Gateway::Serve {
                 interface,
@@ -154,6 +167,38 @@ impl Worker {
             Gateway::Prepare(device_id) => {
                 cmd.arg("prepare").arg(device_id.to_string());
             }
+            #[cfg(target_os = "linux")]
+            Gateway::Tunnel {
+                session,
+                dns,
+                subnet,
+            } => {
+                use std::os::{fd::AsRawFd, unix::process::CommandExt};
+
+                let socket = session.attach()?;
+                let fd = socket.as_raw_fd();
+                cmd.arg("tunnel")
+                    .arg(subnet.to_string())
+                    .arg(dns.to_string());
+                // The gateway takes its frames on descriptor 3. A copy made
+                // by dup2 is open across exec; one already at 3 must be
+                // made so.
+                // SAFETY: dup2 and fcntl are async-signal-safe.
+                unsafe {
+                    cmd.pre_exec(move || {
+                        let result = if fd == 3 {
+                            nix::libc::fcntl(3, nix::libc::F_SETFD, 0)
+                        } else {
+                            nix::libc::dup2(fd, 3)
+                        };
+                        if result == -1 {
+                            return Err(std::io::Error::last_os_error());
+                        }
+                        Ok(())
+                    });
+                }
+                frames = Some(socket);
+            }
         }
         let mut child = cmd
             .stdin(Stdio::piped())
@@ -161,9 +206,14 @@ impl Worker {
             .stderr(Stdio::piped())
             .spawn()
             .with_context(|| format!("starting {}", executable.display()))?;
+        // The gateway has its copy.
+        #[cfg(target_os = "linux")]
+        drop(frames);
         let stdout = child.stdout.take().unwrap();
         let phase = match gateway {
-            Gateway::Serve { .. } => {
+            #[cfg(target_os = "linux")]
+            Gateway::Prepare(_) => Phase::Preparing(stdout),
+            _ => {
                 let (tx, rx) = mpsc::channel();
                 let changes = changes.clone();
                 thread::spawn(move || {
@@ -177,8 +227,6 @@ impl Worker {
                 });
                 Phase::Starting(rx)
             }
-            #[cfg(target_os = "linux")]
-            Gateway::Prepare(_) => Phase::Preparing(stdout),
         };
         Ok(Self {
             child,
@@ -314,18 +362,27 @@ fn reconcile(
     changes: &Arc<Watch>,
 ) -> Result<Vec<PortState>> {
     let mut desired = BTreeMap::new();
-    for &(serial, port, device_id) in targets {
-        let gateway = match interfaces.get(&device_id) {
-            Some(interface) => Gateway::Serve {
-                interface: interface.clone(),
-                device_id,
+    for (serial, port, medium) in targets {
+        let (serial, port) = (*serial, *port);
+        let gateway = match medium {
+            #[cfg(target_os = "linux")]
+            Medium::Tunnel(session) => Gateway::Tunnel {
+                session: session.clone(),
                 dns: network.dns,
                 subnet: network.subnet(port)?,
             },
-            #[cfg(target_os = "linux")]
-            None => Gateway::Prepare(device_id),
-            #[cfg(target_os = "macos")]
-            None => continue,
+            &Medium::Usb(device_id) => match interfaces.get(&device_id) {
+                Some(interface) => Gateway::Serve {
+                    interface: interface.clone(),
+                    device_id,
+                    dns: network.dns,
+                    subnet: network.subnet(port)?,
+                },
+                #[cfg(target_os = "linux")]
+                None => Gateway::Prepare(device_id),
+                #[cfg(target_os = "macos")]
+                None => continue,
+            },
         };
         desired.insert((serial, port), gateway);
     }
