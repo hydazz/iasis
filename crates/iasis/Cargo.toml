@@ -34,16 +34,21 @@ futures-core = "0.3"
 picoboot = { version = "0.3.0", default-features = false, features = ["smol"] }
 pollster = "0.4"
 
-[target.'cfg(not(target_os = "linux"))'.dependencies]
-directories = "6.0.0"
-
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
 io-kit-sys = "0.5"
 system-configuration = "0.8"
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
-nix = { version = "0.32", features = ["fs", "hostname", "net", "poll", "resource", "socket", "user"] }
+nix = { version = "0.32", features = [
+  "fs",
+  "hostname",
+  "net",
+  "poll",
+  "resource",
+  "socket",
+  "user",
+] }
 signal-hook = "0.3"
 pcap = "2.5"
 pktkit = { version = "=0.1.12", features = ["dhcp", "l2adapter", "slirp"] }
@@ -52,7 +57,13 @@ pktkit = { version = "=0.1.12", features = ["dhcp", "l2adapter", "slirp"] }
 restorekit-sys.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.60", features = ["Win32_Devices_DeviceAndDriverInstallation", "Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading"] }
+windows-sys = { version = "0.60", features = [
+  "Win32_Devices_DeviceAndDriverInstallation",
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_System_Threading",
+] }
 
 [package.metadata.deb]
 maintainer = "hydazz <hydazz@users.noreply.github.com>"
