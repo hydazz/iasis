@@ -287,7 +287,7 @@ impl Bus {
     }
 
     pub fn brick_voltage_mv(&self, status: &Status) -> Option<u32> {
-        if self.faulted() || status.i2c_root_fault || status.aggregate_power_fault {
+        if self.faulted() || status.i2c_root_fault || status.brick_input_fault {
             return None;
         }
         status.ch224_current_50ma?;
@@ -322,7 +322,7 @@ impl Bus {
         self.select(Some(7)).await.ok()?;
         let pd = self.register(0x22, 0x09).await.ok()?;
         status.ch224_status = Some(pd);
-        if pd & 0x18 == 0 || inputs & 0x20 == 0 || status.aggregate_power_fault {
+        if pd & 0x18 == 0 || inputs & 0x20 == 0 {
             return None;
         }
         let unloaded = !status.side_power_enabled
