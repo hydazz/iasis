@@ -44,12 +44,15 @@ struct DevicesView: View {
             }
         }
         .contextMenu(forSelectionType: Device.ID.self) { ids in
-            if !browser.devices(in: ids).isEmpty {
+            let devices = browser.devices(in: ids)
+            if !devices.isEmpty {
                 DeviceActionButtons(actions: browser.actions(for: ids)) { requests in
                     model.perform(requests)
                 } restore: { confirmation in
                     browser.confirm(confirmation)
                 }
+            }
+            if devices.count == 1 {
                 Divider()
                 Button("Get Info", systemImage: "info.circle") {
                     browser.selection = ids
@@ -118,12 +121,21 @@ struct DevicesView: View {
             ToolbarSpacer(.fixed)
             ToolbarItem {
                 Button("Inspector", systemImage: "sidebar.trailing") { browser.showsInspector.toggle() }
+                    .disabled(browser.inspected == nil)
                     .help("Show or hide device information")
             }
         }
-        .inspector(isPresented: $browser.showsInspector) {
-            DeviceInspector(devices: browser.selected)
-                .inspectorColumnWidth(min: 240, ideal: 280, max: 400)
+        .inspector(isPresented: Binding {
+            browser.showsInspector && browser.inspected != nil
+        } set: { shown in
+            browser.showsInspector = shown
+        }) {
+            Group {
+                if let device = browser.inspected {
+                    DeviceInspector(device: device)
+                }
+            }
+            .inspectorColumnWidth(min: 240, ideal: 280, max: 400)
         }
         .alert(
             browser.confirming?.title ?? "",
