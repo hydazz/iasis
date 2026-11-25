@@ -316,12 +316,6 @@ impl Ports {
         })
     }
 
-    pub fn settings_busy(&self, now: u64) -> bool {
-        self.ports
-            .iter()
-            .any(|port| port.snapshot().settings_busy(now))
-    }
-
     /// The host supply was withdrawn from the targets it powers.
     pub fn host_fault(&self, error: PortError) {
         for port in &self.ports {

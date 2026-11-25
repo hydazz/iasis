@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 23;
+pub const VERSION: u16 = 24;
 pub const MAX_PACKET: usize = 1408;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
@@ -449,19 +449,6 @@ impl PortStatus {
         })
     }
 
-    /// A change to flash would interrupt an operation on this target.
-    pub fn settings_busy(&self, now: u64) -> bool {
-        self.fetch.is_some()
-            || self.restoring()
-            || self.pd_transition
-            || self.command_result == CommandResult::Pending
-            || self.request.is_some_and(|request| request.pending(now))
-            || (self.restore.is_none()
-                && self
-                    .observed
-                    .is_some_and(|seen| seen.usb == Usb::Apple(AppleMode::Restored)))
-    }
-
     pub fn latch_fault(&mut self, error: PortError, sample: FaultSample) {
         if self.fault_sample.is_none() {
             self.error = Some(error);
@@ -887,8 +874,6 @@ pub struct Status {
     pub settings: Settings,
     /// No erased slots remain. Collection waits for idle target ports.
     pub settings_full: bool,
-    /// A restore arm, port command or target operation is active.
-    pub settings_busy: bool,
 }
 
 impl Status {
@@ -1022,48 +1007,6 @@ pub fn decode_any<'a, T: Deserialize<'a>>(data: &'a [u8]) -> Result<(u16, T), De
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn target_work_protects_settings_until_it_settles() {
-        let mut port = PortStatus {
-            state: PortState::Contract,
-            contract_mv: 9000,
-            ..PortStatus::default()
-        };
-        assert!(!port.settings_busy(0));
-        port.fetch = Some(0);
-        assert!(port.settings_busy(0));
-        port.fetch = None;
-        for phase in [
-            RestorePhase::Preparing,
-            RestorePhase::Running,
-            RestorePhase::Unconfirmed,
-            RestorePhase::Reported,
-            RestorePhase::Failed,
-        ] {
-            port.restore = Some(RestoreStatus {
-                ecid: 1,
-                phase,
-                progress: 0,
-            });
-            assert_eq!(
-                port.settings_busy(0),
-                !matches!(phase, RestorePhase::Reported | RestorePhase::Failed)
-            );
-        }
-        port.restore = None;
-        port.command_result = CommandResult::Pending;
-        assert!(port.settings_busy(0));
-        port.command_result = CommandResult::Acknowledged;
-        port.request = Some(Request {
-            action: PortAction::Dfu,
-            at_ms: 5,
-        });
-        assert!(port.settings_busy(REQUEST_MS + 4));
-        assert!(!port.settings_busy(REQUEST_MS + 5));
-        port.pd_transition = true;
-        assert!(port.settings_busy(REQUEST_MS + 5));
-    }
 
     #[test]
     fn board_names_fit_the_screen_and_validate_on_the_wire() {
@@ -1249,7 +1192,6 @@ mod tests {
                 brightness: u8::MAX,
             },
             settings_full: true,
-            settings_busy: true,
         };
         let mut buffer = [0; MAX_PACKET];
         let packet = encode(&status, &mut buffer).unwrap();

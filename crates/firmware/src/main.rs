@@ -184,7 +184,6 @@ async fn main(_spawner: Spawner) {
     let update = Cell::new(false);
     let command = Cell::new(None);
     let ports = ports::Ports::new();
-    let button_armed = Cell::new(false);
     let configured = Cell::new(false);
     let suspended = Cell::new(false);
     let session = usb::Session::default();
@@ -198,7 +197,6 @@ async fn main(_spawner: Spawner) {
         suspended: &suspended,
         settings: &settings,
         ports: &ports,
-        button_armed: &button_armed,
     };
 
     let mut config = Config::new(USB_VID, USB_PID);
@@ -544,11 +542,9 @@ async fn main(_spawner: Spawner) {
                     }
                 }
             }
-            button_armed.set(button.armed().is_some());
             if now >= reclaim_due
-                && !button_armed.get()
+                && button.armed().is_none()
                 && command.get().is_none()
-                && !ports.settings_busy(now)
                 && ports.idle()
                 && let Ok(_bus) = io.try_lock()
             {
