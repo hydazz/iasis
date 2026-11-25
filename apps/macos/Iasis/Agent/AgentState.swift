@@ -12,6 +12,7 @@ nonisolated struct AgentState: Codable, Equatable {
     var submitted: [Ending?]?
     var images: ImageStore
     var sharing: Sharing
+    var supervision: Supervision
 
     func title(for board: Board) -> String {
         let matches = boards.filter { $0.displayName.caseInsensitiveCompare(board.displayName) == .orderedSame }
@@ -156,6 +157,16 @@ nonisolated struct AgentState: Codable, Equatable {
             var active: Bool
             var problem: String?
         }
+    }
+
+    /// The identity the host pairs with as supervisor, so supervised devices
+    /// that list its certificate don't ask for Trust.
+    struct Supervision: Codable, Equatable {
+        /// The certificate's common name.
+        var name: String?
+        /// The certificate in base64 DER.
+        var certificate: String?
+        var problem: String?
     }
 
     enum USBLink: String, Codable {

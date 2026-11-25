@@ -152,7 +152,7 @@ While an image is being fetched for a target, its port pulses purple, the OLED l
 
 ### Restore
 
-Restores are built into the host tools through [RestoreKit](https://github.com/fcjr/restorekit), for targets in ordinary DFU and Apple Debug USB DFU. On Linux they go through the system usbmuxd. An iPhone or iPad the board can't signal into DFU, such as one on a Lightning cable, restarts into recovery mode at the host's request and restores from there. It must trust the host: unlock it and tap Trust when it asks.
+Restores are built into the host tools through [RestoreKit](https://github.com/fcjr/restorekit), for targets in ordinary DFU and Apple Debug USB DFU. On Linux they go through the system usbmuxd. An iPhone or iPad the board can't signal into DFU, such as one on a Lightning cable, restarts into recovery mode at the host's request and restores from there. It must trust the host: unlock it and tap Trust when it asks, unless its enrollment profile lists the host's [supervision certificate](#supervised-iphones-and-ipads).
 
 ```sh
 target/release/iasis --serial 0123456789abcdef restore --ports 1,2,3,4,5 --erase
@@ -173,6 +173,14 @@ defaults write com.apple.AMPDeviceDiscoveryAgent reveal-devices -bool false
 ```
 
 To restore the default behaviour, run `defaults delete com.apple.AMPDeviceDiscoveryAgent reveal-devices`.
+
+#### Supervised iPhones and iPads
+
+An iPhone or iPad whose enrollment profile lists the agent's supervision certificate pairs with the host without asking for Trust, so its restores through recovery need no one at the device. Other devices still ask.
+
+The agent makes its identity when it first starts. Export the certificate with Export… in the identity's ⋯ menu, in the Mac app's Settings, or with `iasis supervision certificate Iasis.cer`, and add it to the devices' Automated Device Enrollment profile as a supervising host certificate. In Intune that is Sync with computers, Allow Apple Configurator by certificate, in the enrollment program token's profile. A device takes the certificate when it enrolls, so an enrolled one needs one erase, with a Trust tap, and enrollment again first.
+
+To back the identity up or give another host the same one, export it with its private key in a password-protected PKCS #12 archive, with Export… in the Mac app or `iasis supervision export Iasis.p12`, and import it with Import… or `iasis supervision import Iasis.p12`. The agent keeps it as `supervision.pem` in its state directory, open to the agent's account alone: mode 600 in a 700 directory on macOS (`~/Library/Application Support/iasis`) and Linux (`/var/lib/iasis`), and on Windows an access list of the agent's account and Administrators. Anyone holding the identity can pair with every device that lists its certificate.
 
 #### Button restores
 

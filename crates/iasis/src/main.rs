@@ -73,6 +73,12 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Show the identity this host pairs with as supervisor, so supervised
+    /// iPhones and iPads that list its certificate don't ask for Trust
+    Supervision {
+        #[command(subcommand)]
+        command: Option<SupervisionCommand>,
+    },
     /// List boards, IasisOS versions and USB paths
     List,
     /// Read ADC counts, faults and bus observations
@@ -136,6 +142,18 @@ enum SharingCommand {
 }
 
 #[derive(Subcommand)]
+enum SupervisionCommand {
+    /// Save its certificate, for the supervising host certificates of a
+    /// device enrollment profile
+    Certificate { file: PathBuf },
+    /// Save the identity in a password-protected PKCS #12 archive, for a
+    /// backup or another host
+    Export { file: PathBuf },
+    /// Replace the identity with the one in a PKCS #12 archive
+    Import { file: PathBuf },
+}
+
+#[derive(Subcommand)]
 enum ImagesCommand {
     /// Fetch the newest release Apple signs for a model, such as iPad13,18
     Fetch {
@@ -193,6 +211,9 @@ fn main() -> Result<()> {
         Some(Command::List) => return list(ids, serial),
         Some(Command::Sharing { .. }) => bail!("USB Internet Sharing requires the running agent"),
         Some(Command::Images { .. }) => bail!("the agent keeps the restore images; start iasisd"),
+        Some(Command::Supervision { .. }) => {
+            bail!("the agent keeps the supervision identity; start iasisd")
+        }
         Some(command) => command,
     };
     if !matches!(command, Command::Status { .. } | Command::Ports { .. }) && serial.is_none() {
@@ -244,6 +265,7 @@ fn main() -> Result<()> {
         | Command::Watch
         | Command::Images { .. }
         | Command::Sharing { .. }
+        | Command::Supervision { .. }
         | Command::Update { .. } => {
             unreachable!()
         }
@@ -445,6 +467,7 @@ fn through_agent(
         ),
         Some(Command::Images { command }) => images(&mut agent, command.as_ref()),
         Some(Command::Sharing { command, json }) => sharing(&mut agent, command.as_ref(), json),
+        Some(Command::Supervision { command }) => supervision(&mut agent, command.as_ref()),
         Some(Command::Dfu { port }) => dfu_through(&mut agent, &state, &board()?, port),
         Some(Command::Reboot { port }) => {
             agent.request(&Request::Reboot {
@@ -1049,6 +1072,78 @@ fn sharing(agent: &mut Client, command: Option<&SharingCommand>, json: bool) -> 
                 .unwrap_or(if target.active { "sharing" } else { "starting" })
         );
     }
+    Ok(())
+}
+
+fn supervision(agent: &mut Client, command: Option<&SupervisionCommand>) -> Result<()> {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use sha2::Digest;
+    use zeroize::Zeroize;
+    match command {
+        Some(SupervisionCommand::Import { file }) => {
+            let archive =
+                std::fs::read(file).with_context(|| format!("reading {}", file.display()))?;
+            let mut request = Request::ImportSupervision {
+                pkcs12: STANDARD.encode(archive),
+                password: rpassword::prompt_password("Password: ")?,
+            };
+            let imported = agent.request(&request);
+            if let Request::ImportSupervision { password, .. } = &mut request {
+                password.zeroize();
+            }
+            imported?;
+        }
+        Some(SupervisionCommand::Export { file }) => {
+            let mut password = rpassword::prompt_password("Password: ")?;
+            let mut again = rpassword::prompt_password("Again: ")?;
+            let same = password == again;
+            again.zeroize();
+            if !same {
+                password.zeroize();
+                bail!("the passwords differ");
+            }
+            let mut request = Request::ExportSupervision { password };
+            let reply = agent.ask(&request);
+            if let Request::ExportSupervision { password } = &mut request {
+                password.zeroize();
+            }
+            let archive = match reply? {
+                Reply::Supervision(archive) => STANDARD.decode(archive)?,
+                Reply::Error(error) => bail!(error),
+                _ => bail!("the agent sent no identity"),
+            };
+            // A new temporary file is open to its owner alone.
+            let mut saved = tempfile::NamedTempFile::new_in(
+                file.parent()
+                    .filter(|parent| !parent.as_os_str().is_empty())
+                    .unwrap_or(Path::new(".")),
+            )?;
+            saved.write_all(&archive)?;
+            saved
+                .persist(file)
+                .with_context(|| format!("writing {}", file.display()))?;
+        }
+        _ => {}
+    }
+    let supervision = agent.state()?.supervision;
+    if let Some(problem) = supervision.problem {
+        bail!(problem);
+    }
+    let certificate = supervision
+        .certificate
+        .context("the agent holds no supervision identity")?;
+    let name = supervision.name.as_deref().unwrap_or("Unnamed identity");
+    let certificate = STANDARD.decode(certificate)?;
+    if let Some(SupervisionCommand::Certificate { file }) = command {
+        std::fs::write(file, &certificate)
+            .with_context(|| format!("writing {}", file.display()))?;
+    }
+    let fingerprint = sha2::Sha256::digest(&certificate)
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<_>>()
+        .join(":");
+    println!("{name}\nSHA-256 {fingerprint}");
     Ok(())
 }
 

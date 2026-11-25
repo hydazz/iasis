@@ -177,7 +177,8 @@ fn run_batch(
     let home = Home::locate()?;
     let logs = source.logs.unwrap_or_else(|| home.cache.join("restores"));
     let changes = Arc::<Watch>::default();
-    let engine = RestoreEngine::for_host(logs, changes.clone());
+    let supervision = Arc::new(crate::supervision::Supervision::read(&home.supervision()));
+    let engine = RestoreEngine::for_host(logs, supervision, changes.clone());
     let preparing = crate::awake::hold("Preparing a restore");
     // Take the board before the long image check, which another host's
     // session would make pointless.
@@ -916,7 +917,7 @@ fn enter_dfu(
                     unready.add(port, assessment.describe());
                     continue;
                 };
-                match crate::restore::enter_recovery(target) {
+                match engine.enter_recovery(target) {
                     Ok(()) => {
                         println!("port {} entering recovery", port.number());
                         recovering = true;

@@ -22,6 +22,11 @@ nonisolated enum AgentRequest: Codable, Equatable {
     /// of `bytes` bytes that follows the request.
     case update(board: String, bytes: Int64?)
     case sharing(enabled: Bool)
+    /// Replace the host's supervision identity with the one in this PKCS #12
+    /// archive, in base64.
+    case importSupervision(pkcs12: String, password: String)
+    /// The host's supervision identity as a PKCS #12 archive.
+    case exportSupervision(password: String)
     /// Download a release Apple signs for a model: the newest, or `build`.
     case download(model: String, build: String?)
     case releases(model: String)
@@ -40,7 +45,7 @@ nonisolated enum AgentRequest: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case op, board, boards, port, name, on, percent, bytes, model, build, enabled, image, latest
+        case op, board, boards, port, name, on, percent, bytes, model, build, enabled, image, latest, pkcs12, password
     }
 
     init(from decoder: any Decoder) throws {
@@ -63,6 +68,8 @@ nonisolated enum AgentRequest: Codable, Equatable {
         case "brightness": self = try .brightness(board: field(.board), percent: field(.percent))
         case "update": self = try .update(board: field(.board), bytes: fields.decodeIfPresent(Int64.self, forKey: .bytes))
         case "sharing": self = try .sharing(enabled: field(.enabled))
+        case "import_supervision": self = try .importSupervision(pkcs12: field(.pkcs12), password: field(.password))
+        case "export_supervision": self = try .exportSupervision(password: field(.password))
         case "download": self = try .download(model: field(.model), build: fields.decodeIfPresent(String.self, forKey: .build))
         case "releases": self = try .releases(model: field(.model))
         case "import": self = try .importImage(name: field(.name), bytes: field(.bytes))
@@ -124,6 +131,13 @@ nonisolated enum AgentRequest: Codable, Equatable {
         case let .sharing(enabled):
             try fields.encode("sharing", forKey: .op)
             try fields.encode(enabled, forKey: .enabled)
+        case let .importSupervision(pkcs12, password):
+            try fields.encode("import_supervision", forKey: .op)
+            try fields.encode(pkcs12, forKey: .pkcs12)
+            try fields.encode(password, forKey: .password)
+        case let .exportSupervision(password):
+            try fields.encode("export_supervision", forKey: .op)
+            try fields.encode(password, forKey: .password)
         case let .download(model, build):
             try fields.encode("download", forKey: .op)
             try fields.encode(model, forKey: .model)
@@ -145,7 +159,7 @@ nonisolated enum AgentRequest: Codable, Equatable {
 }
 
 /// The agent's answer: `"ok"`, `{"error": …}`, `{"state": …}`,
-/// `{"catalog": …}`, `{"releases": …}` or `{"plan": …}`.
+/// `{"catalog": …}`, `{"releases": …}`, `{"plan": …}` or `{"supervision": …}`.
 nonisolated enum AgentReply: Codable, Equatable {
     case ok
     case error(String)
@@ -153,9 +167,10 @@ nonisolated enum AgentReply: Codable, Equatable {
     case catalog([AgentState.CatalogModel])
     case releases([AgentState.Release])
     case plan([AgentState.Planned])
+    case supervision(String)
 
     private enum CodingKeys: String, CodingKey {
-        case error, state, catalog, releases, plan
+        case error, state, catalog, releases, plan, supervision
     }
 
     init(from decoder: any Decoder) throws {
@@ -168,6 +183,8 @@ nonisolated enum AgentReply: Codable, Equatable {
                 self = .releases(releases)
             } else if let planned = try fields.decodeIfPresent([AgentState.Planned].self, forKey: .plan) {
                 self = .plan(planned)
+            } else if let identity = try fields.decodeIfPresent(String.self, forKey: .supervision) {
+                self = .supervision(identity)
             } else {
                 self = try .state(fields.decode(AgentState.self, forKey: .state))
             }
@@ -191,6 +208,7 @@ nonisolated enum AgentReply: Codable, Equatable {
         case let .catalog(models): try fields.encode(models, forKey: .catalog)
         case let .releases(releases): try fields.encode(releases, forKey: .releases)
         case let .plan(planned): try fields.encode(planned, forKey: .plan)
+        case let .supervision(identity): try fields.encode(identity, forKey: .supervision)
         }
     }
 }

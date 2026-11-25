@@ -17,11 +17,14 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
+use base64::Engine;
 use iasis_api::{
     BoardView, FirmwareUpdate, Operation, Planned, Reply, Request, Selection, State, Target,
 };
 use iasis_protocol::{CommandResult, Port, PortAction};
 use nusb::DeviceInfo;
+use secrecy::SecretString;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
     Board, UsbIds,
@@ -87,6 +90,7 @@ impl Attendance {
 pub struct Agent {
     home: Home,
     sharing: crate::sharing::Sharing,
+    supervision: Arc<crate::supervision::Supervision>,
     store: Store,
     models: Arc<Models>,
     engine: RestoreEngine,
@@ -178,6 +182,7 @@ impl Agent {
             .clone()
             .unwrap_or_else(|| home.cache.join("restores"));
         let changes = Arc::<Watch>::default();
+        let supervision = Arc::new(crate::supervision::Supervision::open(&home.supervision()));
         Ok(Arc::new(Self {
             store: Store::open(
                 home.cache.join("images"),
@@ -185,7 +190,8 @@ impl Agent {
                 changes.clone(),
             )?,
             models: Arc::new(Models::open(home.cache.join("device-models.json"))),
-            engine: RestoreEngine::for_host(logs, changes.clone()),
+            engine: RestoreEngine::for_host(logs, supervision.clone(), changes.clone()),
+            supervision,
             boards: Mutex::default(),
             sharing: crate::sharing::Sharing::open(
                 home.state.join("usb-sharing.json"),
@@ -254,6 +260,7 @@ impl Agent {
             submitted: Vec::new(),
             images: self.store.snapshot(),
             sharing: self.sharing.state(),
+            supervision: self.supervision.state(),
         }
     }
 
@@ -467,6 +474,22 @@ impl Agent {
             Request::Import { name, bytes } => self.store.import(&name, payload, bytes).map(|_| ()),
             Request::Remove { image } => self.store.remove(&image),
             Request::Sharing { enabled } => self.sharing.configure(enabled),
+            Request::ImportSupervision { pkcs12, password } => {
+                let password = SecretString::from(password);
+                base64::engine::general_purpose::STANDARD
+                    .decode(pkcs12)
+                    .context("the archive is not base64")
+                    .and_then(|archive| self.supervision.import(&archive, &password))
+            }
+            Request::ExportSupervision { password } => {
+                let password = SecretString::from(password);
+                return match self.supervision.export(&password) {
+                    Ok(archive) => Reply::Supervision(
+                        base64::engine::general_purpose::STANDARD.encode(archive),
+                    ),
+                    Err(error) => Reply::Error(format!("{error:#}")),
+                };
+            }
         };
         // Whatever the request did, a watching client looks again.
         self.changes.changed();
@@ -858,9 +881,10 @@ mod socket {
     ) -> Result<()> {
         let mut reader = BufReader::new(stream.try_clone()?);
         let mut submitted = Vec::new();
-        let mut line = String::new();
+        // A request line can carry a password.
+        let mut line = Zeroizing::new(String::new());
         loop {
-            line.clear();
+            line.zeroize();
             if reader.read_line(&mut line)? == 0 {
                 return Ok(());
             }
@@ -960,7 +984,7 @@ mod socket {
         }
 
         pub fn ask(&mut self, request: &Request) -> Result<Reply> {
-            let mut line = serde_json::to_vec(request)?;
+            let mut line = Zeroizing::new(serde_json::to_vec(request)?);
             line.push(b'\n');
             self.reader.get_mut().write_all(&line)?;
             self.receive()
