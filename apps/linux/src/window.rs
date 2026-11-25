@@ -1,4 +1,4 @@
-//! The main window: every port of every board in a boxed list per board,
+//! The main window: every port of every hub in a boxed list per hub,
 //! the selected device in a utility pane beside them, and the actions the
 //! agent allows.
 
@@ -13,7 +13,7 @@ use iasis_api::{Reply, Request, State};
 
 use crate::{
     agent::{self, Event},
-    device::{self, Actions, Board, Device, DeviceId},
+    device::{self, Actions, Device, DeviceId, Hub},
     inspector::Inspector,
     preferences::Preferences,
     row::PortRow,
@@ -26,8 +26,8 @@ pub struct Window {
     banner: adw::Banner,
     stack: gtk::Stack,
     status: adw::StatusPage,
-    boards: gtk::Box,
-    groups: RefCell<Vec<BoardGroup>>,
+    hubs: gtk::Box,
+    groups: RefCell<Vec<HubGroup>>,
     inspector: Inspector,
     /// Whether the pane shows while one device is selected.
     show_inspector: gtk::ToggleButton,
@@ -41,15 +41,15 @@ pub struct Window {
 #[derive(Default)]
 struct Model {
     state: Option<State>,
-    boards: Vec<Board>,
+    hubs: Vec<Hub>,
     selected: Vec<DeviceId>,
     selecting: bool,
     actions: Actions,
 }
 
-/// One board: a boxed list of its ports under its name, with a row for why
+/// One hub: a boxed list of its ports under its name, with a row for why
 /// it cannot be read or what it needs.
-struct BoardGroup {
+struct HubGroup {
     serial: String,
     group: adw::PreferencesGroup,
     summary: gtk::Label,
@@ -104,7 +104,7 @@ impl Window {
 
         let banner = adw::Banner::new("");
         let status = adw::StatusPage::new();
-        let boards = gtk::Box::builder()
+        let hubs = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .spacing(24)
             .margin_top(24)
@@ -112,17 +112,14 @@ impl Window {
             .margin_start(12)
             .margin_end(12)
             .build();
-        let clamp = adw::Clamp::builder()
-            .maximum_size(720)
-            .child(&boards)
-            .build();
+        let clamp = adw::Clamp::builder().maximum_size(720).child(&hubs).build();
         let scrolled = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .child(&clamp)
             .build();
         let stack = gtk::Stack::new();
         stack.add_named(&status, Some("status"));
-        stack.add_named(&scrolled, Some("boards"));
+        stack.add_named(&scrolled, Some("hubs"));
 
         let action_bar = gtk::ActionBar::builder().revealed(false).build();
         for (label, action, destructive) in [
@@ -170,7 +167,7 @@ impl Window {
             banner,
             stack,
             status,
-            boards,
+            hubs,
             groups: RefCell::default(),
             inspector,
             show_inspector,
@@ -251,11 +248,11 @@ impl Window {
         });
         self.window.add_action(&power);
 
-        let update = gio::SimpleAction::new("update-board", Some(glib::VariantTy::STRING));
+        let update = gio::SimpleAction::new("update-hub", Some(glib::VariantTy::STRING));
         let weak = Rc::downgrade(self);
         update.connect_activate(move |_, serial| {
-            if let (Some(this), Some(board)) = (weak.upgrade(), serial.and_then(|s| s.str())) {
-                this.update_board(board.to_owned());
+            if let (Some(this), Some(hub)) = (weak.upgrade(), serial.and_then(|s| s.str())) {
+                this.update_hub(hub.to_owned());
             }
         });
         self.window.add_action(&update);
@@ -283,23 +280,23 @@ impl Window {
     pub fn show(self: &Rc<Self>, event: Event) {
         match event {
             Event::State(state) => {
-                let boards = device::boards(&state);
-                if boards.is_empty() {
+                let hubs = device::hubs(&state);
+                if hubs.is_empty() {
                     self.status.set_icon_name(Some("media-removable-symbolic"));
-                    self.status.set_title("No Boards Connected");
+                    self.status.set_title("No Hubs Connected");
                     self.status
-                        .set_description(Some("Connect an Iasis board to this computer."));
+                        .set_description(Some("Connect an Iasis hub to this computer."));
                     self.stack.set_visible_child_name("status");
                 } else {
-                    self.stack.set_visible_child_name("boards");
+                    self.stack.set_visible_child_name("hubs");
                 }
                 self.show_banner(&state);
-                self.show_boards(&boards);
+                self.show_hubs(&hubs);
                 if let Some(preferences) = &*self.preferences.borrow() {
                     preferences.update(&state);
                 }
                 let mut model = self.model.borrow_mut();
-                model.boards = boards;
+                model.hubs = hubs;
                 model.state = Some(*state);
             }
             Event::Absent | Event::Refused(_) => {
@@ -312,7 +309,7 @@ impl Window {
                     _ => (
                         "computer-fail-symbolic",
                         "Iasis Service Not Running",
-                        "The iasisd service attends the boards. Start it with “sudo systemctl start iasisd”.".to_owned(),
+                        "The iasisd service attends the hubs. Start it with “sudo systemctl start iasisd”.".to_owned(),
                     ),
                 };
                 self.status.set_icon_name(Some(icon));
@@ -320,9 +317,9 @@ impl Window {
                 self.status.set_description(Some(&description));
                 self.stack.set_visible_child_name("status");
                 self.banner.set_revealed(false);
-                self.show_boards(&[]);
+                self.show_hubs(&[]);
                 let mut model = self.model.borrow_mut();
-                model.boards.clear();
+                model.hubs.clear();
                 model.state = None;
             }
         }
@@ -337,9 +334,9 @@ impl Window {
         let message = state.images.fetch.as_ref().map(|fetch| {
             let percent = fetch.done.saturating_mul(100) / fetch.bytes.max(1);
             let waiting = state
-                .boards
+                .hubs
                 .iter()
-                .flat_map(|board| &board.ports)
+                .flat_map(|hub| &hub.ports)
                 .filter(|port| port.awaiting.as_deref() == Some(fetch.id.as_str()))
                 .count();
             let waiting = match waiting {
@@ -358,33 +355,33 @@ impl Window {
         self.banner.set_revealed(message.is_some());
     }
 
-    fn show_boards(self: &Rc<Self>, boards: &[Board]) {
+    fn show_hubs(self: &Rc<Self>, hubs: &[Hub]) {
         let mut groups = self.groups.borrow_mut();
         groups.retain(|group| {
-            let keep = boards.iter().any(|board| board.view.serial == group.serial);
+            let keep = hubs.iter().any(|hub| hub.view.serial == group.serial);
             if !keep {
-                self.boards.remove(&group.group);
+                self.hubs.remove(&group.group);
             }
             keep
         });
-        for (index, board) in boards.iter().enumerate() {
+        for (index, hub) in hubs.iter().enumerate() {
             let position = groups
                 .iter()
-                .position(|group| group.serial == board.view.serial);
+                .position(|group| group.serial == hub.view.serial);
             let group = match position {
                 Some(position) => groups.remove(position),
-                None => BoardGroup::new(self, &board.view.serial),
+                None => HubGroup::new(self, &hub.view.serial),
             };
-            group.show(self, board);
-            // Keep the agent's board order.
+            group.show(self, hub);
+            // Keep the agent's hub order.
             let previous = index
                 .checked_sub(1)
                 .and_then(|index| groups.get(index))
                 .map(|previous| previous.group.clone().upcast::<gtk::Widget>());
             if group.group.parent().is_none() {
-                self.boards.append(&group.group);
+                self.hubs.append(&group.group);
             }
-            self.boards
+            self.hubs
                 .reorder_child_after(&group.group, previous.as_ref());
             groups.insert(index, group);
         }
@@ -394,9 +391,9 @@ impl Window {
     fn selected(&self) -> Vec<Device> {
         let model = self.model.borrow();
         model
-            .boards
+            .hubs
             .iter()
-            .flat_map(|board| &board.devices)
+            .flat_map(|hub| &hub.devices)
             .filter(|device| device.selectable() && model.selected.contains(&device.id()))
             .cloned()
             .collect()
@@ -516,11 +513,11 @@ impl Window {
         });
     }
 
-    fn update_board(self: &Rc<Self>, serial: String) {
+    fn update_hub(self: &Rc<Self>, serial: String) {
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let result = agent::perform(Request::Update {
-                board: serial,
+                hub: serial,
                 bytes: None,
             })
             .await;
@@ -538,7 +535,7 @@ impl Window {
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let planned = agent::ask(Request::Plan {
-                boards: confirmation.boards.clone(),
+                hubs: confirmation.hubs.clone(),
             })
             .await;
             let Some(this) = weak.upgrade() else { return };
@@ -599,7 +596,7 @@ fn action_button(label: &str, action: &str, destructive: bool) -> gtk::Button {
     button
 }
 
-impl BoardGroup {
+impl HubGroup {
     fn new(window: &Rc<Window>, serial: &str) -> Self {
         let summary = gtk::Label::builder()
             .css_classes(["dim-label", "caption", "numeric"])
@@ -611,7 +608,7 @@ impl BoardGroup {
             .menu_model(&menu)
             .css_classes(["flat"])
             .valign(gtk::Align::Center)
-            .tooltip_text("Board")
+            .tooltip_text("Hub")
             .build();
         let suffix = gtk::Box::builder().spacing(12).build();
         suffix.append(&summary);
@@ -634,7 +631,7 @@ impl BoardGroup {
             .label("Update")
             .valign(gtk::Align::Center)
             .css_classes(["suggested-action"])
-            .action_name("win.update-board")
+            .action_name("win.update-hub")
             .action_target(&serial.to_variant())
             .build();
         notice.add_suffix(&update);
@@ -677,10 +674,9 @@ impl BoardGroup {
         }
     }
 
-    fn show(&self, window: &Rc<Window>, board: &Board) {
-        let view = &board.view;
-        self.group
-            .set_title(&glib::markup_escape_text(&board.title));
+    fn show(&self, window: &Rc<Window>, hub: &Hub) {
+        let view = &hub.view;
+        self.group.set_title(&glib::markup_escape_text(&hub.title));
         self.summary.set_label(&match view.pool {
             Some(pool) => format!(
                 "{} W of {} W",
@@ -698,18 +694,18 @@ impl BoardGroup {
             let item =
                 gio::MenuItem::new(Some(&format!("Update IasisOS to {}", update.version)), None);
             item.set_action_and_target_value(
-                Some("win.update-board"),
+                Some("win.update-hub"),
                 Some(&view.serial.to_variant()),
             );
             self.menu.append_item(&item);
         }
         self.menu
-            .append(Some("Board Preferences"), Some("app.preferences"));
+            .append(Some("Hub Preferences"), Some("app.preferences"));
 
         let required = view.update.as_ref().filter(|update| update.required);
         let notice = match (&view.notice, required) {
             (_, Some(update)) => Some(format!(
-                "IasisOS {} is from another build. Update the board to {} to use it.",
+                "IasisOS {} is from another build. Update the hub to {} to use it.",
                 view.firmware, update.version
             )),
             (Some(notice), None) => Some(notice.clone()),
@@ -722,7 +718,7 @@ impl BoardGroup {
         self.update.set_visible(required.is_some());
 
         let mut rows = self.rows.borrow_mut();
-        while rows.len() < board.devices.len() {
+        while rows.len() < hub.devices.len() {
             let row = PortRow::new(rows.len() as u8 + 1);
             let selecting = window.model.borrow().selecting;
             row.check.set_visible(selecting);
@@ -741,12 +737,12 @@ impl BoardGroup {
             self.list.append(&row.row);
             rows.push(row);
         }
-        while rows.len() > board.devices.len() {
+        while rows.len() > hub.devices.len() {
             if let Some(row) = rows.pop() {
                 self.list.remove(&row.row);
             }
         }
-        for (row, device) in rows.iter().zip(&board.devices) {
+        for (row, device) in rows.iter().zip(&hub.devices) {
             row.update(device);
         }
     }

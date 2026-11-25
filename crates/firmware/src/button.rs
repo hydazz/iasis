@@ -248,7 +248,7 @@ impl Button {
             self.tell("Erase confirmed", now);
             return Some(Event::Decision(RestoreDecision::Confirmed(arm)));
         }
-        // An erase to confirm or a board fault keeps the screen and lights.
+        // An erase to confirm or a hub fault keeps the screen and lights.
         if self.armed.is_some() || status.i2c_root_fault || status.brick_input_fault {
             self.egg = None;
         } else if self.pressed
@@ -805,7 +805,7 @@ mod tests {
     }
 
     #[test]
-    fn an_erase_to_confirm_or_a_board_fault_ends_the_easter_egg_and_keeps_it_away() {
+    fn an_erase_to_confirm_or_a_hub_fault_ends_the_easter_egg_and_keeps_it_away() {
         let mut r = Rig::new(0b11111);
         let arm = r.prepare();
         r.press();

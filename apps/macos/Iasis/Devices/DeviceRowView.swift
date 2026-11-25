@@ -31,7 +31,7 @@ struct DeviceRowView: View {
     }
 }
 
-/// The port's number, drawn as its light on the board: same colour, and
+/// The port's number, drawn as its light on the hub: same colour, and
 /// pulsing while the light pulses.
 struct PortBadge: View {
     let number: Int

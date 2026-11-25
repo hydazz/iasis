@@ -1,5 +1,5 @@
 //! Preferences: USB Internet Sharing, the supervision identity and opening at
-//! login, each board's name, lights and IasisOS, and the restore images.
+//! login, each hub's name, lights and IasisOS, and the restore images.
 
 use std::{
     cell::{Cell, RefCell},
@@ -11,7 +11,7 @@ use std::{
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use iasis_api::{
-    BoardView, CatalogModel, Fetch, Image, Images, Release, Reply, Request, State, Supervision,
+    CatalogModel, Fetch, HubView, Image, Images, Release, Reply, Request, State, Supervision,
 };
 
 use crate::{
@@ -30,9 +30,9 @@ pub struct Preferences {
     supervision: RefCell<Supervision>,
     /// Set while the state is shown, so the switches send nothing back.
     showing: Cell<bool>,
-    boards: adw::PreferencesPage,
-    no_boards: adw::PreferencesGroup,
-    settings: RefCell<Vec<BoardSettings>>,
+    hubs: adw::PreferencesPage,
+    no_hubs: adw::PreferencesGroup,
+    settings: RefCell<Vec<HubSettings>>,
     images: adw::PreferencesGroup,
     import_row: adw::ActionRow,
     import_mark: ActivityMark,
@@ -63,7 +63,7 @@ struct Importing {
     sent: Option<u64>,
 }
 
-struct BoardSettings {
+struct HubSettings {
     serial: String,
     group: adw::PreferencesGroup,
     name: adw::EntryRow,
@@ -134,15 +134,15 @@ impl Preferences {
         }
         dialog.add(&general);
 
-        let boards = adw::PreferencesPage::builder()
-            .title("Boards")
+        let hubs = adw::PreferencesPage::builder()
+            .title("Hubs")
             .icon_name("media-removable-symbolic")
             .build();
-        let no_boards = adw::PreferencesGroup::builder()
-            .description("No boards connected.")
+        let no_hubs = adw::PreferencesGroup::builder()
+            .description("No hubs connected.")
             .build();
-        boards.add(&no_boards);
-        dialog.add(&boards);
+        hubs.add(&no_hubs);
+        dialog.add(&hubs);
 
         let images_page = adw::PreferencesPage::builder()
             .title("Images")
@@ -185,8 +185,8 @@ impl Preferences {
             export: gio::SimpleAction::new("export-identity", None),
             supervision: RefCell::default(),
             showing: Cell::new(false),
-            boards,
-            no_boards,
+            hubs,
+            no_hubs,
             settings: RefCell::default(),
             images,
             import_row,
@@ -315,7 +315,7 @@ impl Preferences {
         );
         self.export.set_enabled(supervision.certificate.is_some());
         *self.supervision.borrow_mut() = supervision.clone();
-        self.show_boards(&state.boards);
+        self.show_hubs(&state.hubs);
         *self.store.borrow_mut() = state.images.clone();
         self.show_images();
     }
@@ -330,29 +330,26 @@ impl Preferences {
         });
     }
 
-    fn show_boards(self: &Rc<Self>, boards: &[BoardView]) {
-        let readable: Vec<&BoardView> = boards
-            .iter()
-            .filter(|board| !board.ports.is_empty())
-            .collect();
+    fn show_hubs(self: &Rc<Self>, hubs: &[HubView]) {
+        let readable: Vec<&HubView> = hubs.iter().filter(|hub| !hub.ports.is_empty()).collect();
         let mut settings = self.settings.borrow_mut();
         if settings
             .iter()
             .map(|settings| settings.serial.as_str())
-            .ne(readable.iter().map(|board| board.serial.as_str()))
+            .ne(readable.iter().map(|hub| hub.serial.as_str()))
         {
             for old in settings.drain(..) {
-                self.boards.remove(&old.group);
+                self.hubs.remove(&old.group);
             }
-            for board in &readable {
-                let new = BoardSettings::new(self, board);
-                self.boards.add(&new.group);
+            for hub in &readable {
+                let new = HubSettings::new(self, hub);
+                self.hubs.add(&new.group);
                 settings.push(new);
             }
         }
-        self.no_boards.set_visible(readable.is_empty());
-        for (settings, board) in settings.iter().zip(&readable) {
-            settings.show(board);
+        self.no_hubs.set_visible(readable.is_empty());
+        for (settings, hub) in settings.iter().zip(&readable) {
+            settings.show(hub);
         }
     }
 
@@ -803,22 +800,22 @@ fn image_title(image: &Image) -> String {
     }
 }
 
-impl BoardSettings {
-    fn new(preferences: &Rc<Preferences>, board: &BoardView) -> Self {
+impl HubSettings {
+    fn new(preferences: &Rc<Preferences>, hub: &HubView) -> Self {
         let group = adw::PreferencesGroup::builder()
-            .title(glib::markup_escape_text(device::display_name(board)))
+            .title(glib::markup_escape_text(device::display_name(hub)))
             .build();
         let name = adw::EntryRow::builder()
             .title("Name")
-            .text(&board.name)
+            .text(&hub.name)
             .show_apply_button(true)
             .build();
         let weak = Rc::downgrade(preferences);
-        let serial = board.serial.clone();
+        let serial = hub.serial.clone();
         name.connect_apply(move |row| {
             if let Some(preferences) = weak.upgrade() {
                 preferences.perform(Request::Rename {
-                    board: serial.clone(),
+                    hub: serial.clone(),
                     name: row.text().to_string(),
                 });
             }
@@ -829,13 +826,13 @@ impl BoardSettings {
         brightness.set_draw_value(false);
         brightness.set_hexpand(true);
         brightness.set_valign(gtk::Align::Center);
-        brightness.set_value(f64::from(board.brightness));
+        brightness.set_value(f64::from(hub.brightness));
         let light = adw::ActionRow::builder().title("Light Brightness").build();
         light.add_suffix(&brightness);
         brightness.set_width_request(180);
         let pending: Rc<RefCell<Option<glib::SourceId>>> = Rc::default();
         let weak = Rc::downgrade(preferences);
-        let serial = board.serial.clone();
+        let serial = hub.serial.clone();
         let waiting = pending.clone();
         brightness.connect_change_value(move |scale, _, value| {
             if let Some(previous) = waiting.take() {
@@ -851,7 +848,7 @@ impl BoardSettings {
                     done.take();
                     if let Some(preferences) = weak.upgrade() {
                         preferences.perform(Request::Brightness {
-                            board: serial,
+                            hub: serial,
                             percent,
                         });
                     }
@@ -868,20 +865,20 @@ impl BoardSettings {
             .build();
         let update = gtk::Button::builder()
             .valign(gtk::Align::Center)
-            .action_name("win.update-board")
-            .action_target(&board.serial.to_variant())
+            .action_name("win.update-hub")
+            .action_target(&hub.serial.to_variant())
             .build();
         firmware.add_suffix(&update);
         group.add(&firmware);
         let serial_row = adw::ActionRow::builder()
             .title("Serial")
-            .subtitle(&board.serial)
+            .subtitle(&hub.serial)
             .subtitle_selectable(true)
             .css_classes(["property"])
             .build();
         group.add(&serial_row);
         Self {
-            serial: board.serial.clone(),
+            serial: hub.serial.clone(),
             group,
             name,
             brightness,
@@ -891,17 +888,17 @@ impl BoardSettings {
         }
     }
 
-    fn show(&self, board: &BoardView) {
+    fn show(&self, hub: &HubView) {
         self.group
-            .set_title(&glib::markup_escape_text(device::display_name(board)));
-        if !self.name.has_focus() && self.name.text() != board.name {
-            self.name.set_text(&board.name);
+            .set_title(&glib::markup_escape_text(device::display_name(hub)));
+        if !self.name.has_focus() && self.name.text() != hub.name {
+            self.name.set_text(&hub.name);
         }
         if self.pending.borrow().is_none() {
-            self.brightness.set_value(f64::from(board.brightness));
+            self.brightness.set_value(f64::from(hub.brightness));
         }
-        self.firmware.set_subtitle(&board.firmware);
-        match &board.update {
+        self.firmware.set_subtitle(&hub.firmware);
+        match &hub.update {
             Some(update) => {
                 self.update
                     .set_label(&format!("Update to {}", update.version));

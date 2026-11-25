@@ -5,7 +5,7 @@
   <vendor>Iasis</vendor>
   <vendor_url>https://github.com/hydazz/iasis</vendor_url>
   <action id="com.hydaz.iasis.control">
-    <description>Use Iasis boards and the devices on them</description>
+    <description>Use Iasis hubs and the devices on them</description>
     <message>Authentication is required to use Iasis</message>
     <defaults>
       <allow_any>no</allow_any>

@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn reads_the_container_id_both_usb7206_functions_report() {
-        // Captured from two boards on one Linux host: USB 2 function, then
+        // Captured from two hubs on one Linux host: USB 2 function, then
         // SuperSpeed function, of each.
         let ids = [
             "050f2a00030710021ea200000a1003000e00010ae70014100400000000000000002e280f16030a000602",

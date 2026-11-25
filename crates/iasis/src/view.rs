@@ -1,8 +1,8 @@
-//! Board status, host USB observations and restore activity, as the agent
+//! Hub status, host USB observations and restore activity, as the agent
 //! shows them to clients.
 
 use iasis_api::{
-    BoardView, Job, Operation, Pool, PortPower, PortView, PowerSource, SignalProgress, Supply, Usb,
+    HubView, Job, Operation, Pool, PortPower, PortView, PowerSource, SignalProgress, Supply, Usb,
     UsbLink,
 };
 use iasis_protocol::{Info, Link, Port, PortAction, PortState, PortStatus, RestorePhase, Status};
@@ -19,19 +19,19 @@ use crate::{
 /// A new attachment is shown as being identified for this long.
 pub(crate) const IDENTIFYING_MS: u64 = 12_000;
 
-/// What the host brings to a board's targets: their names.
+/// What the host brings to a hub's targets: their names.
 #[derive(Clone, Copy)]
 pub(crate) struct Host<'a> {
     pub store: &'a Store,
     pub models: &'a Models,
 }
 
-/// The board as its status shows it, before its host adds what it sees.
-pub fn board(info: &Info, status: &Status) -> BoardView {
+/// The hub as its status shows it, before its host adds what it sees.
+pub fn hub(info: &Info, status: &Status) -> HubView {
     let [major, minor, patch] = info.firmware_version;
     let ready = status.ready_mask();
     let restore = status.gesture_mask(iasis_protocol::Gesture::Restore);
-    BoardView {
+    HubView {
         serial: format!("{:016x}", info.serial),
         name: status.settings.name.as_str().to_owned(),
         session: status.host.map(|host| host.id),
@@ -113,10 +113,10 @@ pub fn board(info: &Info, status: &Status) -> BoardView {
     }
 }
 
-/// Add what the board's host sees on its ports: link speeds, verified
+/// Add what the hub's host sees on its ports: link speeds, verified
 /// identities, the targets' names and what can be done with them now.
 pub(crate) fn describe_devices(
-    view: &mut BoardView,
+    view: &mut HubView,
     serial: u64,
     status: &Status,
     snapshot: &Snapshot,
@@ -131,7 +131,7 @@ pub(crate) fn describe_devices(
         if !row.occupied {
             continue;
         }
-        // The board and the USB tree are read at different moments.
+        // The hub and the USB tree are read at different moments.
         let seen = observe(snapshot, port);
         let agreed = slot.observed == Some(seen);
         if !agreed {
@@ -140,7 +140,7 @@ pub(crate) fn describe_devices(
             row.mode = None;
             row.usb = None;
         }
-        // A different USB target can arrive before the board echoes the report.
+        // A different USB target can arrive before the hub echoes the report.
         let ecid = seen.identity(slot.ecid).filter(|id| Some(*id) == slot.ecid);
         row.ecid = ecid.map(|id| format!("{id:016x}"));
         // A running iPhone or iPad that the host would take into recovery
@@ -222,7 +222,7 @@ pub(crate) fn describe_job(row: &mut PortView, job: &PortJob) {
     }
 }
 
-/// What the board's host reports on the port's USB.
+/// What the hub's host reports on the port's USB.
 pub fn port_usb(port: &PortStatus) -> Option<Usb> {
     Some(match port.observed?.usb {
         iasis_protocol::Usb::Absent => Usb::Absent,
@@ -327,7 +327,7 @@ mod tests {
         let mut status = Status::default();
         status.ports[0].state = PortState::Fault;
         assert_eq!(
-            board(&info(), &status).ports[0].fault.as_deref(),
+            hub(&info(), &status).ports[0].fault.as_deref(),
             Some("Port fault")
         );
     }
@@ -337,7 +337,7 @@ mod tests {
         let mut status = Status::default();
         status.ports[0].state = PortState::Ready;
         status.ports[0].enabled = true;
-        let mut row = board(&info(), &status).ports.remove(0);
+        let mut row = hub(&info(), &status).ports.remove(0);
         identify_for(&mut row, 0);
         assert!(row.identifying);
         row.link = Some(UsbLink::Usb3);
@@ -370,7 +370,7 @@ mod tests {
                 message: "the device declined to trust this computer".into(),
             },
         };
-        let mut row = board(&info(), &status).ports.remove(0);
+        let mut row = hub(&info(), &status).ports.remove(0);
         row.ecid = ecid.clone();
         attach_result(&mut row, Some(8), &outcome);
         assert!(row.result.is_none());
@@ -378,7 +378,7 @@ mod tests {
         assert!(row.result.is_some());
         // The same device, unplugged and plugged back in.
         status.ports[0].generation += 1;
-        let mut replugged = board(&info(), &status).ports.remove(0);
+        let mut replugged = hub(&info(), &status).ports.remove(0);
         replugged.ecid = ecid;
         attach_result(&mut replugged, Some(9), &outcome);
         assert!(replugged.result.is_none());
@@ -405,7 +405,7 @@ mod tests {
             },
         };
         status.ports[0].restore = Some(job.status);
-        let mut view = board(&info(), &status);
+        let mut view = hub(&info(), &status);
         let port = &mut view.ports[0];
         assert_eq!(port.job.unwrap().phase, RestorePhase::Running);
         assert_eq!(port.stage, None);
@@ -418,7 +418,7 @@ mod tests {
         assert_eq!(port.stage, Some(stage("Sending Filesystem", 23)));
         assert_eq!(port.job.unwrap().phase, RestorePhase::Running);
 
-        let mut next = board(&info(), &status);
+        let mut next = hub(&info(), &status);
         next.ports[0].generation += 1;
         describe_job(&mut next.ports[0], &job);
         assert!(next.ports[0].stage.is_none());

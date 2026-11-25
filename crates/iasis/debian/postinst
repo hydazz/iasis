@@ -2,7 +2,7 @@
 set -e
 
 if [ "$1" = configure ]; then
-    # Boards and targets already attached take the rules' group before the
+    # Hubs and targets already attached take the rules' group before the
     # agent starts below, so it finds them open.
     systemd-sysusers ${DPKG_ROOT:+--root="$DPKG_ROOT"} iasis.conf
     udevadm control --reload-rules || true

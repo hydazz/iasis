@@ -1,4 +1,4 @@
-//! Iasis for Linux desktops: every port of every board the agent attends, the
+//! Iasis for Linux desktops: every port of every hub the agent attends, the
 //! actions it allows on them, and a tray icon where the desktop shows one.
 
 mod agent;

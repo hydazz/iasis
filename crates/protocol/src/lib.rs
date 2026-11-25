@@ -20,7 +20,7 @@ pub const SETTINGS: u8 = 8;
 pub const EVENT_INTERFACE: u8 = 1;
 pub const EVENT_ENDPOINT: u8 = 0x81;
 pub const EVENT_SIZE: usize = 4;
-pub const BOARD_NAME_MAX: usize = 16;
+pub const HUB_NAME_MAX: usize = 16;
 /// Indicator brightness in percent. The default is half of full.
 pub const BRIGHTNESS_DEFAULT: u8 = 50;
 pub const BRIGHTNESS_MIN: u8 = 10;
@@ -116,7 +116,7 @@ pub struct PortStatus {
     pub fusb_device_id: Option<u8>,
     pub enabled: bool,
     pub generation: u32,
-    /// Board uptime when this attachment began, in milliseconds modulo 2^32.
+    /// Hub uptime when this attachment began, in milliseconds modulo 2^32.
     pub attached_ms: u32,
     pub state: PortState,
     pub orientation: Option<Orientation>,
@@ -151,7 +151,7 @@ pub struct PortStatus {
     pub observed: Option<Observed>,
     pub restore_access: RestoreAccess,
     /// The target's ECID, once a host has read it on this attachment. The
-    /// board keeps it until the attachment ends, through a target that stops
+    /// hub keeps it until the attachment ends, through a target that stops
     /// answering on USB and a host that goes away.
     pub ecid: Option<u64>,
     /// The last DFU or reboot sent to the target, until its effect is known.
@@ -189,7 +189,7 @@ pub enum Usb {
 }
 
 /// A host's view of one attachment. Only a host sees a target's USB mode; the
-/// board cannot tell DFU from a running system.
+/// hub cannot tell DFU from a running system.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Observed {
     pub usb: Usb,
@@ -215,12 +215,12 @@ impl Observed {
     }
 }
 
-/// A DFU or reboot the board sent. The target's acknowledgement does not
+/// A DFU or reboot the hub sent. The target's acknowledgement does not
 /// establish the result.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Request {
     pub action: PortAction,
-    /// Board uptime when the request went out.
+    /// Hub uptime when the request went out.
     pub at_ms: u64,
 }
 
@@ -281,11 +281,11 @@ pub struct Light {
 }
 
 /// How long a host may take to look at a new attachment that answers neither
-/// PD nor Apple debug before its port settles on what the board knows.
+/// PD nor Apple debug before its port settles on what the hub knows.
 pub const IDENTIFY_MS: u32 = 3000;
 
 impl PortStatus {
-    /// The target's capabilities are still being found: the board's PD and
+    /// The target's capabilities are still being found: the hub's PD and
     /// Apple debug probe, then, while a host is attached, the host's first
     /// look at a target that answers neither, which it may still restore.
     pub fn identifying(&self, now: u64, host: bool) -> bool {
@@ -300,7 +300,7 @@ impl PortStatus {
         }
     }
 
-    /// Iasis can act on the target through this port: the board signals DFU
+    /// Iasis can act on the target through this port: the hub signals DFU
     /// or a reboot, or the session's host can prepare a restore.
     pub fn operable(&self) -> bool {
         self.lists(PortAction::Dfu)
@@ -308,9 +308,9 @@ impl PortStatus {
             || self.restore_access != RestoreAccess::Unavailable
     }
 
-    /// The port's light at board uptime `now`, with or without a host
+    /// The port's light at hub uptime `now`, with or without a host
     /// session. Green is a target Iasis can act on and white anything else;
-    /// the light stays off until the board knows which. Blue is DFU: pulsing
+    /// the light stays off until the hub knows which. Blue is DFU: pulsing
     /// once it is sent, and steady once a host sees it, which only a host can.
     pub fn light(&self, now: u64, host: bool) -> Light {
         let light = |hue, pulse| Light {
@@ -395,7 +395,7 @@ impl PortStatus {
         }
     }
 
-    /// The board can send the action now: the target lists it and holds a
+    /// The hub can send the action now: the target lists it and holds a
     /// contract.
     pub fn offers(&self, action: PortAction) -> bool {
         self.state == PortState::Contract && self.lists(action)
@@ -480,7 +480,7 @@ pub struct RestoreArm {
     pub id: u32,
     pub ports: u8,
     pub generations: [u32; PORT_COUNT],
-    /// Deadline in board uptime milliseconds.
+    /// Deadline in hub uptime milliseconds.
     pub expires: u64,
 }
 
@@ -508,14 +508,14 @@ pub enum RestoreDecision {
     Cancelled(RestoreArm),
 }
 
-/// The host attached to a board. One host at a time holds the session; its
+/// The host attached to a hub. One host at a time holds the session; its
 /// reports renew it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct HostSession {
     pub id: u32,
     /// The host can prepare a restore when the button asks for one.
     pub restore_ready: bool,
-    /// The host is sharing Internet access on at least one of this board's ports.
+    /// The host is sharing Internet access on at least one of this hub's ports.
     pub internet_sharing: bool,
 }
 
@@ -524,7 +524,7 @@ pub struct HostSession {
 pub enum RestoreAccess {
     #[default]
     Unavailable,
-    /// The board signals the target into DFU.
+    /// The hub signals the target into DFU.
     EnterDfu,
     InDfu,
     /// The host takes the running target into recovery.
@@ -543,8 +543,8 @@ pub struct PortReport {
     pub fetch: Option<u8>,
 }
 
-/// Everything a host knows about the board's targets. The first report of a
-/// new session takes the board; later ones renew it and replace the last.
+/// Everything a host knows about the hub's targets. The first report of a
+/// new session takes the hub; later ones renew it and replace the last.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct HostReport {
     pub serial: u64,
@@ -553,7 +553,7 @@ pub struct HostReport {
 }
 
 /// What the session's host asks beyond its reports: an erase to confirm on
-/// the board, or to give the board up.
+/// the hub, or to give the hub up.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum HostControl {
     Arm(RestoreArm),
@@ -591,13 +591,13 @@ pub enum Supply {
     Brick,
 }
 
-/// A display name that fits the board's OLED. Empty selects the factory name.
+/// A display name that fits the hub's OLED. Empty selects the factory name.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct BoardName([u8; BOARD_NAME_MAX]);
+pub struct HubName([u8; HUB_NAME_MAX]);
 
-impl BoardName {
+impl HubName {
     pub fn new(name: &str) -> Result<Self, &'static str> {
-        if name.len() > BOARD_NAME_MAX
+        if name.len() > HUB_NAME_MAX
             || name.starts_with(' ')
             || name.ends_with(' ')
             || !name.bytes().all(|b| (b' '..=b'~').contains(&b))
@@ -606,39 +606,35 @@ impl BoardName {
                 "use up to 16 printable ASCII characters without leading or trailing spaces",
             );
         }
-        let mut bytes = [0; BOARD_NAME_MAX];
+        let mut bytes = [0; HUB_NAME_MAX];
         bytes[..name.len()].copy_from_slice(name.as_bytes());
         Ok(Self(bytes))
     }
 
     pub fn as_str(&self) -> &str {
-        let end = self
-            .0
-            .iter()
-            .position(|&b| b == 0)
-            .unwrap_or(BOARD_NAME_MAX);
+        let end = self.0.iter().position(|&b| b == 0).unwrap_or(HUB_NAME_MAX);
         core::str::from_utf8(&self.0[..end]).unwrap()
     }
 }
 
-impl Serialize for BoardName {
+impl Serialize for HubName {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(self.as_str())
     }
 }
 
-impl<'de> Deserialize<'de> for BoardName {
+impl<'de> Deserialize<'de> for HubName {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct Name;
         impl serde::de::Visitor<'_> for Name {
-            type Value = BoardName;
+            type Value = HubName;
 
             fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                f.write_str("a board display name")
+                f.write_str("a hub display name")
             }
 
-            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<BoardName, E> {
-                BoardName::new(value).map_err(E::custom)
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<HubName, E> {
+                HubName::new(value).map_err(E::custom)
             }
         }
         deserializer.deserialize_str(Name)
@@ -647,14 +643,14 @@ impl<'de> Deserialize<'de> for BoardName {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
-    pub name: BoardName,
+    pub name: HubName,
     pub brightness: u8,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            name: BoardName::default(),
+            name: HubName::default(),
             brightness: BRIGHTNESS_DEFAULT,
         }
     }
@@ -662,7 +658,7 @@ impl Default for Settings {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Setting {
-    Name(BoardName),
+    Name(HubName),
     Brightness(u8),
 }
 
@@ -739,7 +735,7 @@ pub enum PortError {
 }
 
 impl PortError {
-    /// The fault in the board's words, as its display gives it.
+    /// The fault in the hub's words, as its display gives it.
     pub fn text(&self) -> &'static str {
         match self {
             Self::I2c { .. } => "I2C error",
@@ -881,7 +877,7 @@ pub struct Status {
     pub supply: Supply,
     pub button: Option<ButtonEvent>,
     pub restore_decision: Option<RestoreDecision>,
-    /// The host holding the board's session.
+    /// The host holding the hub's session.
     pub host: Option<HostSession>,
     pub settings: Settings,
     /// No erased slots remain. Collection waits for idle target ports.
@@ -890,7 +886,7 @@ pub struct Status {
 
 impl Status {
     /// The status without its readings, uptime and revision. Two statuses
-    /// with the same state differ only in what the board measures
+    /// with the same state differ only in what the hub measures
     /// continuously.
     pub fn state(mut self) -> Self {
         self.uptime_ms = 0;
@@ -1004,7 +1000,7 @@ pub fn decode<'a, T: Deserialize<'a>>(data: &'a [u8]) -> Result<T, DecodeError> 
 
 /// Decode a frame from a sender of any protocol version, with that version.
 /// `Info` and `BootloaderRequest` keep one layout so that a tool can name and
-/// update a board whose firmware speaks another version.
+/// update a hub whose firmware speaks another version.
 pub fn decode_any<'a, T: Deserialize<'a>>(data: &'a [u8]) -> Result<(u16, T), DecodeError> {
     if data.len() < HEADER_SIZE || data.len() > MAX_PACKET || data[..4] != MAGIC {
         return Err(DecodeError::Header);
@@ -1021,19 +1017,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn board_names_fit_the_screen_and_validate_on_the_wire() {
+    fn hub_names_fit_the_screen_and_validate_on_the_wire() {
         for text in ["", "A1708 #2", "abcdefghijklmnop"] {
-            let name = BoardName::new(text).unwrap();
+            let name = HubName::new(text).unwrap();
             let mut buf = [0; MAX_PACKET];
             assert_eq!(
-                decode::<BoardName>(encode(&text, &mut buf).unwrap()),
+                decode::<HubName>(encode(&text, &mut buf).unwrap()),
                 Ok(name)
             );
             assert_eq!(name.as_str(), text);
         }
         for text in [" abc", "abc ", "abc\t1", "Desk😺", "abcdefghijklmnopq"] {
             let mut buf = [0; MAX_PACKET];
-            assert!(decode::<BoardName>(encode(&text, &mut buf).unwrap()).is_err());
+            assert!(decode::<HubName>(encode(&text, &mut buf).unwrap()).is_err());
         }
     }
 
@@ -1202,7 +1198,7 @@ mod tests {
                 internet_sharing: true,
             }),
             settings: Settings {
-                name: BoardName::new("ABCDEFGHIJKLMNOP").unwrap(),
+                name: HubName::new("ABCDEFGHIJKLMNOP").unwrap(),
                 brightness: u8::MAX,
             },
             settings_full: true,

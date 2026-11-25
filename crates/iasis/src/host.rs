@@ -1,11 +1,11 @@
-//! One host's session with a board.
+//! One host's session with a hub.
 //!
-//! Only a host sees a target's USB mode, so the host that holds a board's
-//! session tells the board what is on each connector. A [`Link`] reads the
-//! board when it announces a change, follows the host's USB devices as they
+//! Only a host sees a target's USB mode, so the host that holds a hub's
+//! session tells the hub what is on each connector. A [`Link`] reads the
+//! hub when it announces a change, follows the host's USB devices as they
 //! come and go, and reports what it finds with any restore job the host is
 //! running. Reports renew the session whether or not anything changed; a
-//! host that stops reporting loses it, and the board forgets what it was
+//! host that stops reporting loses it, and the hub forgets what it was
 //! told.
 
 use std::{
@@ -27,7 +27,7 @@ use iasis_protocol::{
 use nusb::{DeviceInfo, transfer::TransferError};
 
 use crate::{
-    Board, Events, Topology, dfu,
+    Events, Hub, Topology, dfu,
     identity::{AppleDevice, models::Models},
     inventory::Inventory,
     restore::{Operation, Progress},
@@ -40,12 +40,12 @@ use crate::{
 const HEARTBEAT: Duration = Duration::from_secs(1);
 /// Changes are reported no closer together than this.
 const REPORT_GAP: Duration = Duration::from_millis(100);
-/// The board announces its changes. It is read this often regardless, for
+/// The hub announces its changes. It is read this often regardless, for
 /// its measurements and for an announcement that went missing.
 const HEALTH: Duration = Duration::from_secs(1);
 /// Announcements closer together than this are read as one.
 const COALESCE: Duration = Duration::from_millis(20);
-/// A board out of reach this long is about to drop the session anyway.
+/// A hub out of reach this long is about to drop the session anyway.
 const UNREACHABLE: Duration = Duration::from_secs(2);
 /// A USB tree that could not be placed on the connectors is tried again
 /// this often.
@@ -65,7 +65,7 @@ const DEBUG_USB_ONLY: [u16; 10] = [
 ];
 
 /// Restore jobs by port, each with the attachment it runs on. They outlive a
-/// link, so a job keeps reporting after the board reconnects.
+/// link, so a job keeps reporting after the hub reconnects.
 pub type Jobs = Arc<Mutex<[Option<PortJob>; PORT_COUNT]>>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -141,7 +141,7 @@ fn sharing_target(status: &Status, snapshot: &Snapshot, port: Port) -> Option<u6
     }
 }
 
-/// Reports a port only once its view has held for [`AGREE`]. The board and
+/// Reports a port only once its view has held for [`AGREE`]. The hub and
 /// the USB tree change at different moments, and a target that has just
 /// reattached can still be listed in the mode it left.
 #[derive(Default)]
@@ -149,7 +149,7 @@ struct Observer {
     last: Seen,
     /// When each port's latest view was first seen.
     since: [Option<Instant>; PORT_COUNT],
-    /// Board uptime when each port's identification began: at its
+    /// Hub uptime when each port's identification began: at its
     /// attachment, or when the agent asked its target to show itself through
     /// Debug USB.
     identify_from_ms: [u64; PORT_COUNT],
@@ -264,11 +264,11 @@ fn presentable(
         && debug_usb_only
 }
 
-/// Why a report did not reach the board.
+/// Why a report did not reach the hub.
 enum Unsent {
-    /// The board answered and would not take it: the session is gone.
+    /// The hub answered and would not take it: the session is gone.
     Refused,
-    /// The board could not be read or written this time.
+    /// The hub could not be read or written this time.
     Unreachable(anyhow::Error),
 }
 
@@ -276,7 +276,7 @@ enum Unsent {
 struct View {
     observer: Observer,
     access: [RestoreAccess; PORT_COUNT],
-    /// Board uptime at the last sample. A smaller reading is a restart.
+    /// Hub uptime at the last sample. A smaller reading is a restart.
     uptime_ms: u64,
     sample: Option<(Status, Snapshot)>,
     /// The attachment on each port whose target the agent last asked to show
@@ -285,7 +285,7 @@ struct View {
 }
 
 /// The view shows the time since identification began or a request, which
-/// passes without the board's state changing.
+/// passes without the hub's state changing.
 fn ages(status: &Status, identify_from_ms: &[u64; PORT_COUNT]) -> bool {
     let recent = crate::view::IDENTIFYING_MS + HEALTH.as_millis() as u64;
     status.ports.iter().zip(identify_from_ms).any(|(port, at)| {
@@ -308,9 +308,9 @@ fn finished(job: &RestoreStatus) -> bool {
     !matches!(job.phase, RestorePhase::Preparing | RestorePhase::Running)
 }
 
-/// A finished job the board has taken, or whose attachment has ended, has
-/// nothing left to report: the board keeps it until the target leaves. A
-/// restarted board counts its attachments from zero again, so no job from
+/// A finished job the hub has taken, or whose attachment has ended, has
+/// nothing left to report: the hub keeps it until the target leaves. A
+/// restarted hub counts its attachments from zero again, so no job from
 /// before describes them.
 fn settle(jobs: &mut [Option<PortJob>; PORT_COUNT], status: &Status, restarted: bool) -> bool {
     let mut settled = false;
@@ -364,7 +364,7 @@ fn compose(
 }
 
 struct Shared {
-    board: Board,
+    hub: Hub,
     engine: crate::restore::RestoreEngine,
     session: u32,
     jobs: Jobs,
@@ -377,7 +377,7 @@ struct Shared {
     alive: AtomicBool,
     stop: AtomicBool,
     next_arm: AtomicU32,
-    /// The board's copy of the view or the jobs is out of date.
+    /// The hub's copy of the view or the jobs is out of date.
     unreported: AtomicBool,
     view: Mutex<View>,
     /// What the next report says of each port. The lease reads this and not
@@ -407,11 +407,11 @@ impl Shared {
         }
     }
 
-    /// Read the board and enumerate the host's USB devices now, whatever
+    /// Read the hub and enumerate the host's USB devices now, whatever
     /// the link last saw of either.
     fn observe(&self) -> Result<(Status, Snapshot)> {
-        let status = self.board.status()?;
-        let mut snapshot = self.present(topology::discover(self.board.topology())?);
+        let status = self.hub.status()?;
+        let mut snapshot = self.present(topology::discover(self.hub.topology())?);
         self.name_identified(&mut snapshot);
         Ok((status, snapshot))
     }
@@ -435,12 +435,12 @@ impl Shared {
         self.inventory.version() + self.identified_version.load(Ordering::Relaxed) + tunnels
     }
 
-    /// Place the host's USB devices on the board's connectors, with what
+    /// Place the host's USB devices on the hub's connectors, with what
     /// identification found of each enumeration still there. This walks
     /// the host's USB ports, so it runs apart from the view and the lease.
     fn place(&self) -> Result<Snapshot, topology::Error> {
         let devices = self.inventory.devices();
-        let snapshot = topology::locate(self.board.topology(), devices.clone())?;
+        let snapshot = topology::locate(self.hub.topology(), devices.clone())?;
         #[cfg(target_os = "linux")]
         self.tunnels.follow(&snapshot, &devices);
         let mut snapshot = self.present(snapshot);
@@ -452,11 +452,11 @@ impl Shared {
     /// The connectors while the host's USB tree cannot be placed on them:
     /// empty, so nothing a target was seen as before is reported.
     fn unplaced(&self, error: &topology::Error) -> Snapshot {
-        log::warn!("Board {:016x}: {error}", self.board.info().serial);
-        Snapshot::vacant(self.board.topology())
+        log::warn!("Hub {:016x}: {error}", self.hub.info().serial);
+        Snapshot::vacant(self.hub.topology())
     }
 
-    /// Bring the view up to date: with the board's status when it has just
+    /// Bring the view up to date: with the hub's status when it has just
     /// been read, and with the host's USB devices when they have just been
     /// placed.
     fn refresh(&self, read: Option<Status>, placed: Option<Snapshot>) -> Result<()> {
@@ -471,8 +471,8 @@ impl Shared {
         let settled = settle(&mut self.jobs.lock().unwrap(), &status, restarted);
         if restarted {
             drop(view);
-            self.fail(anyhow!("the board restarted"));
-            bail!("the board restarted");
+            self.fail(anyhow!("the hub restarted"));
+            bail!("the hub restarted");
         }
         view.uptime_ms = status.uptime_ms;
         let seen = view.observer.sample(&status, &snapshot, Instant::now());
@@ -481,7 +481,7 @@ impl Shared {
             if seen[port.index()] != Some((slot.generation, observe(&snapshot, port))) {
                 return RestoreAccess::Unavailable;
             }
-            dfu::assess(self.board.info().serial, port, &status, &snapshot, None)
+            dfu::assess(self.hub.info().serial, port, &status, &snapshot, None)
                 .restore_access(slot, |mode| self.engine.restores(mode))
         });
         let report = (view.observer.stable, view.access);
@@ -502,7 +502,7 @@ impl Shared {
     fn send(&self) -> Result<(), Unsent> {
         let (seen, access) = *self.reported.lock().unwrap();
         let report = HostReport {
-            serial: self.board.info().serial,
+            serial: self.hub.info().serial,
             session: HostSession {
                 id: self.session,
                 restore_ready: self.restore_ready.load(Ordering::Relaxed),
@@ -515,7 +515,7 @@ impl Shared {
                 &self.awaiting.lock().unwrap(),
             ),
         };
-        match self.board.host_report(&report) {
+        match self.hub.host_report(&report) {
             Ok(()) => Ok(()),
             Err(crate::Error::Transfer(TransferError::Stall)) => Err(Unsent::Refused),
             Err(error) => Err(Unsent::Unreachable(error.into())),
@@ -533,16 +533,16 @@ impl Shared {
         self.changes.changed();
     }
 
-    /// Something the board is told has changed.
+    /// Something the hub is told has changed.
     fn report_soon(&self) {
         self.unreported.store(true, Ordering::Relaxed);
         self.changes.changed();
     }
 
-    /// Renew the session and keep the board's copy of the view and jobs
-    /// current, until the board refuses or stays out of reach for most of
+    /// Renew the session and keep the hub's copy of the view and jobs
+    /// current, until the hub refuses or stays out of reach for most of
     /// the lease. USB is at its busiest during a restore, and one failed
-    /// report is not a lost board. Nothing here reads the board's status,
+    /// report is not a lost hub. Nothing here reads the hub's status,
     /// the USB tree or the view, so none of them can cost the lease.
     fn report(&self) {
         let mut reached = Instant::now();
@@ -557,10 +557,10 @@ impl Shared {
                 match self.send() {
                     Ok(()) => reached = now,
                     Err(Unsent::Refused) => {
-                        return self.fail(anyhow!("the board gave the host session up"));
+                        return self.fail(anyhow!("the hub gave the host session up"));
                     }
                     Err(Unsent::Unreachable(error)) if reached.elapsed() >= UNREACHABLE => {
-                        return self.fail(error.context("the board stopped answering"));
+                        return self.fail(error.context("the hub stopped answering"));
                     }
                     Err(Unsent::Unreachable(_)) => self.unreported.store(true, Ordering::Relaxed),
                 }
@@ -615,8 +615,8 @@ impl Shared {
         }
     }
 
-    /// Read the board whenever it announces a change. Without its
-    /// announcements, which another client may hold for a moment, the board
+    /// Read the hub whenever it announces a change. Without its
+    /// announcements, which another client may hold for a moment, the hub
     /// is read every [`HEALTH`] and they are asked for again.
     fn follow(&self, mut events: Option<Events>) {
         let mut read = Instant::now();
@@ -633,15 +633,15 @@ impl Shared {
                 }
                 None => {
                     thread::sleep(HEALTH);
-                    events = self.board.events().ok();
+                    events = self.hub.events().ok();
                 }
             }
             if self.stop.load(Ordering::Relaxed) {
                 return;
             }
             read = Instant::now();
-            // A board that cannot be read is lost when its reports fail.
-            let Ok(status) = self.board.status() else {
+            // A hub that cannot be read is lost when its reports fail.
+            let Ok(status) = self.hub.status() else {
                 continue;
             };
             // A target that came or went changed the host's USB devices,
@@ -656,7 +656,7 @@ impl Shared {
         }
     }
 
-    /// Wait until the board has been read at a revision after `revision`,
+    /// Wait until the hub has been read at a revision after `revision`,
     /// the link is lost or `deadline` arrives.
     fn changed_after(&self, revision: u32, deadline: Instant) {
         let mut seen = self.changes.count();
@@ -675,7 +675,7 @@ impl Shared {
                 return;
             }
             if !self.alive.load(Ordering::Relaxed) {
-                // Nothing reads the board for a lost link.
+                // Nothing reads the hub for a lost link.
                 return thread::sleep(left.min(crate::UNANNOUNCED));
             }
             seen = self.changes.wait(seen, Some(deadline));
@@ -687,7 +687,7 @@ impl Shared {
     fn identify(&self, status: &Status) -> Result<bool> {
         // Identities already given must not hide the modes they were asked in.
         let mut snapshot = self.present(topology::locate(
-            self.board.topology(),
+            self.hub.topology(),
             self.inventory.devices(),
         )?);
         let known = self.identified.lock().unwrap().clone();
@@ -747,7 +747,7 @@ impl Shared {
         Ok(unnamed)
     }
 
-    /// Identify targets when the board or the host's USB devices change, and
+    /// Identify targets when the hub or the host's USB devices change, and
     /// again while one stays unnamed.
     fn identify_until_stopped(&self) {
         let mut asked = None;
@@ -777,7 +777,7 @@ pub struct Link {
 }
 
 impl Link {
-    /// Take the board's host session. The board refuses while another host
+    /// Take the hub's host session. The hub refuses while another host
     /// holds it.
     pub(crate) fn open(
         device: &DeviceInfo,
@@ -786,10 +786,10 @@ impl Link {
         engine: &crate::restore::RestoreEngine,
         inventory: Arc<Inventory>,
     ) -> Result<Self> {
-        let board = Board::listen(device)?;
-        let session = (RandomState::new().hash_one(board.info().serial) as u32).max(1);
+        let hub = Hub::listen(device)?;
+        let session = (RandomState::new().hash_one(hub.info().serial) as u32).max(1);
         let shared = Arc::new(Shared {
-            board,
+            hub,
             engine: engine.clone(),
             session,
             #[cfg(target_os = "linux")]
@@ -811,13 +811,13 @@ impl Link {
             identified_version: AtomicU64::new(0),
             failure: Mutex::default(),
         });
-        shared.board.current()?;
+        shared.hub.current()?;
         // Listening starts before the first read, so no change after it is missed.
-        let events = shared.board.events();
+        let events = shared.hub.events();
         if let Err(error) = &events {
             log::warn!(
-                "Board {:016x}: reading every {HEALTH:?} without its announcements: {error}",
-                shared.board.info().serial
+                "Hub {:016x}: reading every {HEALTH:?} without its announcements: {error}",
+                shared.hub.info().serial
             );
         }
         let version = shared.usb_version();
@@ -825,11 +825,11 @@ impl Link {
             Ok(snapshot) => (Some(version), snapshot),
             Err(error) => (None, shared.unplaced(&error)),
         };
-        shared.refresh(Some(shared.board.status()?), Some(snapshot))?;
+        shared.refresh(Some(shared.hub.status()?), Some(snapshot))?;
         match shared.send() {
             Ok(()) => {}
             Err(Unsent::Refused) => {
-                bail!("the board's host session is taken; another iasisd or restore may hold it")
+                bail!("the hub's host session is taken; another iasisd or restore may hold it")
             }
             Err(Unsent::Unreachable(error)) => return Err(error),
         }
@@ -864,27 +864,27 @@ impl Link {
         &self.shared.inventory
     }
 
-    /// Wait until the board has been read at a revision after `revision`,
+    /// Wait until the hub has been read at a revision after `revision`,
     /// the session is lost or `deadline` arrives.
     pub fn changed_after(&self, revision: u32, deadline: Instant) {
         self.shared.changed_after(revision, deadline);
     }
 
-    /// Lets a control connection wait on this link's reading of the board.
+    /// Lets a control connection wait on this link's reading of the hub.
     pub(crate) fn notice(&self) -> crate::Notice {
         let shared = self.shared.clone();
         Arc::new(move |revision, deadline| shared.changed_after(revision, deadline))
     }
 
-    pub fn board(&self) -> &Board {
-        &self.shared.board
+    pub fn hub(&self) -> &Hub {
+        &self.shared.hub
     }
 
     pub fn session(&self) -> u32 {
         self.shared.session
     }
 
-    /// The board still accepts this host's reports.
+    /// The hub still accepts this host's reports.
     pub fn alive(&self) -> bool {
         self.shared.alive.load(Ordering::Relaxed)
     }
@@ -924,20 +924,20 @@ impl Link {
             .collect()
     }
 
-    /// Report whether the host is serving any of this board's USB network links.
+    /// Report whether the host is serving any of this hub's USB network links.
     pub fn set_internet_sharing(&self, active: bool) {
         if self.shared.internet_sharing.swap(active, Ordering::Relaxed) != active {
             self.shared.report_soon();
         }
     }
 
-    /// Tell the board whether a button restore request would be answered.
+    /// Tell the hub whether a button restore request would be answered.
     pub fn restore_ready(&self, ready: bool) -> Result<()> {
         self.shared.restore_ready.store(ready, Ordering::Relaxed);
         self.check()
     }
 
-    /// Report now. Fails once the board has given the session to nobody or
+    /// Report now. Fails once the hub has given the session to nobody or
     /// to another host, or cannot be reached.
     pub fn check(&self) -> Result<()> {
         let started = Instant::now();
@@ -949,7 +949,7 @@ impl Link {
                 Ok(()) => return Ok(()),
                 Err(Unsent::Refused) => {
                     self.shared
-                        .fail(anyhow!("the board gave the host session up"));
+                        .fail(anyhow!("the hub gave the host session up"));
                 }
                 Err(Unsent::Unreachable(error)) if started.elapsed() >= UNREACHABLE => {
                     return Err(error);
@@ -959,7 +959,7 @@ impl Link {
         }
     }
 
-    /// A job is still waiting to reach the board.
+    /// A job is still waiting to reach the hub.
     pub fn reporting(&self) -> bool {
         self.shared.jobs.lock().unwrap().iter().any(Option::is_some)
     }
@@ -992,13 +992,13 @@ impl Link {
         let _ = self.shared.refresh(None, None);
     }
 
-    pub(crate) fn board_view(&self, store: &crate::images::Store) -> Option<iasis_api::BoardView> {
+    pub(crate) fn hub_view(&self, store: &crate::images::Store) -> Option<iasis_api::HubView> {
         let view = self.shared.view.lock().unwrap();
         let (status, snapshot) = view.sample.as_ref()?;
-        let mut board = crate::view::board(self.board().info(), status);
+        let mut hub = crate::view::hub(self.hub().info(), status);
         crate::view::describe_devices(
-            &mut board,
-            self.board().info().serial,
+            &mut hub,
+            self.hub().info().serial,
             status,
             snapshot,
             &crate::view::Host {
@@ -1008,7 +1008,7 @@ impl Link {
         );
         let jobs = self.shared.jobs.lock().unwrap();
         let awaiting = self.shared.awaiting.lock().unwrap();
-        for (index, row) in board.ports.iter_mut().enumerate() {
+        for (index, row) in hub.ports.iter_mut().enumerate() {
             if let Some(job) = &jobs[index] {
                 crate::view::describe_job(row, job);
             }
@@ -1021,7 +1021,7 @@ impl Link {
                 .saturating_sub(view.observer.identify_from_ms[index]);
             crate::view::identify_for(row, age_ms);
         }
-        Some(board)
+        Some(hub)
     }
 
     /// The attachments whose target the agent should now ask to show itself
@@ -1070,13 +1070,13 @@ impl Link {
         self.shared.changes.changed();
     }
 
-    /// The board and its targets, read and enumerated now, each with the mode
+    /// The hub and its targets, read and enumerated now, each with the mode
     /// and identity found for its enumeration.
     pub(crate) fn observe(&self) -> Result<(Status, Snapshot)> {
         self.shared.observe()
     }
 
-    /// The board's status as last read.
+    /// The hub's status as last read.
     pub fn status(&self) -> Option<Status> {
         self.shared
             .view
@@ -1087,7 +1087,7 @@ impl Link {
             .map(|(status, _)| *status)
     }
 
-    /// Ask the board to confirm an erase of the selected ports. Each arm is
+    /// Ask the hub to confirm an erase of the selected ports. Each arm is
     /// issued once.
     pub fn arm(
         &self,
@@ -1103,21 +1103,21 @@ impl Link {
             expires,
         };
         self.shared
-            .board
+            .hub
             .host_control(HostControl::Arm(arm))
-            .context("board rejected the prepared erase arm")?;
+            .context("hub rejected the prepared erase arm")?;
         Ok(arm)
     }
 }
 
 impl Link {
-    /// Give the board's host session up now, for a host that is about to
-    /// exit: the board takes the next host at once.
+    /// Give the hub's host session up now, for a host that is about to
+    /// exit: the hub takes the next host at once.
     pub fn end(&self) {
         self.shared.stop.store(true, Ordering::Relaxed);
         let _ = self
             .shared
-            .board
+            .hub
             .host_control(HostControl::End(self.shared.session));
     }
 }
@@ -1131,7 +1131,7 @@ impl Drop for Link {
         }
         let _ = self
             .shared
-            .board
+            .hub
             .host_control(HostControl::End(self.shared.session));
     }
 }
@@ -1252,15 +1252,15 @@ mod tests {
         let path = dir.path().join("device-models.json");
         let models = Models::open(path.clone());
         let one = Port::ALL[0];
-        // The board echoes each report and keeps the ECID it carried.
+        // The hub echoes each report and keeps the ECID it carried.
         let sample = |status: &mut Status, usb: &Snapshot, models: &Models| -> PortView {
             remember_models(usb, models);
             let seen = observe(usb, one);
             status.ports[0].observed = Some(seen);
             status.ports[0].ecid = seen.identity(status.ports[0].ecid);
-            let mut board = crate::view::board(&info, status);
+            let mut hub = crate::view::hub(&info, status);
             crate::view::describe_devices(
-                &mut board,
+                &mut hub,
                 info.serial,
                 status,
                 usb,
@@ -1269,7 +1269,7 @@ mod tests {
                     models,
                 },
             );
-            board.ports.remove(0)
+            hub.ports.remove(0)
         };
         let mut status = attached([Some(5), None, None, None, None]);
         let mut usb = snapshot();
@@ -1418,7 +1418,7 @@ mod tests {
     }
 
     #[test]
-    fn a_job_is_reported_on_its_own_attachment_until_the_board_has_its_result() {
+    fn a_job_is_reported_on_its_own_attachment_until_the_hub_has_its_result() {
         let job = |phase| RestoreStatus {
             ecid: 42,
             phase,
@@ -1455,8 +1455,8 @@ mod tests {
         assert_eq!(report[0].unwrap().fetch, Some(40));
         assert_eq!(report[1].unwrap().fetch, None);
 
-        // A running job stays whatever the board shows. A finished one goes
-        // once the board echoes it, or once its attachment has ended.
+        // A running job stays whatever the hub shows. A finished one goes
+        // once the hub echoes it, or once its attachment has ended.
         settle(&mut jobs, &status, false);
         assert!(jobs[0].is_some() && jobs[1].is_some());
         jobs[0] = Some(on(3, RestorePhase::Reported));
@@ -1470,7 +1470,7 @@ mod tests {
         settle(&mut jobs, &status, false);
         assert_eq!(jobs, [const { None }; PORT_COUNT]);
 
-        // After a board restart the same generation is another attachment.
+        // After a hub restart the same generation is another attachment.
         jobs[0] = Some(on(3, RestorePhase::Running));
         settle(&mut jobs, &status, true);
         assert_eq!(jobs, [const { None }; PORT_COUNT]);

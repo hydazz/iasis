@@ -5,7 +5,7 @@ using Microsoft.UI.Xaml.Media;
 
 namespace Iasis;
 
-/// Every port of every board the agent attends.
+/// Every port of every hub the agent attends.
 public sealed partial class MainWindow : Window
 {
     private readonly CancellationTokenSource stop = new();
@@ -94,9 +94,9 @@ public sealed partial class MainWindow : Window
             Status.IsOpen = false;
         }
         var lacking = state.Missing.ToDictionary(prerequisite => prerequisite.Id);
-        Ports.ItemsSource = state.Boards
-            .SelectMany(board => board.Ports.Select(port =>
-                $"{(board.Name.Length == 0 ? "Iasis" : board.Name)}, port {port.Number}: " +
+        Ports.ItemsSource = state.Hubs
+            .SelectMany(hub => hub.Ports.Select(port =>
+                $"{(hub.Name.Length == 0 ? "Iasis" : hub.Name)}, port {port.Number}: " +
                 (port.Device ?? (port.Occupied ? "Unknown device" : "Empty")) +
                 (port.Needs is { } id && lacking.TryGetValue(id, out var needs) ? $", needs {needs.Name}" : "")))
             .ToList();

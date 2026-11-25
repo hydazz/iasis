@@ -5,24 +5,24 @@ nonisolated enum AgentRequest: Codable, Equatable {
     case state
     case watch
     /// What a restore would install on each target.
-    case plan(boards: [RestoreSelection])
+    case plan(hubs: [RestoreSelection])
     /// Erases the targets. The user has confirmed. With `latest`, each gets
     /// the newest release Apple signs, downloaded if the store lacks it.
-    case restore(boards: [RestoreSelection], latest: Bool)
+    case restore(hubs: [RestoreSelection], latest: Bool)
     /// Repairs the targets from the images a restore would install and keeps
     /// their data.
-    case revive(boards: [RestoreSelection], latest: Bool)
-    case dfu(board: String, port: Int)
-    case reboot(board: String, port: Int)
-    case power(board: String, port: Int, on: Bool)
-    case debugUsb(board: String, port: Int, on: Bool)
-    case rename(board: String, name: String)
-    case brightness(board: String, percent: Int)
+    case revive(hubs: [RestoreSelection], latest: Bool)
+    case dfu(hub: String, port: Int)
+    case reboot(hub: String, port: Int)
+    case power(hub: String, port: Int, on: Bool)
+    case debugUsb(hub: String, port: Int, on: Bool)
+    case rename(hub: String, name: String)
+    case brightness(hub: String, percent: Int)
     /// The remaining current of a legacy USB-A host port; zero clears it.
-    case hostBudget(board: String, milliamps: Int)
-    /// Write IasisOS to a board: the image the agent carries, or the UF2 file
+    case hostBudget(hub: String, milliamps: Int)
+    /// Write IasisOS to a hub: the image the agent carries, or the UF2 file
     /// of `bytes` bytes that follows the request.
-    case update(board: String, bytes: Int64?)
+    case update(hub: String, bytes: Int64?)
     case sharing(enabled: Bool)
     /// Replace the host's supervision identity with the one in this PKCS #12
     /// archive, in base64.
@@ -47,7 +47,7 @@ nonisolated enum AgentRequest: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case op, board, boards, port, name, on, percent, milliamps, bytes, model, build, enabled, image, latest, pkcs12, password
+        case op, hub, hubs, port, name, on, percent, milliamps, bytes, model, build, enabled, image, latest, pkcs12, password
     }
 
     init(from decoder: any Decoder) throws {
@@ -59,17 +59,17 @@ nonisolated enum AgentRequest: Codable, Equatable {
         switch op {
         case "state": self = .state
         case "watch": self = .watch
-        case "plan": self = try .plan(boards: field(.boards))
-        case "restore": self = try .restore(boards: field(.boards), latest: field(.latest))
-        case "revive": self = try .revive(boards: field(.boards), latest: field(.latest))
-        case "dfu": self = try .dfu(board: field(.board), port: field(.port))
-        case "reboot": self = try .reboot(board: field(.board), port: field(.port))
-        case "power": self = try .power(board: field(.board), port: field(.port), on: field(.on))
-        case "debug_usb": self = try .debugUsb(board: field(.board), port: field(.port), on: field(.on))
-        case "rename": self = try .rename(board: field(.board), name: field(.name))
-        case "brightness": self = try .brightness(board: field(.board), percent: field(.percent))
-        case "host_budget": self = try .hostBudget(board: field(.board), milliamps: field(.milliamps))
-        case "update": self = try .update(board: field(.board), bytes: fields.decodeIfPresent(Int64.self, forKey: .bytes))
+        case "plan": self = try .plan(hubs: field(.hubs))
+        case "restore": self = try .restore(hubs: field(.hubs), latest: field(.latest))
+        case "revive": self = try .revive(hubs: field(.hubs), latest: field(.latest))
+        case "dfu": self = try .dfu(hub: field(.hub), port: field(.port))
+        case "reboot": self = try .reboot(hub: field(.hub), port: field(.port))
+        case "power": self = try .power(hub: field(.hub), port: field(.port), on: field(.on))
+        case "debug_usb": self = try .debugUsb(hub: field(.hub), port: field(.port), on: field(.on))
+        case "rename": self = try .rename(hub: field(.hub), name: field(.name))
+        case "brightness": self = try .brightness(hub: field(.hub), percent: field(.percent))
+        case "host_budget": self = try .hostBudget(hub: field(.hub), milliamps: field(.milliamps))
+        case "update": self = try .update(hub: field(.hub), bytes: fields.decodeIfPresent(Int64.self, forKey: .bytes))
         case "sharing": self = try .sharing(enabled: field(.enabled))
         case "import_supervision": self = try .importSupervision(pkcs12: field(.pkcs12), password: field(.password))
         case "export_supervision": self = try .exportSupervision(password: field(.password))
@@ -90,50 +90,50 @@ nonisolated enum AgentRequest: Codable, Equatable {
             try fields.encode("state", forKey: .op)
         case .watch:
             try fields.encode("watch", forKey: .op)
-        case let .plan(boards):
+        case let .plan(hubs):
             try fields.encode("plan", forKey: .op)
-            try fields.encode(boards, forKey: .boards)
-        case let .restore(boards, latest):
+            try fields.encode(hubs, forKey: .hubs)
+        case let .restore(hubs, latest):
             try fields.encode("restore", forKey: .op)
-            try fields.encode(boards, forKey: .boards)
+            try fields.encode(hubs, forKey: .hubs)
             try fields.encode(latest, forKey: .latest)
-        case let .revive(boards, latest):
+        case let .revive(hubs, latest):
             try fields.encode("revive", forKey: .op)
-            try fields.encode(boards, forKey: .boards)
+            try fields.encode(hubs, forKey: .hubs)
             try fields.encode(latest, forKey: .latest)
-        case let .dfu(board, port):
+        case let .dfu(hub, port):
             try fields.encode("dfu", forKey: .op)
-            try fields.encode(board, forKey: .board)
+            try fields.encode(hub, forKey: .hub)
             try fields.encode(port, forKey: .port)
-        case let .reboot(board, port):
+        case let .reboot(hub, port):
             try fields.encode("reboot", forKey: .op)
-            try fields.encode(board, forKey: .board)
+            try fields.encode(hub, forKey: .hub)
             try fields.encode(port, forKey: .port)
-        case let .power(board, port, on):
+        case let .power(hub, port, on):
             try fields.encode("power", forKey: .op)
-            try fields.encode(board, forKey: .board)
+            try fields.encode(hub, forKey: .hub)
             try fields.encode(port, forKey: .port)
             try fields.encode(on, forKey: .on)
-        case let .debugUsb(board, port, on):
+        case let .debugUsb(hub, port, on):
             try fields.encode("debug_usb", forKey: .op)
-            try fields.encode(board, forKey: .board)
+            try fields.encode(hub, forKey: .hub)
             try fields.encode(port, forKey: .port)
             try fields.encode(on, forKey: .on)
-        case let .rename(board, name):
+        case let .rename(hub, name):
             try fields.encode("rename", forKey: .op)
-            try fields.encode(board, forKey: .board)
+            try fields.encode(hub, forKey: .hub)
             try fields.encode(name, forKey: .name)
-        case let .brightness(board, percent):
+        case let .brightness(hub, percent):
             try fields.encode("brightness", forKey: .op)
-            try fields.encode(board, forKey: .board)
+            try fields.encode(hub, forKey: .hub)
             try fields.encode(percent, forKey: .percent)
-        case let .hostBudget(board, milliamps):
+        case let .hostBudget(hub, milliamps):
             try fields.encode("host_budget", forKey: .op)
-            try fields.encode(board, forKey: .board)
+            try fields.encode(hub, forKey: .hub)
             try fields.encode(milliamps, forKey: .milliamps)
-        case let .update(board, bytes):
+        case let .update(hub, bytes):
             try fields.encode("update", forKey: .op)
-            try fields.encode(board, forKey: .board)
+            try fields.encode(hub, forKey: .hub)
             try fields.encode(bytes, forKey: .bytes)
         case let .sharing(enabled):
             try fields.encode("sharing", forKey: .op)
@@ -220,9 +220,9 @@ nonisolated enum AgentReply: Codable, Equatable {
     }
 }
 
-/// The targets selected on one board, in the session the user saw.
+/// The targets selected on one hub, in the session the user saw.
 nonisolated struct RestoreSelection: Codable, Equatable {
-    let board: String
+    let hub: String
     let session: UInt32
     var targets: [RestoreTarget]
 }

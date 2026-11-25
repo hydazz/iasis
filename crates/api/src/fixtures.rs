@@ -175,7 +175,7 @@ fn state() -> State {
             ..port(5)
         },
     ];
-    // The other modes and colours, on a second board.
+    // The other modes and colours, on a second hub.
     let more = modes
         .iter()
         .enumerate()
@@ -192,8 +192,8 @@ fn state() -> State {
         .collect();
     State {
         version: "0.2.0".into(),
-        boards: vec![
-            BoardView {
+        hubs: vec![
+            HubView {
                 serial: "817a23bd502453b4".into(),
                 name: "Bench A".into(),
                 session: Some(3),
@@ -212,9 +212,9 @@ fn state() -> State {
                 restores: true,
                 brightness: 50,
                 ports,
-                notice: Some("the board did not accept the restore request".into()),
+                notice: Some("the hub did not accept the restore request".into()),
             },
-            BoardView {
+            HubView {
                 serial: "a0e012192cdfdb67".into(),
                 name: "Bench B".into(),
                 session: Some(1),
@@ -223,17 +223,17 @@ fn state() -> State {
                 host: true,
                 ports: more,
                 notice: None,
-                ..BoardView::unreadable(String::new(), String::new())
+                ..HubView::unreadable(String::new(), String::new())
             },
-            BoardView::unreadable("e2a4c1d0b3f59687".into(), "not attended".into()),
-            BoardView {
+            HubView::unreadable("e2a4c1d0b3f59687".into(), "not attended".into()),
+            HubView {
                 firmware: "0.1.0".into(),
                 update: Some(FirmwareUpdate {
                     version: "0.2.0".into(),
                     required: true,
                 }),
                 notice: None,
-                ..BoardView::unreadable("5c19e0f2a7d4b368".into(), String::new())
+                ..HubView::unreadable("5c19e0f2a7d4b368".into(), String::new())
             },
         ],
         submitted: vec![
@@ -284,7 +284,7 @@ fn state() -> State {
             enabled: true,
             problem: Some("no route to the internet".into()),
             ports: vec![SharingPort {
-                board: "817a23bd502453b4".into(),
+                hub: "817a23bd502453b4".into(),
                 port: 2,
                 active: true,
                 problem: Some("DHCP failed".into()),
@@ -306,7 +306,7 @@ fn state() -> State {
 
 fn selection() -> Selection {
     Selection {
-        board: "817a23bd502453b4".into(),
+        hub: "817a23bd502453b4".into(),
         session: 3,
         targets: vec![Target {
             port: Port::ALL[1],
@@ -317,53 +317,53 @@ fn selection() -> Selection {
 }
 
 fn requests() -> Vec<Request> {
-    let board = || "817a23bd502453b4".to_owned();
+    let hub = || "817a23bd502453b4".to_owned();
     vec![
         Request::State,
         Request::Watch,
         Request::Plan {
-            boards: vec![selection()],
+            hubs: vec![selection()],
         },
         Request::Restore {
-            boards: vec![selection()],
+            hubs: vec![selection()],
             latest: true,
         },
         Request::Revive {
-            boards: vec![selection()],
+            hubs: vec![selection()],
             latest: false,
         },
         Request::Dfu {
-            board: board(),
+            hub: hub(),
             port: 2,
         },
         Request::Reboot {
-            board: board(),
+            hub: hub(),
             port: 2,
         },
         Request::Power {
-            board: board(),
+            hub: hub(),
             port: 2,
             on: true,
         },
         Request::DebugUsb {
-            board: board(),
+            hub: hub(),
             port: 1,
             on: true,
         },
         Request::Rename {
-            board: board(),
+            hub: hub(),
             name: "Bench A".into(),
         },
         Request::Brightness {
-            board: board(),
+            hub: hub(),
             percent: 50,
         },
         Request::HostBudget {
-            board: board(),
+            hub: hub(),
             milliamps: 900,
         },
         Request::Update {
-            board: board(),
+            hub: hub(),
             bytes: Some(518_144),
         },
         Request::Sharing { enabled: true },
@@ -404,7 +404,7 @@ fn release() -> Release {
 fn replies() -> Vec<Reply> {
     vec![
         Reply::Ok,
-        Reply::Error("the board has reconnected".into()),
+        Reply::Error("the hub has reconnected".into()),
         Reply::Catalog(vec![CatalogModel {
             identifier: "MacBookAir10,1".into(),
             name: "MacBook Air (M1, 2020)".into(),
@@ -412,7 +412,7 @@ fn replies() -> Vec<Reply> {
         Reply::Releases(vec![release()]),
         Reply::Plan(vec![
             Planned {
-                board: "817a23bd502453b4".into(),
+                hub: "817a23bd502453b4".into(),
                 port: 2,
                 offer: Some(Offer {
                     latest: Some(release()),
@@ -425,7 +425,7 @@ fn replies() -> Vec<Reply> {
                 }),
             },
             Planned {
-                board: "817a23bd502453b4".into(),
+                hub: "817a23bd502453b4".into(),
                 port: 3,
                 offer: None,
             },

@@ -1,6 +1,6 @@
-//! The board's side of the host session.
+//! The hub's side of the host session.
 //!
-//! One host at a time holds the board. Its reports renew a short lease, so a
+//! One host at a time holds the hub. Its reports renew a short lease, so a
 //! host that stops reporting takes its view of the targets with it.
 
 use core::cell::Cell;
@@ -45,7 +45,7 @@ impl Session {
     }
 
     /// Take a report from the session's host, or from a new host while the
-    /// board is free. A lapsed session cannot be resumed under its old identity.
+    /// hub is free. A lapsed session cannot be resumed under its old identity.
     pub fn report(&self, session: HostSession, now: u64) -> bool {
         let active = self.active(now).map(|session| session.id);
         let id = session.id;
@@ -97,7 +97,7 @@ mod tests {
     }
 
     #[test]
-    fn one_host_holds_the_board_until_its_reports_stop() {
+    fn one_host_holds_the_hub_until_its_reports_stop() {
         let session = Session::default();
         let status = Status::default();
         assert!(!session.report(report(0, false).session, 0));
@@ -111,7 +111,7 @@ mod tests {
         assert!(!session.report(report(2, false).session, 3000));
         assert_eq!(session.active(4999), Some(sharing));
         assert_eq!(session.active(5000), None);
-        // The lapsed identity is refused; a new one takes the board.
+        // The lapsed identity is refused; a new one takes the hub.
         assert!(!session.report(report(1, true).session, 5001));
         assert!(session.report(report(2, false).session, 5001));
         assert_eq!(session.active(5001), Some(report(2, false).session));
