@@ -125,7 +125,7 @@ On Linux, a Mac is served once the kernel’s `cdc_ncm` driver lists its USB ID:
 
 Windows can't share: Microsoft's NCM driver fails on a Mac's USB Ethernet, and Apple's Windows driver keeps iPhones and iPads from offering theirs.
 
-A Mac with no USB device of its own while it runs, such as the MacBook Neo, reaches the host through Apple Debug USB once its port carries it: `iasis debug-usb <port> on`, or a DFU or restore through Iasis, which keeps it on into the restored system. macOS and the Linux agent present the Mac behind it, Linux without `cdc_ncm`, while the Mac is awake.
+A Mac with no USB device of its own while it runs, such as the MacBook Neo, reaches the host only through Apple Debug USB. The agent turns it on when such a Mac's port shows nothing on USB, and a DFU or restore through Iasis keeps it on into the restored system. macOS and the Linux agent present the Mac behind it, Linux without `cdc_ncm`, while the Mac is awake.
 
 Setup Assistant can use this connection for Automated Device Enrollment. See the [Mac app guide](apps/macos/README.md#usb-internet-sharing) for host permissions.
 
