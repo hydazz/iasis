@@ -11,9 +11,9 @@ use crate::{
     Board,
     dfu::{self, Attempt, Outcome, Signal},
     home::Home,
-    host::{Jobs, Link, PortJob},
+    host::{Awaiting, Jobs, Link, PortJob},
     identity::{AppleMode, Observation, TargetTracker, models::DeviceModel},
-    images::{Lease, Network, Store},
+    images::{Lease, Network, Pick, Poll, Store},
     inventory::Inventory,
     restore::{
         Operation, PreparedIpsw, RestoreBatch, RestoreEngine, RestoreState, image_for_model,
@@ -387,9 +387,11 @@ fn in_dfu(
 }
 
 /// Choose each target's image by its model: the chip and board in a DFU
-/// descriptor, or its product type. The store gives the
-/// newest image it has that Apple still signs, or with `latest` the newest
-/// release, and fetches what it lacks, which the target's port shows.
+/// descriptor, or its product type. The store gives the newest image it has
+/// that Apple still signs, or with `latest` the newest release, and fetches
+/// what it lacks. Every release the targets need is asked for at once, each
+/// once, and they wait for it together, each port showing the image it waits
+/// for. A target that leaves, or whose image cannot be had, stops there.
 /// Returns the targets with their images and why the others have none.
 fn resolve(
     link: &Link,
@@ -400,48 +402,103 @@ fn resolve(
     let (_, snapshot) = link.observe()?;
     let mut chosen = Vec::new();
     let mut unresolved = Unready::default();
+    let mut waiting = Vec::new();
     for (target, generation) in targets {
-        let image = (|| -> Result<PreparedIpsw> {
+        let pick = (|| -> Result<Pick> {
             let (_, model) = in_dfu(link.board(), target, &snapshot)
                 .context("the target left DFU or recovery")?;
-            Ok(match images {
-                Images::Given(images) => image_for_model(images, &model)?.clone(),
+            match images {
+                Images::Given(images) => Ok(Pick::Held(image_for_model(images, &model)?.clone())),
                 Images::Store(store) => {
-                    let (chip, id) = store.hardware_for(&model)?;
-                    let mut announced = false;
-                    store.obtain(chip, id, latest, |fetch| {
-                        ensure!(link.alive(), link.failure());
-                        ensure!(
-                            link.status().is_none_or(|status| {
-                                status.ports[target.port.index()].generation == *generation
-                            }),
-                            "the target left while its image was fetched"
-                        );
-                        if let Some(fetch) = fetch
-                            && !announced
-                        {
-                            announced = true;
-                            println!(
-                                "Port {}: fetching {} ({}), {:.1} GB",
-                                target.port.number(),
-                                fetch.version,
-                                fetch.build,
-                                fetch.bytes as f64 / 1e9
-                            );
-                        }
-                        // A download waiting behind another has not begun.
-                        let percent =
-                            fetch.map_or(0, |fetch| fetch.done * 100 / fetch.bytes.max(1));
-                        link.fetching(target.port, *generation, Some(percent.min(100) as u8));
-                        Ok(())
-                    })?
+                    let (chip, board) = store.hardware_for(&model)?;
+                    store.pick(chip, board, latest)
                 }
-            })
+            }
         })();
-        link.fetching(target.port, *generation, None);
-        match image {
-            Ok(image) => chosen.push((target.clone(), *generation, image)),
+        match pick {
+            Ok(Pick::Held(image)) => chosen.push((target.clone(), *generation, image)),
+            Ok(Pick::Fetch(wanted)) => waiting.push((target.clone(), *generation, wanted)),
             Err(error) => unresolved.add(target.port, format_args!("{error:#}")),
+        }
+    }
+    let Images::Store(store) = images else {
+        return Ok((chosen, unresolved));
+    };
+    // Asked for once, a release that fails ends every wait on it rather than
+    // being tried again for the next target.
+    let mut asked = Vec::new();
+    for (_, _, wanted) in &waiting {
+        if !asked.contains(&wanted.id()) {
+            store.queue(wanted);
+            asked.push(wanted.id());
+        }
+    }
+    let serial = link.board().info().serial;
+    let inventory = link.inventory();
+    let mut seen = link.changes().count();
+    let mut placed = None;
+    while !waiting.is_empty() {
+        ensure!(link.alive(), link.failure());
+        let version = inventory.version();
+        let snapshot = match placed.take() {
+            Some((at, snapshot)) if at == version => Ok(snapshot),
+            _ => topology::locate(link.board().topology(), inventory.devices()),
+        };
+        let status = link.status();
+        waiting.retain_mut(|(target, generation, wanted)| {
+            let port = target.port;
+            match snapshot
+                .as_ref()
+                .map(|snapshot| target.observe(serial, snapshot))
+            {
+                // A target that restarts, as an iPad does after a while in
+                // recovery, comes back as a new attachment.
+                Ok(Observation::Present { .. }) => {
+                    if let Some(status) = &status {
+                        *generation = status.ports[port.index()].generation;
+                    }
+                }
+                Ok(Observation::Missing | Observation::IdentityMissing { .. }) | Err(_) => {}
+                Ok(_) => {
+                    link.awaiting(port, None);
+                    unresolved.add(port, "the target left while its image was fetched");
+                    return false;
+                }
+            }
+            match store.poll(wanted) {
+                Ok(Poll::Ready(image)) => {
+                    link.awaiting(port, None);
+                    chosen.push((target.clone(), *generation, image));
+                    false
+                }
+                Ok(Poll::Coming(fetch)) => {
+                    // A download waiting behind another has not begun.
+                    let percent = fetch.map_or(0, |fetch| fetch.done * 100 / fetch.bytes.max(1));
+                    link.awaiting(
+                        port,
+                        Some(Awaiting {
+                            generation: *generation,
+                            image: wanted.id().into(),
+                            percent: percent.min(100) as u8,
+                        }),
+                    );
+                    true
+                }
+                Err(error) => {
+                    link.awaiting(port, None);
+                    unresolved.add(port, format_args!("{error:#}"));
+                    false
+                }
+            }
+        });
+        if !waiting.is_empty() {
+            // The download, the store and the board all advance this count.
+            // A tree that could not be placed is tried again shortly.
+            let again = snapshot
+                .is_err()
+                .then(|| Instant::now() + Duration::from_secs(1));
+            placed = snapshot.ok().map(|snapshot| (version, snapshot));
+            seen = link.changes().wait(seen, again);
         }
     }
     Ok((chosen, unresolved))
