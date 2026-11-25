@@ -51,6 +51,8 @@ struct ImageRow {
     mark: ActivityMark,
     stop: gtk::Button,
     menu: gtk::MenuButton,
+    /// Whether the menu was last built for an image a restore is reading.
+    in_use: Cell<Option<bool>>,
 }
 
 /// An archive on its way into the store: the bytes sent, or `None` once the
@@ -232,6 +234,20 @@ impl Preferences {
             }
         });
         actions.add_action(&remove_image);
+        // The Remove Image item of an image a restore is reading.
+        let held_image = gio::SimpleAction::new("remove-held-image", Some(glib::VariantTy::STRING));
+        held_image.set_enabled(false);
+        actions.add_action(&held_image);
+        let show_image = gio::SimpleAction::new("show-image", Some(glib::VariantTy::STRING));
+        let weak = Rc::downgrade(&this);
+        show_image.connect_activate(move |_, image| {
+            if let Some(this) = weak.upgrade()
+                && let Some(image) = image.and_then(String::from_variant)
+            {
+                this.show_in_folder(&image);
+            }
+        });
+        actions.add_action(&show_image);
         let image_info = gio::SimpleAction::new("image-info", Some(glib::VariantTy::STRING));
         let weak = Rc::downgrade(&this);
         image_info.connect_activate(move |_, image| {
@@ -382,16 +398,53 @@ impl Preferences {
             .set_visible(importing.is_none() && store.images.is_empty());
     }
 
-    /// What an image's row leaves out: every model it restores.
+    /// Open the image's folder in the file manager, with the archive selected.
+    fn show_in_folder(&self, id: &str) {
+        let store = self.store.borrow();
+        let Some(path) = store
+            .images
+            .iter()
+            .find(|image| image.id == id)
+            .and_then(|image| image.path.clone())
+        else {
+            return;
+        };
+        let launcher = gtk::FileLauncher::new(Some(&gio::File::for_path(path)));
+        let parent = self.dialog.root().and_downcast::<gtk::Window>();
+        let window = self.window.clone();
+        glib::spawn_future_local(async move {
+            if let Err(error) = launcher
+                .open_containing_folder_future(parent.as_ref())
+                .await
+                && let Some(window) = window.upgrade()
+            {
+                window.toast(&format!("Show in Folder: {error}"));
+            }
+        });
+    }
+
+    /// What an image's row leaves out: where it came from and every model it
+    /// restores.
     fn show_info(&self, id: &str) {
         let store = self.store.borrow();
         let Some(image) = store.images.iter().find(|image| image.id == id) else {
             return;
         };
         let about = adw::PreferencesGroup::new();
+        about.set_description(
+            image.in_use.then_some(
+                "A restore is using this image. It can be removed once the restore ends.",
+            ),
+        );
+        let source = if image.fetched {
+            "Downloaded from Apple"
+        } else {
+            "Added from a file"
+        };
         for (title, value) in [
             ("Build", image.build.clone()),
             ("Size", device::size(image.bytes)),
+            ("Source", source.to_owned()),
         ] {
             about.add(
                 &adw::ActionRow::builder()
@@ -611,18 +664,8 @@ impl ImageRow {
             .css_classes(["flat"])
             .build();
         row.add_suffix(&stop);
-        let info = gio::MenuItem::new(Some("Get Info"), None);
-        info.set_action_and_target_value(Some("prefs.image-info"), Some(&target));
-        let remove = gio::MenuItem::new(Some("Remove Image"), None);
-        remove.set_action_and_target_value(Some("prefs.remove-image"), Some(&target));
-        let removing = gio::Menu::new();
-        removing.append_item(&remove);
-        let actions = gio::Menu::new();
-        actions.append_item(&info);
-        actions.append_section(None, &removing);
         let menu = gtk::MenuButton::builder()
             .icon_name("view-more-symbolic")
-            .menu_model(&actions)
             .tooltip_text("Image Options")
             .valign(gtk::Align::Center)
             .css_classes(["flat"])
@@ -645,10 +688,39 @@ impl ImageRow {
             mark,
             stop,
             menu,
+            in_use: Cell::default(),
         }
     }
 
+    /// The held image's actions; Remove Image is unavailable while a restore
+    /// reads the image.
+    fn actions(&self, in_use: bool) -> gio::Menu {
+        let target = self.id.to_variant();
+        let item = |label: &str, action: &str| {
+            let item = gio::MenuItem::new(Some(label), None);
+            item.set_action_and_target_value(Some(action), Some(&target));
+            item
+        };
+        let removing = gio::Menu::new();
+        removing.append_item(&item(
+            "Remove Image",
+            if in_use {
+                "prefs.remove-held-image"
+            } else {
+                "prefs.remove-image"
+            },
+        ));
+        let actions = gio::Menu::new();
+        actions.append_item(&item("Show in Folder", "prefs.show-image"));
+        actions.append_item(&item("Get Info", "prefs.image-info"));
+        actions.append_section(None, &removing);
+        actions
+    }
+
     fn show(&self, image: &Image, fetch: Option<&Fetch>) {
+        if self.in_use.replace(Some(image.in_use)) != Some(image.in_use) {
+            self.menu.set_menu_model(Some(&self.actions(image.in_use)));
+        }
         let mut detail = vec![image.build.clone(), device::size(image.bytes)];
         // macOS says which devices by itself; the others restore only some.
         if image.os != "macOS" && image.models.len() <= 2 {
