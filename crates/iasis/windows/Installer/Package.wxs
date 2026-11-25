@@ -51,6 +51,27 @@
               ResetPeriodInDays="1" />
         </ServiceInstall>
         <ServiceControl Name="iasisd" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+        <!-- Binding WinUSB to a Mac in restore mode needs an administrator,
+             which the agent's account is not. -->
+        <ServiceInstall
+            Id="WinUsb"
+            Name="iasis-winusb"
+            DisplayName="Iasis WinUSB"
+            Description="Binds Windows' WinUSB driver to Macs in restore mode while the Iasis service restores them."
+            Type="ownProcess"
+            Start="auto"
+            ErrorControl="normal"
+            Account="LocalSystem"
+            Arguments="worker winusb"
+            Vital="yes">
+          <util:ServiceConfig
+              FirstFailureActionType="restart"
+              SecondFailureActionType="restart"
+              ThirdFailureActionType="restart"
+              RestartServiceDelayInSeconds="5"
+              ResetPeriodInDays="1" />
+        </ServiceInstall>
+        <ServiceControl Id="WinUsb" Name="iasis-winusb" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
         <!-- The agent's event source. Windows' .NET message file shows each
              event's text as it is. -->
         <RegistryKey Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\EventLog\Application\Iasis">
