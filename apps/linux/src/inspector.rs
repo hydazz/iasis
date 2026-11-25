@@ -60,6 +60,29 @@ fn groups(device: &Device) -> Vec<adw::PreferencesGroup> {
     } else if let Some(operation) = device.operation() {
         operation_rows(&lead, &operation);
     }
+    if let Some(needs) = &device.needs {
+        let reason = adw::ActionRow::builder()
+            .title(glib::markup_escape_text(&needs.reason))
+            .title_lines(0)
+            .build();
+        reason.add_prefix(&icon("dialog-warning-symbolic", "warning"));
+        lead.add(&reason);
+        let get = adw::ActionRow::builder()
+            .title(glib::markup_escape_text(&format!("Get {}", needs.name)))
+            .activatable(true)
+            .build();
+        get.add_suffix(&gtk::Image::from_icon_name("adw-external-link-symbolic"));
+        let url = needs.url.clone();
+        get.connect_activated(move |row| {
+            let window = row.root().and_downcast::<gtk::Window>();
+            gtk::UriLauncher::new(&url).launch(
+                window.as_ref(),
+                gtk::gio::Cancellable::NONE,
+                |_| {},
+            );
+        });
+        lead.add(&get);
+    }
 
     let actions = adw::PreferencesGroup::new();
     for (title, icon_name, action) in [
