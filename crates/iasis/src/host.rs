@@ -94,6 +94,18 @@ pub fn observe(snapshot: &Snapshot, port: Port) -> Observed {
     }
 }
 
+/// Where a target's network reaches the host.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Medium {
+    /// The host's own USB device: its IOKit registry entry on macOS, its
+    /// attachment ID on Linux.
+    Usb(u64),
+    /// A running Mac behind Debug USB that the agent presents.
+    #[cfg(target_os = "linux")]
+    Tunnel(Arc<crate::tunnel::Session>),
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn sharing_target(status: &Status, snapshot: &Snapshot, port: Port) -> Option<u64> {
     let state = &status.ports[port.index()];
@@ -314,6 +326,8 @@ struct Shared {
     /// Advances when a target is named or forgotten.
     identified_version: AtomicU64,
     failure: Mutex<Option<String>>,
+    #[cfg(target_os = "linux")]
+    tunnels: crate::tunnel::Tunnels,
 }
 
 impl Shared {
@@ -336,20 +350,39 @@ impl Shared {
     /// the link last saw of either.
     fn observe(&self) -> Result<(Status, Snapshot)> {
         let status = self.board.status()?;
-        let mut snapshot = topology::discover(self.board.topology())?;
+        let mut snapshot = self.present(topology::discover(self.board.topology())?);
         self.name_identified(&mut snapshot);
         Ok((status, snapshot))
     }
 
+    /// The host's devices on the connectors, with the running Macs that
+    /// tunnels present behind Debug USB.
+    fn present(
+        &self,
+        #[cfg_attr(not(target_os = "linux"), allow(unused_mut))] mut snapshot: Snapshot,
+    ) -> Snapshot {
+        #[cfg(target_os = "linux")]
+        self.tunnels.present(&mut snapshot);
+        snapshot
+    }
+
     fn usb_version(&self) -> u64 {
-        self.inventory.version() + self.identified_version.load(Ordering::Relaxed)
+        #[cfg(target_os = "linux")]
+        let tunnels = self.tunnels.version();
+        #[cfg(not(target_os = "linux"))]
+        let tunnels = 0;
+        self.inventory.version() + self.identified_version.load(Ordering::Relaxed) + tunnels
     }
 
     /// Place the host's USB devices on the board's connectors, with what
     /// identification found of each enumeration still there. This walks
     /// the host's USB ports, so it runs apart from the view and the lease.
     fn place(&self) -> Result<Snapshot, topology::Error> {
-        let mut snapshot = topology::locate(self.board.topology(), self.inventory.devices())?;
+        let devices = self.inventory.devices();
+        let snapshot = topology::locate(self.board.topology(), devices.clone())?;
+        #[cfg(target_os = "linux")]
+        self.tunnels.follow(&snapshot, &devices);
+        let mut snapshot = self.present(snapshot);
         self.name_identified(&mut snapshot);
         remember_models(&snapshot, &self.models);
         Ok(snapshot)
@@ -592,17 +625,27 @@ impl Shared {
     /// target is still unnamed.
     fn identify(&self, status: &Status) -> Result<bool> {
         // Identities already given must not hide the modes they were asked in.
-        let mut snapshot = topology::locate(self.board.topology(), self.inventory.devices())?;
+        let mut snapshot = self.present(topology::locate(
+            self.board.topology(),
+            self.inventory.devices(),
+        )?);
         let known = self.identified.lock().unwrap().clone();
         let mut asked: [Option<Enumeration>; PORT_COUNT] = Default::default();
         let mut mask = 0;
         for port in Port::ALL {
             let index = port.index();
-            let enumeration = unidentified_usb(&snapshot, port).map(Enumeration::from);
+            let target = unidentified_usb(&snapshot, port);
+            let enumeration = target.map(Enumeration::from);
             let settled = matches!(
                 (&known[index], &enumeration),
                 (Some((seen, apple)), Some(now)) if seen == now && apple.ecid().is_some()
             );
+            // A tunnel names what it presents from its descriptors, and its
+            // Debug USB device is the tunnel's while it is claimed.
+            #[cfg(target_os = "linux")]
+            let settled = settled
+                || self.tunnels.holds(port)
+                || target.is_some_and(|device| self.tunnels.session(device).is_some());
             // A restore owns its target's USB.
             if enumeration.is_some() && !settled && !status.ports[index].restoring() {
                 mask |= 1 << index;
@@ -688,6 +731,8 @@ impl Link {
             board,
             engine: engine.clone(),
             session,
+            #[cfg(target_os = "linux")]
+            tunnels: crate::tunnel::Tunnels::new(inventory.changes().clone(), jobs.clone()),
             jobs,
             models,
             changes: inventory.changes().clone(),
@@ -796,14 +841,25 @@ impl Link {
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    pub(crate) fn sharing_targets(&self) -> Vec<(Port, u64)> {
+    pub(crate) fn sharing_targets(&self) -> Vec<(Port, Medium)> {
         let view = self.shared.view.lock().unwrap();
         let Some((status, snapshot)) = &view.sample else {
             return Vec::new();
         };
         Port::ALL
             .into_iter()
-            .filter_map(|port| Some((port, sharing_target(status, snapshot, port)?)))
+            .filter_map(|port| {
+                #[cfg(target_os = "linux")]
+                if let Some(session) = snapshot
+                    .target(port)
+                    .and_then(|device| self.shared.tunnels.session(device))
+                {
+                    let state = &status.ports[port.index()];
+                    return (state.occupied() && !state.restoring() && session.network())
+                        .then_some((port, Medium::Tunnel(session)));
+                }
+                Some((port, Medium::Usb(sharing_target(status, snapshot, port)?)))
+            })
             .collect()
     }
 
