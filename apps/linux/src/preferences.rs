@@ -1,5 +1,5 @@
-//! Preferences: USB Internet Sharing and opening at login, each board's name,
-//! lights and IasisOS, and the restore images.
+//! Preferences: USB Internet Sharing, the supervision identity and opening at
+//! login, each board's name, lights and IasisOS, and the restore images.
 
 use std::{
     cell::{Cell, RefCell},
@@ -10,7 +10,9 @@ use std::{
 
 use adw::prelude::*;
 use gtk::{gio, glib};
-use iasis_api::{BoardView, CatalogModel, Image, Images, Release, Reply, Request, State};
+use iasis_api::{
+    BoardView, CatalogModel, Image, Images, Release, Reply, Request, State, Supervision,
+};
 
 use crate::{
     agent,
@@ -23,6 +25,9 @@ pub struct Preferences {
     pub dialog: adw::PreferencesDialog,
     window: Weak<Window>,
     sharing: adw::SwitchRow,
+    supervision_row: adw::ActionRow,
+    export: gio::SimpleAction,
+    supervision: RefCell<Supervision>,
     /// Set while the state is shown, so the switches send nothing back.
     showing: Cell<bool>,
     boards: adw::PreferencesPage,
@@ -70,6 +75,28 @@ impl Preferences {
             .build();
         sharing_group.add(&sharing);
         general.add(&sharing_group);
+        let supervision_group = adw::PreferencesGroup::builder()
+            .title("Supervision Identity")
+            .description("Supervised iPhones and iPads whose enrollment profile lists this certificate as a supervising host pair with this computer without asking for Trust.")
+            .build();
+        let identity = gio::Menu::new();
+        identity.append(Some("Export…"), Some("prefs.export-identity"));
+        identity.append(Some("Import…"), Some("prefs.import-identity"));
+        let fingerprint_section = gio::Menu::new();
+        fingerprint_section.append(Some("Copy Fingerprint"), Some("prefs.copy-fingerprint"));
+        identity.append_section(None, &fingerprint_section);
+        let supervision_row = adw::ActionRow::builder().subtitle_lines(1).build();
+        supervision_row.add_suffix(
+            &gtk::MenuButton::builder()
+                .icon_name("view-more-symbolic")
+                .menu_model(&identity)
+                .css_classes(["flat"])
+                .tooltip_text("Export or Import the Identity")
+                .valign(gtk::Align::Center)
+                .build(),
+        );
+        supervision_group.add(&supervision_row);
+        general.add(&supervision_group);
         #[cfg(target_os = "linux")]
         {
             let startup = adw::PreferencesGroup::builder().title("Startup").build();
@@ -128,6 +155,9 @@ impl Preferences {
             dialog,
             window: Rc::downgrade(window),
             sharing,
+            supervision_row,
+            export: gio::SimpleAction::new("export-identity", None),
+            supervision: RefCell::default(),
             showing: Cell::new(false),
             boards,
             no_boards,
@@ -165,6 +195,31 @@ impl Preferences {
             }
         });
         actions.add_action(&import);
+        let weak = Rc::downgrade(&this);
+        this.export.connect_activate(move |_, _| {
+            if let Some(this) = weak.upgrade() {
+                this.export_identity();
+            }
+        });
+        actions.add_action(&this.export);
+        let import_identity = gio::SimpleAction::new("import-identity", None);
+        let weak = Rc::downgrade(&this);
+        import_identity.connect_activate(move |_, _| {
+            if let Some(this) = weak.upgrade() {
+                this.import_identity();
+            }
+        });
+        actions.add_action(&import_identity);
+        let copy_fingerprint = gio::SimpleAction::new("copy-fingerprint", None);
+        let weak = Rc::downgrade(&this);
+        copy_fingerprint.connect_activate(move |_, _| {
+            if let Some(this) = weak.upgrade()
+                && let Some(fingerprint) = fingerprint(&this.supervision.borrow())
+            {
+                this.dialog.clipboard().set_text(&fingerprint);
+            }
+        });
+        actions.add_action(&copy_fingerprint);
         this.dialog.insert_action_group("prefs", Some(&actions));
         this
     }
@@ -181,6 +236,22 @@ impl Preferences {
                 .unwrap_or("Targets with USB Ethernet use this computer’s internet connection"),
         ));
         self.showing.set(false);
+        let supervision = &state.supervision;
+        let fingerprint = fingerprint(supervision);
+        self.supervision_row
+            .set_title(&glib::markup_escape_text(match &supervision.certificate {
+                Some(_) => supervision.name.as_deref().unwrap_or("Unnamed"),
+                None => supervision.problem.as_deref().unwrap_or("No Identity"),
+            }));
+        self.supervision_row
+            .set_subtitle(fingerprint.as_deref().unwrap_or_default());
+        self.supervision_row.set_tooltip_text(
+            fingerprint
+                .map(|fingerprint| format!("SHA-256 {fingerprint}"))
+                .as_deref(),
+        );
+        self.export.set_enabled(supervision.certificate.is_some());
+        *self.supervision.borrow_mut() = supervision.clone();
         self.show_boards(&state.boards);
         *self.store.borrow_mut() = state.images.clone();
         self.show_images();
@@ -332,6 +403,121 @@ impl Preferences {
         });
         row.add_suffix(&remove);
         row
+    }
+
+    /// Save the identity's certificate in DER, for an enrollment profile.
+    fn save_certificate(self: &Rc<Self>) {
+        let supervision = self.supervision.borrow().clone();
+        let Some(certificate) = supervision.certificate else {
+            return;
+        };
+        let chooser = gtk::FileDialog::builder()
+            .title("Export Certificate")
+            .initial_name(format!(
+                "{}.cer",
+                supervision.name.as_deref().unwrap_or("Iasis")
+            ))
+            .modal(true)
+            .build();
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let Some(this) = weak.upgrade() else { return };
+            let parent = this.dialog.root().and_downcast::<gtk::Window>();
+            let Ok(file) = chooser.save_future(parent.as_ref()).await else {
+                return;
+            };
+            let Some(path) = file.path() else { return };
+            if let Err(error) = std::fs::write(&path, glib::base64_decode(&certificate))
+                && let Some(window) = this.window.upgrade()
+            {
+                window.toast(&format!("Export Certificate: {error}"));
+            }
+        });
+    }
+
+    /// Save the certificate alone, for an enrollment profile, or with the
+    /// private key in a PKCS #12 archive protected by a password the user
+    /// gives twice, to back the identity up or move it.
+    fn export_identity(self: &Rc<Self>) {
+        let name = self.supervision.borrow().name.clone();
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let Some(this) = weak.upgrade() else { return };
+            let password = match ask_export(&this.dialog).await {
+                None => return,
+                Some(Export::Certificate) => return this.save_certificate(),
+                Some(Export::Identity(password)) => password,
+            };
+            let archive = match agent::ask(Request::ExportSupervision { password }).await {
+                Ok(Reply::Supervision(archive)) => glib::base64_decode(&archive),
+                Ok(Reply::Error(message)) | Err(message) => return this.report(&message),
+                Ok(_) => return,
+            };
+            let chooser = gtk::FileDialog::builder()
+                .title("Export Supervision Identity")
+                .initial_name(format!("{}.p12", name.as_deref().unwrap_or("Iasis")))
+                .modal(true)
+                .build();
+            let parent = this.dialog.root().and_downcast::<gtk::Window>();
+            let Ok(file) = chooser.save_future(parent.as_ref()).await else {
+                return;
+            };
+            if let Some(path) = file.path()
+                && let Err(error) = std::fs::write(&path, archive)
+            {
+                this.report(&format!("Export Supervision Identity: {error}"));
+            }
+        });
+    }
+
+    /// Replace the identity with the one in a PKCS #12 archive.
+    fn import_identity(self: &Rc<Self>) {
+        let filter = gtk::FileFilter::new();
+        filter.set_name(Some("PKCS #12 Archives"));
+        filter.add_suffix("p12");
+        filter.add_suffix("pfx");
+        let filters = gio::ListStore::new::<gtk::FileFilter>();
+        filters.append(&filter);
+        let chooser = gtk::FileDialog::builder()
+            .title("Import Supervision Identity")
+            .filters(&filters)
+            .modal(true)
+            .build();
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let Some(this) = weak.upgrade() else { return };
+            let parent = this.dialog.root().and_downcast::<gtk::Window>();
+            let Ok(file) = chooser.open_future(parent.as_ref()).await else {
+                return;
+            };
+            let Some(archive) = file.path().and_then(|path| std::fs::read(path).ok()) else {
+                return this.report("Import Supervision Identity: the file could not be read");
+            };
+            let Some(password) = ask_password(
+                &this.dialog,
+                "Import Supervision Identity",
+                "This replaces the computer's identity. Devices that list the current certificate ask for Trust until they enroll with the new one.",
+                "_Replace",
+            )
+            .await
+            else {
+                return;
+            };
+            if let Err(message) = agent::perform(Request::ImportSupervision {
+                pkcs12: glib::base64_encode(&archive).to_string(),
+                password,
+            })
+            .await
+            {
+                this.report(&message);
+            }
+        });
+    }
+
+    fn report(&self, message: &str) {
+        if let Some(window) = self.window.upgrade() {
+            window.toast(message);
+        }
     }
 
     fn choose_import(self: &Rc<Self>) {
@@ -734,4 +920,130 @@ fn toolbar_page(title: &str, content: &impl IsA<gtk::Widget>) -> adw::Navigation
     toolbar.add_top_bar(&adw::HeaderBar::new());
     toolbar.set_content(Some(content));
     adw::NavigationPage::new(&toolbar, title)
+}
+
+/// What an export holds: the certificate alone, or with the private key in
+/// an archive under this password.
+enum Export {
+    Certificate,
+    Identity(String),
+}
+
+/// Ask what to export and, with the private key, a password twice; `None`
+/// when the user cancels.
+async fn ask_export(parent: &impl IsA<gtk::Widget>) -> Option<Export> {
+    let dialog = adw::AlertDialog::new(Some("Export Supervision Identity"), None);
+    dialog.add_response("cancel", "_Cancel");
+    dialog.add_response("export", "_Export…");
+    dialog.set_response_appearance("export", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("export"));
+    dialog.set_close_response("cancel");
+    let certificate = gtk::CheckButton::with_label("Certificate, for an enrollment profile");
+    let identity = gtk::CheckButton::with_label(
+        "Certificate and private key, to back up or move the identity",
+    );
+    identity.set_group(Some(&certificate));
+    certificate.set_active(true);
+    let password = gtk::PasswordEntry::builder()
+        .placeholder_text("Password")
+        .show_peek_icon(true)
+        .activates_default(true)
+        .build();
+    let again = gtk::PasswordEntry::builder()
+        .placeholder_text("Verify")
+        .activates_default(true)
+        .build();
+    let secret = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    secret.append(
+        &gtk::Label::builder()
+            .label("Anyone with the file and its password can pair with every device that lists the certificate.")
+            .wrap(true)
+            .xalign(0.0)
+            .css_classes(["dim-label"])
+            .build(),
+    );
+    secret.append(&password);
+    secret.append(&again);
+    let fields = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    fields.append(&certificate);
+    fields.append(&identity);
+    fields.append(&secret);
+    dialog.set_extra_child(Some(&fields));
+    let check = {
+        let (dialog, identity, password, again, secret) = (
+            dialog.clone(),
+            identity.clone(),
+            password.clone(),
+            again.clone(),
+            secret.clone(),
+        );
+        move || {
+            let keyed = identity.is_active();
+            secret.set_visible(keyed);
+            let text = password.text();
+            dialog.set_response_enabled(
+                "export",
+                !keyed || (!text.is_empty() && text == again.text()),
+            );
+        }
+    };
+    check();
+    identity.connect_toggled({
+        let check = check.clone();
+        move |_| check()
+    });
+    password.connect_changed({
+        let check = check.clone();
+        move |_| check()
+    });
+    again.connect_changed(move |_| check());
+    if dialog.choose_future(Some(parent)).await != "export" {
+        return None;
+    }
+    Some(if identity.is_active() {
+        Export::Identity(password.text().to_string())
+    } else {
+        Export::Certificate
+    })
+}
+
+/// Ask for a password; `None` when the user cancels.
+async fn ask_password(
+    parent: &impl IsA<gtk::Widget>,
+    heading: &str,
+    body: &str,
+    action: &str,
+) -> Option<String> {
+    let dialog = adw::AlertDialog::new(Some(heading), Some(body));
+    dialog.add_response("cancel", "_Cancel");
+    dialog.add_response("ok", action);
+    dialog.set_response_appearance("ok", adw::ResponseAppearance::Destructive);
+    dialog.set_default_response(Some("ok"));
+    dialog.set_close_response("cancel");
+    dialog.set_response_enabled("ok", false);
+    let password = gtk::PasswordEntry::builder()
+        .placeholder_text("Password")
+        .show_peek_icon(true)
+        .activates_default(true)
+        .build();
+    dialog.set_extra_child(Some(&password));
+    password.connect_changed({
+        let dialog = dialog.clone();
+        move |password| dialog.set_response_enabled("ok", !password.text().is_empty())
+    });
+    (dialog.choose_future(Some(parent)).await == "ok").then(|| password.text().to_string())
+}
+
+/// The certificate's SHA-256 fingerprint, in colon-separated hexadecimal
+/// pairs, to check which identity an enrollment profile lists.
+fn fingerprint(supervision: &Supervision) -> Option<String> {
+    let certificate = glib::base64_decode(supervision.certificate.as_deref()?);
+    let hex = glib::compute_checksum_for_data(glib::ChecksumType::Sha256, &certificate)?;
+    Some(
+        hex.as_bytes()
+            .chunks(2)
+            .map(|pair| String::from_utf8_lossy(pair).to_uppercase())
+            .collect::<Vec<_>>()
+            .join(":"),
+    )
 }

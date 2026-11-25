@@ -14,7 +14,7 @@ use std::{
 use anyhow::{Context, Result, ensure};
 use iasis_protocol::AppleMode;
 
-use crate::{identity::models::DeviceModel, watch::Watch};
+use crate::{identity::models::DeviceModel, supervision::Supervision, watch::Watch};
 use serde::{Deserialize, Serialize};
 
 mod integrity;
@@ -250,13 +250,6 @@ fn manifest_id(value: &plist::Value) -> Option<u32> {
     }
 }
 
-/// Take a running iPhone or iPad into recovery through the host's usbmuxd.
-/// Since iOS 14.5 this needs the host to be paired with the device, as a
-/// trusted computer is.
-pub fn enter_recovery(ecid: u64) -> Result<()> {
-    restorekit::recovery::enter(ecid, None).map_err(|error| anyhow::anyhow!("{error}"))
-}
-
 /// The chip and board IDs in an ordinary DFU USB serial descriptor.
 pub fn dfu_hardware(serial_descriptor: &str) -> Result<(u32, u32)> {
     let id = |key| -> Result<u32> {
@@ -342,14 +335,20 @@ pub struct RestoreEngine {
     /// The executable the workers run.
     program: PathBuf,
     logs_root: PathBuf,
+    supervision: Arc<Supervision>,
     active: Arc<Mutex<HashSet<u64>>>,
     /// Advances whenever a job's status changes.
     changes: Arc<Watch>,
 }
 
 impl RestoreEngine {
-    pub fn for_host(logs_root: impl Into<PathBuf>, changes: Arc<Watch>) -> Self {
+    pub fn for_host(
+        logs_root: impl Into<PathBuf>,
+        supervision: Arc<Supervision>,
+        changes: Arc<Watch>,
+    ) -> Self {
         Self {
+            supervision,
             changes,
             // An executable that cannot name itself fails each worker's start.
             ..Self::with(crate::native::program().unwrap_or_default(), logs_root)
@@ -360,6 +359,7 @@ impl RestoreEngine {
         Self {
             program,
             logs_root: logs_root.into(),
+            supervision: Arc::default(),
             active: Arc::default(),
             changes: Arc::default(),
         }
@@ -379,6 +379,16 @@ impl RestoreEngine {
     pub fn restores(&self, mode: AppleMode) -> bool {
         Self::starts_from(mode)
             || (mode == AppleMode::Normal && crate::native::mux::reaches_running_devices())
+    }
+
+    /// Take a running iPhone or iPad into recovery through the host's
+    /// usbmuxd. Since iOS 14.5 this needs the host paired with the device:
+    /// by its user's Trust, or as its supervisor with a supervision identity
+    /// the device lists.
+    pub fn enter_recovery(&self, ecid: u64) -> Result<()> {
+        let supervisor = self.supervision.supervisor()?;
+        restorekit::recovery::enter(ecid, supervisor.as_deref())
+            .map_err(|error| anyhow::anyhow!("{error}"))
     }
 
     /// Start a deliberately selected erase batch. The caller must establish

@@ -10,6 +10,9 @@ use serde::Serialize;
 
 use super::*;
 
+/// A supervision identity's PKCS #12 archive in base64, shortened.
+const PKCS12: &str = "MIIJ4QIBAzCCCZcGCSqGSIb3DQEHAaCCCYgEggmEMIIJgDCCBDcGCSqGSIb3DQEH";
+
 fn ending(operation: Operation, phase: RestorePhase) -> Ending {
     Ending {
         operation,
@@ -278,6 +281,11 @@ fn state() -> State {
                 problem: Some("DHCP failed".into()),
             }],
         },
+        supervision: Supervision {
+            name: Some("Iasis on bench".into()),
+            certificate: Some("MIIBszCCAVmgAwIBAgIIb3Vy".into()),
+            problem: Some("supervision.pem: unusable supervision identity: no certificate".into()),
+        },
     }
 }
 
@@ -340,6 +348,13 @@ fn requests() -> Vec<Request> {
             bytes: Some(518_144),
         },
         Request::Sharing { enabled: true },
+        Request::ImportSupervision {
+            pkcs12: PKCS12.into(),
+            password: "correct horse".into(),
+        },
+        Request::ExportSupervision {
+            password: "correct horse".into(),
+        },
         Request::Download {
             model: "MacBookAir10,1".into(),
             build: Some("26B131".into()),
@@ -396,6 +411,7 @@ fn replies() -> Vec<Reply> {
                 offer: None,
             },
         ]),
+        Reply::Supervision(PKCS12.into()),
     ]
 }
 

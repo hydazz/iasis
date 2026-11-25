@@ -13,6 +13,7 @@ pub mod native;
 pub mod progress;
 pub mod restore;
 pub mod sharing;
+pub mod supervision;
 pub mod topology;
 #[cfg(target_os = "linux")]
 mod tunnel;

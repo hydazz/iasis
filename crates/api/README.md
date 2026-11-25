@@ -16,32 +16,34 @@ On Linux any local user can connect; the agent reads the client's credentials an
 
 A client writes requests and reads replies as JSON, one to a line. A request is an object with an `op`:
 
-| `op`          | Other fields             | Effect                                                               |
-| ------------- | ------------------------ | -------------------------------------------------------------------- |
-| `state`       |                          | Reply with the state once                                            |
-| `watch`       |                          | Reply with the state now and again each time it changes              |
-| `plan`        | `boards`                 | Reply with what a restore would install on each target               |
-| `restore`     | `boards`, `latest`       | Erase and restore the confirmed attachments on those boards          |
-| `revive`      | `boards`, `latest`       | Repair the confirmed attachments on those boards and keep their data |
-| `dfu`         | `board`, `port`          | Send DFU                                                             |
-| `reboot`      | `board`, `port`          | Send a reboot                                                        |
-| `power`       | `board`, `port`, `on`    | Enable or disable a port                                             |
-| `debug_usb`   | `board`, `port`, `on`    | Carry the target's Apple Debug USB on its USB 2 pair, or take it off |
-| `brightness`  | `board`, `percent`       | Save one board's light level                                         |
-| `rename`      | `board`, `name`          | Save one board's display name                                        |
-| `update`      | `board`, `bytes` or null | Write IasisOS: the image the agent carries, or the UF2 sent          |
-| `sharing`     | `enabled`                | Configure USB Internet Sharing on the host                           |
-| `download`    | `model`, `build` or null | Fetch a model's newest signed release, or the one of `build`         |
-| `releases`    | `model`                  | Reply with the releases Apple signs for a model, newest first        |
-| `import`      | `name`, `bytes`          | Check the IPSW archive sent and keep it in the store as `name`       |
-| `remove`      | `image`                  | Delete an image by its `id`, or cancel its download                  |
-| `catalog`     |                          | Reply with every model the store can fetch images for                |
+| `op`                 | Other fields             | Effect                                                               |
+| -------------------- | ------------------------ | -------------------------------------------------------------------- |
+| `state`              |                          | Reply with the state once                                            |
+| `watch`              |                          | Reply with the state now and again each time it changes              |
+| `plan`               | `boards`                 | Reply with what a restore would install on each target               |
+| `restore`            | `boards`, `latest`       | Erase and restore the confirmed attachments on those boards          |
+| `revive`             | `boards`, `latest`       | Repair the confirmed attachments on those boards and keep their data |
+| `dfu`                | `board`, `port`          | Send DFU                                                             |
+| `reboot`             | `board`, `port`          | Send a reboot                                                        |
+| `power`              | `board`, `port`, `on`    | Enable or disable a port                                             |
+| `debug_usb`          | `board`, `port`, `on`    | Carry the target's Apple Debug USB on its USB 2 pair, or take it off |
+| `brightness`         | `board`, `percent`       | Save one board's light level                                         |
+| `rename`             | `board`, `name`          | Save one board's display name                                        |
+| `update`             | `board`, `bytes` or null | Write IasisOS: the image the agent carries, or the UF2 sent          |
+| `sharing`            | `enabled`                | Configure USB Internet Sharing on the host                           |
+| `import_supervision` | `pkcs12`, `password`     | Replace the supervision identity with the one in a PKCS #12 archive  |
+| `export_supervision` | `password`               | Reply with the supervision identity in a PKCS #12 archive            |
+| `download`           | `model`, `build` or null | Fetch a model's newest signed release, or the one of `build`         |
+| `releases`           | `model`                  | Reply with the releases Apple signs for a model, newest first        |
+| `import`             | `name`, `bytes`          | Check the IPSW archive sent and keep it in the store as `name`       |
+| `remove`             | `image`                  | Delete an image by its `id`, or cancel its download                  |
+| `catalog`            |                          | Reply with every model the store can fetch images for                |
 
 `board` is the serial as sixteen hexadecimal digits, and ports are numbered 1 to 5.
 
 A request with `bytes` is followed on the connection by exactly that many bytes of the file it sends, and the next request comes after them. The agent reads them as they arrive and keeps only what it checks: an imported archive enters the store whole, under its name, once every member's checksum matches. A refused upload is answered with the reason, and the agent then closes the connection.
 
-A reply is `"ok"`, `{"error": "…"}`, `{"state": {…}}`, to `catalog` `{"catalog": […]}` with each model's `identifier` and `name`, to `releases` `{"releases": […]}` with each release's `os`, `version`, `build` and `bytes`, or to `plan` `{"plan": […]}`. After `watch` the connection carries only states.
+A reply is `"ok"`, `{"error": "…"}`, `{"state": {…}}`, to `catalog` `{"catalog": […]}` with each model's `identifier` and `name`, to `releases` `{"releases": […]}` with each release's `os`, `version`, `build` and `bytes`, to `plan` `{"plan": […]}`, or to `export_supervision` `{"supervision": "…"}` with the archive in base64. After `watch` the connection carries only states.
 
 **A `restore` request erases its targets with no further confirmation.** A client asks its user first. Each entry in `boards` names a `board`, its `session` and its `targets`, copied from the state the user reviewed. Each target has its `port`, `generation` and the port's `ecid` when it has one; an unidentified target is selected by its attachment. The agent checks every board before it asks any: a changed session, attachment or ECID refuses the whole request, and the client confirms again.
 
@@ -55,13 +57,14 @@ printf '{"op":"state"}\n' | nc -U /run/iasis/agent.sock
 
 ## State
 
-| Field       | Meaning                                                       |
-| ----------- | ------------------------------------------------------------- |
-| `version`   | The agent's release version                                   |
-| `boards`    | Every attached board                                          |
-| `submitted` | On a connection that submitted work, its results; else absent |
-| `images`    | The image store                                               |
-| `sharing`   | USB Internet Sharing                                          |
+| Field         | Meaning                                                       |
+| ------------- | ------------------------------------------------------------- |
+| `version`     | The agent's release version                                   |
+| `boards`      | Every attached board                                          |
+| `submitted`   | On a connection that submitted work, its results; else absent |
+| `images`      | The image store                                               |
+| `sharing`     | USB Internet Sharing                                          |
+| `supervision` | The supervision identity                                      |
 
 Each board has its `serial`, `name` (empty for an unnamed board), `session` ID, the IasisOS `firmware` version it runs, `upstream_mbps` (the negotiated rate between the host and the board's hub, or null), `supply`, `pool`, `host` and `restores` (a host holds the board, and it takes restore requests), `brightness`, `settings_busy`, its `ports` and a `notice`: why the board cannot be read, or why its last restore request came to nothing. A board that cannot be read has no ports.
 
@@ -116,3 +119,5 @@ The board drops a job when its target leaves, which a restored target does by re
 Archives for different models share version and build numbers, so only the `id` names one.
 
 `sharing.enabled` is the saved USB Internet Sharing setting. Each entry in `sharing.ports` names a `board` and `port`; `active` means the port's gateway is running. A `problem` on the sharing state or on a port describes a failure.
+
+`supervision` is the identity the host pairs with as the supervisor of iPhones and iPads that list its certificate: the certificate's common `name` and the `certificate` in base64 DER, for an enrollment profile's supervising host certificates. A `problem` says why the host has no usable identity. `import_supervision` and `export_supervision` carry the identity, private key included, in a PKCS #12 archive in base64, encrypted with `password`.

@@ -18,6 +18,10 @@ nonisolated protocol AgentService: Sendable {
     /// What a restore would install on each target.
     func plan(_ boards: [RestoreSelection]) async throws -> [AgentState.Planned]
 
+    /// The host's supervision identity as a PKCS #12 archive in base64,
+    /// protected by this password.
+    func exportSupervision(password: String) async throws -> String
+
     /// Send an IPSW archive to the store, reporting the bytes sent as they
     /// go. The agent checks the archive before it answers.
     func importImage(_ file: URL, progress: @escaping @Sendable (Int64) -> Void) async throws
@@ -81,6 +85,13 @@ nonisolated struct AgentClient: AgentService {
             throw AgentError.unavailable
         }
         return planned
+    }
+
+    func exportSupervision(password: String) async throws -> String {
+        guard case let .supervision(archive) = try await answer(to: .exportSupervision(password: password)) else {
+            throw AgentError.unavailable
+        }
+        return archive
     }
 
     func importImage(_ file: URL, progress: @escaping @Sendable (Int64) -> Void) async throws {

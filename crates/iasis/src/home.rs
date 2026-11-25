@@ -48,6 +48,11 @@ impl Home {
         }
     }
 
+    /// The supervision identity the agent makes and pairs with.
+    pub fn supervision(&self) -> PathBuf {
+        self.state.join("supervision.pem")
+    }
+
     /// Where the agent listens for its clients.
     pub fn socket(&self) -> PathBuf {
         self.runtime.join("agent.sock")

@@ -15,6 +15,7 @@ public sealed record AgentState
     public IReadOnlyList<Ending?>? Submitted { get; init; }
     public required ImageStore Images { get; init; }
     public required Sharing Sharing { get; init; }
+    public required Supervision Supervision { get; init; }
 }
 
 public sealed record Board
@@ -106,6 +107,10 @@ public sealed record Sharing(bool Enabled, string? Problem, IReadOnlyList<Sharin
 
 public sealed record SharingPort(string Board, int Port, bool Active, string? Problem);
 
+/// The identity the host pairs with as supervisor: its certificate's common
+/// name and the certificate in base64 DER.
+public sealed record Supervision(string? Name, string? Certificate, string? Problem);
+
 /// The targets selected on one board, in the session the client saw.
 public sealed record Selection(string Board, uint Session, IReadOnlyList<Target> Targets);
 
@@ -166,6 +171,8 @@ public sealed class SnakeCaseEnum<T>() : JsonStringEnumConverter<T>(JsonNamingPo
 [JsonDerivedType(typeof(BrightnessRequest), "brightness")]
 [JsonDerivedType(typeof(UpdateRequest), "update")]
 [JsonDerivedType(typeof(SharingRequest), "sharing")]
+[JsonDerivedType(typeof(ImportSupervisionRequest), "import_supervision")]
+[JsonDerivedType(typeof(ExportSupervisionRequest), "export_supervision")]
 [JsonDerivedType(typeof(DownloadRequest), "download")]
 [JsonDerivedType(typeof(ReleasesRequest), "releases")]
 [JsonDerivedType(typeof(ImportRequest), "import")]
@@ -195,6 +202,10 @@ public sealed record UpdateRequest(string Board, long? Bytes) : Request
 }
 
 public sealed record SharingRequest(bool Enabled) : Request;
+/// Replace the supervision identity with the one in a PKCS #12 archive, in base64.
+public sealed record ImportSupervisionRequest(string Pkcs12, string Password) : Request;
+/// The supervision identity as a PKCS #12 archive protected by the password.
+public sealed record ExportSupervisionRequest(string Password) : Request;
 public sealed record DownloadRequest(string Model, string? Build) : Request;
 public sealed record ReleasesRequest(string Model) : Request;
 
@@ -216,6 +227,8 @@ public sealed record StateReply(AgentState State) : Reply;
 public sealed record CatalogReply(IReadOnlyList<CatalogModel> Models) : Reply;
 public sealed record ReleasesReply(IReadOnlyList<Release> Releases) : Reply;
 public sealed record PlanReply(IReadOnlyList<Planned> Planned) : Reply;
+/// The supervision identity as a PKCS #12 archive in base64.
+public sealed record SupervisionReply(string Pkcs12) : Reply;
 
 public sealed class ReplyConverter : JsonConverter<Reply>
 {
@@ -238,6 +251,7 @@ public sealed class ReplyConverter : JsonConverter<Reply>
             "catalog" => new CatalogReply(Read(ref reader, AgentJson.Default.IReadOnlyListCatalogModel)),
             "releases" => new ReleasesReply(Read(ref reader, AgentJson.Default.IReadOnlyListRelease)),
             "plan" => new PlanReply(Read(ref reader, AgentJson.Default.IReadOnlyListPlanned)),
+            "supervision" => new SupervisionReply(reader.GetString() ?? ""),
             _ => throw new JsonException($"unknown reply {kind}"),
         };
         reader.Read();
@@ -275,6 +289,9 @@ public sealed class ReplyConverter : JsonConverter<Reply>
             case PlanReply plan:
                 writer.WritePropertyName("plan");
                 JsonSerializer.Serialize(writer, plan.Planned, AgentJson.Default.IReadOnlyListPlanned);
+                break;
+            case SupervisionReply supervision:
+                writer.WriteString("supervision", supervision.Pkcs12);
                 break;
         }
         writer.WriteEndObject();
