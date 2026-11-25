@@ -50,7 +50,6 @@ pub fn board(info: &Info, status: &Status) -> BoardView {
         host: status.host.is_some(),
         restores: status.restore_session().is_some(),
         brightness: status.settings.brightness,
-        settings_busy: false,
         ports: Port::ALL
             .map(|port| {
                 let state = &status.ports[port.index()];

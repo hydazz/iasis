@@ -45,7 +45,6 @@ nonisolated struct AgentState: Codable, Equatable {
         /// The host takes restore requests for the board.
         var restores: Bool
         var brightness: Int
-        var settingsBusy: Bool
         var ports: [Port]
         /// Why the board cannot be read, or why its last restore request came
         /// to nothing.
