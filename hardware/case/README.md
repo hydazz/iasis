@@ -8,8 +8,8 @@ Choose the main-board case or the longer case for the main board and CM5 carrier
 
 | Case                   | Printed body size       |
 | ---------------------- | ----------------------- |
-| Main board, either lid | 136 × 104.6 × 17.6 mm   |
-| CM5, either lid        | 212.6 × 104.6 × 20.1 mm |
+| Main board, either lid | 136.0 × 105.6 × 17.6 mm |
+| CM5, either lid        | 212.6 × 105.6 × 20.1 mm |
 
 ## Generate the parts
 
@@ -23,7 +23,7 @@ The print-oriented STLs are in `build/case/iasis/print/`. Print the tray, button
 
 ## Print and assemble
 
-Use PLA, a 0.4 mm nozzle and 0.20 mm layers. The button prints face down for a textured finish. For its retaining flange, use **Normal (auto)** supports with **On build plate only** in Bambu Studio.
+Use PLA, a 0.4 mm nozzle and 0.20 mm layers. Print the tray in white so the status lights show through its front wall, and on a smooth plate: the adhesive feet don't hold on a textured underside.
 
 For a second colour on the lettering and button ring, import the lid and its matching `-lettering.stl` as parts of one object. The lid alone has recessed markings.
 

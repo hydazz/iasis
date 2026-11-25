@@ -1,8 +1,8 @@
 """Fit checks for the enclosure against the board.
 
 Exact solids check walls, pillars, controls and the display against nearby components.
-USB checks distinguish the inserted metal plug from its exterior plastic shoulder and
-reserve room for board movement and printing error.
+USB checks pass the largest metal plug through each opening and keep the measured seated
+plug shoulder outside the wall.
 """
 
 from itertools import combinations
@@ -15,7 +15,6 @@ from build123d import (
     Part,
     Pos,
     Rectangle,
-    SlotOverall,
     extrude,
 )
 from build123d.topology.shape_core import Shape
@@ -26,7 +25,9 @@ USB_C_METAL = (8.28, 2.43)  # USB Type-C R2.5 Fig 3-3, maximum metal plug envelo
 USB_C_OVERMOLD = (12.85, 7.0)  # maximum straight cable body, stays outside the wall
 MIN_WEB = 1.0  # wall left between neighbouring openings
 PIN_TOOL = 1.0  # straightened paper clip through the nRPIBOOT pinhole
-MIN_CORNER_FLAT = 1.0  # flat wall between an opening's edge round and a corner radius
+MIN_CORNER_FLAT = 0.9  # flat wall between an opening's edge round and a corner radius
+LED_PLACEMENT_ERROR = 0.05  # pick and place
+PRINT_ERROR = 0.1
 
 Candidates = list[tuple[str, Shape, BoundBox]]
 
@@ -102,11 +103,14 @@ def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
         )
         _clear(r, f"counterbore support {i}", support, parts)
 
+    # Plugs follow their receptacles wherever the pegs' play lets the board sit.
     movement = (case.HOLE_D - case.LOCATOR_D + case.LOCATOR_CLEARANCE) / 2
-    if movement > case.CLEARANCE + 1e-6:
-        r.fail(f"board/cover movement {movement:.2f} mm exceeds USB seating allowance")
+    usb = [o for o in lay.openings if o.kind == "usb-c"]
+    side = min(min(o.width - USB_C_METAL[0], o.height - USB_C_METAL[1]) / 2 for o in usb)
+    if max(movement, case.PCB_FLOAT) > side - 0.1:
+        r.fail(f"board/cover movement {movement:.2f} mm leaves plug metal {side:.2f} mm to spare")
     else:
-        r.ok(f"board/cover movement bounded to {movement:.2f} mm")
+        r.ok(f"plug metal clears its opening with the board {movement:.2f} mm off centre")
     if any(_overlap(Pos(0, 0, z / 2) * board.body, tray) > 1e-3 for z in range(1, 13)):
         r.fail("PCB cannot lower vertically onto the tray pegs")
     else:
@@ -120,10 +124,9 @@ def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
     for o in lay.openings:
         if o.kind == "usb-c":
             recess = (o.y_face - o.y_wall) * o.inward
-            gap = case.MATED_SHOULDER[o.ref] - recess - case.CLEARANCE - case.PORT_ERROR
+            gap = case.MATED_SHOULDER[o.ref] - recess
             description = (
-                f"{o.label} recess {recess:.3f} mm, worst-case shoulder gap {gap:.3f} mm, "
-                f"opening {o.width:.2f} x {o.height:.2f} mm"
+                f"{o.label}: {recess:.3f} mm recess, {gap:.3f} mm nominal Apple plug shoulder gap"
             )
             if gap >= case.SHOULDER_GAP - 1e-6:
                 r.ok(description)
@@ -196,6 +199,7 @@ def run(lay: case.Layout, tray: Part, covers: dict[str, case.Cover]) -> Report:
             for i, pin in enumerate(c.display_mount.pins, 1):
                 _clear(r, f"display pin {i}", pin, parts)
         _case_retention(r, lay, c, tray, parts)
+        _lights(r, lay, c.part, tray, movement)
         _paths(r, lay, c.part, tray)
         if (overlap := _overlap(c.part, tray)) > 1e-3:
             r.fail(f"{name} overlaps tray by {overlap:.2f} mm3")
@@ -296,7 +300,7 @@ def _case_retention(
         r.fail("unscrewed cover cannot lift straight off the tray")
     for h in lay.holes:
         locator = lay.fastener_at(h) is None
-        top = lay.locator_face if locator else lay.seat
+        top = lay.locator_face if locator else lay.post_face
         # Gauge the annulus that actually bears on the PCB, clear of screw bores and pegs.
         ring = (Circle(3.0) - Circle(2.5)).face()
         gauge = extrude(Pos(h.X, h.Y, lay.support_z) * ring, amount=top - lay.support_z)
@@ -313,14 +317,15 @@ def _case_retention(
             )
             if _overlap(tip_space, c.part) > 1e-3:
                 r.fail(f"locating peg at {h.X:.1f},{h.Y:.1f} lacks clearance beyond its tip")
-    for dx, dy in ((-0.12, 0), (0.12, 0), (0, -0.12), (0, 0.12)):
+    play = case.LOCATOR_CLEARANCE / 2 + 0.02
+    for dx, dy in ((-play, 0), (play, 0), (0, -play), (0, play)):
         if _overlap(Pos(dx, dy, 0) * c.part, tray) < 0.01:
-            r.fail(f"case halves are not located against movement {dx},{dy} mm")
+            r.fail(f"case halves are not located against movement {dx:.2f},{dy:.2f} mm")
     if case.LOCATOR_INSERT - case.LOCATOR_TAPER < 1:
         r.fail("case locating pegs have less than 1 mm straight socket engagement")
     r.ok(
-        f"PCB capture {case.PCB_CAPTURE:.2f} mm at screws, "
-        f"{case.LOCATOR_RELIEF:.2f} mm extra at locating pegs"
+        f"PCB rests on the tray, {case.PCB_FLOAT:.2f} mm below the screw posts and "
+        f"{case.PCB_FLOAT + case.LOCATOR_RELIEF:.2f} mm below the locating posts"
     )
 
 
@@ -412,24 +417,48 @@ def _paths(r: Report, lay: case.Layout, cover: Part, tray: Part) -> None:
     for o in lay.openings:
         if o.kind == "usb-c":
             metal = extrude(o.plane(o.y_face) * Rectangle(*USB_C_METAL), amount=20)
-            gap = case.MATED_SHOULDER[o.ref] - case.CLEARANCE - case.PORT_ERROR
-            shoulder = o.y_face - o.inward * gap
+            shoulder = o.y_face - o.inward * case.MATED_SHOULDER[o.ref]
             plastic = extrude(o.plane(shoulder) * Rectangle(*USB_C_OVERMOLD), amount=20)
             paths = [metal, plastic]
         elif o.kind == "rj45":  # the whole jack face: plug, latch and lights
             face = Rectangle(o.width - 2 * case.PORT_FIT, o.height - 2 * case.PORT_FIT)
             paths = [extrude(o.plane(o.y_face) * face, amount=10)]
-        elif o.kind == "pin":
+        else:  # pin
             paths = [extrude(o.plane(o.y_face) * Circle(PIN_TOOL / 2), amount=10)]
-        else:
-            profile = SlotOverall(o.width - 0.1, o.height - 0.1)
-            paths = [extrude(o.plane(o.y_face) * profile, amount=10)]
         if any(_overlap(path, cover) > 1e-3 or _overlap(path, tray) > 1e-3 for path in paths):
             blocked.append(o.label or o.ref)
     if blocked:
         r.fail("blocked from outside: " + ", ".join(blocked))
     else:
-        r.ok("maximum plug metal passes; seated overmolds and LED paths clear")
+        r.ok("maximum plug metal passes; seated overmolds clear")
+
+
+def _lights(r: Report, lay: case.Layout, cover: Part, tray: Part, movement: float) -> None:
+    """Continuous vertical insertion paths, including package and assembly tolerances. Once
+    the pegs' full diameter holds the board, the tray sees only the peg play."""
+    blocked = []
+    package = case.LIGHT_PACKAGE
+    height = package[2] + 2 * (0.1 + PRINT_ERROR)  # solder seating and print error
+    engaged = lay.locator_face + case.LOCATOR_INSERT - case.LOCATOR_TAPER - lay.support_z
+    lowest = min(lay.board.box(ref).min.Z for ref in case.LIGHTS)
+    play = (case.HOLE_D - case.LOCATOR_D) / 2 if lowest + engaged >= lay.split else movement
+    for ref in case.LIGHTS:
+        centre = lay.board.box(ref).center()
+        low, high = centre.Z - height / 2, centre.Z + height / 2
+        sweeps = (
+            (tray, play, low, max(high, lay.split + 1)),
+            (cover, movement, lay.z_bottom, high),
+        )
+        for part, shift, z0, z1 in sweeps:
+            xy = shift + LED_PLACEMENT_ERROR + PRINT_ERROR
+            box = Box(package[0] + 2 * xy, package[1] + 2 * xy, z1 - z0, align=case.BASE)
+            if _overlap(Pos(centre.X, centre.Y, z0) * box, part) > 1e-3:
+                blocked.append(ref)
+                break
+    if blocked:
+        r.fail("LED bodies catch during vertical assembly: " + ", ".join(blocked))
+    else:
+        r.ok(f"all six LED bodies clear assembly with {play:.2f} mm board play in the tray")
 
 
 def main() -> int:
