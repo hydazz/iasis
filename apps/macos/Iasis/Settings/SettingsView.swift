@@ -51,9 +51,9 @@ private struct GeneralSettings: View {
             }
             SupervisionSection(model: model)
             Section {
-                Toggle("Open Finder When a Device Connects", isOn: $revealsDevices)
+                Toggle("Open Finder for DFU Devices", isOn: $revealsDevices)
             } footer: {
-                Text("Finder opens a window for each device that enters DFU. This is an undocumented macOS setting and applies to every Apple device you connect.")
+                Text("Finder opens a window for each device that enters DFU. This is an undocumented macOS setting, and turning it off also stops Finder opening for other Apple devices.")
             }
         }
         .formStyle(.grouped)
