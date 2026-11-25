@@ -17,7 +17,8 @@ nonisolated enum Fixtures {
     "fetch":{"id":"iPad_Fall_2022_27.2.1_24B156_Restore.ipsw","version":"27.2.1","build":"24B156","bytes":10941876409,"done":4704986855}},
     "sharing":{"enabled":true,"problem":null,
     "ports":[{"board":"a0e012192cdfdb67","port":3,"active":true},{"board":"a0e012192cdfdb67","port":4,"active":false,"problem":"Cannot open USB interface"}]},
-    "supervision":{"name":"Iasis on bench","certificate":"MIIBszCCAVmgAwIBAgIIb3Vy","problem":null}}}
+    "supervision":{"name":"Iasis on bench","certificate":"MIIBszCCAVmgAwIBAgIIb3Vy","problem":null},
+    "missing":[]}}
     """#
 
     static func decode(_ line: String) throws -> AgentReply {
