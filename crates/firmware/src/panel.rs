@@ -66,7 +66,7 @@ pub fn dim(frame: [[u8; 3]; 6], brightness: u8) -> [[u8; 3]; 6] {
 
 /// RGB values in chain order: status, port 5 through port 1. The status light
 /// shows the action a release would send or an armed restore; otherwise green
-/// while a host holds the board and white while it stands alone. The Easter
+/// while a host holds the hub and white while it stands alone. The Easter
 /// egg takes every light but a faulted port's.
 pub fn indicators(status: &Status, control: &Button, now: u64) -> [[u8; 3]; 6] {
     if let Some(played) = control.egg(now) {
@@ -220,7 +220,7 @@ mod tests {
     }
 
     #[test]
-    fn the_status_light_shows_the_host_the_held_action_an_arm_and_board_faults() {
+    fn the_status_light_shows_the_host_the_held_action_an_arm_and_hub_faults() {
         let mut status = ready();
         assert_eq!(steady(&status)[0], WHITE);
         status.host = host(false);
@@ -354,7 +354,7 @@ mod tests {
             }
         }
         // A host that sees the running system leaves the request pulsing
-        // until the board withdraws it.
+        // until the hub withdraws it.
         for mode in [AppleMode::Normal, AppleMode::PortDfu, AppleMode::Kis] {
             status.ports[0].observed = seen(mode);
             assert_eq!(indicators(&status, &button, 0)[5], [0, 2, 6]);
@@ -489,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn board_order_and_brightness_reservation_are_preserved() {
+    fn hub_order_and_brightness_reservation_are_preserved() {
         let mut status = ready();
         for port in &mut status.ports[1..4] {
             *port = PortStatus::default();

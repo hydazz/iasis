@@ -9,10 +9,10 @@ use iasis::{
 #[command(
     name = "iasisd",
     version,
-    about = "Attend every Iasis board: show each what its targets are doing, keep the restore images current and run the restores the boards and clients ask for"
+    about = "Attend every Iasis hub: show each what its targets are doing, keep the restore images current and run the restores the hubs and clients ask for"
 )]
 struct Arguments {
-    /// Attend one board instead of every board
+    /// Attend one hub instead of every hub
     #[arg(long, value_parser = parse_serial)]
     serial: Option<u64>,
 }
@@ -29,7 +29,7 @@ fn main() -> Result<()> {
         return Ok(());
     };
     let agent = Agent::new()?;
-    // A stopped agent gives its boards up rather than leaving each to wait
+    // A stopped agent gives its hubs up rather than leaving each to wait
     // out the session lease before the next host.
     let releasing = agent.clone();
     ctrlc::set_handler(move || {

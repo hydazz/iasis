@@ -1,6 +1,6 @@
 # Iasis for macOS
 
-Iasis lives in the menu bar and shows what is on every port of every connected board. Opening its window puts it in the Dock with menus of its own; closing the window returns it to the menu bar.
+Iasis lives in the menu bar and shows what is on every port of every connected hub. Opening its window puts it in the Dock with menus of its own; closing the window returns it to the menu bar.
 
 ## Install
 
@@ -19,9 +19,9 @@ sudo ln -sf /Applications/Iasis.app/Contents/Helpers/iasis /usr/local/bin/iasis
 
 ## Menu bar
 
-The cable dims when no board is connected. A ring over its tail shows work under way, and a red mark means a board or port needs attention.
+The cable dims when no hub is connected. A ring over its tail shows work under way, and a red mark means a hub or port needs attention.
 
-The menu groups devices by board, each under its physical port number with a line on what it is doing. Choose a device for its actions or choose Get Info to open its inspector. The menu shows the boards as they were when it opened; the window follows them live.
+The menu groups devices by hub, each under its physical port number with a line on what it is doing. Choose a device for its actions or choose Get Info to open its inspector. The menu shows the hubs as they were when it opened; the window follows them live.
 
 ## Window
 
@@ -31,22 +31,22 @@ The bolt shows USB power. The cable marks a live USB link. A highlighted tip ind
 
 Select rows and use the toolbar, the Device menu or a row's context menu:
 
-| Action    | Applies to                                                                            |
-| --------- | ------------------------------------------------------------------------------------- |
-| Enter DFU | Each selected device that can be signalled                                            |
-| Restart   | Each selected device that can be signalled                                            |
-| Revive    | Every selected device, on any number of boards. Repairs the system and keeps the data |
-| Restore   | Every selected device, on any number of boards. Asks first, then erases them          |
+| Action    | Applies to                                                                          |
+| --------- | ----------------------------------------------------------------------------------- |
+| Enter DFU | Each selected device that can be signalled                                          |
+| Restart   | Each selected device that can be signalled                                          |
+| Revive    | Every selected device, on any number of hubs. Repairs the system and keeps the data |
+| Restore   | Every selected device, on any number of hubs. Asks first, then erases them          |
 
 Before it asks, Restore checks what Apple signs for each device. Where a downloaded image is older than the newest release, it offers both: download the newest, or use the one downloaded. Otherwise it says what each device gets and how much is to download. Restore is unavailable while any selected device cannot be restored.
 
-A board on a power supply shows, beside its name, the power allocated to its ports out of the available charging budget. A bolt with a warning marks a device that took the largest offer the board could make and would use more: with several devices sharing a supply, one with a flat battery may get too little to start.
+A hub on a power supply shows, beside its name, the power allocated to its ports out of the available charging budget. A bolt with a warning marks a device that took the largest offer the hub could make and would use more: with several devices sharing a supply, one with a flat battery may get too little to start.
 
 Each row ends in one mark for its operation: a ring that fills as a download, restore or revive runs, then how it ended. Select a row to inspect its operation step by step, its identity, USB connection and power. Power shows the PD contract or default USB allowance with exact nominal watts in parentheses. The toolbar lets you hide or show the inspector. The bar under the list reports an image download.
 
 ## Settings and Help
 
-In Settings > Boards, rename a board or adjust its lights; the board keeps both when moved to another Mac. It also shows the board's IasisOS. When that differs from the IasisOS this Iasis carries, **Update to** writes the carried version, as does Board > Update IasisOS. The board leaves USB for a few seconds and its ports lose power; the agent refuses while the board is restoring. A board that runs IasisOS this Iasis cannot talk to has no ports until it is updated. Settings > Images lists every restore image Iasis holds or is downloading. Add Image ▸ Download offers, for any model, the releases Apple still signs, such as an older macOS; From File adds an IPSW, as does File ▸ Add Restore Image, and the list shows it being sent and checked. Images stay until you remove them. Settings > General shows the supervision identity and its fingerprint; its ⋯ menu exports the certificate for an enrollment profile, or the identity with its private key in a password-protected PKCS #12 archive, and imports one ([supervised devices](../../README.md#supervised-iphones-and-ipads)). The Finder preference applies to all connected Apple devices. Help ▸ Indicator Lights explains the port and status lights.
+In Settings > Hubs, rename a hub or adjust its lights; the hub keeps both when moved to another Mac. It also shows the hub's IasisOS. When that differs from the IasisOS this Iasis carries, **Update to** writes the carried version, as does Hub > Update IasisOS. The hub leaves USB for a few seconds and its ports lose power; the agent refuses while the hub is restoring. A hub that runs IasisOS this Iasis cannot talk to has no ports until it is updated. Settings > Images lists every restore image Iasis holds or is downloading. Add Image ▸ Download offers, for any model, the releases Apple still signs, such as an older macOS; From File adds an IPSW, as does File ▸ Add Restore Image, and the list shows it being sent and checked. Images stay until you remove them. Settings > General shows the supervision identity and its fingerprint; its ⋯ menu exports the certificate for an enrollment profile, or the identity with its private key in a password-protected PKCS #12 archive, and imports one ([supervised devices](../../README.md#supervised-iphones-and-ipads)). The Finder preference applies to all connected Apple devices. Help ▸ Indicator Lights explains the port and status lights.
 
 ### USB internet sharing
 

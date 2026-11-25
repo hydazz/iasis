@@ -18,10 +18,10 @@ struct MenuTests {
         for _ in 0 ..< 100 where await agent.received.isEmpty {
             try await Task.sleep(for: .milliseconds(10))
         }
-        #expect(await agent.received == [.reboot(board: "a0e012192cdfdb67", port: 2)])
+        #expect(await agent.received == [.reboot(hub: "a0e012192cdfdb67", port: 2)])
     }
 
-    @Test func theBoardMenuUpdatesABoardThatRunsAnotherIasisOS() async throws {
+    @Test func theHubMenuUpdatesAHubThatRunsAnotherIasisOS() async throws {
         var state = try Fixtures.state
         let agent = FakeAgent(reports: [state])
         let model = AgentModel(agent: agent)
@@ -29,11 +29,11 @@ struct MenuTests {
         for _ in 0 ..< 100 where model.state == nil {
             try await Task.sleep(for: .milliseconds(10))
         }
-        let menu = NSHostingMenu(rootView: BoardMenuItems(model: model))
+        let menu = NSHostingMenu(rootView: HubMenuItems(model: model))
         menu.update()
         let update = try #require(menu.item(withTitle: "Update IasisOS"))
         #expect(!update.isEnabled)
-        state.boards[0].update = .init(version: "0.2.0", required: false)
+        state.hubs[0].update = .init(version: "0.2.0", required: false)
         await agent.publish(state)
         for _ in 0 ..< 100 where !update.isEnabled {
             try await Task.sleep(for: .milliseconds(10))
@@ -45,7 +45,7 @@ struct MenuTests {
         for _ in 0 ..< 100 where await agent.received.isEmpty {
             try await Task.sleep(for: .milliseconds(10))
         }
-        #expect(await agent.received == [.update(board: "a0e012192cdfdb67", bytes: nil)])
+        #expect(await agent.received == [.update(hub: "a0e012192cdfdb67", bytes: nil)])
     }
 
     @Test func aDeviceShowsItsPortNameAndStatusAndTheDownloadItsPercent() async throws {
@@ -64,12 +64,12 @@ struct MenuTests {
         #expect(menu.items.allSatisfy { $0.badge == nil })
     }
 
-    @Test func anOpenMenuKeepsTheBoardsAsTheyStoodWhenItOpened() async throws {
+    @Test func anOpenMenuKeepsTheHubsAsTheyStoodWhenItOpened() async throws {
         var state = try Fixtures.state
         let (model, agent) = try await started(state)
         let menu = NSHostingMenu(rootView: StatusMenu(browser: DeviceBrowser(model: model)))
         menu.update()
-        state.boards[0].ports[1].mode = .normal
+        state.hubs[0].ports[1].mode = .normal
         let next = state
         let shown = await whileMenuTracks {
             Task { await agent.publish(next) }
@@ -99,7 +99,7 @@ struct MenuTests {
         submenu.performActionForItem(at: restart)
         try await waitUntil { await agent.received.count == 1 }
         // Another Mac takes the port while the menu is open.
-        state.boards[0].ports[1].generation += 1
+        state.hubs[0].ports[1].generation += 1
         let next = state
         await whileMenuTracks {
             Task { await agent.publish(next) }
@@ -109,7 +109,7 @@ struct MenuTests {
             submenu.performActionForItem(at: restart)
         }
         try await Task.sleep(for: .milliseconds(200))
-        #expect(await agent.received == [.reboot(board: "a0e012192cdfdb67", port: 2)])
+        #expect(await agent.received == [.reboot(hub: "a0e012192cdfdb67", port: 2)])
     }
 
     private func started(_ state: AgentState) async throws -> (AgentModel, FakeAgent) {

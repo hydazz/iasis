@@ -1,6 +1,6 @@
 # Host tools
 
-`iasis` is the command line for boards, `iasisd` the agent that attends every board, and `iasis-gateway` the agent's USB Internet Sharing helper. The [root README](../../README.md#use) covers their use; the [agent socket](../api/README.md) is for writing another client.
+`iasis` is the command line for hubs, `iasisd` the agent that attends every hub, and `iasis-gateway` the agent's USB Internet Sharing helper. The [root README](../../README.md#use) covers their use; the [agent socket](../api/README.md) is for writing another client.
 
 `mise run host:build` builds them into `target/release`, carrying the IasisOS image that `iasis update` writes. Set `IASIS_OS_UF2` to a UF2 file to carry another; without it a build carries none, and `iasis update` needs a file.
 
@@ -26,9 +26,9 @@ sudo usermod -aG iasis "$USER"
 | `/var/lib/iasis`                             | Settings, the supervision identity and images added from a file |
 | `/var/cache/iasis`                           | Downloaded images and restore scratch space                     |
 
-Only the service touches the boards and targets directly. Its udev rule gives the `iasis-usb` group, whose one member is the service user, these devices:
+Only the service touches the hubs and targets directly. Its udev rule gives the `iasis-usb` group, whose one member is the service user, these devices:
 
-- an Iasis board's management interface, and the board's RP2350 boot ROM on its hub's management port
+- an Iasis hub's management interface, and the hub's RP2350 boot ROM on its USB hub's management port
 - Apple devices in DFU, recovery, Apple Debug USB and the restore service, attached below an Iasis hub
 
 Other USB devices are left alone, and the system usbmuxd keeps the Apple devices it serves. The service has `CAP_NET_ADMIN` and `CAP_NET_RAW` for USB Internet Sharing. The same rules mark those targets' `cdc_ncm` network interfaces unmanaged, so NetworkManager neither configures them nor runs DHCP on them; it keeps every other interface.

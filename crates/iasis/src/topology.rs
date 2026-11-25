@@ -130,7 +130,7 @@ pub enum Companion {
     Mapped {
         topology: Topology,
     },
-    /// The board hub's SuperSpeed function is not enumerated, or nothing the
+    /// The USB hub's SuperSpeed function is not enumerated, or nothing the
     /// host reports identifies it.
     Unavailable,
     /// The host's evidence disagrees. No SuperSpeed device is assigned.
@@ -202,7 +202,7 @@ impl PortDevices {
 #[derive(Clone, Debug, Serialize)]
 pub struct Snapshot {
     pub hub: Topology,
-    /// Negotiated speed of the board's upstream hub connection.
+    /// Negotiated speed of the hub's upstream USB connection.
     pub upstream_mbps: Option<u16>,
     pub ports: [PortDevices; PORT_COUNT],
 }
@@ -276,7 +276,7 @@ pub fn discover(management: &Topology) -> Result<Snapshot, Error> {
 
 /// Place USB devices on the connectors from their cached descriptors and what
 /// the host reports about its ports and hubs. SuperSpeed locations stay
-/// unassigned unless that evidence identifies the board hub's SuperSpeed
+/// unassigned unless that evidence identifies the USB hub's SuperSpeed
 /// function without contradiction.
 pub fn locate(management: &Topology, devices: Vec<DeviceInfo>) -> Result<Snapshot, Error> {
     hub_path(management)?;
@@ -307,7 +307,7 @@ fn hub_path(management: &Topology) -> Result<&[u8], Error> {
     }
 }
 
-/// The board's Microchip USB7206: its USB 2 and SuperSpeed hub functions.
+/// The hub's Microchip USB7206: its USB 2 and SuperSpeed hub functions.
 const USB2_HUB: (u16, u16) = (0x0424, 0x4206);
 const SUPERSPEED_HUB: (u16, u16) = (0x0424, 0x7206);
 /// Apple Debug USB.
@@ -369,9 +369,9 @@ fn companion(port: &Topology, records: &[HostPort]) -> Companion {
     }
 }
 
-/// The SuperSpeed function of the board's hub, from the host's companion link
+/// The SuperSpeed function of the hub's USB hub, from the host's companion link
 /// for the hub's upstream port or from the Container ID both functions of a
-/// USB 3 hub report (USB 3.2 §11.1). `Ok(None)`: the board is on USB 2 only.
+/// USB 3 hub report (USB 3.2 §11.1). `Ok(None)`: the hub is on USB 2 only.
 fn superspeed_hub<'a>(
     usb2: &UsbDevice,
     devices: &'a [UsbDevice],
@@ -403,7 +403,7 @@ fn superspeed_hub<'a>(
         (Some(a), Some(b)) if a.map(|d| &d.topology) == b.map(|d| &d.topology) => a,
         (Some(found), None) | (None, Some(found)) => found,
         (Some(_), Some(_)) => return Err(Companion::Ambiguous),
-        // Without evidence, the board is on USB 2 only when no such hub is.
+        // Without evidence, the hub is on USB 2 only when no such USB hub is.
         (None, None) if devices.iter().any(is_superspeed_hub) => {
             return Err(Companion::Unavailable);
         }
@@ -627,9 +627,9 @@ mod tests {
     }
 
     #[test]
-    fn container_ids_pair_each_boards_hub_functions_across_host_controllers() {
+    fn container_ids_pair_each_hubs_usb_hub_functions_across_host_controllers() {
         // Linux on a host whose USB-C ports carry USB 2 and USB 3 on separate
-        // controllers: no companion links, two boards, both on SuperSpeed.
+        // controllers: no companion links, two hubs, both on SuperSpeed.
         let (a, b) = ([1; 16], [2; 16]);
         let mut host = Host {
             ports: Vec::new(),
@@ -716,7 +716,7 @@ mod tests {
         let snapshot = place(vec![usb2.clone(), usb3.clone(), target.clone()], &host);
         assert_eq!(snapshot.ports[0].devices.len(), 1);
         assert_eq!(snapshot.upstream_mbps, Some(10000));
-        // An empty companion port: the board is on USB 2 only.
+        // An empty companion port: the hub is on USB 2 only.
         let usb2_only = place(vec![usb2.clone(), target.clone()], &host);
         assert_eq!(usb2_only.upstream_mbps, Some(480));
         assert_eq!(usb2_only.ports[0].superspeed, Companion::Unavailable);

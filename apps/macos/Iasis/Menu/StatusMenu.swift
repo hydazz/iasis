@@ -1,12 +1,12 @@
 import SwiftUI
 
-/// The menu bar item's menu: each board's devices with their actions, the
+/// The menu bar item's menu: each hub's devices with their actions, the
 /// download under way and the app's commands.
 ///
 /// It reads the agent only through `menuSnapshot`, which holds while a menu
 /// is open, because SwiftUI resets the row under the pointer and closes its
 /// submenu whenever an open menu's content or label updates. An open menu
-/// shows the boards as they stood when it opened, so its actions reach a
+/// shows the hubs as they stood when it opened, so its actions reach a
 /// device only while the port still holds the attachment it showed.
 struct StatusMenu: View {
     let browser: DeviceBrowser
@@ -15,19 +15,19 @@ struct StatusMenu: View {
     var body: some View {
         let model = browser.model
         if let snapshot = model.menuSnapshot {
-            if snapshot.boards.isEmpty {
-                Text("No Boards Connected")
+            if snapshot.hubs.isEmpty {
+                Text("No Hubs Connected")
             }
-            ForEach(snapshot.boardDevices) { board in
-                Section(board.title) {
-                    let devices = board.devices.filter(\.isSelectable)
-                    if let notice = board.board.notice {
+            ForEach(snapshot.hubDevices) { hub in
+                Section(hub.title) {
+                    let devices = hub.devices.filter(\.isSelectable)
+                    if let notice = hub.hub.notice {
                         Label(notice, systemImage: "exclamationmark.triangle")
-                    } else if board.board.update?.required == true {
+                    } else if hub.hub.update?.required == true {
                         Button("Update IasisOS", systemImage: DeviceSymbol.download) {
-                            model.updateFirmware(of: board.board.serial)
+                            model.updateFirmware(of: hub.hub.serial)
                         }
-                        .disabled(model.updating.contains(board.board.serial))
+                        .disabled(model.updating.contains(hub.hub.serial))
                     } else if devices.isEmpty {
                         Text("No Devices")
                     }

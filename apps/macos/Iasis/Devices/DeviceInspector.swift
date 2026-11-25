@@ -28,7 +28,7 @@ struct DeviceInspector: View {
                 }
             }
             Section {
-                LabeledContent("Port", value: "\(device.boardTitle) · \(device.port.number)")
+                LabeledContent("Port", value: "\(device.hubTitle) · \(device.port.number)")
                 if let ecid = device.port.ecid {
                     LabeledContent("ECID", value: ecid)
                 }

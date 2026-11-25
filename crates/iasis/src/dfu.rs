@@ -18,14 +18,14 @@ pub enum Signal {
     AlreadyDfu,
     /// An iPhone or iPad in recovery; a Mac restores from DFU instead.
     AlreadyRecovery,
-    /// A running iPhone or iPad the board cannot signal, which the host can
+    /// A running iPhone or iPad the hub cannot signal, which the host can
     /// take into recovery.
     Recoverable,
     PortDfu,
     Restoring,
     Disabled,
     NoAttachment,
-    /// The host's port gives the board no current for its targets.
+    /// The host's port gives the hub no current for its targets.
     NoTargetPower,
     WaitingPower,
     Fault,
@@ -56,7 +56,7 @@ impl Signal {
             Self::WaitingPower => {
                 "Target power unavailable. Check the supply and available port budget."
             }
-            Self::Fault => "Port or supply fault. See board status.",
+            Self::Fault => "Port or supply fault. See hub status.",
             Self::Busy => "A port command is pending.",
             Self::Settling => "Waiting for a stable powered attachment.",
             Self::NoPdContract => "Attached without a PD contract. DFU signalling requires PD.",
@@ -86,7 +86,7 @@ pub enum Outcome {
     CheckMacAfterReattach,
     NoDfuObserved,
     AttachmentChanged,
-    BoardRestarted,
+    HubRestarted,
     IdentityChanged,
     TargetUnclear,
     IdentityUnverified,
@@ -120,7 +120,7 @@ impl Outcome {
                 "The Mac disappeared from USB after the PD acknowledgement. The target port still has power. Check the model's DFU socket and the USB data cable."
             }
             Self::NoDfuObserved => "No DFU entry observed.",
-            Self::BoardRestarted => {
+            Self::HubRestarted => {
                 "The controller restarted during observation. Inspect the current target before retrying."
             }
             Self::AttachmentChanged => {
@@ -259,7 +259,7 @@ impl Attempt {
             was_mac,
             result,
             tracker: before.ecid.map(|ecid| TargetTracker {
-                board_serial: serial,
+                hub_serial: serial,
                 port,
                 ecid,
             }),
@@ -311,7 +311,7 @@ pub fn assess(
         Signal::Restoring
     } else if matches!(usb_mode, Some(AppleMode::Dfu | AppleMode::KisDfu)) {
         // Only DFU confirmed on USB skips the DFU action. Debug USB alone does
-        // not establish the mode, so it goes on to the board's checks.
+        // not establish the mode, so it goes on to the hub's checks.
         Signal::AlreadyDfu
     } else if usb_mode == Some(AppleMode::PortDfu) {
         Signal::PortDfu
@@ -385,7 +385,7 @@ pub fn assess(
     };
     let outcome = attempt.map(|attempt| {
         if status.uptime_ms < attempt.uptime_ms {
-            return Outcome::BoardRestarted;
+            return Outcome::HubRestarted;
         }
         let powered_but_missing = attempt.before.is_some()
             && usb_mode.is_none()
@@ -405,9 +405,7 @@ pub fn assess(
         if matches!(
             identity,
             Some(
-                Observation::Moved { .. }
-                    | Observation::Replaced { .. }
-                    | Observation::BoardChanged
+                Observation::Moved { .. } | Observation::Replaced { .. } | Observation::HubChanged
             )
         ) {
             return Outcome::IdentityChanged;
@@ -621,7 +619,7 @@ mod tests {
         s.ports[0].devices = vec![mac];
         assert_eq!(report(&st, &s, None).signal, Signal::Available);
         // A target behind Debug USB whose mode is unknown, running or asleep,
-        // is restored from the DFU the board sends.
+        // is restored from the DFU the hub sends.
         s.ports[0].devices = vec![apple(AppleMode::Kis, 0x1881, None)];
         assert_eq!(
             report(&st, &s, None).restore_access(&st.ports[0], |_| true),

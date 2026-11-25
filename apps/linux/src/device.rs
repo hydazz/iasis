@@ -3,18 +3,18 @@
 //! and descriptions take sentence case.
 
 use iasis_api::{
-    AppleMode, BoardView, Offer, Operation, Planned, Port, PortPower, PortView, PowerSource,
+    AppleMode, HubView, Offer, Operation, Planned, Port, PortPower, PortView, PowerSource,
     Prerequisite, Release, Request, RestorePhase, Selection, SharingPort, SignalProgress, State,
     Target, UsbLink,
 };
 
-/// A port, named by its board's serial and its number.
+/// A port, named by its hub's serial and its number.
 pub type DeviceId = (String, u8);
 
-/// One port of one board and what is on it.
+/// One port of one hub and what is on it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Device {
-    pub board_title: String,
+    pub hub_title: String,
     pub serial: String,
     pub session: Option<u32>,
     pub port: PortView,
@@ -23,20 +23,20 @@ pub struct Device {
     pub needs: Option<Prerequisite>,
 }
 
-/// A board, its title among the others, and its ports.
+/// A hub, its title among the others, and its ports.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Board {
-    pub view: BoardView,
+pub struct Hub {
+    pub view: HubView,
     pub title: String,
     pub devices: Vec<Device>,
 }
 
 pub const DFU_PORT_HELP: &str = "Connect the cable to the Mac’s DFU port.";
 
-/// Every board in the state, titled so boards of one name are told apart.
-pub fn boards(state: &State) -> Vec<Board> {
+/// Every hub in the state, titled so hubs of one name are told apart.
+pub fn hubs(state: &State) -> Vec<Hub> {
     state
-        .boards
+        .hubs
         .iter()
         .map(|view| {
             let title = title(state, view);
@@ -44,7 +44,7 @@ pub fn boards(state: &State) -> Vec<Board> {
                 .ports
                 .iter()
                 .map(|port| Device {
-                    board_title: title.clone(),
+                    hub_title: title.clone(),
                     serial: view.serial.clone(),
                     session: view.session,
                     port: port.clone(),
@@ -52,7 +52,7 @@ pub fn boards(state: &State) -> Vec<Board> {
                         .sharing
                         .ports
                         .iter()
-                        .find(|shared| shared.board == view.serial && shared.port == port.number)
+                        .find(|shared| shared.hub == view.serial && shared.port == port.number)
                         .cloned(),
                     needs: state
                         .missing
@@ -61,7 +61,7 @@ pub fn boards(state: &State) -> Vec<Board> {
                         .cloned(),
                 })
                 .collect();
-            Board {
+            Hub {
                 view: view.clone(),
                 title,
                 devices,
@@ -70,7 +70,7 @@ pub fn boards(state: &State) -> Vec<Board> {
         .collect()
 }
 
-pub fn display_name(view: &BoardView) -> &str {
+pub fn display_name(view: &HubView) -> &str {
     if view.name.is_empty() {
         "Iasis"
     } else {
@@ -78,10 +78,10 @@ pub fn display_name(view: &BoardView) -> &str {
     }
 }
 
-fn title(state: &State, view: &BoardView) -> String {
+fn title(state: &State, view: &HubView) -> String {
     let name = display_name(view);
-    let same: Vec<&BoardView> = state
-        .boards
+    let same: Vec<&HubView> = state
+        .hubs
         .iter()
         .filter(|other| display_name(other).eq_ignore_ascii_case(name))
         .collect();
@@ -454,7 +454,7 @@ impl Actions {
                 .iter()
                 .filter(|device| device.port.dfu)
                 .map(|device| Request::Dfu {
-                    board: device.serial.clone(),
+                    hub: device.serial.clone(),
                     port: device.port.number,
                 })
                 .collect(),
@@ -462,7 +462,7 @@ impl Actions {
                 .iter()
                 .filter(|device| device.port.reboot)
                 .map(|device| Request::Reboot {
-                    board: device.serial.clone(),
+                    hub: device.serial.clone(),
                     port: device.port.number,
                 })
                 .collect(),
@@ -470,7 +470,7 @@ impl Actions {
         };
         actions.restore = RestoreConfirmation::new(devices);
         actions.revive = actions.restore.as_ref().map(|restore| Request::Revive {
-            boards: restore.boards.clone(),
+            hubs: restore.hubs.clone(),
             latest: false,
         });
         actions
@@ -478,11 +478,11 @@ impl Actions {
 }
 
 /// An erase the user is asked to confirm: the attachments as shown, on any
-/// number of boards, and what the agent says each would be restored with.
+/// number of hubs, and what the agent says each would be restored with.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RestoreConfirmation {
     pub devices: Vec<Device>,
-    pub boards: Vec<Selection>,
+    pub hubs: Vec<Selection>,
     pub planned: Vec<Planned>,
 }
 
@@ -502,13 +502,13 @@ impl RestoreConfirmation {
         {
             return None;
         }
-        let mut boards: Vec<Selection> = Vec::new();
+        let mut hubs: Vec<Selection> = Vec::new();
         for device in devices {
             let session = device.session?;
-            match boards.iter_mut().find(|board| board.board == device.serial) {
-                Some(board) => board.targets.push(device.target()),
-                None => boards.push(Selection {
-                    board: device.serial.clone(),
+            match hubs.iter_mut().find(|hub| hub.hub == device.serial) {
+                Some(hub) => hub.targets.push(device.target()),
+                None => hubs.push(Selection {
+                    hub: device.serial.clone(),
                     session,
                     targets: vec![device.target()],
                 }),
@@ -516,7 +516,7 @@ impl RestoreConfirmation {
         }
         Some(Self {
             devices: devices.to_vec(),
-            boards,
+            hubs,
             planned: Vec::new(),
         })
     }
@@ -555,7 +555,7 @@ impl RestoreConfirmation {
             return Vec::new();
         }
         let restore = |latest| Request::Restore {
-            boards: self.boards.clone(),
+            hubs: self.hubs.clone(),
             latest,
         };
         let newer: Vec<&Offer> = self
@@ -601,7 +601,7 @@ impl RestoreConfirmation {
     fn offer(&self, device: &Device) -> Option<&Offer> {
         self.planned
             .iter()
-            .find(|planned| planned.board == device.serial && planned.port == device.port.number)?
+            .find(|planned| planned.hub == device.serial && planned.port == device.port.number)?
             .offer
             .as_ref()
     }
@@ -617,7 +617,7 @@ impl RestoreConfirmation {
     fn line(&self, device: &Device) -> String {
         let place = format!(
             "{}, port {}: {}",
-            device.board_title,
+            device.hub_title,
             device.port.number,
             device.name()
         );
@@ -679,7 +679,7 @@ mod tests {
 
     fn device(port: PortView) -> Device {
         Device {
-            board_title: "Bench".into(),
+            hub_title: "Bench".into(),
             serial: "817a23bd502453b4".into(),
             session: Some(3),
             port,
@@ -756,8 +756,8 @@ mod tests {
     fn a_restore_asks_only_when_a_downloaded_image_is_older() {
         let devices = [device(port(1)), device(port(3))];
         let mut confirmation = RestoreConfirmation::new(&devices).unwrap();
-        assert_eq!(confirmation.boards.len(), 1);
-        assert_eq!(confirmation.boards[0].targets.len(), 2);
+        assert_eq!(confirmation.hubs.len(), 1);
+        assert_eq!(confirmation.hubs[0].targets.len(), 2);
         assert_eq!(confirmation.choices().len(), 1);
         let release = |build: &str| Release {
             os: "macOS".into(),
@@ -766,7 +766,7 @@ mod tests {
             bytes: 18_000_000_000,
         };
         confirmation.planned = vec![Planned {
-            board: "817a23bd502453b4".into(),
+            hub: "817a23bd502453b4".into(),
             port: 1,
             offer: Some(Offer {
                 latest: Some(release("27.2")),

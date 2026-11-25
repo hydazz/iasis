@@ -16,7 +16,7 @@ nonisolated protocol AgentService: Sendable {
     func releases(of model: String) async throws -> [AgentState.Release]
 
     /// What a restore would install on each target.
-    func plan(_ boards: [RestoreSelection]) async throws -> [AgentState.Planned]
+    func plan(_ hubs: [RestoreSelection]) async throws -> [AgentState.Planned]
 
     /// The host's supervision identity as a PKCS #12 archive in base64,
     /// protected by this password.
@@ -80,8 +80,8 @@ nonisolated struct AgentClient: AgentService {
         return releases
     }
 
-    func plan(_ boards: [RestoreSelection]) async throws -> [AgentState.Planned] {
-        guard case let .plan(planned) = try await answer(to: .plan(boards: boards)) else {
+    func plan(_ hubs: [RestoreSelection]) async throws -> [AgentState.Planned] {
+        guard case let .plan(planned) = try await answer(to: .plan(hubs: hubs)) else {
             throw AgentError.unavailable
         }
         return planned

@@ -1,5 +1,5 @@
-# Iasis boards, and the Apple devices on their ports, are open to the iasis
-# service through the iasis-usb group. A board's RP2354 sits on port 6 of its
+# Iasis hubs, and the Apple devices on their ports, are open to the iasis
+# service through the iasis-usb group. A hub's RP2354 sits on port 6 of its
 # Microchip USB7206C hub, whose USB 2 function is 0424:4206 and SuperSpeed
 # function 0424:7206. Owners stay as they are, so usbmuxd keeps the devices
 # it serves.

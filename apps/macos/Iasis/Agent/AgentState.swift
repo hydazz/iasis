@@ -6,7 +6,7 @@ import Foundation
 nonisolated struct AgentState: Codable, Equatable {
     /// The agent's release version.
     var version: String
-    var boards: [Board]
+    var hubs: [Hub]
     /// A submitting connection's results in target order, each null until it
     /// has one. Absent on other connections.
     var submitted: [Ending?]?
@@ -19,36 +19,36 @@ nonisolated struct AgentState: Codable, Equatable {
     /// How many ports wait for the image being downloaded.
     var waitingForDownload: Int {
         guard let id = images.fetch?.id else { return 0 }
-        return boards.flatMap(\.ports).filter { $0.awaiting == id }.count
+        return hubs.flatMap(\.ports).filter { $0.awaiting == id }.count
     }
 
-    func title(for board: Board) -> String {
-        let matches = boards.filter { $0.displayName.caseInsensitiveCompare(board.displayName) == .orderedSame }
-        guard matches.count > 1 else { return board.displayName }
-        let suffix = board.serial.suffix(4)
-        let unique = !matches.contains { $0.serial != board.serial && $0.serial.hasSuffix(suffix) }
-        return "\(board.displayName) · \(unique ? String(suffix) : board.serial)"
+    func title(for hub: Hub) -> String {
+        let matches = hubs.filter { $0.displayName.caseInsensitiveCompare(hub.displayName) == .orderedSame }
+        guard matches.count > 1 else { return hub.displayName }
+        let suffix = hub.serial.suffix(4)
+        let unique = !matches.contains { $0.serial != hub.serial && $0.serial.hasSuffix(suffix) }
+        return "\(hub.displayName) · \(unique ? String(suffix) : hub.serial)"
     }
 
-    struct Board: Codable, Equatable, Identifiable {
+    struct Hub: Codable, Equatable, Identifiable {
         var serial: String
         var name: String
         var session: UInt32?
-        /// The IasisOS version the board runs; empty while it cannot be read.
+        /// The IasisOS version the hub runs; empty while it cannot be read.
         var firmware: String
-        /// The IasisOS the agent carries, when the board runs another.
+        /// The IasisOS the agent carries, when the hub runs another.
         var update: FirmwareUpdate?
         var upstreamMbps: Int?
         var supply: Supply
         /// The power supply's pool for the targets, when there is a supply.
         var pool: Pool?
-        /// A host holds the board.
+        /// A host holds the hub.
         var host: Bool
-        /// The host takes restore requests for the board.
+        /// The host takes restore requests for the hub.
         var restores: Bool
         var brightness: Int
         var ports: [Port]
-        /// Why the board cannot be read, or why its last restore request came
+        /// Why the hub cannot be read, or why its last restore request came
         /// to nothing.
         var notice: String?
 
@@ -61,17 +61,17 @@ nonisolated struct AgentState: Codable, Equatable {
         }
     }
 
-    /// IasisOS the agent can write to a board.
+    /// IasisOS the agent can write to a hub.
     struct FirmwareUpdate: Codable, Equatable {
         var version: String
-        /// The board runs a build the agent cannot talk to, so it has no
+        /// The hub runs a build the agent cannot talk to, so it has no
         /// ports until it takes this one.
         var required: Bool
     }
 
     /// What powers the targets.
     enum Supply: String, Codable {
-        /// A USB-C power supply on the board's power input.
+        /// A USB-C power supply on the hub's power input.
         case brick
         /// The host's USB port alone.
         case host
@@ -85,7 +85,7 @@ nonisolated struct AgentState: Codable, Equatable {
         var device: String?
         var identifying: Bool
         var ecid: String?
-        /// What the board's host finds on the port's USB.
+        /// What the hub's host finds on the port's USB.
         var usb: USB?
         /// The Apple target's USB mode, when `usb` is `apple`.
         var mode: AppleMode?
@@ -98,10 +98,10 @@ nonisolated struct AgentState: Codable, Equatable {
         var power: PortPower?
         /// Power supply capacity committed to this port.
         var allocatedMw: Int
-        /// The target took the largest offer its board could make and would
+        /// The target took the largest offer its hub could make and would
         /// use more.
         var short: Bool
-        /// Why the port faulted, in the board's words.
+        /// Why the port faulted, in the hub's words.
         var fault: String?
         var dfu: Bool
         var reboot: Bool
@@ -163,7 +163,7 @@ nonisolated struct AgentState: Codable, Equatable {
         var ports: [Port]
 
         struct Port: Codable, Equatable {
-            var board: String
+            var hub: String
             var port: Int
             var active: Bool
             var problem: String?
@@ -224,7 +224,7 @@ nonisolated struct AgentState: Codable, Equatable {
         var step: Int
     }
 
-    /// The port's light on the board.
+    /// The port's light on the hub.
     struct Light: Codable, Equatable {
         var hue: Hue
         var pulse: Bool
@@ -309,7 +309,7 @@ nonisolated struct AgentState: Codable, Equatable {
 
     /// What a restore would install on one target.
     struct Planned: Codable, Equatable {
-        var board: String
+        var hub: String
         var port: Int
         /// Absent while the agent does not know the target's model.
         var offer: Offer?

@@ -1,7 +1,7 @@
 import ServiceManagement
 import SwiftUI
 
-/// The main window: every port of every board, in a list.
+/// The main window: every port of every hub, in a list.
 struct DevicesView: View {
     static let windowID = "devices"
 
@@ -13,23 +13,23 @@ struct DevicesView: View {
     var body: some View {
         @Bindable var browser = browser
         let state = model.state
-        let boards = state?.boardDevices ?? []
+        let hubs = state?.hubDevices ?? []
 
         List(selection: $browser.selection) {
-            ForEach(boards) { group in
+            ForEach(hubs) { group in
                 Section {
-                    if let notice = group.board.notice {
+                    if let notice = group.hub.notice {
                         Label(notice, systemImage: "exclamationmark.triangle")
                             .foregroundStyle(.secondary)
                             .selectionDisabled()
                     }
-                    if group.board.update?.required == true {
+                    if group.hub.update?.required == true {
                         HStack {
-                            Label("Update IasisOS to use this board", systemImage: "arrow.down.circle")
+                            Label("Update IasisOS to use this hub", systemImage: "arrow.down.circle")
                                 .foregroundStyle(.secondary)
                             Spacer()
-                            Button("Update") { model.updateFirmware(of: group.board.serial) }
-                                .disabled(model.updating.contains(group.board.serial))
+                            Button("Update") { model.updateFirmware(of: group.hub.serial) }
+                                .disabled(model.updating.contains(group.hub.serial))
                         }
                         .selectionDisabled()
                     }
@@ -38,7 +38,7 @@ struct DevicesView: View {
                             .selectionDisabled(!device.isSelectable)
                     }
                 } header: {
-                    BoardHeader(group: group)
+                    HubHeader(group: group)
                         .listRowSeparator(.hidden, edges: .bottom)
                 }
             }
@@ -78,11 +78,11 @@ struct DevicesView: View {
                     systemImage: "bolt.slash",
                     description: Text("Iasis starts its agent at login.")
                 )
-            } else if boards.isEmpty {
+            } else if hubs.isEmpty {
                 ContentUnavailableView(
-                    "No Boards Connected",
+                    "No Hubs Connected",
                     systemImage: "cable.connector.slash",
-                    description: Text("Connect an Iasis board to this Mac.")
+                    description: Text("Connect an Iasis hub to this Mac.")
                 )
             }
         }
@@ -158,13 +158,13 @@ struct DevicesView: View {
     }
 }
 
-private struct BoardHeader: View {
-    let group: BoardDevices
+private struct HubHeader: View {
+    let group: HubDevices
 
     var body: some View {
         HStack {
             Text(group.title)
-                .help("IasisOS \(group.board.firmware), serial \(group.board.serial)")
+                .help("IasisOS \(group.hub.firmware), serial \(group.hub.serial)")
             Spacer()
             Group {
                 if group.devices.contains(where: \.sharesInternet) {
@@ -172,14 +172,14 @@ private struct BoardHeader: View {
                         .help("Sharing internet over USB")
                         .accessibilityLabel("Sharing internet over USB")
                 }
-                if let speed = group.board.upstreamMbps {
+                if let speed = group.hub.upstreamMbps {
                     let rate = speed >= 1000 ? "\(speed / 1000) Gbit/s" : "\(speed) Mbit/s"
                     let detail = "Host USB \(speed >= 5000 ? "3" : "2") connection at \(rate)"
                     Label(rate, systemImage: "cable.connector")
                         .help(detail)
                         .accessibilityLabel(detail)
                 }
-                if let pool = group.board.pool {
+                if let pool = group.hub.pool {
                     Label("\(wholeWatts(pool.allocatedMw)) W of \(wholeWatts(pool.budgetMw)) W", systemImage: "powerplug.portrait")
                         .help("Power reserved for all ports, including voltage tolerance")
                 }
