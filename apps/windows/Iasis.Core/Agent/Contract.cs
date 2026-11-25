@@ -98,7 +98,10 @@ public sealed record Image(
     long Bytes,
     IReadOnlyList<string> Models,
     bool Ready,
-    string? Error);
+    string? Error,
+    string? Path,
+    bool Fetched,
+    bool InUse);
 
 public sealed record Fetch(string Id, string Version, string Build, long Bytes, long Done);
 
