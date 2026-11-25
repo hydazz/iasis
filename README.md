@@ -160,7 +160,7 @@ target/release/iasis --serial 0123456789abcdef restore --ports 1,2,3,4,5 --erase
 
 **`--erase` erases the selected targets.** With the agent running, the request goes to it and the command follows the restore to its end. Without the agent, the command hosts the board for its own run; there, `--button` confirms the erase on the board, and `--button` without `--ports` chooses the targets there too. Name an IPSW before the options to restore from that file instead of the newest release.
 
-Iasis starts one restore process for each authorized ECID. A failed restore ends that target’s job.
+Iasis starts one restore process for each authorized ECID. A failed restore ends that target’s job. A target that can’t be prepared, such as an iPad waiting for Trust, ends with the reason on its port while the others restore.
 
 The host stays out of idle sleep from a batch's preparation until its last restore ends, while its display can still sleep. On battery, a Windows laptop with Modern Standby drops that hold five minutes after its sleep timeout.
 
