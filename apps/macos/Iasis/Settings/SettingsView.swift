@@ -307,11 +307,6 @@ private struct BoardsSettings: View {
                     Section {
                         BoardSettings(board: selected, model: model)
                             .id(selected.serial)
-                            .disabled(selected.settingsBusy)
-                    } footer: {
-                        if selected.settingsBusy {
-                            Text("Settings are locked while the board is busy.")
-                        }
                     }
                 }
                 Section {
