@@ -20,8 +20,9 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail};
 use iasis_protocol::{
-    AppleMode, HostControl, HostReport, HostSession, Observed, PORT_COUNT, Port, PortReport,
-    RestoreAccess, RestoreArm, RestorePhase, RestoreStatus, Status, Usb,
+    AppleMode, DEBUG_USB, DFU_USB, DebugActions, HostControl, HostReport, HostSession, IDENTIFY_MS,
+    Observed, PORT_COUNT, Port, PortAction, PortReport, PortStatus, RestoreAccess, RestoreArm,
+    RestorePhase, RestoreStatus, Status, Usb,
 };
 use nusb::{DeviceInfo, transfer::TransferError};
 
@@ -54,6 +55,14 @@ const AGREE: Duration = Duration::from_millis(250);
 /// A target that could not be named yet, such as a Mac on Apple Debug USB
 /// whose KIS read failed, is asked again this often.
 const IDENTIFY_INTERVAL: Duration = Duration::from_secs(2);
+/// Every Apple debug action a MacBook Neo lists on its DFU port. Its running
+/// system has no USB device of its own and reaches a host only through Debug
+/// USB. Macs that list more, such as an M1's 0x0301 or an M5's
+/// 0x0109, bring their own USB up. Debug USB would hide an iPad's (0x030a),
+/// which comes back only when its port's power is cycled.
+const DEBUG_USB_ONLY: [u16; 10] = [
+    DEBUG_USB, DFU_USB, 0x0206, 0x0306, 0x0106, 0x0105, 0x0303, 0x0803, 0x0809, 0x0103,
+];
 
 /// Restore jobs by port, each with the attachment it runs on. They outlive a
 /// link, so a job keeps reporting after the board reconnects.
@@ -140,7 +149,10 @@ struct Observer {
     last: Seen,
     /// When each port's latest view was first seen.
     since: [Option<Instant>; PORT_COUNT],
-    attached_at_ms: [u64; PORT_COUNT],
+    /// Board uptime when each port's identification began: at its
+    /// attachment, or when the agent asked its target to show itself through
+    /// Debug USB.
+    identify_from_ms: [u64; PORT_COUNT],
     stable: Seen,
 }
 
@@ -155,7 +167,7 @@ impl Observer {
             if now.map(|(generation, _)| generation)
                 != self.last[index].map(|(generation, _)| generation)
             {
-                self.attached_at_ms[index] = status.uptime_ms;
+                self.identify_from_ms[index] = status.uptime_ms;
                 self.stable[index] = None;
             }
             if now != self.last[index] {
@@ -217,6 +229,41 @@ fn unidentified_usb(snapshot: &Snapshot, port: Port) -> Option<&UsbDevice> {
     })
 }
 
+/// The agent asks a target to show itself through Debug USB once per
+/// attachment: when the target lists nothing beyond what a Mac reached only
+/// that way lists, its USB has shown nothing for the host's first look, and
+/// no request, restore or image fetch holds the port.
+fn presentable(
+    state: &PortStatus,
+    seen: Option<(u32, Observed)>,
+    looked_ms: u64,
+    busy: bool,
+    presented: Option<u32>,
+) -> bool {
+    let silent = seen.is_some_and(|(generation, seen)| {
+        generation == state.generation && seen.usb == Usb::Absent
+    });
+    // A Mac's other port is left alone: an M5 never acknowledged Debug USB
+    // there.
+    let debug_usb_only = match state.debug_actions {
+        DebugActions::Listed(list) => {
+            list.contains(&DFU_USB)
+                && list
+                    .iter()
+                    .all(|id| *id == 0 || DEBUG_USB_ONLY.contains(id))
+        }
+        _ => false,
+    };
+    silent
+        && looked_ms >= u64::from(IDENTIFY_MS)
+        && presented != Some(state.generation)
+        && !busy
+        && state.request.is_none()
+        && state.restore.is_none()
+        && state.offers(PortAction::MapDebugUsb)
+        && debug_usb_only
+}
+
 /// Why a report did not reach the board.
 enum Unsent {
     /// The board answered and would not take it: the session is gone.
@@ -232,13 +279,16 @@ struct View {
     /// Board uptime at the last sample. A smaller reading is a restart.
     uptime_ms: u64,
     sample: Option<(Status, Snapshot)>,
+    /// The attachment on each port whose target the agent last asked to show
+    /// itself through Debug USB.
+    presented: [Option<u32>; PORT_COUNT],
 }
 
-/// The view shows the time since an attachment or a request, which passes
-/// without the board's state changing.
-fn ages(status: &Status, attached_at_ms: &[u64; PORT_COUNT]) -> bool {
+/// The view shows the time since identification began or a request, which
+/// passes without the board's state changing.
+fn ages(status: &Status, identify_from_ms: &[u64; PORT_COUNT]) -> bool {
     let recent = crate::view::IDENTIFYING_MS + HEALTH.as_millis() as u64;
-    status.ports.iter().zip(attached_at_ms).any(|(port, at)| {
+    status.ports.iter().zip(identify_from_ms).any(|(port, at)| {
         port.request.is_some() || (port.occupied() && status.uptime_ms.saturating_sub(*at) < recent)
     })
 }
@@ -436,7 +486,7 @@ impl Shared {
         });
         let report = (view.observer.stable, view.access);
         let unreported = std::mem::replace(&mut *self.reported.lock().unwrap(), report) != report;
-        let aged = read.is_some() && ages(&status, &view.observer.attached_at_ms);
+        let aged = read.is_some() && ages(&status, &view.observer.identify_from_ms);
         view.sample = Some((status, snapshot));
         drop(view);
         if unreported {
@@ -962,10 +1012,56 @@ impl Link {
                 .map(|awaiting| awaiting.image.clone());
             let age_ms = status
                 .uptime_ms
-                .saturating_sub(view.observer.attached_at_ms[index]);
+                .saturating_sub(view.observer.identify_from_ms[index]);
             crate::view::identify_for(row, age_ms);
         }
         Some(board)
+    }
+
+    /// The attachments whose target the agent should now ask to show itself
+    /// through Debug USB.
+    pub(crate) fn unpresented(&self) -> Vec<(Port, u32)> {
+        let view = self.shared.view.lock().unwrap();
+        let Some((status, _)) = &view.sample else {
+            return Vec::new();
+        };
+        let jobs = self.shared.jobs.lock().unwrap();
+        let awaiting = self.shared.awaiting.lock().unwrap();
+        Port::ALL
+            .into_iter()
+            .filter_map(|port| {
+                let index = port.index();
+                let state = &status.ports[index];
+                let busy = jobs[index]
+                    .as_ref()
+                    .is_some_and(|job| job.generation == state.generation)
+                    || awaiting[index]
+                        .as_ref()
+                        .is_some_and(|awaiting| awaiting.generation == state.generation);
+                let looked_ms = status
+                    .uptime_ms
+                    .saturating_sub(view.observer.identify_from_ms[index]);
+                presentable(
+                    state,
+                    view.observer.stable[index],
+                    looked_ms,
+                    busy,
+                    view.presented[index],
+                )
+                .then_some((port, state.generation))
+            })
+            .collect()
+    }
+
+    /// The agent is asking the target on this attachment to show itself
+    /// through Debug USB, which starts its identification again.
+    pub(crate) fn presenting(&self, port: Port, generation: u32) {
+        let mut view = self.shared.view.lock().unwrap();
+        let index = port.index();
+        view.presented[index] = Some(generation);
+        view.observer.identify_from_ms[index] = view.uptime_ms;
+        drop(view);
+        self.shared.changes.changed();
     }
 
     /// The board and its targets, read and enumerated now, each with the mode
@@ -1431,5 +1527,91 @@ mod tests {
             look(&mut observer, &status, &usb, AGREE),
             [None; PORT_COUNT]
         );
+    }
+
+    #[test]
+    fn a_silent_target_reached_only_through_debug_usb_is_asked_once_per_attachment() {
+        let listed = |ids: &[u16]| {
+            let mut list = [0; iasis_protocol::MAX_ACTIONS];
+            list[..ids.len()].copy_from_slice(ids);
+            let mut state = attached([Some(3), None, None, None, None]).ports[0];
+            state.debug_actions = DebugActions::Listed(list);
+            state
+        };
+        let neo = listed(&[
+            0x4606, 0x0606, 0x0206, 0x0306, 0x0106, 0x0105, 0x0303, 0x0803, 0x0809, 0x0103,
+        ]);
+        let seen = |generation, usb| Some((generation, Observed { usb, ecid: None }));
+        let silent = seen(3, Usb::Absent);
+        let looked = u64::from(IDENTIFY_MS);
+        assert!(presentable(&neo, silent, looked, false, None));
+        // The Neo's other port lists what an M5's does there.
+        let other = listed(&[0x4606, 0x0106, 0x0105, 0x0303, 0x0803, 0x0809, 0x0103]);
+        assert!(!presentable(&other, silent, looked, false, None));
+        // Once per attachment.
+        assert!(!presentable(&neo, silent, looked, false, Some(3)));
+        assert!(presentable(&neo, silent, looked, false, Some(2)));
+        // After the host's first look, and only while its USB shows nothing.
+        assert!(!presentable(&neo, silent, looked - 1, false, None));
+        let booted = seen(3, Usb::Apple(AppleMode::Normal));
+        assert!(!presentable(&neo, booted, looked, false, None));
+        assert!(!presentable(
+            &neo,
+            seen(2, Usb::Absent),
+            looked,
+            false,
+            None
+        ));
+        // A job or an image fetch, a request or a restore holds the port.
+        assert!(!presentable(&neo, silent, looked, true, None));
+        let mut requested = neo;
+        requested.request = Some(iasis_protocol::Request {
+            action: PortAction::Dfu,
+            at_ms: 0,
+        });
+        assert!(!presentable(&requested, silent, looked, false, None));
+        let mut restored = neo;
+        restored.restore = Some(RestoreStatus {
+            ecid: 1,
+            phase: RestorePhase::Reported,
+            progress: 100,
+        });
+        assert!(!presentable(&restored, silent, looked, false, None));
+        let mut waiting = neo;
+        waiting.state = PortState::Ready;
+        assert!(!presentable(&waiting, silent, looked, false, None));
+        // An M1 and an M5 bring their own USB up; Debug USB hides an iPad's;
+        // a HomePod does not list Debug USB.
+        for ids in [
+            &[
+                0x4606, 0x0606, 0x0206, 0x0301, 0x0306, 0x0106, 0x0105, 0x0303, 0x0803, 0x0809,
+                0x0103,
+            ][..],
+            &[
+                0x4606, 0x0606, 0x0206, 0x0306, 0x0106, 0x0109, 0x0105, 0x0303, 0x0803, 0x0809,
+                0x0103,
+            ],
+            &[
+                0x4606, 0x0206, 0x0306, 0x0606, 0x030a, 0x0b11, 0x0106, 0x0105, 0x0303, 0x0803,
+                0x0809, 0x0103,
+            ],
+            &[
+                0x4606, 0x0206, 0x0306, 0x0606, 0x0607, 0x0410, 0x030a, 0x0106, 0x0105,
+            ],
+            &[
+                0x0206, 0x0306, 0x0606, 0x0d06, 0x0b05, 0x0106, 0x0105, 0x0303, 0x0803, 0x0809,
+                0x0103,
+            ],
+        ] {
+            assert!(
+                !presentable(&listed(ids), silent, looked, false, None),
+                "{ids:04x?}"
+            );
+        }
+        for actions in [DebugActions::Pending, DebugActions::Silent] {
+            let mut quiet = neo;
+            quiet.debug_actions = actions;
+            assert!(!presentable(&quiet, silent, looked, false, None));
+        }
     }
 }
