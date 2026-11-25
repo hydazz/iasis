@@ -1228,8 +1228,15 @@ mod tests {
         use crate::images::{Network, Store};
         use iasis_api::PortView;
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("index.json"), r#"{"images":[],"models":[],"devices":[{"identifier":"iPad13,18","name":"iPad (10th generation)","hardware":[]}]}"#).unwrap();
-        let store = Store::open(dir.path(), Network::default(), Arc::default()).unwrap();
+        std::fs::create_dir(dir.path().join("kept")).unwrap();
+        std::fs::write(dir.path().join("kept/index.json"), r#"{"images":[],"models":[],"devices":[{"identifier":"iPad13,18","name":"iPad (10th generation)","hardware":[]}]}"#).unwrap();
+        let store = Store::open(
+            dir.path().join("cache"),
+            dir.path().join("kept"),
+            Network::default(),
+            Arc::default(),
+        )
+        .unwrap();
         let info = iasis_protocol::Info {
             serial: 1,
             firmware_version: [0, 1, 0],

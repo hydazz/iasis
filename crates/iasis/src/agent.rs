@@ -179,10 +179,11 @@ impl Agent {
         Ok(Arc::new(Self {
             store: Store::open(
                 home.cache.join("images"),
+                home.state.join("images"),
                 Network::default(),
                 changes.clone(),
             )?,
-            models: Arc::new(Models::open(home.cache.join("device-models.json"))),
+            models: Arc::new(Models::open(home.state.join("device-models.json"))),
             engine: RestoreEngine::for_host(
                 home.cache.join("restores"),
                 supervision.clone(),
