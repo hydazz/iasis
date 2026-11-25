@@ -81,7 +81,7 @@ pub fn indicators(status: &Status, control: &Button, now: u64) -> [[u8; 3]; 6] {
         return pixels;
     }
     let mut pixels = [OFF; 6];
-    pixels[0] = if status.i2c_root_fault || status.aggregate_power_fault {
+    pixels[0] = if status.i2c_root_fault || status.brick_input_fault {
         RED
     } else if control.armed().is_some() {
         if now % 800 < 400 {
@@ -193,7 +193,7 @@ mod tests {
                 assert_eq!(indicators(&status, &button, now)[1..], [OFF; 5]);
             }
         }
-        status.ports[0].error = Some(PortError::HostLimiter);
+        status.ports[0].error = Some(PortError::DischargeTimeout);
         status.ports[1].orientation = Some(iasis_protocol::Orientation::Cc1);
         assert_eq!(steady(&status)[5], RED);
         assert_eq!(steady(&status)[4], [12, 5, 0]);
@@ -267,7 +267,7 @@ mod tests {
         assert_eq!(pixels[5], BLUE);
         assert_eq!(pixels[4], [0, 3, 0]);
         assert_eq!(indicators(&status, &button, 8400)[0], [6, 0, 6]);
-        status.aggregate_power_fault = true;
+        status.brick_input_fault = true;
         assert_eq!(indicators(&status, &button, 8000)[0], RED);
     }
 
