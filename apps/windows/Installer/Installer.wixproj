@@ -8,4 +8,7 @@
          package installs for the machine. -->
     <SuppressIces>ICE38;ICE43;ICE57</SuppressIces>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Util.wixext" />
+  </ItemGroup>
 </Project>
