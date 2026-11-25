@@ -247,7 +247,7 @@ mod tests {
         let mut state: State =
             serde_json::from_str(include_str!("../../../crates/api/fixtures/state.json")).unwrap();
         let port = &mut state.boards[0].ports[0];
-        port.fetch = None;
+        port.awaiting = None;
         port.stage = Some(Progress {
             name: "Sending Filesystem".into(),
             percent: 43,

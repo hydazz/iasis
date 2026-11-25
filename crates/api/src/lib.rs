@@ -348,8 +348,9 @@ pub struct PortView {
     pub enabled: bool,
     /// The operation on the port and its phase.
     pub job: Option<Job>,
-    /// Percent of the restore image fetched, while the port waits for one.
-    pub fetch: Option<u8>,
+    /// The store's id for the image the port's restore waits for, while it
+    /// waits. The images' `fetch` says how much of it is here.
+    pub awaiting: Option<String>,
     /// What the job's worker is doing.
     pub stage: Option<Progress>,
     /// How the port's last operation ended, from the agent that ran it.

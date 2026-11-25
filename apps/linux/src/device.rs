@@ -135,11 +135,8 @@ impl Device {
         if !port.occupied || !port.enabled {
             return Activity::idle();
         }
-        if let Some(percent) = port.fetch {
-            return Activity::new(
-                format!("Downloading image, {percent}%"),
-                Mark::Working(Some(f64::from(percent) / 100.0)),
-            );
+        if port.awaiting.is_some() {
+            return Activity::new("Waiting for image", Mark::Working(None));
         }
         if let Some(job) = &port.job {
             return match &port.stage {
@@ -190,9 +187,9 @@ impl Device {
                 operation_icon(job.operation),
                 activity.mark,
             );
-            if port.fetch.is_some() {
+            if port.awaiting.is_some() {
                 status.steps = vec![Step {
-                    name: "Downloading Image".into(),
+                    name: "Waiting for Image".into(),
                     state: StepState::Active,
                 }];
             } else if let Some(stage) = &port.stage {
@@ -737,7 +734,7 @@ mod tests {
             restore: true,
             enabled: true,
             job: None,
-            fetch: None,
+            awaiting: None,
             stage: None,
             result: None,
         }
