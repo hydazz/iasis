@@ -45,17 +45,22 @@ enum MenuBarStatus: String, CaseIterable {
             context.fillEllipse(in: badge.insetBy(dx: -1, dy: -1))
             context.setBlendMode(.normal)
             if self == .busy {
-                context.setLineWidth(1.5)
-                context.setLineCap(.round)
-                context.setStrokeColor(NSColor.black.cgColor)
-                context.addArc(
-                    center: CGPoint(x: badge.midX, y: badge.midY),
-                    radius: 3.5,
-                    startAngle: 0,
-                    endAngle: 1.5 * .pi,
-                    clockwise: false
+                guard let mark = NSImage(systemSymbolName: ActivityMark.turning, accessibilityDescription: nil)?
+                    .withSymbolConfiguration(.init(pointSize: 8, weight: .bold))
+                else { return true }
+                mark.draw(
+                    in: CGRect(
+                        x: badge.midX - mark.size.width / 2,
+                        y: badge.midY - mark.size.height / 2,
+                        width: mark.size.width,
+                        height: mark.size.height
+                    ),
+                    from: .zero,
+                    operation: .sourceOver,
+                    fraction: 1,
+                    respectFlipped: true,
+                    hints: nil
                 )
-                context.strokePath()
             } else {
                 context.setBlendMode(.sourceAtop)
                 context.setFillColor(NSColor.labelColor.cgColor)
