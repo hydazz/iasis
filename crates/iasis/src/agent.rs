@@ -293,15 +293,20 @@ impl Agent {
     }
 
     fn command(&self, serial: &str, port: u8, action: PortAction) -> Result<()> {
-        let (board, _) = self.board(serial)?;
+        let (board, link) = self.board(serial)?;
         let port = Port::try_from(port)
             .ok()
             .context("ports are numbered 1 to 5")?;
+        let mapping = matches!(action, PortAction::MapDebugUsb | PortAction::UnmapDebugUsb);
+        // A client's own Debug USB command settles the attachment, so the
+        // agent leaves it as the client set it.
+        if mapping && let Some(status) = link.status() {
+            link.presenting(port, status.ports[port.index()].generation);
+        }
         let result = board.control(|board| board.command(port, action))?;
         // The target's reply shows its pins once it has mapped them.
         ensure!(
-            !matches!(action, PortAction::MapDebugUsb | PortAction::UnmapDebugUsb)
-                || result == CommandResult::Complete,
+            !mapping || result == CommandResult::Complete,
             "the target did not confirm its Debug USB mapping"
         );
         Ok(())
@@ -534,6 +539,44 @@ impl Agent {
         result
     }
 
+    /// Ask each silent target that is reached only through Debug USB to show
+    /// itself there, once per attachment, so it is named like any other.
+    fn present(&self) {
+        loop {
+            let seen = self.changes.count();
+            let boards: Vec<(u64, Arc<Attendance>)> = self
+                .boards
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(serial, board)| (*serial, board.clone()))
+                .collect();
+            for (serial, board) in boards {
+                let Some(link) = board.link.lock().unwrap().clone() else {
+                    continue;
+                };
+                if !board.present.load(Ordering::Relaxed) || !link.alive() {
+                    continue;
+                }
+                for (port, generation) in link.unpresented() {
+                    link.presenting(port, generation);
+                    let number = port.number();
+                    match board.control(|board| {
+                        board.command_for_generation(port, generation, PortAction::MapDebugUsb)
+                    }) {
+                        Ok(result) => println!(
+                            "Board {serial:016x}: port {number} Debug USB for its silent target: {result:?}"
+                        ),
+                        Err(error) => {
+                            eprintln!("Board {serial:016x}: port {number} Debug USB: {error:#}")
+                        }
+                    }
+                }
+            }
+            self.changes.wait(seen, None);
+        }
+    }
+
     /// Attend boards as they come and go. Returns only on a failure that
     /// leaves the agent without its socket.
     pub fn run(self: &Arc<Self>, options: &Options) -> Result<()> {
@@ -559,6 +602,12 @@ impl Agent {
                             .collect()
                     })
                 })?;
+        }
+        {
+            let agent = self.clone();
+            thread::Builder::new()
+                .name("debug-usb".into())
+                .spawn(move || agent.present())?;
         }
         let mut attendants: BTreeMap<u64, Attendant> = BTreeMap::new();
         let mut errors: BTreeMap<u64, String> = BTreeMap::new();
