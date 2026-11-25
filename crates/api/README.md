@@ -116,6 +116,9 @@ The board drops a job when its target leaves, which a restored target does by re
 | `models`                 | Names of the models it restores                        |
 | `ready`                  | The archive is in the store                            |
 | `error`                  | Why it could not be fetched, or null                   |
+| `path`                   | The archive's file once it is in the store, or null    |
+| `fetched`                | It came from Apple's catalog rather than from a file   |
+| `in_use`                 | A restore is reading it, so `remove` refuses it        |
 
 Archives for different models share version and build numbers, so only the `id` names one.
 
