@@ -347,18 +347,21 @@ private struct BoardSettings: View {
     let board: AgentState.Board
     let model: AgentModel
     @State private var draft: String?
+    @FocusState private var naming: Bool
     @State private var lightLevel = LightLevelEdit()
     @State private var writing: Task<Void, Never>?
 
     var body: some View {
-        LabeledContent("Name") {
-            TextField("Board Name", text: Binding(get: { draft ?? board.name }, set: { draft = $0 }), prompt: Text("Iasis"))
-                .labelsHidden()
-                .onSubmit(saveName)
-                .help("Up to 16 printable ASCII characters. An empty name resets the board name.")
-            Button("Save", action: saveName)
-                .disabled(draft == nil || draft == board.name)
-        }
+        TextField("Name", text: Binding(get: { draft ?? board.name }, set: { draft = $0 }), prompt: Text("Iasis"))
+            .focused($naming)
+            .onSubmit(saveName)
+            .onChange(of: naming) { _, focused in
+                if !focused {
+                    saveName()
+                }
+            }
+            .onDisappear(perform: saveName)
+            .help("Up to 16 printable ASCII characters. An empty name resets the board name.")
         Slider(
             value: Binding(get: { lightLevel.value(reading: board.brightness) }, set: { lightLevel.drag(to: $0) }),
             in: 10 ... 100
