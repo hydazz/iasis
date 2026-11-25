@@ -56,6 +56,12 @@
               ResetPeriodInDays="1" />
         </ServiceInstall>
         <ServiceControl Name="iasisd" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+        <!-- The agent's event source. Windows' .NET message file shows each
+             event's text as it is. -->
+        <RegistryKey Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\EventLog\Application\Iasis">
+          <RegistryValue Name="EventMessageFile" Type="expandable" Value="%SystemRoot%\Microsoft.NET\Framework64\v4.0.30319\EventLogMessages.dll" />
+          <RegistryValue Name="TypesSupported" Type="integer" Value="7" />
+        </RegistryKey>
       </Component>
       <Component Id="DataFolder" Directory="DATAFOLDER" Guid="6B19DAF0-CE97-4C69-BC6A-53E3D67E0ABB">
         <CreateFolder>
