@@ -39,16 +39,16 @@ final class AgentModel {
             while !Task.isCancelled {
                 do {
                     for try await state in agent.states() {
-                        // An app put in place of another finds that app's
-                        // agent still running. One restart: a difference it
-                        // cannot fix would otherwise repeat it forever.
-                        if state.version != Self.version, let restartAgent, !restartedAgent {
-                            restartedAgent = true
-                            Log.agent.notice("Restarting agent \(state.version, privacy: .public) for app \(Self.version, privacy: .public)")
-                            await restartAgent()
+                        if state.version != Self.version, await replaceAgent(running: state.version) {
                             break
                         }
                         publish(state)
+                    }
+                } catch is DecodingError {
+                    // A rebuild keeps the version, so a state this app cannot
+                    // read is the other sign of another build's agent.
+                    if await !replaceAgent(running: "of another build") {
+                        Log.agent.error("Cannot read the agent's state")
                     }
                 } catch {
                     Log.agent.debug("Agent unavailable: \(error.localizedDescription)")
@@ -57,6 +57,19 @@ final class AgentModel {
                 try? await Task.sleep(for: .seconds(2))
             }
         }
+    }
+
+    /// An app put in place of another finds that app's agent still running.
+    /// Restart it once: a difference a restart cannot fix would otherwise
+    /// repeat it forever.
+    private func replaceAgent(running version: String) async -> Bool {
+        guard let restartAgent, !restartedAgent else {
+            return false
+        }
+        restartedAgent = true
+        Log.agent.notice("Restarting agent \(version, privacy: .public) for app \(Self.version, privacy: .public)")
+        await restartAgent()
+        return true
     }
 
     private func publish(_ next: AgentState?) {

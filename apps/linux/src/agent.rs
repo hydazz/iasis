@@ -26,8 +26,11 @@ pub enum Event {
     State(Box<State>),
     /// No agent is running.
     Absent,
-    /// The agent will not serve this user, or could not be read.
+    /// The agent will not serve this user.
     Refused(String),
+    /// The agent's state is not in the contract this program reads: the
+    /// agent is another build.
+    Unreadable,
 }
 
 /// Follow the agent's state on a thread of its own. A lost agent is looked
@@ -65,7 +68,10 @@ fn watch(sender: &async_channel::Sender<Event>) -> Result<(), Event> {
             Ok(Reply::State(state)) => Event::State(state),
             Ok(Reply::Error(message)) => return Err(Event::Refused(message)),
             Ok(_) => continue,
-            Err(error) => return Err(Event::Refused(format!("unreadable state: {error}"))),
+            Err(error) => {
+                eprintln!("Unreadable agent state: {error}");
+                return Err(Event::Unreadable);
+            }
         };
         if sender.send_blocking(event).is_err() {
             return Ok(());
