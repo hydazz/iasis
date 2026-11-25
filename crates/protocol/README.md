@@ -64,7 +64,7 @@ Send a `PortCommand` with a nonzero request ID. USB acceptance queues the comman
 | Debug USB complete        | The target's reply shows Debug USB on its primary USB 2 pair, or off its pins               |
 | Bootloader accepted       | ROM reboot queued; use picotool to detect the updater                                       |
 
-`SettingsRequest` changes one field in `Status.settings`. A name holds up to 16 printable ASCII characters, with spaces allowed inside. An empty name clears it. Brightness ranges from 10 to 100 percent and defaults to 50. The board acknowledges a change after saving it to flash. `Status.settings_busy` means a target operation or an erase arm is in progress. Retry a change once it finishes. A full settings store rejects changes and sets `Status.settings_full`. Unplug the targets and retry once this flag clears.
+`SettingsRequest` changes one field in `Status.settings`. A name holds up to 16 printable ASCII characters, with spaces allowed inside. An empty name clears it. Brightness ranges from 10 to 100 percent and defaults to 50. The board acknowledges a change after saving it to flash. A full settings store rejects changes and sets `Status.settings_full`. Unplug the targets and retry once this flag clears.
 
 ## Host session and reports
 

@@ -66,8 +66,6 @@ pub enum Error {
     CommandTimeout,
     #[error("{0}")]
     InvalidSetting(&'static str),
-    #[error("board settings are locked while a port action or restore is in progress")]
-    SettingsBusy,
     #[error("settings storage is full; unplug targets briefly, then retry")]
     SettingsFull,
     #[error("IasisOS on this board is from another build; update it with `iasis update`")]
@@ -410,14 +408,9 @@ impl Board {
         if matches!(
             result,
             Err(Error::Transfer(nusb::transfer::TransferError::Stall))
-        ) && let Ok(status) = self.status()
+        ) && self.status().is_ok_and(|status| status.settings_full)
         {
-            if status.settings_busy {
-                return Err(Error::SettingsBusy);
-            }
-            if status.settings_full {
-                return Err(Error::SettingsFull);
-            }
+            return Err(Error::SettingsFull);
         }
         result
     }
