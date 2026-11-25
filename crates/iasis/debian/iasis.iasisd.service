@@ -10,6 +10,7 @@ Group=iasis
 # Its USB devices belong to this group, which only the agent's user is in.
 SupplementaryGroups=iasis-usb
 StateDirectory=iasis
+StateDirectoryMode=0700
 CacheDirectory=iasis
 RuntimeDirectory=iasis
 # Any local user reaches the socket; the agent decides whom it serves.

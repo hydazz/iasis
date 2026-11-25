@@ -102,6 +102,15 @@
     "enabled": true
   },
   {
+    "op": "import_supervision",
+    "pkcs12": "MIIJ4QIBAzCCCZcGCSqGSIb3DQEHAaCCCYgEggmEMIIJgDCCBDcGCSqGSIb3DQEH",
+    "password": "correct horse"
+  },
+  {
+    "op": "export_supervision",
+    "password": "correct horse"
+  },
+  {
     "op": "download",
     "model": "MacBookAir10,1",
     "build": "26B131"
