@@ -3,7 +3,7 @@
 use std::{
     collections::HashSet,
     fs::{self, File},
-    io::{self, BufRead, BufReader, Read, Write},
+    io::{self, BufRead, BufReader, Read},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{Arc, Mutex},
@@ -321,7 +321,6 @@ pub struct RestoreStatus {
     pub progress: Progress,
     pub message: String,
     pub exit_code: Option<i32>,
-    pub directory: PathBuf,
 }
 
 /// Restores and revives targets in DFU, over ordinary USB or Apple Debug USB,
@@ -334,7 +333,8 @@ pub struct RestoreStatus {
 pub struct RestoreEngine {
     /// The executable the workers run.
     program: PathBuf,
-    logs_root: PathBuf,
+    /// Where each worker has a directory of its own while it runs.
+    scratch: PathBuf,
     supervision: Arc<Supervision>,
     active: Arc<Mutex<HashSet<u64>>>,
     /// Advances whenever a job's status changes.
@@ -343,7 +343,7 @@ pub struct RestoreEngine {
 
 impl RestoreEngine {
     pub fn for_host(
-        logs_root: impl Into<PathBuf>,
+        scratch: impl Into<PathBuf>,
         supervision: Arc<Supervision>,
         changes: Arc<Watch>,
     ) -> Self {
@@ -351,14 +351,14 @@ impl RestoreEngine {
             supervision,
             changes,
             // An executable that cannot name itself fails each worker's start.
-            ..Self::with(crate::native::program().unwrap_or_default(), logs_root)
+            ..Self::with(crate::native::program().unwrap_or_default(), scratch)
         }
     }
 
-    fn with(program: PathBuf, logs_root: impl Into<PathBuf>) -> Self {
+    fn with(program: PathBuf, scratch: impl Into<PathBuf>) -> Self {
         Self {
             program,
-            logs_root: logs_root.into(),
+            scratch: scratch.into(),
             supervision: Arc::default(),
             active: Arc::default(),
             changes: Arc::default(),
@@ -431,19 +431,19 @@ impl RestoreEngine {
                 "RestoreKit does not restore a target in {mode:?}"
             );
         }
-        fs::create_dir_all(&self.logs_root).context("creating restore log directory")?;
-        let logs_root = self.logs_root.canonicalize()?;
+        fs::create_dir_all(&self.scratch).context("creating the restore scratch directory")?;
+        let scratch = self.scratch.canonicalize()?;
         let mut active = self.active.lock().unwrap();
         ensure!(
             selected.is_disjoint(&active),
             "a selected ECID already has an active restore"
         );
-        // Allocate every log and cache before launching the first target.
+        // Make every worker's directory before launching the first target.
         let mut workers = Vec::new();
         for &(ipsw, ecid, _) in targets {
             let directory = tempfile::Builder::new()
                 .prefix(&format!("{ecid:016x}-"))
-                .tempdir_in(&logs_root)
+                .tempdir_in(&scratch)
                 .context("creating restore worker directory")?;
             let mut command =
                 crate::native::worker_command(&self.program, operation, ecid, ipsw.path());
@@ -452,14 +452,12 @@ impl RestoreEngine {
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
-            let stdout = File::create(directory.path().join("stdout.log"))?;
-            let stderr = File::create(directory.path().join("stderr.log"))?;
-            workers.push((command, ipsw.clone(), ecid, directory, stdout, stderr));
+            workers.push((command, ipsw.clone(), ecid, directory));
         }
         active.extend(selected);
         drop(active);
         let mut statuses = Vec::new();
-        for (command, image, ecid, directory, stdout, stderr) in workers {
+        for (command, image, ecid, directory) in workers {
             let status = Arc::new(Mutex::new(RestoreStatus {
                 operation,
                 ecid,
@@ -468,7 +466,6 @@ impl RestoreEngine {
                 progress: Progress::starting(),
                 message: String::new(),
                 exit_code: None,
-                directory: directory.keep(),
             }));
             let worker_status = Arc::clone(&status);
             let active = Arc::clone(&self.active);
@@ -477,14 +474,17 @@ impl RestoreEngine {
                 .name(format!("restore-{ecid:x}"))
                 .spawn(move || {
                     let _awake = crate::awake::hold(&format!("{operation:?} of {ecid:016x}"));
-                    let result = image.check_unchanged().and_then(|()| {
-                        run_worker(command, &worker_status, stdout, stderr, &changes)
-                    });
+                    let result = image
+                        .check_unchanged()
+                        .and_then(|()| run_worker(command, &worker_status, &changes));
                     if let Err(error) = result {
                         let mut status = worker_status.lock().unwrap();
                         status.state = RestoreState::Failed;
                         status.message = format!("{error:#}");
                     }
+                    log::info!("{ecid:016x}: {}", worker_status.lock().unwrap().message);
+                    // The worker's scratch is of no use once its job ends.
+                    drop(directory);
                     active.lock().unwrap().remove(&ecid);
                     changes.changed();
                 });
@@ -522,8 +522,6 @@ impl RestoreBatch {
 fn run_worker(
     mut command: Command,
     status: &Arc<Mutex<RestoreStatus>>,
-    stdout_log: File,
-    stderr_log: File,
     changes: &Watch,
 ) -> Result<()> {
     let mut child = command
@@ -538,8 +536,8 @@ fn run_worker(
     let stdout = child.stdout.take().context("worker stdout missing")?;
     let stderr = child.stderr.take().context("worker stderr missing")?;
     let (outcome, stdout_result, stderr_result) = thread::scope(|scope| {
-        let out = scope.spawn(|| drain(stdout, stdout_log, status, true, changes));
-        let err = scope.spawn(|| drain(stderr, stderr_log, status, false, changes));
+        let out = scope.spawn(|| drain(stdout, status, true, changes));
+        let err = scope.spawn(|| drain(stderr, status, false, changes));
         let outcome = child.wait();
         (outcome, out.join(), err.join())
     });
@@ -573,31 +571,29 @@ fn run_worker(
     Ok(())
 }
 
-/// Drain both streams regardless of log-write errors so a full pipe cannot
-/// deadlock a restore. Preserve raw bytes; interpret only complete output lines.
+/// Drain a worker's stream to its end, so a full pipe cannot stall a
+/// restore. Stdout carries the worker's records; each line on stderr goes
+/// to the log under the target's ECID, and the last is the restore's message.
 fn drain(
     input: impl Read,
-    mut log: File,
     status: &Mutex<RestoreStatus>,
     stdout: bool,
     changes: &Watch,
 ) -> io::Result<bool> {
+    let ecid = status.lock().unwrap().ecid;
     let mut input = BufReader::new(input);
     let mut line = Vec::new();
     let mut reported = false;
-    let mut write_error = None;
     loop {
         line.clear();
         if input.read_until(b'\n', &mut line)? == 0 {
             break;
         }
-        if write_error.is_none()
-            && let Err(error) = log.write_all(&line)
-        {
-            write_error = Some(error);
-        }
         let text = String::from_utf8_lossy(&line);
         let text = text.trim();
+        if !stdout && !text.is_empty() {
+            log::info!("{ecid:016x}: {text}");
+        }
         let mut status = status.lock().unwrap();
         let before = (status.progress.clone(), status.message.clone());
         if stdout {
@@ -614,17 +610,16 @@ fn drain(
             changes.changed();
         }
     }
-    if let Some(error) = write_error {
-        return Err(error);
-    }
-    log.flush()?;
     Ok(reported)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Duration, Instant};
+    use std::{
+        io::Write,
+        time::{Duration, Instant},
+    };
     use zip::{ZipWriter, write::SimpleFileOptions};
 
     const MANIFEST: &str = r#"<?xml version="1.0"?><plist version="1.0"><dict>
@@ -642,8 +637,21 @@ mod tests {
         </dict></plist>"#;
 
     /// An engine with this program in place of the executable's own worker.
-    fn native(program: impl Into<PathBuf>, logs: impl Into<PathBuf>) -> RestoreEngine {
-        RestoreEngine::with(program.into(), logs)
+    fn native(program: impl Into<PathBuf>, scratch: impl Into<PathBuf>) -> RestoreEngine {
+        RestoreEngine::with(program.into(), scratch)
+    }
+
+    /// Wait for every worker's directory to go once its job has ended.
+    fn cleared(scratch: &Path) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while fs::read_dir(scratch)
+            .unwrap()
+            .flatten()
+            .any(|entry| entry.path().is_dir())
+        {
+            assert!(Instant::now() < deadline, "a worker's directory stayed");
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     fn archive(path: &Path, manifest: Option<&str>) {
@@ -876,9 +884,10 @@ mod tests {
         let ipsw = PreparedIpsw::open(&path).unwrap();
         let program = executable(
             temp.path(),
-            r#"printf '%s\n' "$2" > operation; echo IASIS_RESTORE_COMPLETE"#,
+            r#"printf '%s\n' "$2" > "../operation-$3"; echo IASIS_RESTORE_COMPLETE"#,
         );
-        let engine = native(program, temp.path().join("logs"));
+        let scratch = temp.path().join("scratch");
+        let engine = native(program, &scratch);
         for (mode, restores) in [
             (AppleMode::Dfu, true),
             (AppleMode::KisDfu, true),
@@ -909,9 +918,10 @@ mod tests {
             );
             assert_eq!(jobs[0].operation, operation);
             assert_eq!(
-                fs::read_to_string(jobs[0].directory.join("operation")).unwrap(),
+                fs::read_to_string(scratch.join(format!("operation-{ecid:016x}"))).unwrap(),
                 format!("{verb}\n")
             );
+            cleared(&scratch);
         }
     }
 
@@ -926,9 +936,12 @@ mod tests {
         };
         let first = prepare("one.ipsw");
         let changed = prepare("two.ipsw");
-        let program = executable(temp.path(), r#"printf '%s\n' "$3" "$4" > selection"#);
-        let logs = temp.path().join("logs");
-        let engine = native(program, &logs);
+        let program = executable(
+            temp.path(),
+            r#"printf '%s\n' "$3" "$4" > "../selection-$3""#,
+        );
+        let scratch = temp.path().join("scratch");
+        let engine = native(program, &scratch);
         fs::remove_file(changed.path()).unwrap();
         assert!(
             engine
@@ -938,14 +951,14 @@ mod tests {
                 )
                 .is_err()
         );
-        assert!(!logs.exists());
+        assert!(!scratch.exists());
         let second = prepare("two.ipsw");
         let targets = [(&first, 1, AppleMode::Dfu), (&second, 2, AppleMode::Dfu)];
         let statuses = finish(&engine.start_selected(&targets, Operation::Restore).unwrap());
         for ((ipsw, ecid, _), status) in targets.iter().zip(statuses) {
             assert_eq!(status.exit_code, Some(0), "{}", status.message);
             assert_eq!(
-                fs::read_to_string(status.directory.join("selection")).unwrap(),
+                fs::read_to_string(scratch.join(format!("selection-{ecid:016x}"))).unwrap(),
                 format!("{ecid:016x}\n{}\n", ipsw.path().display())
             );
         }
@@ -978,13 +991,13 @@ printf '\nworker stderr drained\n' >&2
 printf 'IASIS_RESTORE_COMPLETE\n'
 "#,
         );
-        let engine = native(program, temp.path().join("logs"));
+        let scratch = temp.path().join("scratch");
+        let engine = native(program, &scratch);
         let first = engine.start_erase(&ipsw, &[1]).unwrap();
         assert!(engine.start_erase(&ipsw, &[1]).is_err());
         assert!(engine.start_erase(&ipsw, &[2, 3, 4, 5, 6, 7]).is_err());
         let rest = engine.start_erase(&ipsw, &[2, 3, 4, 5]).unwrap();
         let statuses: Vec<_> = finish(&first).into_iter().chain(finish(&rest)).collect();
-        let mut directories = HashSet::new();
         for status in statuses {
             assert_eq!(
                 status.state,
@@ -998,14 +1011,8 @@ printf 'IASIS_RESTORE_COMPLETE\n'
                 ("Complete", 100)
             );
             assert_eq!(status.progress.step, status.progress.steps.len());
-            assert!(directories.insert(status.directory.clone()));
-            assert!(
-                fs::metadata(status.directory.join("stderr.log"))
-                    .unwrap()
-                    .len()
-                    > 131072
-            );
         }
+        cleared(&scratch);
     }
 
     #[test]
@@ -1038,16 +1045,8 @@ esac
                 progress: Progress::starting(),
                 message: String::new(),
                 exit_code: None,
-                directory: temp.path().into(),
             }));
-            run_worker(
-                cmd,
-                &status,
-                tempfile::tempfile().unwrap(),
-                tempfile::tempfile().unwrap(),
-                &Watch::default(),
-            )
-            .unwrap();
+            run_worker(cmd, &status, &Watch::default()).unwrap();
             let status = status.lock().unwrap();
             assert_eq!(status.state, expected);
             assert_eq!(status.progress.percent, percent);
@@ -1070,7 +1069,7 @@ case "$3" in
 esac
 "#,
         );
-        let engine = native(program, temp.path().join("logs"));
+        let engine = native(program, temp.path().join("scratch"));
         let statuses = finish(&engine.start_erase(&ipsw, &[1, 2]).unwrap());
         assert_eq!(statuses[0].state, RestoreState::Unconfirmed);
         assert_eq!(statuses[0].exit_code, Some(0));
@@ -1085,7 +1084,7 @@ esac
         fs::write(&plain, "").unwrap();
         // A worker that cannot start fails its own job.
         for program in [temp.path().join("missing"), plain] {
-            let engine = native(program, temp.path().join("logs"));
+            let engine = native(program, temp.path().join("scratch"));
             let status = finish(&engine.start_erase(&ipsw, &[1]).unwrap());
             assert_eq!(status[0].state, RestoreState::Failed);
             assert_eq!(status[0].pid, None);

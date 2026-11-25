@@ -20,6 +20,7 @@ iasis-protocol.workspace = true
 iasis-pd.workspace = true
 indicatif = { version = "0.18", default-features = false, features = ["unicode-width"] }
 keepawake = "0.6.1"
+log = { version = "0.4", features = ["std"] }
 nusb = "0.2.9"
 plist = "1.10.3"
 serde = { workspace = true, features = ["std"] }
@@ -37,6 +38,7 @@ pollster = "0.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
+oslog = { version = "0.2", default-features = false }
 io-kit-sys = "0.5"
 system-configuration = "0.8"
 

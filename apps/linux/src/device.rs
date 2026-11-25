@@ -2,8 +2,6 @@
 //! buttons and menu items take GNOME's header capitalisation; status lines
 //! and descriptions take sentence case.
 
-use std::path::PathBuf;
-
 use iasis_api::{
     AppleMode, BoardView, Offer, Operation, Planned, Port, PortPower, PortView, PowerSource,
     Release, Request, RestorePhase, Selection, SharingPort, SignalProgress, State, Target, UsbLink,
@@ -226,7 +224,6 @@ impl Device {
             let mut status =
                 OperationStatus::new(&ending.text, operation_icon(result.operation), ending.mark);
             status.detail = Some(result.message.clone());
-            status.log_directory = result.log_directory.clone();
             return Some(status);
         }
         port.job.map(|job| {
@@ -406,7 +403,6 @@ pub struct OperationStatus {
     /// What is happening when no step says it, or how the operation ended.
     pub detail: Option<String>,
     pub steps: Vec<Step>,
-    pub log_directory: Option<PathBuf>,
 }
 
 impl OperationStatus {
@@ -417,7 +413,6 @@ impl OperationStatus {
             mark,
             detail: None,
             steps: Vec::new(),
-            log_directory: None,
         }
     }
 }

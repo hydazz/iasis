@@ -359,7 +359,6 @@ mod tests {
             attachment: Some((9, 3)),
             ending: Ending {
                 operation: Operation::Restore,
-                log_directory: None,
                 ecid: ecid.clone(),
                 phase: RestorePhase::Failed,
                 message: "the device declined to trust this computer".into(),

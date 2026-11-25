@@ -237,7 +237,7 @@ pub(super) fn run(link: Link, network: Ipv4Addr, dns: Ipv4Addr) -> Result<()> {
                     return Ok(());
                 }
                 result => {
-                    eprintln!("USB Ethernet write failed: {result:?}");
+                    log::error!("USB Ethernet write failed: {result:?}");
                     std::process::exit(1);
                 }
             }

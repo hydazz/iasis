@@ -122,9 +122,6 @@ pub fn update(
     if stage.is_none() && !job.message.is_empty() {
         write!(message, "  {}", job.message).unwrap();
     }
-    if job.state.is_terminal() {
-        write!(message, "  Logs {}", job.directory.display()).unwrap();
-    }
     let message = message.replace(char::is_control, " ");
     if row.message() == message {
         return;
