@@ -8,72 +8,39 @@ use gtk::{gio, glib};
 
 use crate::device::{self, Device, Mark, OperationStatus, StepState};
 
-/// What the pane shows.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Shown {
-    Nothing,
-    Many(usize),
-    Device(Box<Device>),
-}
-
 pub struct Inspector {
     pub widget: adw::ToolbarView,
-    stack: gtk::Stack,
-    empty: adw::StatusPage,
     page: adw::PreferencesPage,
     groups: RefCell<Vec<adw::PreferencesGroup>>,
-    shown: RefCell<Option<Shown>>,
+    shown: RefCell<Option<Device>>,
 }
 
 impl Inspector {
     pub fn new() -> Self {
-        let empty = adw::StatusPage::builder()
-            .icon_name("media-removable-symbolic")
-            .title("No Selection")
-            .css_classes(["compact"])
-            .build();
         let page = adw::PreferencesPage::new();
-        let stack = gtk::Stack::new();
-        stack.add_named(&empty, Some("empty"));
-        stack.add_named(&page, Some("device"));
         let widget = adw::ToolbarView::new();
         widget.add_top_bar(&adw::HeaderBar::builder().show_title(false).build());
-        widget.set_content(Some(&stack));
+        widget.set_content(Some(&page));
         Self {
             widget,
-            stack,
-            empty,
             page,
             groups: RefCell::default(),
             shown: RefCell::default(),
         }
     }
 
-    pub fn show(&self, shown: Shown) {
-        if self.shown.borrow().as_ref() == Some(&shown) {
+    pub fn show(&self, device: &Device) {
+        if self.shown.borrow().as_ref() == Some(device) {
             return;
         }
         for group in self.groups.take() {
             self.page.remove(&group);
         }
-        match &shown {
-            Shown::Nothing => {
-                self.empty.set_title("No Selection");
-                self.stack.set_visible_child_name("empty");
-            }
-            Shown::Many(count) => {
-                self.empty.set_title(&format!("{count} Devices Selected"));
-                self.stack.set_visible_child_name("empty");
-            }
-            Shown::Device(device) => {
-                for group in groups(device) {
-                    self.page.add(&group);
-                    self.groups.borrow_mut().push(group);
-                }
-                self.stack.set_visible_child_name("device");
-            }
+        for group in groups(device) {
+            self.page.add(&group);
+            self.groups.borrow_mut().push(group);
         }
-        *self.shown.borrow_mut() = Some(shown);
+        *self.shown.borrow_mut() = Some(device.clone());
     }
 }
 
