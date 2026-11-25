@@ -147,7 +147,7 @@ pub struct PortDevices {
 impl PortDevices {
     /// The connector's target: its one device when that is directly on the
     /// connector, or the target an Apple Debug USB device there carries.
-    /// macOS presents what a target sends through Debug USB as devices one
+    /// Hosts present what a target sends through Debug USB as devices one
     /// tier below it, and a restore OS appears there and directly on the
     /// SuperSpeed link at once, with one serial. The direct one is preferred.
     pub fn target(&self) -> Option<&UsbDevice> {
