@@ -21,5 +21,7 @@ run = "dotnet run --project Iasis -c Release"
 description = "MSI"
 run = [
   "dotnet publish Iasis -c Release -p:Version={{ vars.version }} -o build/app",
-  "wix build Installer/Package.wxs -arch x64 -acceptEula wix7 -d Version={{ vars.version }} -d AppDir={{ config_root }}/build/app -d ToolsDir={{ config_root }}/../../target/x86_64-pc-windows-gnu/release -o build/Iasis-{{ vars.version }}-x64.msi",
+  # The extension's version is wix's.
+  "wix extension add -acceptEula wix7 -g WixToolset.Util.wixext/7.0.1",
+  "wix build Installer/Package.wxs -arch x64 -acceptEula wix7 -ext WixToolset.Util.wixext -d Version={{ vars.version }} -d AppDir={{ config_root }}/build/app -d ToolsDir={{ config_root }}/../../target/x86_64-pc-windows-gnu/release -o build/Iasis-{{ vars.version }}-x64.msi",
 ]
