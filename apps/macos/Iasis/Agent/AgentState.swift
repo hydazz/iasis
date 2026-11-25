@@ -252,7 +252,6 @@ nonisolated struct AgentState: Codable, Equatable {
         var ecid: String?
         var phase: RestorePhase
         var message: String
-        var logDirectory: String?
     }
 
     /// The store's archives: those it holds and those it is still to fetch.

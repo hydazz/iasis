@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use anyhow::Result;
 use clap::Parser;
 use iasis::{
@@ -17,24 +15,20 @@ struct Arguments {
     /// Attend one board instead of every board
     #[arg(long, value_parser = parse_serial)]
     serial: Option<u64>,
-    /// Per-device worker logs and scratch directories; the cache directory
-    /// by default
-    #[arg(long)]
-    logs: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
     iasis::native::run_if_worker();
+    iasis::logging::system();
     let arguments = Arguments::parse();
     let options = Options {
         serial: arguments.serial,
-        logs: arguments.logs,
     };
     #[cfg(windows)]
     let Some(options) = service::run(options)? else {
         return Ok(());
     };
-    let agent = Agent::new(&options)?;
+    let agent = Agent::new()?;
     // A stopped agent gives its boards up rather than leaving each to wait
     // out the session lease before the next host.
     let releasing = agent.clone();
@@ -129,7 +123,7 @@ mod service {
         let Some(options) = OPTIONS.lock().unwrap().take() else {
             return;
         };
-        let agent = match Agent::new(&options) {
+        let agent = match Agent::new() {
             Ok(agent) => agent,
             Err(error) => fail(&error),
         };

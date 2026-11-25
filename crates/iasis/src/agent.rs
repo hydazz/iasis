@@ -7,7 +7,6 @@
 use std::{
     collections::BTreeMap,
     io::Read,
-    path::PathBuf,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -50,8 +49,6 @@ const UF2_BYTES: u64 = 4 << 20;
 pub struct Options {
     /// Attend one board instead of every board.
     pub serial: Option<u64>,
-    /// Worker logs and scratch directories; the cache directory by default.
-    pub logs: Option<PathBuf>,
 }
 
 /// A board the agent has seen. Its jobs outlive each session with it.
@@ -175,12 +172,8 @@ fn submit(
 }
 
 impl Agent {
-    pub fn new(options: &Options) -> Result<Arc<Self>> {
+    pub fn new() -> Result<Arc<Self>> {
         let home = Home::locate()?;
-        let logs = options
-            .logs
-            .clone()
-            .unwrap_or_else(|| home.cache.join("restores"));
         let changes = Arc::<Watch>::default();
         let supervision = Arc::new(crate::supervision::Supervision::open(&home.supervision()));
         Ok(Arc::new(Self {
@@ -190,7 +183,11 @@ impl Agent {
                 changes.clone(),
             )?,
             models: Arc::new(Models::open(home.cache.join("device-models.json"))),
-            engine: RestoreEngine::for_host(logs, supervision.clone(), changes.clone()),
+            engine: RestoreEngine::for_host(
+                home.cache.join("restores"),
+                supervision.clone(),
+                changes.clone(),
+            ),
             supervision,
             boards: Mutex::default(),
             sharing: crate::sharing::Sharing::open(
@@ -410,7 +407,7 @@ impl Agent {
             ensure!(!restoring, "the board is restoring");
         }
         let [major, minor, patch] = update::write(serial, &image, &self.inventory)?;
-        println!("Board {serial:016x}: IasisOS {major}.{minor}.{patch} written");
+        log::info!("Board {serial:016x}: IasisOS {major}.{minor}.{patch} written");
         Ok(())
     }
 
@@ -516,7 +513,7 @@ impl Agent {
             &self.engine,
             self.inventory.clone(),
         )?);
-        println!("Board {:016x}: attending", link.board().info().serial);
+        log::info!("Board {:016x}: attending", link.board().info().serial);
         *board.device.lock().unwrap() = Some(device.clone());
         *board.link.lock().unwrap() = Some(link.clone());
         // Whatever kept an earlier attempt from the board is over.
@@ -567,11 +564,11 @@ impl Agent {
                     match board.control(|board| {
                         board.command_for_generation(port, generation, PortAction::MapDebugUsb)
                     }) {
-                        Ok(result) => println!(
+                        Ok(result) => log::info!(
                             "Board {serial:016x}: port {number} Debug USB for its silent target: {result:?}"
                         ),
                         Err(error) => {
-                            eprintln!("Board {serial:016x}: port {number} Debug USB: {error:#}")
+                            log::warn!("Board {serial:016x}: port {number} Debug USB: {error:#}")
                         }
                     }
                 }
@@ -649,7 +646,7 @@ impl Agent {
                 if errors.get(&serial) != Some(&message)
                     || started.elapsed() > Duration::from_secs(5)
                 {
-                    eprintln!("Board {serial:016x}: {message}");
+                    log::warn!("Board {serial:016x}: {message}");
                 }
                 if let Some(board) = self.boards.lock().unwrap().get(&serial) {
                     *board.notice.lock().unwrap() = Some(message.clone());
@@ -1153,7 +1150,6 @@ mod socket {
             ecid: Some("000000000000002a".into()),
             phase: RestorePhase::Failed,
             message: "Restore worker lost the device".into(),
-            log_directory: None,
         };
         let ended = |ending| batch::Ended {
             attachment: None,

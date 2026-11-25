@@ -119,8 +119,7 @@ struct Device: Identifiable, Equatable {
                 title: ending.text,
                 symbol: result.operation.symbol,
                 mark: ending.mark,
-                detail: result.message,
-                logDirectory: result.logDirectory
+                detail: result.message
             )
         }
         if let job = port.job {
@@ -152,7 +151,6 @@ struct OperationStatus: Equatable {
     /// What is happening when no step says it, or how the operation ended.
     var detail: String?
     var steps: [Step] = []
-    var logDirectory: String?
 }
 
 /// What a port is doing, in words and as one mark.
