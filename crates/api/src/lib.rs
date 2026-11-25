@@ -76,6 +76,17 @@ pub enum Request {
     Sharing {
         enabled: bool,
     },
+    /// Replace the host's supervision identity with the one in this PKCS #12
+    /// archive, in base64, protected by `password`.
+    ImportSupervision {
+        pkcs12: String,
+        password: String,
+    },
+    /// Reply with the host's supervision identity as a PKCS #12 archive
+    /// protected by `password`.
+    ExportSupervision {
+        password: String,
+    },
     /// Fetch a release Apple signs for a model into the store: the newest,
     /// or the one of this `build`.
     Download {
@@ -122,6 +133,8 @@ pub enum Reply {
     Catalog(Vec<CatalogModel>),
     Releases(Vec<Release>),
     Plan(Vec<Planned>),
+    /// The supervision identity as a PKCS #12 archive, in base64.
+    Supervision(String),
 }
 
 /// The targets selected on one board, in the session the client saw.
@@ -216,6 +229,7 @@ pub struct State {
     pub submitted: Vec<Option<Ending>>,
     pub images: Images,
     pub sharing: Sharing,
+    pub supervision: Supervision,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -477,6 +491,20 @@ pub struct SharingPort {
     pub port: u8,
     /// The port's gateway is running.
     pub active: bool,
+    pub problem: Option<String>,
+}
+
+/// The supervision identity the host pairs with as the supervisor of the
+/// iPhones and iPads that list its certificate, which then pair without
+/// asking whether to trust the host.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Supervision {
+    /// The certificate's common name.
+    pub name: Option<String>,
+    /// The certificate in base64 DER, for the supervising host certificates
+    /// of a device enrollment profile.
+    pub certificate: Option<String>,
+    /// Why the host has no usable identity.
     pub problem: Option<String>,
 }
 
