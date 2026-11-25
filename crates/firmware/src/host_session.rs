@@ -44,10 +44,6 @@ impl Session {
         self.pending.take().filter(|arm| now < arm.expires)
     }
 
-    pub fn awaiting_button(&self, now: u64) -> bool {
-        self.active(now).is_some() && self.pending.get().is_some_and(|arm| now < arm.expires)
-    }
-
     /// Take a report from the session's host, or from a new host while the
     /// board is free. A lapsed session cannot be resumed under its old identity.
     pub fn report(&self, session: HostSession, now: u64) -> bool {
@@ -178,9 +174,7 @@ mod tests {
         assert!(!session.apply(HostControl::Arm(arm), &status, 10));
         status.ports[1].restore_access = iasis_protocol::RestoreAccess::InDfu;
         assert!(session.apply(HostControl::Arm(arm), &status, 10));
-        assert!(session.awaiting_button(11));
         assert_eq!(session.take_arm(11), Some(arm));
-        assert!(!session.awaiting_button(11));
         // The same arm cannot be issued again; a later one can.
         assert!(!session.apply(HostControl::Arm(arm), &status, 12));
         arm.id = 2;
@@ -196,7 +190,6 @@ mod tests {
         status.ports[1].restore = None;
         assert!(session.apply(HostControl::Arm(arm), &status, 15));
         // Losing the host withdraws an arm nobody has taken.
-        assert!(!session.awaiting_button(3010));
         assert_eq!(session.take_arm(3010), None);
         assert!(session.report(report(2, true).session, 3011));
         assert!(!session.apply(HostControl::Arm(arm), &status, 3012));
