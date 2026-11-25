@@ -5,4 +5,7 @@
     <AcceptEula>wix7</AcceptEula>
     <DefineConstants>Version=$(Version);ToolsDir=$(ToolsDir)</DefineConstants>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Util.wixext" />
+  </ItemGroup>
 </Project>

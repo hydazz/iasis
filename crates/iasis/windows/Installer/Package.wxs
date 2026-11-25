@@ -1,4 +1,4 @@
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Package
       Name="Iasis"
       Manufacturer="hydazz"
@@ -13,6 +13,19 @@
         <Directory Id="BINFOLDER" Name="bin" />
       </Directory>
     </StandardDirectory>
+    <!-- The agent's state and cache. Users may read the cache; the agent
+         keeps its state to itself and Administrators. -->
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="DATAFOLDER" Name="Iasis" />
+    </StandardDirectory>
+
+    <!-- Uninstalling removes the image cache, which an upgrade keeps. -->
+    <SetProperty
+        Id="CACHEFOLDER"
+        Value="[CommonAppDataFolder]Iasis\cache"
+        Before="Wix4RemoveFoldersEx_X64"
+        Sequence="execute"
+        Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
 
     <Feature Id="Iasis">
       <Component Directory="BINFOLDER">
@@ -21,6 +34,30 @@
       </Component>
       <Component Directory="BINFOLDER">
         <File Source="$(var.ToolsDir)\iasisd.exe" />
+        <ServiceInstall
+            Name="iasisd"
+            DisplayName="Iasis"
+            Description="Attends Iasis boards and runs the restores they and the Iasis apps ask for."
+            Type="ownProcess"
+            Start="auto"
+            ErrorControl="normal"
+            Account="NT SERVICE\iasisd"
+            Vital="yes">
+          <util:ServiceConfig
+              FirstFailureActionType="restart"
+              SecondFailureActionType="restart"
+              ThirdFailureActionType="restart"
+              RestartServiceDelayInSeconds="5"
+              ResetPeriodInDays="1" />
+        </ServiceInstall>
+        <ServiceControl Name="iasisd" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+      </Component>
+      <Component Id="DataFolder" Directory="DATAFOLDER" Guid="6B19DAF0-CE97-4C69-BC6A-53E3D67E0ABB">
+        <CreateFolder>
+          <!-- S-1-5-80-… is NT SERVICE\iasisd, the service's own account. -->
+          <PermissionEx Sddl="D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;S-1-5-80-1909915432-955103889-361278497-479388142-1594523046)(A;OICI;0x1200a9;;;BU)" />
+        </CreateFolder>
+        <util:RemoveFolderEx On="uninstall" Property="CACHEFOLDER" />
       </Component>
     </Feature>
   </Package>

@@ -1,5 +1,7 @@
 //! USB management of an Iasis board.
 
+#[cfg(windows)]
+mod acl;
 pub mod agent;
 mod awake;
 pub mod batch;

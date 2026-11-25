@@ -14,6 +14,7 @@ base64 = "0.23"
 rpassword = "7"
 secrecy = "0.10"
 clap = { version = "4.6", features = ["derive"] }
+ctrlc = { version = "3.5", features = ["termination"] }
 iasis-api.workspace = true
 iasis-protocol.workspace = true
 iasis-pd.workspace = true
@@ -49,7 +50,6 @@ nix = { version = "0.32", features = [
   "socket",
   "user",
 ] }
-signal-hook = "0.3"
 pcap = "2.5"
 pktkit = { version = "=0.1.12", features = ["dhcp", "l2adapter", "slirp"] }
 
@@ -57,6 +57,8 @@ pktkit = { version = "=0.1.12", features = ["dhcp", "l2adapter", "slirp"] }
 restorekit-sys.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
+uds_windows = "1.2"
+windows-service = "0.8"
 windows-sys = { version = "0.61", features = [
   "Win32_Devices_DeviceAndDriverInstallation",
   "Win32_Foundation",

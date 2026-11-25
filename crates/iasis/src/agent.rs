@@ -580,7 +580,6 @@ impl Agent {
     /// Attend boards as they come and go. Returns only on a failure that
     /// leaves the agent without its socket.
     pub fn run(self: &Arc<Self>, options: &Options) -> Result<()> {
-        #[cfg(unix)]
         socket::serve(self.clone())?;
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
@@ -852,23 +851,25 @@ mod access {
     }
 }
 
-#[cfg(unix)]
 mod socket {
     use super::*;
     use std::{
         fs,
         io::{BufRead, BufReader, Read, Write},
         net::Shutdown,
-        os::unix::{
-            fs::PermissionsExt,
-            net::{UnixListener, UnixStream},
-        },
+        path::Path,
     };
+
+    #[cfg(unix)]
+    use std::os::unix::net::{UnixListener, UnixStream};
+    #[cfg(windows)]
+    use uds_windows::{UnixListener, UnixStream};
 
     /// Listen for clients. A client can erase the targets. On macOS the
     /// socket is the agent's user's alone. On Linux, where the agent is a
     /// system service, any local user can connect and the agent serves only
-    /// those `access` admits.
+    /// those `access` admits. On Windows the socket's access list admits
+    /// Administrators and whoever is signed in at the computer.
     pub fn serve(agent: Arc<Agent>) -> Result<()> {
         let path = agent.home.socket();
         if let Some(parent) = path.parent() {
@@ -882,12 +883,7 @@ mod socket {
         fs::remove_file(&path).ok();
         let listener = UnixListener::bind(&path)
             .with_context(|| format!("listening on {}", path.display()))?;
-        let mode = if cfg!(target_os = "linux") {
-            0o666
-        } else {
-            0o600
-        };
-        fs::set_permissions(&path, fs::Permissions::from_mode(mode))?;
+        open_to_clients(&path)?;
         thread::Builder::new()
             .name("socket".into())
             .spawn(move || {
@@ -911,6 +907,29 @@ mod socket {
                 }
             })?;
         Ok(())
+    }
+
+    #[cfg(unix)]
+    fn open_to_clients(path: &Path) -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = if cfg!(target_os = "linux") {
+            0o666
+        } else {
+            0o600
+        };
+        fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
+        Ok(())
+    }
+
+    /// The agent's account and the system, and to read and write but not
+    /// to delete or replace it, Administrators and whoever is signed in at
+    /// the computer.
+    #[cfg(windows)]
+    fn open_to_clients(path: &Path) -> Result<()> {
+        crate::acl::set(
+            path,
+            "D:P(A;;FA;;;OW)(A;;FA;;;SY)(A;;FRFW;;;BA)(A;;FRFW;;;IU)",
+        )
     }
 
     fn send(stream: &mut UnixStream, reply: &Reply) -> Result<()> {
@@ -1026,6 +1045,11 @@ mod socket {
                     Ok(None)
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                    if cfg!(windows) {
+                        bail!(
+                            "Iasis serves Administrators and the person signed in at this computer"
+                        )
+                    }
                     bail!("the agent belongs to another user")
                 }
                 Err(error) => Err(error).with_context(|| path.display().to_string()),
@@ -1215,43 +1239,7 @@ mod socket {
     }
 }
 
-#[cfg(unix)]
 pub use socket::Client;
-
-/// Where the agent has no socket, no client finds it.
-#[cfg(not(unix))]
-pub struct Client;
-
-#[cfg(not(unix))]
-impl Client {
-    pub fn connect(_: &Home) -> Result<Option<Self>> {
-        Ok(None)
-    }
-
-    pub fn ask(&mut self, _: &Request) -> Result<Reply> {
-        bail!("the agent has no socket on this platform")
-    }
-
-    pub fn receive(&mut self) -> Result<Reply> {
-        bail!("the agent has no socket on this platform")
-    }
-
-    pub fn state(&mut self) -> Result<State> {
-        bail!("the agent has no socket on this platform")
-    }
-
-    pub fn request(&mut self, _: &Request) -> Result<()> {
-        bail!("the agent has no socket on this platform")
-    }
-
-    pub fn upload(&mut self, _: &Request, _: &mut impl Read) -> Result<()> {
-        bail!("the agent has no socket on this platform")
-    }
-
-    pub fn receive_by(&mut self, _: Instant) -> Result<Option<Reply>> {
-        bail!("the agent has no socket on this platform")
-    }
-}
 
 #[cfg(test)]
 mod tests {

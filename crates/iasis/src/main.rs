@@ -241,6 +241,8 @@ fn main() -> Result<()> {
                 device.port_chain(),
                 if cfg!(target_os = "linux") {
                     "; its USB device is open to root and the iasis-usb group"
+                } else if cfg!(windows) {
+                    "; on Windows one process at a time opens it, and the iasisd service does while it runs"
                 } else {
                     ""
                 }
