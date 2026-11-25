@@ -34,3 +34,20 @@ Only the service touches the boards and targets directly. Its udev rule gives th
 Other USB devices are left alone, and the system usbmuxd keeps the Apple devices it serves. The service has `CAP_NET_ADMIN` and `CAP_NET_RAW` for USB Internet Sharing. The same rules mark those targets' `cdc_ncm` network interfaces unmanaged, so NetworkManager neither configures them nor runs DHCP on them; it keeps every other interface.
 
 Removing the package keeps the images; purging it deletes `/var/lib/iasis` and `/var/cache/iasis`.
+
+## Windows installer
+
+`mise run //crates/iasis/windows:package` builds `crates/iasis/windows/build/Iasis-<version>-x64.msi` from the tools `mise run host:build` builds in MSYS2's MINGW64 shell. It installs for the whole machine, and installing a newer one upgrades it.
+
+The installer runs the agent at boot as the `iasisd` service, under its own account `NT SERVICE\iasisd`. The agent serves Administrators and the person signed in at the computer.
+
+| Path                                    | Contents                                                                                            |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `C:\Program Files\Iasis\bin\iasis.exe`  | The command line, on `PATH`                                                                         |
+| `C:\Program Files\Iasis\bin\iasisd.exe` | The agent and its WinUSB helper                                                                     |
+| `%ProgramData%\Iasis\state`             | Settings, the supervision identity and images added from a file, for the service and Administrators |
+| `%ProgramData%\Iasis\cache`             | Downloaded images, restore scratch space and the agent's socket                                     |
+
+A Mac in restore mode is reachable once Windows' WinUSB driver is bound to it, which takes an administrator, so the `iasis-winusb` service binds it as LocalSystem while a restore's usbmuxd runs. Restoring a running iPhone or iPad needs [Apple Devices](https://apps.microsoft.com/detail/9NP83LWLPZ9K), whose service reaches it; the agent reports what is missing on the ports it affects. The agent logs to the Application event log under the source `Iasis`.
+
+Uninstalling removes the services, the tools and the downloaded images, and keeps `%ProgramData%\Iasis\state`.
