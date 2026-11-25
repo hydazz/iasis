@@ -90,7 +90,7 @@ fn downshift_increases_the_output_limit_only_after_voltage_confirmation() {
         );
         stage::off(&mut bus).await.unwrap();
         stage::five_volts(&mut bus).await.unwrap();
-        assert_eq!(bus.registers[6], 0xbd);
+        assert_eq!(bus.registers[6], 0xbf); // Forced PWM from the first enable.
     });
 }
 
@@ -123,7 +123,7 @@ fn converter_faults_report_the_register_values_that_tripped_the_guard() {
             stage::five_volts(&mut bus).await,
             Err(PortError::ConverterMode {
                 raw: 0,
-                expected: 0x3d,
+                expected: 0x3f,
                 mask: 0xff
             })
         );
