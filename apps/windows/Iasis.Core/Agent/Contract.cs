@@ -16,6 +16,8 @@ public sealed record AgentState
     public required ImageStore Images { get; init; }
     public required Sharing Sharing { get; init; }
     public required Supervision Supervision { get; init; }
+    /// What the host lacks that some of Iasis needs.
+    public required IReadOnlyList<Prerequisite> Missing { get; init; }
 }
 
 public sealed record Board
@@ -71,6 +73,8 @@ public sealed record Port
     public string? Awaiting { get; init; }
     public Progress? Stage { get; init; }
     public Ending? Result { get; init; }
+    /// The id of the missing prerequisite the target's restore waits for.
+    public string? Needs { get; init; }
 }
 
 public sealed record Light(Hue Hue, bool Pulse, bool Dim);
@@ -111,6 +115,9 @@ public sealed record SharingPort(string Board, int Port, bool Active, string? Pr
 /// The identity the host pairs with as supervisor: its certificate's common
 /// name and the certificate in base64 DER.
 public sealed record Supervision(string? Name, string? Certificate, string? Problem);
+
+/// Software the host lacks, and what goes without it.
+public sealed record Prerequisite(string Id, string Name, string Url, string Reason);
 
 /// The targets selected on one board, in the session the client saw.
 public sealed record Selection(string Board, uint Session, IReadOnlyList<Target> Targets);
