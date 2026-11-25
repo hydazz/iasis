@@ -283,7 +283,12 @@ impl Drop for Worker {
 }
 
 enum Service {
-    Running(Worker),
+    /// A gateway at work, with what stopped the attempt before it: a retry
+    /// shows that until it gets further.
+    Running {
+        worker: Worker,
+        problem: Option<String>,
+    },
     Retry {
         at: Instant,
         problem: Option<String>,
@@ -293,9 +298,9 @@ enum Service {
 }
 
 impl Service {
-    fn start(gateway: &Gateway, changes: &Arc<Watch>) -> Self {
+    fn start(gateway: &Gateway, changes: &Arc<Watch>, problem: Option<String>) -> Self {
         match Worker::start(gateway, changes) {
-            Ok(worker) => Self::Running(worker),
+            Ok(worker) => Self::Running { worker, problem },
             Err(e) => Self::retry(Some(format!("{e:#}"))),
         }
     }
@@ -315,14 +320,14 @@ pub(super) struct PortGateway {
 
 impl PortGateway {
     fn start(gateway: Gateway, changes: &Arc<Watch>) -> Self {
-        let service = Service::start(&gateway, changes);
+        let service = Service::start(&gateway, changes, None);
         Self { gateway, service }
     }
 
     /// When the gateway next needs looking at with nothing announced.
     fn due(&self) -> Option<Instant> {
         match &self.service {
-            Service::Running(_) => Some(Instant::now() + CHILD_HEALTH),
+            Service::Running { .. } => Some(Instant::now() + CHILD_HEALTH),
             Service::Retry { at, .. } => Some(*at),
             #[cfg(target_os = "linux")]
             Service::Unsupported => None,
@@ -330,12 +335,15 @@ impl PortGateway {
     }
 
     fn status(&mut self, changes: &Arc<Watch>) -> (bool, Option<String>) {
-        if matches!(self.service, Service::Retry { at, .. } if Instant::now() >= at) {
-            self.service = Service::start(&self.gateway, changes);
+        if let Service::Retry { at, problem } = &mut self.service
+            && Instant::now() >= *at
+        {
+            let problem = problem.take();
+            self.service = Service::start(&self.gateway, changes, problem);
         }
-        if let Service::Running(worker) = &mut self.service {
+        if let Service::Running { worker, problem } = &mut self.service {
             self.service = match worker.poll() {
-                Ok(Progress::Starting) => return (false, None),
+                Ok(Progress::Starting) => return (false, problem.clone()),
                 Ok(Progress::Active) => return (true, None),
                 #[cfg(target_os = "linux")]
                 Ok(Progress::Prepared) => Service::retry(None),
