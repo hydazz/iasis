@@ -5,8 +5,19 @@ mod gateway;
 fn main() -> anyhow::Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     match args.as_slice() {
-        [link, network, target, dns] => {
-            gateway::run(link, network.parse()?, target.parse()?, dns.parse()?)
+        [link, network, target, dns] => gateway::run(
+            gateway::Link::Interface {
+                name: link,
+                target: target.parse()?,
+            },
+            network.parse()?,
+            dns.parse()?,
+        ),
+        // Frames from the agent on descriptor 3, for a Mac it reaches
+        // through Debug USB.
+        #[cfg(target_os = "linux")]
+        [command, network, dns] if command == "tunnel" => {
+            gateway::run(gateway::Link::tunnel()?, network.parse()?, dns.parse()?)
         }
         #[cfg(target_os = "linux")]
         [command, target] if command == "prepare" => gateway::prepare_usb(target.parse()?),
