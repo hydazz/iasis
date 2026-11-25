@@ -51,8 +51,8 @@ struct ImageRow {
     mark: ActivityMark,
     stop: gtk::Button,
     menu: gtk::MenuButton,
-    /// Whether the menu was last built for an image a restore is reading.
-    in_use: Cell<Option<bool>>,
+    /// Whether a restore reads the image, as the menu was last built for.
+    in_use: Rc<Cell<Option<bool>>>,
 }
 
 /// An archive on its way into the store: the bytes sent, or `None` once the
@@ -664,6 +664,7 @@ impl ImageRow {
             .css_classes(["flat"])
             .build();
         row.add_suffix(&stop);
+        row.set_action_target_value(Some(&target));
         let menu = gtk::MenuButton::builder()
             .icon_name("view-more-symbolic")
             .tooltip_text("Image Options")
@@ -671,7 +672,7 @@ impl ImageRow {
             .css_classes(["flat"])
             .build();
         row.add_suffix(&menu);
-        // A secondary click opens the same menu.
+        // A secondary click or a long press opens the same menu.
         let click = gtk::GestureClick::builder()
             .button(gdk::BUTTON_SECONDARY)
             .build();
@@ -682,14 +683,42 @@ impl ImageRow {
             }
         });
         row.add_controller(click);
-        Self {
+        let press = gtk::GestureLongPress::builder().touch_only(true).build();
+        let shown = menu.clone();
+        press.connect_pressed(move |_, _, _| {
+            if shown.is_visible() {
+                shown.popup();
+            }
+        });
+        row.add_controller(press);
+        let this = Self {
             id: id.to_owned(),
             row,
             mark,
             stop,
             menu,
-            in_use: Cell::default(),
-        }
+            in_use: Rc::default(),
+        };
+        // Delete removes the image or stops its download, as its menu or
+        // stop button would.
+        let keys = gtk::EventControllerKey::new();
+        let in_use = this.in_use.clone();
+        keys.connect_key_pressed(move |keys, key, _, _| {
+            if !matches!(
+                key,
+                gdk::Key::Delete | gdk::Key::KP_Delete | gdk::Key::BackSpace
+            ) {
+                return glib::Propagation::Proceed;
+            }
+            if in_use.get() != Some(true)
+                && let Some(row) = keys.widget()
+            {
+                let _ = row.activate_action("prefs.remove-image", Some(&target));
+            }
+            glib::Propagation::Stop
+        });
+        this.row.add_controller(keys);
+        this
     }
 
     /// The held image's actions; Remove Image is unavailable while a restore
@@ -721,6 +750,10 @@ impl ImageRow {
         if self.in_use.replace(Some(image.in_use)) != Some(image.in_use) {
             self.menu.set_menu_model(Some(&self.actions(image.in_use)));
         }
+        // Activating a held image's row shows its information.
+        self.row.set_activatable(image.ready);
+        self.row
+            .set_action_name(image.ready.then_some("prefs.image-info"));
         let mut detail = vec![image.build.clone(), device::size(image.bytes)];
         // macOS says which devices by itself; the others restore only some.
         if image.os != "macOS" && image.models.len() <= 2 {
