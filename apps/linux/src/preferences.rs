@@ -9,9 +9,9 @@ use std::{
 };
 
 use adw::prelude::*;
-use gtk::{gio, glib};
+use gtk::{gdk, gio, glib};
 use iasis_api::{
-    BoardView, CatalogModel, Image, Images, Release, Reply, Request, State, Supervision,
+    BoardView, CatalogModel, Fetch, Image, Images, Release, Reply, Request, State, Supervision,
 };
 
 use crate::{
@@ -34,9 +34,23 @@ pub struct Preferences {
     no_boards: adw::PreferencesGroup,
     settings: RefCell<Vec<BoardSettings>>,
     images: adw::PreferencesGroup,
-    image_rows: RefCell<Vec<adw::ActionRow>>,
+    import_row: adw::ActionRow,
+    import_mark: ActivityMark,
+    no_images: adw::ActionRow,
+    image_rows: RefCell<Vec<ImageRow>>,
     importing: RefCell<Option<Importing>>,
     store: RefCell<Images>,
+}
+
+/// One image's row, kept while the store lists the image and updated in
+/// place. A held image's actions are in its menu; one still to download shows
+/// its progress and a stop button.
+struct ImageRow {
+    id: String,
+    row: adw::ActionRow,
+    mark: ActivityMark,
+    stop: gtk::Button,
+    menu: gtk::MenuButton,
 }
 
 /// An archive on its way into the store: the bytes sent, or `None` once the
@@ -148,6 +162,16 @@ impl Preferences {
                     .build(),
             )
             .build();
+        let import_row = adw::ActionRow::builder().visible(false).build();
+        import_row.add_prefix(&gtk::Image::from_icon_name("package-x-generic-symbolic"));
+        let import_mark = ActivityMark::new();
+        import_row.add_suffix(&import_mark.widget);
+        images.add(&import_row);
+        let no_images = adw::ActionRow::builder()
+            .title("No Images")
+            .css_classes(["dim-label"])
+            .build();
+        images.add(&no_images);
         images_page.add(&images);
         dialog.add(&images_page);
 
@@ -163,6 +187,9 @@ impl Preferences {
             no_boards,
             settings: RefCell::default(),
             images,
+            import_row,
+            import_mark,
+            no_images,
             image_rows: RefCell::default(),
             importing: RefCell::default(),
             store: RefCell::default(),
@@ -195,6 +222,26 @@ impl Preferences {
             }
         });
         actions.add_action(&import);
+        let remove_image = gio::SimpleAction::new("remove-image", Some(glib::VariantTy::STRING));
+        let weak = Rc::downgrade(&this);
+        remove_image.connect_activate(move |_, image| {
+            if let Some(this) = weak.upgrade()
+                && let Some(image) = image.and_then(String::from_variant)
+            {
+                this.perform(Request::Remove { image });
+            }
+        });
+        actions.add_action(&remove_image);
+        let image_info = gio::SimpleAction::new("image-info", Some(glib::VariantTy::STRING));
+        let weak = Rc::downgrade(&this);
+        image_info.connect_activate(move |_, image| {
+            if let Some(this) = weak.upgrade()
+                && let Some(image) = image.and_then(String::from_variant)
+            {
+                this.show_info(&image);
+            }
+        });
+        actions.add_action(&image_info);
         let weak = Rc::downgrade(&this);
         this.export.connect_activate(move |_, _| {
             if let Some(this) = weak.upgrade() {
@@ -294,16 +341,27 @@ impl Preferences {
     }
 
     fn show_images(self: &Rc<Self>) {
-        for row in self.image_rows.take() {
-            self.images.remove(&row);
-        }
         let store = self.store.borrow();
-        let mut rows = Vec::new();
-        if let Some(importing) = &*self.importing.borrow() {
-            let row = adw::ActionRow::builder()
-                .title(glib::markup_escape_text(&importing.name))
-                .build();
-            row.add_prefix(&gtk::Image::from_icon_name("package-x-generic-symbolic"));
+        let mut rows = self.image_rows.borrow_mut();
+        if rows
+            .iter()
+            .map(|row| row.id.as_str())
+            .ne(store.images.iter().map(|image| image.id.as_str()))
+        {
+            for old in rows.drain(..) {
+                self.images.remove(&old.row);
+            }
+            for image in &store.images {
+                let new = ImageRow::new(&image.id);
+                self.images.add(&new.row);
+                rows.push(new);
+            }
+        }
+        for (row, image) in rows.iter().zip(&store.images) {
+            row.show(image, store.fetch.as_ref());
+        }
+        let importing = self.importing.borrow();
+        if let Some(importing) = &*importing {
             let (text, mark) = match importing.sent {
                 Some(sent) => {
                     let fraction = sent as f64 / importing.bytes.max(1) as f64;
@@ -314,95 +372,58 @@ impl Preferences {
                 }
                 None => ("Checking".to_owned(), Mark::Working(None)),
             };
-            row.set_subtitle(&text);
-            let shown = ActivityMark::new();
-            shown.show(&device::Activity { text, mark });
-            row.add_suffix(&shown.widget);
-            rows.push(row);
+            self.import_row
+                .set_title(&glib::markup_escape_text(&importing.name));
+            self.import_row.set_subtitle(&text);
+            self.import_mark.show(&device::Activity { text, mark });
         }
-        for image in &store.images {
-            rows.push(self.image_row(image, store.fetch.as_ref()));
-        }
-        if rows.is_empty() {
-            let row = adw::ActionRow::builder()
-                .title("No Images")
-                .css_classes(["dim-label"])
-                .build();
-            rows.push(row);
-        }
-        for row in &rows {
-            self.images.add(row);
-        }
-        *self.image_rows.borrow_mut() = rows;
+        self.import_row.set_visible(importing.is_some());
+        self.no_images
+            .set_visible(importing.is_none() && store.images.is_empty());
     }
 
-    fn image_row(
-        self: &Rc<Self>,
-        image: &Image,
-        fetch: Option<&iasis_api::Fetch>,
-    ) -> adw::ActionRow {
-        let mut detail = vec![image.build.clone(), device::size(image.bytes)];
-        if image.os != "macOS" && image.models.len() <= 2 {
-            detail.push(image.models.join(", "));
-        }
-        let row = adw::ActionRow::builder()
-            .title(glib::markup_escape_text(&format!(
-                "{} {}",
-                image.os, image.version
-            )))
-            .subtitle(glib::markup_escape_text(&detail.join(" · ")))
-            .build();
-        let activity = match (
-            image.ready,
-            &image.error,
-            fetch.filter(|fetch| fetch.id == image.id),
-        ) {
-            (true, _, _) => device::Activity {
-                text: "Downloaded".into(),
-                mark: Mark::Done,
-            },
-            (false, Some(error), _) => device::Activity {
-                text: format!("Not downloaded: {error}"),
-                mark: Mark::Caution,
-            },
-            (false, None, Some(fetch)) => {
-                let fraction = fetch.done as f64 / fetch.bytes.max(1) as f64;
-                device::Activity {
-                    text: format!("Downloading, {:.0}%", fraction * 100.0),
-                    mark: Mark::Working(Some(fraction)),
-                }
-            }
-            (false, None, None) => device::Activity {
-                text: "Waiting to download".into(),
-                mark: Mark::Working(Some(0.0)),
-            },
+    /// What an image's row leaves out: every model it restores.
+    fn show_info(&self, id: &str) {
+        let store = self.store.borrow();
+        let Some(image) = store.images.iter().find(|image| image.id == id) else {
+            return;
         };
-        let shown = ActivityMark::new();
-        shown.show(&activity);
-        row.add_suffix(&shown.widget);
-        let remove = gtk::Button::builder()
-            .icon_name(if image.ready {
-                "user-trash-symbolic"
-            } else {
-                "process-stop-symbolic"
-            })
-            .tooltip_text(if image.ready {
-                "Remove This Image"
-            } else {
-                "Stop Downloading"
-            })
-            .valign(gtk::Align::Center)
-            .css_classes(["flat"])
-            .build();
-        let weak = Rc::downgrade(self);
-        let id = image.id.clone();
-        remove.connect_clicked(move |_| {
-            if let Some(this) = weak.upgrade() {
-                this.perform(Request::Remove { image: id.clone() });
-            }
-        });
-        row.add_suffix(&remove);
-        row
+        let about = adw::PreferencesGroup::new();
+        for (title, value) in [
+            ("Build", image.build.clone()),
+            ("Size", device::size(image.bytes)),
+        ] {
+            about.add(
+                &adw::ActionRow::builder()
+                    .title(title)
+                    .subtitle(glib::markup_escape_text(&value))
+                    .subtitle_selectable(true)
+                    .css_classes(["property"])
+                    .build(),
+            );
+        }
+        let models = adw::PreferencesGroup::builder().title("Models").build();
+        for model in &image.models {
+            models.add(
+                &adw::ActionRow::builder()
+                    .title(glib::markup_escape_text(model))
+                    .title_selectable(true)
+                    .build(),
+            );
+        }
+        let page = adw::PreferencesPage::new();
+        page.add(&about);
+        page.add(&models);
+        let toolbar = adw::ToolbarView::new();
+        toolbar.add_top_bar(&adw::HeaderBar::new());
+        toolbar.set_content(Some(&page));
+        adw::Dialog::builder()
+            .title(image_title(image))
+            .content_width(360)
+            .content_height(480)
+            .child(&toolbar)
+            .build()
+            .present(Some(&self.dialog));
     }
 
     /// Save the identity's certificate in DER, for an enrollment profile.
@@ -573,6 +594,107 @@ impl Preferences {
         if let (Err(message), Some(window)) = (result, self.window.upgrade()) {
             window.toast(&message);
         }
+    }
+}
+
+impl ImageRow {
+    fn new(id: &str) -> Self {
+        let row = adw::ActionRow::new();
+        let mark = ActivityMark::new();
+        row.add_suffix(&mark.widget);
+        let target = id.to_variant();
+        let stop = gtk::Button::builder()
+            .icon_name("process-stop-symbolic")
+            .action_name("prefs.remove-image")
+            .action_target(&target)
+            .valign(gtk::Align::Center)
+            .css_classes(["flat"])
+            .build();
+        row.add_suffix(&stop);
+        let info = gio::MenuItem::new(Some("Get Info"), None);
+        info.set_action_and_target_value(Some("prefs.image-info"), Some(&target));
+        let remove = gio::MenuItem::new(Some("Remove Image"), None);
+        remove.set_action_and_target_value(Some("prefs.remove-image"), Some(&target));
+        let removing = gio::Menu::new();
+        removing.append_item(&remove);
+        let actions = gio::Menu::new();
+        actions.append_item(&info);
+        actions.append_section(None, &removing);
+        let menu = gtk::MenuButton::builder()
+            .icon_name("view-more-symbolic")
+            .menu_model(&actions)
+            .tooltip_text("Image Options")
+            .valign(gtk::Align::Center)
+            .css_classes(["flat"])
+            .build();
+        row.add_suffix(&menu);
+        // A secondary click opens the same menu.
+        let click = gtk::GestureClick::builder()
+            .button(gdk::BUTTON_SECONDARY)
+            .build();
+        let shown = menu.clone();
+        click.connect_pressed(move |_, _, _, _| {
+            if shown.is_visible() {
+                shown.popup();
+            }
+        });
+        row.add_controller(click);
+        Self {
+            id: id.to_owned(),
+            row,
+            mark,
+            stop,
+            menu,
+        }
+    }
+
+    fn show(&self, image: &Image, fetch: Option<&Fetch>) {
+        let mut detail = vec![image.build.clone(), device::size(image.bytes)];
+        // macOS says which devices by itself; the others restore only some.
+        if image.os != "macOS" && image.models.len() <= 2 {
+            detail.push(image.models.join(", "));
+        }
+        self.row
+            .set_title(&glib::markup_escape_text(&image_title(image)));
+        self.row
+            .set_subtitle(&glib::markup_escape_text(&detail.join(" · ")));
+        self.mark.widget.set_visible(!image.ready);
+        self.stop.set_visible(!image.ready);
+        self.menu.set_visible(image.ready);
+        if image.ready {
+            return;
+        }
+        let activity = match (&image.error, fetch.filter(|fetch| fetch.id == image.id)) {
+            (Some(error), _) => device::Activity {
+                text: format!("Not downloaded: {error}"),
+                mark: Mark::Caution,
+            },
+            (None, Some(fetch)) => {
+                let fraction = fetch.done as f64 / fetch.bytes.max(1) as f64;
+                device::Activity {
+                    text: format!("Downloading, {:.0}%", fraction * 100.0),
+                    mark: Mark::Working(Some(fraction)),
+                }
+            }
+            (None, None) => device::Activity {
+                text: "Waiting to download".into(),
+                mark: Mark::Working(Some(0.0)),
+            },
+        };
+        self.mark.show(&activity);
+        self.stop.set_tooltip_text(Some(if image.error.is_some() {
+            "Remove"
+        } else {
+            "Stop Downloading"
+        }));
+    }
+}
+
+fn image_title(image: &Image) -> String {
+    if image.os.is_empty() {
+        image.version.clone()
+    } else {
+        format!("{} {}", image.os, image.version)
     }
 }
 

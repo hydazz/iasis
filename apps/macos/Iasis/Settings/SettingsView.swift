@@ -405,15 +405,24 @@ private struct ImageSettings: View {
     let model: AgentModel
     @State private var choosingRelease = false
     @State private var choosingFile = false
+    @State private var inspecting: AgentState.Image?
 
     var body: some View {
         Form {
             if let store = model.state?.images {
                 Section {
                     ForEach(store.images) { image in
-                        ImageRow(image: image, fetch: store.fetch) {
-                            model.perform([.remove(image: image.id)])
-                        }
+                        let remove: () -> Void = { model.perform([.remove(image: image.id)]) }
+                        ImageRow(image: image, fetch: store.fetch, remove: remove)
+                            .contextMenu {
+                                if image.ready {
+                                    Button("Get Info") { inspecting = image }
+                                    Divider()
+                                    Button("Remove Image", action: remove)
+                                } else {
+                                    Button("Cancel Download", action: remove)
+                                }
+                            }
                     }
                     if let importing = model.importing {
                         ImportRow(importing: importing)
@@ -447,6 +456,9 @@ private struct ImageSettings: View {
         .sheet(isPresented: $choosingRelease) {
             ReleasePicker(model: model)
         }
+        .sheet(item: $inspecting) { image in
+            ImageInfo(image: image)
+        }
         .fileImporter(
             isPresented: $choosingFile,
             allowedContentTypes: [UTType(filenameExtension: "ipsw") ?? .data]
@@ -465,8 +477,8 @@ private struct ImageSettings: View {
     }
 }
 
-/// An image on one row: the system and version, what it is for, and one mark
-/// for whether it is here.
+/// An image on one row: the system and version, what it is for and, until it
+/// is here, how its download stands.
 private struct ImageRow: View {
     let image: AgentState.Image
     let fetch: AgentState.Fetch?
@@ -489,11 +501,13 @@ private struct ImageRow: View {
             }
             .lineLimit(1)
             Spacer(minLength: 4)
-            ActivityMark(activity: status)
-            Button(image.ready ? "Remove" : "Cancel", systemImage: image.ready ? "trash" : "xmark.circle", action: remove)
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
-                .help(image.ready ? "Delete this image" : "Do not download this image")
+            if !image.ready {
+                ActivityMark(activity: status)
+                Button("Cancel Download", systemImage: "xmark.circle", action: remove)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                    .help("Do not download this image")
+            }
         }
     }
 
@@ -510,9 +524,6 @@ private struct ImageRow: View {
     }
 
     private var status: Activity {
-        if image.ready {
-            return Activity("Downloaded", .done)
-        }
         if image.error != nil {
             return Activity("Not Downloaded", .caution)
         }
@@ -521,6 +532,41 @@ private struct ImageRow: View {
             return Activity("Downloading \(percent)", .working(fetch.fraction), symbol: DeviceSymbol.download)
         }
         return Activity("Waiting to Download", .working(0), symbol: DeviceSymbol.download)
+    }
+}
+
+/// What an image's row leaves out: every model it restores.
+private struct ImageInfo: View {
+    let image: AgentState.Image
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    LabeledContent("Build", value: image.build)
+                    LabeledContent("Size", value: image.bytes.formatted(.byteCount(style: .file)))
+                } header: {
+                    Label(image.title, systemImage: DeviceSymbol.system(image.os))
+                        .font(.headline)
+                }
+                Section("Models") {
+                    ForEach(image.models, id: \.self) { model in
+                        Text(model)
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            .textSelection(.enabled)
+            Divider()
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(12)
+        }
+        .frame(width: 360, height: 420)
     }
 }
 
