@@ -560,5 +560,10 @@
         "problem": "DHCP failed"
       }
     ]
+  },
+  "supervision": {
+    "name": "Iasis on bench",
+    "certificate": "MIIBszCCAVmgAwIBAgIIb3Vy",
+    "problem": "supervision.pem: unusable supervision identity: no certificate"
   }
 }
