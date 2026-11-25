@@ -2,11 +2,11 @@
 
 `iasisd` serves its clients on a local Unix socket: the `iasis` command line, the Mac app and any other client. This crate defines the messages, and [`fixtures/`](fixtures) holds an example of each, with every field set and every value of every enumeration. A client's models read each fixture and write it back unchanged; the Mac app tests this. After a change to the messages, `IASIS_FIXTURES=write cargo test -p iasis-api` rewrites the fixtures.
 
-| Agent                          | Socket                                           | Whom the agent serves                                                      |
-| ------------------------------ | ------------------------------------------------ | -------------------------------------------------------------------------- |
-| macOS, for the login session   | `~/Library/Application Support/iasis/agent.sock` | The agent's user                                                           |
-| Linux, as the `iasisd` service | `/run/iasis/agent.sock`                          | Root, the `iasis` group, and the person signed in at the computer (polkit) |
-| With `IASIS_HOME` set          | `$IASIS_HOME/agent.sock`                         | As above                                                                   |
+| Agent                          | Socket                                                     | Whom the agent serves                                                      |
+| ------------------------------ | ---------------------------------------------------------- | -------------------------------------------------------------------------- |
+| macOS, for the login session   | `~/Library/Application Support/com.hydaz.Iasis/agent.sock` | The agent's user                                                           |
+| Linux, as the `iasisd` service | `/run/iasis/agent.sock`                                    | Root, the `iasis` group, and the person signed in at the computer (polkit) |
+| With `IASIS_HOME` set          | `$IASIS_HOME/agent.sock`                                   | As above                                                                   |
 
 On Linux any local user can connect; the agent reads the client's credentials and answers anyone else with an error, then closes the connection.
 
