@@ -33,6 +33,11 @@ final class DeviceBrowser {
         devices(in: selection)
     }
 
+    /// What the host lacks for a selected device's restore.
+    var lacking: AgentState.Prerequisite? {
+        selected.lazy.compactMap(\.needs).first
+    }
+
     /// The device the inspector shows: the selection, when it is one device.
     var inspected: Device? {
         let selected = selected
