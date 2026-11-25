@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 24;
+pub const VERSION: u16 = 26;
 pub const MAX_PACKET: usize = 1408;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
@@ -711,9 +711,7 @@ pub enum PortError {
     Isolated {
         channel: u8,
     },
-    HostAllowanceExpired,
     Adc,
-    HostLimiter,
     PortProtection {
         pins: PortFaults,
         converter_status: Option<u8>,
@@ -746,9 +744,7 @@ impl PortError {
         match self {
             Self::I2c { .. } => "I2C error",
             Self::Isolated { .. } => "I2C isolated",
-            Self::HostAllowanceExpired => "Host budget expired",
             Self::Adc => "ADC unavailable",
-            Self::HostLimiter => "Host limiter tripped",
             Self::PortProtection { .. } => "Protection tripped",
             Self::ConverterStatus { .. } => "Converter fault",
             Self::ConverterMode { .. } => "Converter mode",
@@ -853,7 +849,14 @@ pub struct Status {
     pub retained_update: bool,
     pub side_power_enabled: bool,
     pub shift_outputs_enabled: bool,
-    pub aggregate_power_fault: bool,
+    /// The charging input's protector has tripped, and the targets are off.
+    pub brick_input_fault: bool,
+    /// The shared host limiter's FAULT output: it is limiting current, or
+    /// has shut down. The limiter acts by itself, and each port's VBUS window
+    /// judges that port.
+    pub host_limiter_fault: bool,
+    /// Assertions of that output seen in the 1 ms readings since boot.
+    pub host_limiter_assertions: u32,
     pub ports: [PortStatus; PORT_COUNT],
     pub bus_voltage_adc: Option<u16>,
     pub thermistor_adc: [Option<u16>; 2],
@@ -948,7 +951,7 @@ impl Status {
 
     /// Stable powered attachments available for an operation.
     pub fn ready_mask(&self) -> u8 {
-        if self.i2c_root_fault || self.aggregate_power_fault {
+        if self.i2c_root_fault || self.brick_input_fault {
             return 0;
         }
         let mut mask = 0;
@@ -1099,7 +1102,9 @@ mod tests {
             retained_update: true,
             side_power_enabled: true,
             shift_outputs_enabled: true,
-            aggregate_power_fault: true,
+            brick_input_fault: true,
+            host_limiter_fault: true,
+            host_limiter_assertions: u32::MAX,
             ports: [PortStatus {
                 vbus_adc: Some(u16::MAX),
                 faults: Some(PortFaults {

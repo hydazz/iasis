@@ -158,7 +158,7 @@ pub fn view(status: &Status, button: &Button, now: u64) -> View {
         (label(port), indicator)
     });
     let face = if status.i2c_root_fault
-        || status.aggregate_power_fault
+        || status.brick_input_fault
         || columns.iter().any(|(_, i)| *i == Indicator::Attention)
     {
         Face::Fault
@@ -201,7 +201,7 @@ pub fn view(status: &Status, button: &Button, now: u64) -> View {
     let selected = button.selected.map(|port| &status.ports[port.index()]);
     if status.i2c_root_fault {
         view.lines = pair("I2C fault", "Targets off");
-    } else if status.aggregate_power_fault {
+    } else if status.brick_input_fault {
         view.lines = pair("Power fault", "Targets off");
     } else if button.armed().is_some() {
         view.lines = pair("Erase", "Hold 3s");
@@ -1232,8 +1232,8 @@ mod tests {
         assert_eq!(view(&status, &button, 0).lines, pair("Installing", ""));
         status.ports[1].restore.as_mut().unwrap().phase = RestorePhase::Reported;
         assert_eq!(view(&status, &button, 0).lines, pair("Done", ""));
-        status.ports[1].error = Some(PortError::HostLimiter);
-        assert_eq!(view(&status, &button, 0).lines[0], "Host limiter tripped");
+        status.ports[1].error = Some(PortError::DischargeTimeout);
+        assert_eq!(view(&status, &button, 0).lines[0], "Discharge timeout");
     }
 
     #[test]
@@ -1265,8 +1265,8 @@ mod tests {
         }
         assert_eq!(view(&status, &button, 650).lines[0], "DFU requested");
         button.selected = Some(Port::ALL[0]);
-        status.ports[0].error = Some(PortError::HostLimiter);
-        assert_eq!(view(&status, &button, 700).lines[0], "Host limiter tripped");
+        status.ports[0].error = Some(PortError::DischargeTimeout);
+        assert_eq!(view(&status, &button, 700).lines[0], "Discharge timeout");
         status.ports[0].error = None;
         assert_eq!(view(&status, &button, 3200).lines[1], "PD 5V 900mA (5W)");
     }

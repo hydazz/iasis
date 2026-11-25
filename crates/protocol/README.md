@@ -44,7 +44,7 @@ Ports are numbered 1–5 and appear in that order in status. ADC readings are ra
 
 Status reports the brick’s source PDOs, requested voltage and qualified input current. The charging budget is in milliwatts. Each port reports the source PDOs it offers, the accepted request, contract voltage (mV) and agreed operating current (mA).
 
-After a trip the port reports its `error` and `fault_sample` until an attachment next becomes ready, a held-off port sees its target unplugged, or the port is enabled again. The sample records the uptime of the trip, port state, connector ADC, local fault pins, and active and pending contracts. Each contract includes voltage, operating current and current limit. A missing contract is `None`.
+After a trip the port reports its `error` and `fault_sample` until an attachment next becomes ready, a held-off port sees its target unplugged or a supply change ends its hold, or the port is enabled again. The sample records the uptime of the trip, port state, connector ADC, local fault pins, and active and pending contracts. Each contract includes voltage, operating current and current limit. A missing contract is `None`.
 
 `recoveries` counts trips since boot. `pd_write_retries` counts PD frames the port controller refused on a busy line and firmware wrote again. `hard_resets_sent` and `hard_resets_received` count PD hard resets by their sender; each removes VBUS from the target for about a second. `requests_rejected` counts requests the port answered with Reject.
 
@@ -52,7 +52,7 @@ After a trip the port reports its `error` and `fault_sample` until an attachment
 
 `link` is the USB link the hub holds with the target, read from the hub's downstream port state: `Down`, `Usb2` or `Usb3`, or absent while the hub cannot be read.
 
-`PortProtection` identifies the local CC or power inputs that triggered the trip. The local power input is shared by the port’s host eFuse and charging converter. If it trips with the converter on, `converter_status` records TPS55288 STATUS after the output switch opens and before converter shutdown, when readable. `HostLimiter` identifies the shared host limiter. TPS55288 errors report the observed STATUS (0x07), MODE (0x06), current-limit (0x02) or failed readback register value. I²C errors identify the operation, 7-bit address, register or mux selection, exposed mux channel mask and failure reason.
+`PortProtection` identifies the local CC or power inputs that triggered the trip. The local power input is shared by the port’s host eFuse and charging converter. If it trips with the converter on, `converter_status` records TPS55288 STATUS after the output switch opens and before converter shutdown, when readable. TPS55288 errors report the observed STATUS (0x07), MODE (0x06), current-limit (0x02) or failed readback register value. I²C errors identify the operation, 7-bit address, register or mux selection, exposed mux channel mask and failure reason.
 
 Send a `PortCommand` with a nonzero request ID. USB acceptance queues the command; the matching ID and its result then appear in status, and each step of the result is announced. DFU, reboot and the Debug USB mappings act on one attachment and must carry the port's latest generation; a stale generation is rejected. Enable and disable apply to the port itself. The USB command queue holds one request, and a port with an action pending rejects another.
 
