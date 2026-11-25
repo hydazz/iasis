@@ -91,8 +91,7 @@ fn lock_file(path: &Path) -> io::Result<File> {
 pub(in crate::native) fn serve(dir: &Path, address: &OsStr) -> Result<(), Box<dyn Error>> {
     // A Mac in restore mode is reachable only once WinUSB is bound to it.
     #[cfg(windows)]
-    let _restore_mode = restorekit::driver::spawn_restore_mode_watcher()
-        .ok_or("cannot bind WinUSB to Macs in restore mode: elevation was refused")?;
+    let _restore_mode = crate::native::driver::bind()?;
     let socket = CString::new(address.as_encoded_bytes())?;
     restorekit_sys::usbmuxd_start(&socket).map_err(|status| {
         format!(

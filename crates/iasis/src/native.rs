@@ -14,6 +14,8 @@ use crate::{
     topology::{Snapshot, UsbDevice},
 };
 
+#[cfg(windows)]
+mod driver;
 pub(crate) mod mux;
 
 /// The first argument of a host tool started as one of its own workers.
@@ -215,6 +217,8 @@ mod worker {
             [command, dir, address] if command == "mux" => {
                 super::mux::serve(Path::new(dir), address)
             }
+            #[cfg(windows)]
+            [command] if command == "winusb" => super::driver::serve(),
             _ => Err("invalid worker arguments".into()),
         }
     }
