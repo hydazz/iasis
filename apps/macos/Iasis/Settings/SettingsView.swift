@@ -414,9 +414,15 @@ private struct ImageSettings: View {
                         ImageRow(image: image, fetch: store.fetch, remove: remove)
                             .contextMenu {
                                 if image.ready {
+                                    if let path = image.path {
+                                        Button("Show in Finder") {
+                                            NSWorkspace.shared.activateFileViewerSelecting([URL(filePath: path)])
+                                        }
+                                    }
                                     Button("Get Info") { inspecting = image }
                                     Divider()
                                     Button("Remove Image", action: remove)
+                                        .disabled(image.inUse)
                                 } else {
                                     Button("Cancel Download", action: remove)
                                 }
@@ -533,7 +539,8 @@ private struct ImageRow: View {
     }
 }
 
-/// What an image's row leaves out: every model it restores.
+/// What an image's row leaves out: where it came from and every model it
+/// restores.
 private struct ImageInfo: View {
     let image: AgentState.Image
     @Environment(\.dismiss) private var dismiss
@@ -544,9 +551,14 @@ private struct ImageInfo: View {
                 Section {
                     LabeledContent("Build", value: image.build)
                     LabeledContent("Size", value: image.bytes.formatted(.byteCount(style: .file)))
+                    LabeledContent("Source", value: image.fetched ? "Downloaded from Apple" : "Added from a file")
                 } header: {
                     Label(image.title, systemImage: DeviceSymbol.system(image.os))
                         .font(.headline)
+                } footer: {
+                    if image.inUse {
+                        Text("A restore is using this image. It can be removed once the restore ends.")
+                    }
                 }
                 Section("Models") {
                     ForEach(image.models, id: \.self) { model in
