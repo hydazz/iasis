@@ -69,8 +69,7 @@
             "operation": "restore",
             "ecid": "001a79d10e6bc01c",
             "phase": "Reported",
-            "message": "Restore finished",
-            "log_directory": "/var/cache/iasis/restores/001a79d10e6bc01c-1"
+            "message": "Restore finished"
           }
         },
         {
@@ -114,8 +113,7 @@
             "operation": "revive",
             "ecid": "001a79d10e6bc01c",
             "phase": "Failed",
-            "message": "Restore finished",
-            "log_directory": "/var/cache/iasis/restores/001a79d10e6bc01c-1"
+            "message": "Restore finished"
           }
         },
         {
@@ -505,8 +503,7 @@
       "operation": "restore",
       "ecid": "001a79d10e6bc01c",
       "phase": "Reported",
-      "message": "Restore finished",
-      "log_directory": "/var/cache/iasis/restores/001a79d10e6bc01c-1"
+      "message": "Restore finished"
     },
     null
   ],

@@ -19,7 +19,6 @@ fn ending(operation: Operation, phase: RestorePhase) -> Ending {
         ecid: Some("001a79d10e6bc01c".into()),
         phase,
         message: "Restore finished".into(),
-        log_directory: Some("/var/cache/iasis/restores/001a79d10e6bc01c-1".into()),
     }
 }
 

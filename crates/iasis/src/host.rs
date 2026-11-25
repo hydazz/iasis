@@ -452,7 +452,7 @@ impl Shared {
     /// The connectors while the host's USB tree cannot be placed on them:
     /// empty, so nothing a target was seen as before is reported.
     fn unplaced(&self, error: &topology::Error) -> Snapshot {
-        eprintln!("Board {:016x}: {error}", self.board.info().serial);
+        log::warn!("Board {:016x}: {error}", self.board.info().serial);
         Snapshot::vacant(self.board.topology())
     }
 
@@ -815,7 +815,7 @@ impl Link {
         // Listening starts before the first read, so no change after it is missed.
         let events = shared.board.events();
         if let Err(error) = &events {
-            eprintln!(
+            log::warn!(
                 "Board {:016x}: reading every {HEALTH:?} without its announcements: {error}",
                 shared.board.info().serial
             );

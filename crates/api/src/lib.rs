@@ -3,8 +3,6 @@
 //! bytes it names. `README.md` describes each message for clients in any
 //! language; `fixtures/` holds an example of each, which clients test against.
 
-use std::path::PathBuf;
-
 pub use iasis_protocol::{AppleMode, Hue, Light, Port, RestorePhase};
 use serde::{Deserialize, Serialize};
 
@@ -435,8 +433,6 @@ pub struct Ending {
     pub ecid: Option<String>,
     pub phase: RestorePhase,
     pub message: String,
-    /// Where the worker's logs are, when a worker ran.
-    pub log_directory: Option<PathBuf>,
 }
 
 /// The store's archives: those it holds and those it is still to fetch.

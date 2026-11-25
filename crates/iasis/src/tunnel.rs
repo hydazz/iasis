@@ -334,7 +334,7 @@ impl Tunnel {
             };
             let problem = result.err().map(|error| format!("{error:#}"));
             if let Some(problem) = problem.as_ref().filter(|_| problem != reported) {
-                eprintln!("Port {} Debug USB: {problem}", self.port.number());
+                log::warn!("Port {} Debug USB: {problem}", self.port.number());
             }
             reported = problem;
             let until = Instant::now() + wait;
@@ -367,7 +367,7 @@ impl Tunnel {
         }
         let session = Arc::new(self.session(&device, control.is_some()));
         let model = session.device.apple.as_ref().and_then(|a| a.model.clone());
-        println!(
+        log::info!(
             "Port {}: {} running behind Debug USB",
             self.port.number(),
             model.as_deref().unwrap_or("a Mac")

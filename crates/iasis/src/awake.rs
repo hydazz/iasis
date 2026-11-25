@@ -24,7 +24,7 @@ pub(crate) fn hold(reason: &str) -> Awake {
         .app_name("Iasis")
         .app_reverse_domain("com.hydaz.Iasis")
         .create()
-        .inspect_err(|error| eprintln!("Cannot keep the host awake ({reason}): {error}"))
+        .inspect_err(|error| log::warn!("Cannot keep the host awake ({reason}): {error}"))
         .ok();
     Awake {
         _held: held,

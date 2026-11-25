@@ -11,6 +11,7 @@ pub mod host;
 pub mod identity;
 pub mod images;
 pub mod inventory;
+pub mod logging;
 pub mod native;
 pub mod progress;
 pub mod restore;

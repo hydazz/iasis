@@ -58,7 +58,7 @@ impl Supervision {
 
     fn holding(file: &Path, identity: Result<Option<Supervisor>>) -> Self {
         if let Err(error) = &identity {
-            eprintln!("Supervision identity unusable: {error:#}");
+            log::error!("Supervision identity unusable: {error:#}");
         }
         Self {
             file: file.to_owned(),
@@ -129,7 +129,7 @@ fn create(file: &Path) -> Result<Supervisor> {
     let name = identity_name(host_name());
     let identity = Supervisor::generate(&name)?;
     save(file, &identity)?;
-    println!("Made supervision identity {name}");
+    log::info!("Made supervision identity {name}");
     Ok(identity)
 }
 
