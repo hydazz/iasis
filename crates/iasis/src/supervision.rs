@@ -188,24 +188,19 @@ fn private_directory(directory: &Path) -> Result<()> {
 /// Administrators; nothing inherited and no one else.
 #[cfg(windows)]
 fn restrict(path: &Path, directory: bool) -> Result<()> {
-    use std::{os::windows::ffi::OsStrExt, ptr};
+    use std::ptr;
 
     use windows_sys::Win32::{
         Foundation::{CloseHandle, HANDLE, LocalFree},
         Security::{
-            Authorization::{
-                ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
-                SDDL_REVISION_1,
-            },
-            DACL_SECURITY_INFORMATION, GetTokenInformation, PROTECTED_DACL_SECURITY_INFORMATION,
-            PSECURITY_DESCRIPTOR, SetFileSecurityW, TOKEN_QUERY, TOKEN_USER, TokenUser,
+            Authorization::ConvertSidToStringSidW, GetTokenInformation, TOKEN_QUERY, TOKEN_USER,
+            TokenUser,
         },
         System::Threading::{GetCurrentProcess, OpenProcessToken},
     };
 
     let failed = || anyhow!(io::Error::last_os_error());
-    let wide = |text: &std::ffi::OsStr| text.encode_wide().chain([0]).collect::<Vec<u16>>();
-    unsafe {
+    let sid = unsafe {
         let mut token: HANDLE = ptr::null_mut();
         if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
             return Err(failed());
@@ -226,30 +221,13 @@ fn restrict(path: &Path, directory: bool) -> Result<()> {
         let length = (0..).take_while(|&i| *text.add(i) != 0).count();
         let sid = String::from_utf16_lossy(std::slice::from_raw_parts(text, length));
         LocalFree(text.cast());
-
-        let inherit = if directory { "OICI" } else { "" };
-        let sddl = format!("D:P(A;{inherit};FA;;;{sid})(A;{inherit};FA;;;BA)");
-        let mut descriptor: PSECURITY_DESCRIPTOR = ptr::null_mut();
-        if ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            wide(sddl.as_ref()).as_ptr(),
-            SDDL_REVISION_1,
-            &mut descriptor,
-            ptr::null_mut(),
-        ) == 0
-        {
-            return Err(failed());
-        }
-        let set = SetFileSecurityW(
-            wide(path.as_os_str()).as_ptr(),
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-            descriptor,
-        );
-        LocalFree(descriptor);
-        if set == 0 {
-            return Err(failed()).with_context(|| format!("restricting {}", path.display()));
-        }
-    }
-    Ok(())
+        sid
+    };
+    let inherit = if directory { "OICI" } else { "" };
+    crate::acl::set(
+        path,
+        &format!("D:P(A;{inherit};FA;;;{sid})(A;{inherit};FA;;;BA)"),
+    )
 }
 
 fn host_name() -> Option<String> {
