@@ -32,6 +32,16 @@ struct AgentModelTests {
         #expect(await restarts.total == 1)
     }
 
+    @Test func anAgentWhoseStateCannotBeReadIsRestarted() async throws {
+        let agent = FakeAgent(reports: [])
+        let restarts = Restarts()
+        let model = AgentModel(agent: agent) { await restarts.count() }
+        model.start()
+        await agent.fail(with: DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "another build's state")))
+        try await waitUntil { await restarts.total == 1 }
+        #expect(model.state == nil)
+    }
+
     @Test func menuStatusFollowsConnectedHubsAndPortLights() throws {
         var state = try Fixtures.state
         #expect(MenuBarStatus(nil) == .offline)
