@@ -276,13 +276,23 @@ fn settle(jobs: &mut [Option<PortJob>; PORT_COUNT], status: &Status, restarted: 
     settled
 }
 
+/// The image a port's restore waits for, on one attachment, and how much of
+/// it the store has fetched.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Awaiting {
+    pub generation: u32,
+    /// The store's id for the image.
+    pub image: String,
+    pub percent: u8,
+}
+
 /// Pair each port's view with the job and the image fetch on the same
 /// attachment.
 fn compose(
     seen: &Seen,
     access: [RestoreAccess; PORT_COUNT],
     jobs: &[Option<PortJob>; PORT_COUNT],
-    fetching: &[Option<(u32, u8)>; PORT_COUNT],
+    awaiting: &[Option<Awaiting>; PORT_COUNT],
 ) -> [Option<PortReport>; PORT_COUNT] {
     let mut ports = [None; PORT_COUNT];
     for (index, entry) in ports.iter_mut().enumerate() {
@@ -294,9 +304,10 @@ fn compose(
                 .as_ref()
                 .filter(|job| job.generation == generation)
                 .map(|job| job.status),
-            fetch: fetching[index]
-                .filter(|(fetch, _)| *fetch == generation)
-                .map(|(_, percent)| percent),
+            fetch: awaiting[index]
+                .as_ref()
+                .filter(|awaiting| awaiting.generation == generation)
+                .map(|awaiting| awaiting.percent),
         });
     }
     ports
@@ -310,7 +321,7 @@ struct Shared {
     models: Arc<Models>,
     inventory: Arc<Inventory>,
     changes: Arc<Watch>,
-    fetching: Mutex<[Option<(u32, u8)>; PORT_COUNT]>,
+    awaiting: Mutex<[Option<Awaiting>; PORT_COUNT]>,
     restore_ready: AtomicBool,
     internet_sharing: AtomicBool,
     alive: AtomicBool,
@@ -451,7 +462,7 @@ impl Shared {
                 &seen,
                 access,
                 &self.jobs.lock().unwrap(),
-                &self.fetching.lock().unwrap(),
+                &self.awaiting.lock().unwrap(),
             ),
         };
         match self.board.host_report(&report) {
@@ -737,7 +748,7 @@ impl Link {
             models,
             changes: inventory.changes().clone(),
             inventory,
-            fetching: Mutex::default(),
+            awaiting: Mutex::default(),
             restore_ready: AtomicBool::new(false),
             internet_sharing: AtomicBool::new(false),
             alive: AtomicBool::new(true),
@@ -913,15 +924,15 @@ impl Link {
         }
     }
 
-    /// Say how much of a port's restore image is fetched, or that the fetch
-    /// is over.
-    pub fn fetching(&self, port: Port, generation: u32, percent: Option<u8>) {
-        let fetch = percent.map(|percent| (generation, percent));
-        let mut fetching = self.shared.fetching.lock().unwrap();
-        if fetching[port.index()] != fetch {
-            fetching[port.index()] = fetch;
-            drop(fetching);
+    /// Say which image a port's restore waits for and how much of it is
+    /// fetched, or that the wait is over.
+    pub(crate) fn awaiting(&self, port: Port, awaiting: Option<Awaiting>) {
+        let mut ports = self.shared.awaiting.lock().unwrap();
+        if ports[port.index()] != awaiting {
+            ports[port.index()] = awaiting;
+            drop(ports);
             self.shared.report_soon();
+            self.shared.changes.changed();
         }
     }
 
@@ -940,10 +951,15 @@ impl Link {
             },
         );
         let jobs = self.shared.jobs.lock().unwrap();
+        let awaiting = self.shared.awaiting.lock().unwrap();
         for (index, row) in board.ports.iter_mut().enumerate() {
             if let Some(job) = &jobs[index] {
                 crate::view::describe_job(row, job);
             }
+            row.awaiting = awaiting[index]
+                .as_ref()
+                .filter(|awaiting| awaiting.generation == row.generation)
+                .map(|awaiting| awaiting.image.clone());
             let age_ms = status
                 .uptime_ms
                 .saturating_sub(view.observer.attached_at_ms[index]);
@@ -1316,8 +1332,15 @@ mod tests {
         // A job for an earlier attachment of port 2 is not this target's.
         jobs[1] = Some(on(2, RestorePhase::Running));
         // Nor is an image fetch begun for one.
-        let fetching = [Some((3, 40)), Some((2, 40)), None, None, None];
-        let report = compose(&view, Default::default(), &jobs, &fetching);
+        let fetch = |generation| {
+            Some(Awaiting {
+                generation,
+                image: "iPad.ipsw".into(),
+                percent: 40,
+            })
+        };
+        let awaiting = [fetch(3), fetch(2), None, None, None];
+        let report = compose(&view, Default::default(), &jobs, &awaiting);
         assert_eq!(report[0].unwrap().restore, Some(job(RestorePhase::Running)));
         assert_eq!(report[1].unwrap().restore, None);
         assert_eq!(report[0].unwrap().fetch, Some(40));

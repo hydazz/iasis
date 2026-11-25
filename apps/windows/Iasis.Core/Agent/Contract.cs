@@ -69,7 +69,7 @@ public sealed record Port
     public required bool Restore { get; init; }
     public required bool Enabled { get; init; }
     public Job? Job { get; init; }
-    public int? Fetch { get; init; }
+    public string? Awaiting { get; init; }
     public Progress? Stage { get; init; }
     public Ending? Result { get; init; }
 }
