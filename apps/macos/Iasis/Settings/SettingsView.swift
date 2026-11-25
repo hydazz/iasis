@@ -10,8 +10,8 @@ struct SettingsView: View {
             Tab("General", systemImage: "gearshape") {
                 GeneralSettings(model: model)
             }
-            Tab("Boards", systemImage: "cpu") {
-                BoardsSettings(model: model)
+            Tab("Hubs", systemImage: "cpu") {
+                HubsSettings(model: model)
             }
             Tab("Images", systemImage: "internaldrive") {
                 ImageSettings(model: model)
@@ -21,7 +21,7 @@ struct SettingsView: View {
     }
 }
 
-/// What applies to the app and its agent, whichever boards are connected.
+/// What applies to the app and its agent, whichever hubs are connected.
 private struct GeneralSettings: View {
     let model: AgentModel
     @State private var opensAtLogin = OpenAtLogin.isEnabled
@@ -276,20 +276,20 @@ private struct ExportedFile: FileDocument {
     }
 }
 
-/// What a board keeps: one board's settings, with a choice of board above
+/// What a hub keeps: one hub's settings, with a choice of hub above
 /// them when there are several.
-private struct BoardsSettings: View {
+private struct HubsSettings: View {
     let model: AgentModel
     @State private var selection: String?
 
     var body: some View {
         Form {
-            if let state = model.state, !state.boards.isEmpty {
-                let selected = state.boards.first { $0.serial == selection } ?? state.boards[0]
-                if state.boards.count > 1 {
-                    Picker("Board", selection: Binding(get: { selected.serial }, set: { selection = $0 })) {
-                        ForEach(state.boards) { board in
-                            Text(state.title(for: board)).tag(board.serial)
+            if let state = model.state, !state.hubs.isEmpty {
+                let selected = state.hubs.first { $0.serial == selection } ?? state.hubs[0]
+                if state.hubs.count > 1 {
+                    Picker("Hub", selection: Binding(get: { selected.serial }, set: { selection = $0 })) {
+                        ForEach(state.hubs) { hub in
+                            Text(state.title(for: hub)).tag(hub.serial)
                         }
                     }
                 }
@@ -298,14 +298,14 @@ private struct BoardsSettings: View {
                         if let notice = selected.notice {
                             Text(notice)
                         } else if selected.update?.required == true {
-                            Text("Update IasisOS to use this board.")
+                            Text("Update IasisOS to use this hub.")
                         } else {
-                            Text("Board Unavailable")
+                            Text("Hub Unavailable")
                         }
                     }
                 } else {
                     Section {
-                        BoardSettings(board: selected, model: model)
+                        HubSettings(hub: selected, model: model)
                             .id(selected.serial)
                     }
                 }
@@ -328,7 +328,7 @@ private struct BoardsSettings: View {
                 .textSelection(.enabled)
             } else {
                 Section {
-                    Text(model.state == nil ? "Agent Not Running" : "No Boards Connected")
+                    Text(model.state == nil ? "Agent Not Running" : "No Hubs Connected")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -338,8 +338,8 @@ private struct BoardsSettings: View {
     }
 }
 
-private struct BoardSettings: View {
-    let board: AgentState.Board
+private struct HubSettings: View {
+    let hub: AgentState.Hub
     let model: AgentModel
     @State private var draft: String?
     @FocusState private var naming: Bool
@@ -347,7 +347,7 @@ private struct BoardSettings: View {
     @State private var writing: Task<Void, Never>?
 
     var body: some View {
-        TextField("Name", text: Binding(get: { draft ?? board.name }, set: { draft = $0 }), prompt: Text("Iasis"))
+        TextField("Name", text: Binding(get: { draft ?? hub.name }, set: { draft = $0 }), prompt: Text("Iasis"))
             .focused($naming)
             .onSubmit(saveName)
             .onChange(of: naming) { _, focused in
@@ -356,25 +356,25 @@ private struct BoardSettings: View {
                 }
             }
             .onDisappear(perform: saveName)
-            .help("Up to 16 printable ASCII characters. An empty name resets the board name.")
+            .help("Up to 16 printable ASCII characters. An empty name resets the hub name.")
         Slider(
-            value: Binding(get: { lightLevel.value(reading: board.brightness) }, set: { lightLevel.drag(to: $0) }),
+            value: Binding(get: { lightLevel.value(reading: hub.brightness) }, set: { lightLevel.drag(to: $0) }),
             in: 10 ... 100
         ) {
             Text("Light Brightness")
         } onEditingChanged: { editing in
-            if !editing, let percent = lightLevel.release(reading: board.brightness) {
+            if !editing, let percent = lightLevel.release(reading: hub.brightness) {
                 let previous = writing
                 writing = Task {
                     await previous?.value
-                    if await !(model.send(.brightness(board: board.serial, percent: percent))) {
+                    if await !(model.send(.brightness(hub: hub.serial, percent: percent))) {
                         lightLevel.reconcile(percent)
                     }
                 }
             }
         }
-        .accessibilityValue("\(Int(lightLevel.value(reading: board.brightness).rounded())) percent")
-        .onChange(of: board.brightness) { _, reading in lightLevel.reconcile(reading) }
+        .accessibilityValue("\(Int(lightLevel.value(reading: hub.brightness).rounded())) percent")
+        .onChange(of: hub.brightness) { _, reading in lightLevel.reconcile(reading) }
         .task(id: lightLevel.submitted) {
             guard let percent = lightLevel.submitted else { return }
             await writing?.value
@@ -384,7 +384,7 @@ private struct BoardSettings: View {
                 lightLevel.reconcile(percent)
             }
         }
-        .onChange(of: board.name) { _, name in
+        .onChange(of: hub.name) { _, name in
             if draft == name {
                 draft = nil
             }
@@ -392,8 +392,8 @@ private struct BoardSettings: View {
     }
 
     private func saveName() {
-        guard let draft, draft != board.name else { return }
-        model.perform([.rename(board: board.serial, name: draft)])
+        guard let draft, draft != hub.name else { return }
+        model.perform([.rename(hub: hub.serial, name: draft)])
     }
 }
 

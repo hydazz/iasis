@@ -1,6 +1,6 @@
 # IasisOS
 
-IasisOS is the firmware on the board's RP2354. It controls port power, USB-C attachment, Apple DFU signalling, the button, LEDs and optional OLED. Restore data passes directly through the USB hub between the host and targets.
+IasisOS is the firmware on the hub's RP2354. It controls port power, USB-C attachment, Apple DFU signalling, the button, LEDs and optional OLED. Restore data passes directly through the USB hub between the host and targets.
 
 ## Build and update
 
@@ -9,12 +9,12 @@ From the repository root:
 ```sh
 mise install
 mise run host:build
-target/release/iasis --serial <board-serial> update
+target/release/iasis --serial <hub-serial> update
 ```
 
-`mise run host:build` builds IasisOS and the host tools that carry it, and `update` writes that image; `update path/to/IasisOS.uf2` writes another. The board restarts into its RP2350 boot ROM, which takes the image, and returns as the new IasisOS. The host writes only the ROM that answers with the board's chip ID from its hub's management port. `mise run firmware:build` builds `IasisOS.uf2` alone, the form each release carries.
+`mise run host:build` builds IasisOS and the host tools that carry it, and `update` writes that image; `update path/to/IasisOS.uf2` writes another. The hub restarts into its RP2350 boot ROM, which takes the image, and returns as the new IasisOS. The host writes only the ROM that answers with the hub's chip ID from its USB hub's management port. `mise run firmware:build` builds `IasisOS.uf2` alone, the form each release carries.
 
-A board with blank flash enumerates as its boot ROM when an external host is connected, and `update` writes it the same way. For a failed application, connect an external host, hold BOOTSEL, press and release RESET, then release BOOTSEL. Both buttons are under the lid. An interrupted write can be recovered with the same sequence. SWD provides independent access.
+A hub with blank flash enumerates as its boot ROM when an external host is connected, and `update` writes it the same way. For a failed application, connect an external host, hold BOOTSEL, press and release RESET, then release BOOTSEL. Both buttons are under the lid. An interrupted write can be recovered with the same sequence. SWD provides independent access.
 
 Development USB IDs are `1209:0001`. Set `IASIS_USB_VID` and `IASIS_USB_PID` as hexadecimal build variables to override them, and use matching CLI `--vid`/`--pid` arguments.
 
@@ -22,7 +22,7 @@ Development USB IDs are `1209:0001`. Set `IASIS_USB_VID` and `IASIS_USB_PID` as 
 
 Ports start enabled and reserve power only while attached. Disabling a port removes Rp and discharges VBUS. PD-capable targets negotiate fixed supplies over USB PD revision 2.0.
 
-A port whose voltage or negotiation fails switches its output off, discharges VBUS and attaches again. A protection trip holds the port off until the target is unplugged or the port is enabled again. Three failures within 30 seconds hold it off the same way, or until the board's supply changes.
+A port whose voltage or negotiation fails switches its output off, discharges VBUS and attaches again. A protection trip holds the port off until the target is unplugged or the port is enabled again. Three failures within 30 seconds hold it off the same way, or until the hub's supply changes.
 
 | Supply path     | Target offer                               | Budget                                                                                                                                                 |
 | --------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -45,11 +45,11 @@ Each port starts at 5 V. With a 20 V brick, one port can offer 5, 9, 15 and 20 V
 
 On brick power, Iasis reserves 5 V / 900 mA to start a port. If that allowance is unavailable, the port waits. A new device can also be offered spare charging capacity. Once a device requests the full current of a highest-power profile, Iasis can redistribute power among charging devices. Existing contracts stay funded until the devices step down. When power becomes available, Iasis updates the charging ports one at a time, so a device can take a higher offer without a replug. An active restore keeps its contract while the supply can cover it.
 
-Changing the charging input can interrupt USB to all targets while the board stays online. Leave the supply connected or disconnected for the duration of a restore.
+Changing the charging input can interrupt USB to all targets while the hub stays online. Leave the supply connected or disconnected for the duration of a restore.
 
 ## Controls and status
 
-`iasis status --watch` shows the board temperature near the port 1 and 2 output switches (TH1191, sensor A) and the shared core regulator (TH1192, sensor B). On macOS it can run during a restore. Use the raw ADC counts in `status --json` for calibration.
+`iasis status --watch` shows the hub temperature near the port 1 and 2 output switches (TH1191, sensor A) and the shared core regulator (TH1192, sensor B). On macOS it can run during a restore. Use the raw ADC counts in `status --json` for calibration.
 
 The [button and CLI controls](../../README.md#use) operate on ready ports. USB peripherals can use the data link without negotiating Power Delivery. Once a PD contract has settled, Iasis asks the target which Apple debug actions its port offers, and sends DFU or reboot only where the target lists them. DFU also needs the port to list DFU USB, which a Mac does on its [DFU port](https://support.apple.com/en-us/120694) alone: told to enter DFU from another port, some Macs restart into DFU where no host can reach them. Those ports still take reboot. A target that lists neither still charges and can be restored once it is in DFU by other means; a USB-C to Lightning cable does not carry Apple debug. `iasis status` prints each port's list. Commands use the attachment generation to reject requests for a device that has since disconnected.
 
@@ -71,7 +71,7 @@ A colour is what the port holds, a pulse is work under way or a result awaited, 
 
 A fault keeps full brightness whatever is selected. While the button is held, the bright ports are the ones the action will reach.
 
-`iasis --board "Bench A" brightness 35` sets all six lights on Bench A to 35 percent. The range is 10 to 100 percent, with a factory setting of 50. Each board keeps its name and brightness through restarts and firmware updates. Its name appears in the OLED title bar.
+`iasis --hub "Bench A" brightness 35` sets all six lights on Bench A to 35 percent. The range is 10 to 100 percent, with a factory setting of 50. Each hub keeps its name and brightness through restarts and firmware updates. Its name appears in the OLED title bar.
 
 Iasis cannot tell a target in DFU from a running one: the target looks the same on its power pins either way. Only a host sees the USB mode, so blue turns steady when [`iasisd`](../../README.md#host-agent) or a restore command reports DFU on that port, and the report is forgotten three seconds after the host stops. Without a host a sent DFU keeps pulsing until the target is unplugged or restarted. With one, a DFU not seen within 15 seconds gives way to the mode the host does see. A green light alone gives no information about the target's USB mode.
 
@@ -91,13 +91,13 @@ At the Erase prompt, hold for three seconds to start the restore. You can keep h
 
 The status LED can briefly turn red when the charging supply is unplugged. Its input protector signals while the voltage falls.
 
-A restore or revive failure reported by the host lights that port red at full brightness. The OLED labels it `FAIL` and shows `Install failed` when the port is selected. The result belongs to the current USB-C attachment. A detach clears it, including one caused by restarting the target. A manual Configurator restore needs a host process to relay its result to the board.
+A restore or revive failure reported by the host lights that port red at full brightness. The OLED labels it `FAIL` and shows `Install failed` when the port is selected. The result belongs to the current USB-C attachment. A detach clears it, including one caused by restarting the target. A manual Configurator restore needs a host process to relay its result to the hub.
 
 If updates stop during preparation or restore, the port turns steady purple after five seconds and power stays on. Terminal results have no heartbeat timeout. Command results and feedback fields are defined in the [protocol](../protocol/README.md).
 
 ## OLED
 
-Connect an [Adafruit 938](https://www.adafruit.com/product/938) to the display I²C connector. The 128×64 screen shows all five physical ports. Bars beside a port number show its USB link: one for USB 2, two for USB 3. A selected port that a hold would reach is filled; any other selected port is outlined. In the menubar, a plug means brick power. The USB symbol marks a live Iasis host session. A network symbol appears while the host shares Internet access on at least one of the board’s ports.
+Connect an [Adafruit 938](https://www.adafruit.com/product/938) to the display I²C connector. The 128×64 screen shows all five physical ports. Bars beside a port number show its USB link: one for USB 2, two for USB 3. A selected port that a hold would reach is filled; any other selected port is outlined. In the menubar, a plug means brick power. The USB symbol marks a live Iasis host session. A network symbol appears while the host shares Internet access on at least one of the hub’s ports.
 
 A port reads `DFU` or `REC` while the host sees it in DFU or recovery, `DFU?` for a DFU sent and not yet seen, `BOOT` after a reboot is sent, and `IMG` with a percentage while the host fetches its restore image.
 
@@ -135,7 +135,7 @@ The display is optional and works with an external restore host or the CM5. It u
 
 ### Reset and recovery
 
-A cooperative ROM update disables target power and retains the CM5 supply, host selection, hub-run state and host orientation. The application restores those outputs before releasing GPIO isolation. Each time it starts, the application resets the hub to turn on its I²C interface, so the board enumerates again on the host. Without firmware the hub attaches on its own. Physical RESET resets the hub and drops CM5 power. Power loss or a failed update on a CM5 host requires recovery through the external host port or SWD; the CM5 service port does not power the board.
+A cooperative ROM update disables target power and retains the CM5 supply, host selection, hub-run state and host orientation. The application restores those outputs before releasing GPIO isolation. Each time it starts, the application resets the hub to turn on its I²C interface, so the hub enumerates again on the host. Without firmware the hub attaches on its own. Physical RESET resets the hub and drops CM5 power. Power loss or a failed update on a CM5 host requires recovery through the external host port or SWD; the CM5 service port does not power the hub.
 
 I²C transactions time out after 20 ms. Recovery resets the mux and MCU I²C controller, quarantines the failed downstream branch until reboot and preserves the root expander outputs. An unrecoverable root fault disables all targets while leaving USB diagnostics available.
 

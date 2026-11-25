@@ -1,4 +1,4 @@
-//! Supervise one gateway for each public NCM target on an attended board.
+//! Supervise one gateway for each public NCM target on an attended hub.
 
 use std::{
     collections::BTreeMap,
@@ -38,7 +38,7 @@ const REFRESH: Duration = Duration::from_secs(30);
 /// again after this long.
 const RETRY: Duration = Duration::from_secs(5);
 
-/// A board, its port and where the target's network reaches the host.
+/// A hub, its port and where the target's network reaches the host.
 type Target = (u64, u8, Medium);
 
 /// What the gateways are built from, and what it was read for.
@@ -396,7 +396,7 @@ fn reconcile(
                 .or_insert_with(|| PortGateway::start(gateway, changes));
             let (active, problem) = entry.status(changes);
             PortState {
-                board: format!("{serial:016x}"),
+                hub: format!("{serial:016x}"),
                 port,
                 active,
                 problem,
@@ -426,8 +426,8 @@ impl Sharing {
         let mut inputs: Option<Inputs> = None;
         loop {
             let seen = self.changes.count();
-            let boards = attended();
-            let targets: Vec<Target> = boards
+            let hubs = attended();
+            let targets: Vec<Target> = hubs
                 .iter()
                 .flat_map(|(serial, link)| {
                     link.sharing_targets()
@@ -484,9 +484,9 @@ impl Sharing {
                 due = Some(due.map_or(at, |due| due.min(at)));
             }
             let moved = before != (state.problem.clone(), state.ports.clone());
-            for (serial, link) in &boards {
-                let board = format!("{serial:016x}");
-                link.set_internet_sharing(state.ports.iter().any(|p| p.active && p.board == board));
+            for (serial, link) in &hubs {
+                let hub = format!("{serial:016x}");
+                link.set_internet_sharing(state.ports.iter().any(|p| p.active && p.hub == hub));
             }
             drop(runtime);
             if moved {

@@ -3,14 +3,14 @@ import Foundation
 import Testing
 
 struct DeviceTests {
-    @Test func internetSharingFollowsTheActivePortOnItsBoard() throws {
+    @Test func internetSharingFollowsTheActivePortOnItsHub() throws {
         var state = try Fixtures.state
-        var other = state.boards[0]
+        var other = state.hubs[0]
         other.serial = "817a23bd502453b4"
-        state.boards.append(other)
+        state.hubs.append(other)
 
         #expect(state.devices.filter(\.sharesInternet).map(\.id) == [
-            Device.ID(board: "a0e012192cdfdb67", port: 3),
+            Device.ID(hub: "a0e012192cdfdb67", port: 3),
         ])
         #expect(state.devices[3].sharing?.problem == "Cannot open USB interface")
         #expect(state.devices[8].sharing?.problem == nil)
@@ -28,26 +28,26 @@ struct DeviceTests {
         #expect(devices[0].symbol == nil)
 
         // Progress, a new attachment and another device leave the row where it was.
-        state.boards[0].ports[2].stage?.percent = 44
-        state.boards[0].ports[3].generation += 1
-        state.boards[0].ports[3].ecid = "0000000000001234"
+        state.hubs[0].ports[2].stage?.percent = 44
+        state.hubs[0].ports[3].generation += 1
+        state.hubs[0].ports[3].ecid = "0000000000001234"
         #expect(state.devices.map(\.id) == devices.map(\.id))
 
-        state.boards[0].ports[0].enabled = false
+        state.hubs[0].ports[0].enabled = false
         #expect(state.devices[0].name == "Off")
         #expect(state.devices[0].isSelectable)
     }
 
     @Test func aPeripheralWithNoAppleModeIsAnOrdinaryDevice() throws {
         var state = try Fixtures.state
-        state.boards[0].ports[0].occupied = true
-        state.boards[0].ports[0].identifying = true
+        state.hubs[0].ports[0].occupied = true
+        state.hubs[0].ports[0].identifying = true
         #expect(state.devices[0].name == "Identifying…")
-        state.boards[0].ports[0].identifying = false
+        state.hubs[0].ports[0].identifying = false
         #expect(state.devices[0].name == "Unknown Device")
-        state.boards[0].ports[0].link = .usb2
+        state.hubs[0].ports[0].link = .usb2
         #expect(state.devices[0].name == "Unknown Device")
-        state.boards[0].ports[0].device = "USB JTAG/serial debug unit"
+        state.hubs[0].ports[0].device = "USB JTAG/serial debug unit"
         #expect(state.devices[0].name == "USB JTAG/serial debug unit")
         #expect(state.devices[0].activity == .idle)
     }
@@ -72,18 +72,18 @@ struct DeviceTests {
         #expect(activity(state, 2) == Activity("DFU", .none))
         #expect(activity(state, 3) == Activity("Restoring 43%", .working(0.43), symbol: "arrow.counterclockwise.circle"))
         #expect(activity(state, 5) == Activity("Protection tripped", .failed))
-        state.boards[0].ports[4].enabled = false
+        state.hubs[0].ports[4].enabled = false
         #expect(activity(state, 5) == Activity("Protection tripped", .failed))
 
         #expect(activity(state, 4) == Activity("Restore Complete", .done))
-        state.boards[0].ports[3].result?.phase = .failed
+        state.hubs[0].ports[3].result?.phase = .failed
         #expect(activity(state, 4) == Activity("Restore Failed", .failed))
-        state.boards[0].ports[3].result = nil
+        state.hubs[0].ports[3].result = nil
         #expect(activity(state, 4) == .idle)
 
-        state.boards[0].ports[1].mode = nil
+        state.hubs[0].ports[1].mode = nil
         #expect(activity(state, 2) == .idle)
-        state.boards[0].ports[1].request = .restarting
+        state.hubs[0].ports[1].request = .restarting
         #expect(activity(state, 2) == Activity("Restarting", .working(nil)))
     }
 
@@ -93,18 +93,18 @@ struct DeviceTests {
         #expect(running.title == "Restore")
         #expect(running.steps.map(\.state) == [.done, .done, .active, .pending])
         #expect(running.detail == nil)
-        state.boards[0].ports[2].stage?.name = "Updating Firmware"
+        state.hubs[0].ports[2].stage?.name = "Updating Firmware"
         #expect(state.devices[2].operation?.detail == "Updating Firmware")
 
-        state.boards[0].ports[2].stage = nil
-        state.boards[0].ports[2].job?.phase = .preparing
+        state.hubs[0].ports[2].stage = nil
+        state.hubs[0].ports[2].job?.phase = .preparing
         #expect(state.devices[2].operation?.detail == "Preparing")
-        state.boards[0].ports[2].awaiting = state.images.fetch?.id
+        state.hubs[0].ports[2].awaiting = state.images.fetch?.id
         #expect(state.devices[2].activity == Activity("Waiting for Image", .working(nil), symbol: "arrow.down.circle"))
         #expect(state.devices[2].operation?.steps == [.init(name: "Waiting for Image", state: .active)])
         #expect(state.waitingForDownload == 1)
-        state.boards[0].ports[3].awaiting = state.images.fetch?.id
-        state.boards[0].ports[4].awaiting = "UniversalMac_27.2.1_26B131_Restore.ipsw"
+        state.hubs[0].ports[3].awaiting = state.images.fetch?.id
+        state.hubs[0].ports[4].awaiting = "UniversalMac_27.2.1_26B131_Restore.ipsw"
         // A port waiting behind another download is not this one's.
         #expect(state.waitingForDownload == 2)
 
@@ -115,14 +115,14 @@ struct DeviceTests {
         #expect(state.devices[4].operation == nil)
     }
 
-    @Test func aRestorePinsEveryAttachmentAcrossBoards() throws {
+    @Test func aRestorePinsEveryAttachmentAcrossHubs() throws {
         var state = try Fixtures.state
-        state.boards[0].ports[1].restore = true
-        var other = state.boards[0]
+        state.hubs[0].ports[1].restore = true
+        var other = state.hubs[0]
         other.serial = "817a23bd502453b4"
         other.name = "Cart"
         other.session = 9
-        state.boards.append(other)
+        state.hubs.append(other)
 
         let chosen = state.devices.filter { [2, 4].contains($0.port.number) }
         let actions = DeviceActions(chosen)
@@ -134,26 +134,26 @@ struct DeviceTests {
             RestoreTarget(port: 2, generation: 2, ecid: "001a79d10e6bc01c"),
             RestoreTarget(port: 4, generation: 4, ecid: "0002250e3c04c01e"),
         ]
-        let boards = [
-            RestoreSelection(board: "a0e012192cdfdb67", session: 77, targets: targets),
-            RestoreSelection(board: "817a23bd502453b4", session: 9, targets: targets),
+        let hubs = [
+            RestoreSelection(hub: "a0e012192cdfdb67", session: 77, targets: targets),
+            RestoreSelection(hub: "817a23bd502453b4", session: 9, targets: targets),
         ]
-        #expect(confirmation.boards == boards)
+        #expect(confirmation.hubs == hubs)
         // With nothing to choose between, there is one way to go on.
-        #expect(confirmation.choices == [.init(title: "Restore", request: .restore(boards: boards, latest: false))])
+        #expect(confirmation.choices == [.init(title: "Restore", request: .restore(hubs: hubs, latest: false))])
 
         // One device that cannot be restored withholds the erase from all.
         #expect(DeviceActions(state.devices.filter { [3, 4].contains($0.port.number) }).restore == nil)
-        state.boards[1].session = nil
+        state.hubs[1].session = nil
         #expect(DeviceActions(state.devices.filter { [2, 4].contains($0.port.number) }).restore == nil)
         #expect(RestoreConfirmation([state.devices[1]])?.title == "Restore MacBook Air?")
     }
 
     @Test func aRestoreAsksWhichImageOnlyWhenTheStoreHasAnOlderOne() throws {
         var state = try Fixtures.state
-        state.boards[0].ports[1].restore = true
+        state.hubs[0].ports[1].restore = true
         var confirmation = try #require(RestoreConfirmation(state.devices.filter { [2, 4].contains($0.port.number) }))
-        let board = "a0e012192cdfdb67"
+        let hub = "a0e012192cdfdb67"
         let release = { (version: String, build: String) in
             AgentState.Release(os: "macOS", version: version, build: build, bytes: 25_600_000_000)
         }
@@ -162,8 +162,8 @@ struct DeviceTests {
 
         // The newest is in the store, or nothing is: no question.
         confirmation.planned = [
-            .init(board: board, port: 2, offer: .init(latest: newest, held: newest)),
-            .init(board: board, port: 4, offer: .init(latest: newest)),
+            .init(hub: hub, port: 2, offer: .init(latest: newest, held: newest)),
+            .init(hub: hub, port: 4, offer: .init(latest: newest)),
         ]
         #expect(confirmation.choices.map(\.title) == ["Restore"])
         #expect(confirmation.message.contains("Port 2: MacBook Air (13-inch, M5) · macOS 27.2.1\n"))
@@ -172,8 +172,8 @@ struct DeviceTests {
         // An older image in the store is a choice against the newest release.
         confirmation.planned[0].offer = .init(latest: newest, held: older)
         #expect(confirmation.choices == [
-            .init(title: "Download macOS 27.2.1", request: .restore(boards: confirmation.boards, latest: true)),
-            .init(title: "Use macOS 26.6", request: .restore(boards: confirmation.boards, latest: false)),
+            .init(title: "Download macOS 27.2.1", request: .restore(hubs: confirmation.hubs, latest: true)),
+            .init(title: "Use macOS 26.6", request: .restore(hubs: confirmation.hubs, latest: false)),
         ])
         #expect(confirmation.message.contains("macOS 26.6 downloaded, macOS 27.2.1 available (25.6 GB)"))
         // A build is compared as a number too, and a newer image in the store is no choice.
@@ -194,25 +194,25 @@ struct DeviceTests {
 
     @Test func actionsGoToTheDevicesThatTakeThem() throws {
         var state = try Fixtures.state
-        let board = "a0e012192cdfdb67"
+        let hub = "a0e012192cdfdb67"
         let all = DeviceActions(state.devices.filter(\.isSelectable))
-        #expect(all.dfu == [.dfu(board: board, port: 4)])
-        #expect(all.restart == [.reboot(board: board, port: 2), .reboot(board: board, port: 4)])
+        #expect(all.dfu == [.dfu(hub: hub, port: 4)])
+        #expect(all.restart == [.reboot(hub: hub, port: 2), .reboot(hub: hub, port: 4)])
         #expect(all.revive == nil)
 
-        state.boards[0].ports[1].restore = true
+        state.hubs[0].ports[1].restore = true
         let mac = DeviceActions([state.devices[1]])
         let target = RestoreTarget(port: 2, generation: 2, ecid: "001a79d10e6bc01c")
-        let selection = RestoreSelection(board: board, session: 77, targets: [target])
-        #expect(mac.revive == .revive(boards: [selection], latest: false))
+        let selection = RestoreSelection(hub: hub, session: 77, targets: [target])
+        #expect(mac.revive == .revive(hubs: [selection], latest: false))
     }
 
-    @Test func boardsWithOneNameAreToldApart() throws {
+    @Test func hubsWithOneNameAreToldApart() throws {
         var state = try Fixtures.state
-        var other = state.boards[0]
+        var other = state.hubs[0]
         other.serial = "817a23bd502453b4"
         other.name = other.name.uppercased()
-        state.boards.append(other)
-        #expect(state.boardDevices.map(\.title) == ["Repair Bench · db67", "REPAIR BENCH · 53b4"])
+        state.hubs.append(other)
+        #expect(state.hubDevices.map(\.title) == ["Repair Bench · db67", "REPAIR BENCH · 53b4"])
     }
 }

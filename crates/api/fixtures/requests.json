@@ -7,9 +7,9 @@
   },
   {
     "op": "plan",
-    "boards": [
+    "hubs": [
       {
-        "board": "817a23bd502453b4",
+        "hub": "817a23bd502453b4",
         "session": 3,
         "targets": [
           {
@@ -23,9 +23,9 @@
   },
   {
     "op": "restore",
-    "boards": [
+    "hubs": [
       {
-        "board": "817a23bd502453b4",
+        "hub": "817a23bd502453b4",
         "session": 3,
         "targets": [
           {
@@ -40,9 +40,9 @@
   },
   {
     "op": "revive",
-    "boards": [
+    "hubs": [
       {
-        "board": "817a23bd502453b4",
+        "hub": "817a23bd502453b4",
         "session": 3,
         "targets": [
           {
@@ -57,39 +57,39 @@
   },
   {
     "op": "dfu",
-    "board": "817a23bd502453b4",
+    "hub": "817a23bd502453b4",
     "port": 2
   },
   {
     "op": "reboot",
-    "board": "817a23bd502453b4",
+    "hub": "817a23bd502453b4",
     "port": 2
   },
   {
     "op": "power",
-    "board": "817a23bd502453b4",
+    "hub": "817a23bd502453b4",
     "port": 2,
     "on": true
   },
   {
     "op": "debug_usb",
-    "board": "817a23bd502453b4",
+    "hub": "817a23bd502453b4",
     "port": 1,
     "on": true
   },
   {
     "op": "rename",
-    "board": "817a23bd502453b4",
+    "hub": "817a23bd502453b4",
     "name": "Bench A"
   },
   {
     "op": "brightness",
-    "board": "817a23bd502453b4",
+    "hub": "817a23bd502453b4",
     "percent": 50
   },
   {
     "op": "update",
-    "board": "817a23bd502453b4",
+    "hub": "817a23bd502453b4",
     "bytes": 518144
   },
   {

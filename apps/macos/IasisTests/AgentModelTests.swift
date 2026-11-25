@@ -12,7 +12,7 @@ struct AgentModelTests {
         try await waitUntil { model.state != nil }
         #expect(model.state == state)
         var next = state
-        next.boards[0].ports[1].device = "iPhone"
+        next.hubs[0].ports[1].device = "iPhone"
         await agent.publish(next)
         try await waitUntil { model.state?.devices[1].name == "iPhone" }
     }
@@ -32,20 +32,20 @@ struct AgentModelTests {
         #expect(await restarts.total == 1)
     }
 
-    @Test func menuStatusFollowsConnectedBoardsAndPortLights() throws {
+    @Test func menuStatusFollowsConnectedHubsAndPortLights() throws {
         var state = try Fixtures.state
         #expect(MenuBarStatus(nil) == .offline)
         #expect(MenuBarStatus(state) == .fault)
-        state.boards[0].ports.removeAll { $0.light.hue == .red }
+        state.hubs[0].ports.removeAll { $0.light.hue == .red }
         state.images.fetch = nil
         #expect(MenuBarStatus(state) == .busy)
-        state.boards[0].ports.removeAll { $0.light.pulse }
+        state.hubs[0].ports.removeAll { $0.light.pulse }
         #expect(MenuBarStatus(state) == .ready)
         state.images.fetch = try Fixtures.state.images.fetch
         #expect(MenuBarStatus(state) == .busy)
-        state.boards[0].notice = "Cannot read board"
+        state.hubs[0].notice = "Cannot read hub"
         #expect(MenuBarStatus(state) == .fault)
-        state.boards = []
+        state.hubs = []
         #expect(MenuBarStatus(state) == .offline)
     }
 

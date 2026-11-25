@@ -83,7 +83,7 @@ const ACTION_ASK_SPACING: Duration = Duration::from_millis(250);
 const STRIKE_WINDOW: Duration = Duration::from_secs(30);
 const STRIKES: u8 = 3;
 
-/// What the board gives one port: its supply, charging budget and the
+/// What the hub gives one port: its supply, charging budget and the
 /// qualified brick voltage behind it.
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
 pub struct Grant {
@@ -227,7 +227,7 @@ impl Shared {
     }
 }
 
-/// The board's side of the ports: measurements in, grants in, status out.
+/// The hub's side of the ports: measurements in, grants in, status out.
 pub struct Ports {
     ports: [Shared; PORT_COUNT],
     last_offer_update: Cell<Instant>,
@@ -317,7 +317,7 @@ impl Ports {
     }
 
     /// The host's allowance lapsed and the ports it powered are switched off.
-    /// Each attaches its target again once the board has power for it.
+    /// Each attaches its target again once the hub has power for it.
     pub fn withdraw_host(&self) {
         for port in &self.ports {
             if port.status.get().supply == Supply::HostPresence {
@@ -585,7 +585,7 @@ impl Port<'_> {
         self.phy.wait(int, other).await
     }
 
-    /// The board no longer wants this attachment as it stands.
+    /// The hub no longer wants this attachment as it stands.
     fn stopping(&self) -> bool {
         let grant = self.shared.grant.get();
         !self.status().enabled || grant.supply == Supply::Off || grant.supply != self.supply.get()
@@ -918,7 +918,7 @@ impl Port<'_> {
     }
 
     /// Watch an attached sink beside the PD engine. Each pass acts on what
-    /// has changed, then sleeps until the controller, the board or a reading
+    /// has changed, then sleeps until the controller, the hub or a reading
     /// changes something, or until the next thing it is timing comes due.
     async fn supervise(&self) -> Result<(), PortError> {
         let mut open_since = None;
@@ -1275,7 +1275,7 @@ impl Port<'_> {
     }
 
     /// Return the port to vSafe0V with Rp removed. Reports a failure the
-    /// board did not ask for, with the CC line the sink was on.
+    /// hub did not ask for, with the CC line the sink was on.
     async fn finish(
         &self,
         outcome: Result<(), PortError>,
@@ -1397,7 +1397,7 @@ impl Port<'_> {
     }
 
     /// Stay off until the port is enabled again or the sink is unplugged. A
-    /// hold for failures on `supply` also ends when the board's supply changes.
+    /// hold for failures on `supply` also ends when the hub's supply changes.
     async fn hold_off(
         &self,
         orientation: Option<Orientation>,
@@ -1571,7 +1571,7 @@ impl DevicePolicyManager for Policy<'_, '_> {
                     }
                 }
             }
-            // The offers wait for the board to change them; a candidate waits
+            // The offers wait for the hub to change them; a candidate waits
             // for the last of the three settle times as well.
             let settled = self.candidate.map(|(_, since)| {
                 since

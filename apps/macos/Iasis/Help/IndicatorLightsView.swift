@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// What the board's lights mean, port by port and for the status light.
+/// What the hub's lights mean, port by port and for the status light.
 struct IndicatorLightsView: View {
     static let windowID = "lights"
     @State private var panel = Panel.ports
@@ -32,7 +32,7 @@ struct IndicatorLightsView: View {
                     light(.purple, "Pulsing Purple", "Fetching an image or restoring", .pulse)
                     light(.red, "Red", "Port fault or restore failed")
                 case .status:
-                    light(.white, "White", "Board running on its own")
+                    light(.white, "White", "Hub running on its own")
                     light(.green, "Green", "Host connected")
                     light(.blue, "Blue", "Release the button to enter DFU")
                     light(.orange, "Amber", "Release the button to restart")
