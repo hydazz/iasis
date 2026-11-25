@@ -33,6 +33,12 @@ final class DeviceBrowser {
         devices(in: selection)
     }
 
+    /// The device the inspector shows: the selection, when it is one device.
+    var inspected: Device? {
+        let selected = selected
+        return selected.count == 1 ? selected.first : nil
+    }
+
     var actions: DeviceActions {
         actions(for: selection)
     }
