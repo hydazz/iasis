@@ -769,15 +769,31 @@ fn agent_text(state: &State) -> String {
     for board in &state.boards {
         text.push_str(&board_text(board));
     }
-    if let Some(fetch) = &state.images.fetch {
-        text.push_str(&format!(
-            "Fetching {} ({}): {}%\n",
-            fetch.version,
-            fetch.build,
-            fetch.done * 100 / fetch.bytes.max(1)
-        ));
+    if let Some(fetch) = fetch_text(state, 1) {
+        text.push_str(&fetch);
+        text.push('\n');
     }
     text
+}
+
+/// The store's download, its percent in steps of `step`, and how many ports
+/// wait for it.
+fn fetch_text(state: &State, step: u64) -> Option<String> {
+    let fetch = state.images.fetch.as_ref()?;
+    let percent = fetch.done * 100 / fetch.bytes.max(1) / step * step;
+    let mut text = format!("Fetching {} ({}): {percent}%", fetch.version, fetch.build);
+    let waiting = state
+        .boards
+        .iter()
+        .flat_map(|board| &board.ports)
+        .filter(|port| port.awaiting.as_deref() == Some(fetch.id.as_str()))
+        .count();
+    match waiting {
+        0 => {}
+        1 => text.push_str(", 1 device waiting"),
+        waiting => text.push_str(&format!(", {waiting} devices waiting")),
+    }
+    Some(text)
 }
 
 /// The board and its ports, a line each.
@@ -843,14 +859,14 @@ fn activity(port: &PortView) -> String {
     }
     if let Some(job) = port.job {
         let phase = job_text(job);
-        return match (port.fetch, &port.stage) {
-            (Some(percent), _) => format!("{phase}  {percent}%  Downloading Image"),
+        return match (&port.awaiting, &port.stage) {
+            (Some(_), _) => format!("{phase}  waiting for image"),
             (None, Some(stage)) => format!("{phase}  {}%  {}", stage.percent, stage.name),
             (None, None) => phase.into(),
         };
     }
-    if let Some(percent) = port.fetch {
-        return format!("{percent}%  Downloading Image");
+    if port.awaiting.is_some() {
+        return "waiting for image".into();
     }
     match port.request {
         Some(SignalProgress::EnteringDfu) => "entering DFU",
@@ -1316,6 +1332,7 @@ fn submit_through(
 
 fn follow_work(agent: &mut Client, board: &str, ports: &[Port]) -> Result<()> {
     let mut shown = vec![String::new(); ports.len()];
+    let mut download = None;
     let mut reply = agent.ask(&Request::Watch)?;
     loop {
         let Reply::State(state) = reply else {
@@ -1325,6 +1342,11 @@ fn follow_work(agent: &mut Client, board: &str, ports: &[Port]) -> Result<()> {
             state.submitted.len() == ports.len(),
             "the agent did not report an outcome for the submitted operations"
         );
+        let fetch = fetch_text(&state, 10);
+        if fetch.is_some() && fetch != download {
+            println!("{}", fetch.as_deref().unwrap_or_default());
+        }
+        download = fetch;
         let view = state.boards.iter().find(|view| view.serial == board);
         for ((port, shown), result) in ports.iter().zip(&mut shown).zip(&state.submitted) {
             if result.is_none()

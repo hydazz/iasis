@@ -180,7 +180,8 @@ private struct BoardHeader: View {
     }
 }
 
-/// The image the agent is downloading, while it downloads one.
+/// The image the agent is downloading, while it downloads one, and how many
+/// devices wait for it.
 private struct AgentStatusBar: View {
     let state: AgentState
 
@@ -192,6 +193,11 @@ private struct AgentStatusBar: View {
                     .frame(maxWidth: 160)
                 Text("\(fetch.percent)%")
                     .monospacedDigit()
+                switch state.waitingForDownload {
+                case 0: EmptyView()
+                case 1: Text("1 device waiting")
+                case let waiting: Text("\(waiting) devices waiting")
+                }
             }
         }
     }

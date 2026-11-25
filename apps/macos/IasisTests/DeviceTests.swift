@@ -99,9 +99,14 @@ struct DeviceTests {
         state.boards[0].ports[2].stage = nil
         state.boards[0].ports[2].job?.phase = .preparing
         #expect(state.devices[2].operation?.detail == "Preparing")
-        state.boards[0].ports[2].fetch = 43
-        #expect(state.devices[2].activity == Activity("Downloading Image 43%", .working(0.43), symbol: "arrow.down.circle"))
-        #expect(state.devices[2].operation?.steps == [.init(name: "Downloading Image", state: .active)])
+        state.boards[0].ports[2].awaiting = state.images.fetch?.id
+        #expect(state.devices[2].activity == Activity("Waiting for Image", .working(nil), symbol: "arrow.down.circle"))
+        #expect(state.devices[2].operation?.steps == [.init(name: "Waiting for Image", state: .active)])
+        #expect(state.waitingForDownload == 1)
+        state.boards[0].ports[3].awaiting = state.images.fetch?.id
+        state.boards[0].ports[4].awaiting = "UniversalMac_27.2.1_26B131_Restore.ipsw"
+        // A port waiting behind another download is not this one's.
+        #expect(state.waitingForDownload == 2)
 
         let ended = try #require(state.devices[3].operation)
         #expect(ended.title == "Restore Complete")

@@ -58,8 +58,8 @@ struct Device: Identifiable, Equatable {
             return Activity(fault, .failed)
         }
         guard port.occupied, port.enabled else { return .idle }
-        if let percent = port.fetch {
-            return Activity("Downloading Image \(percent)%", .working(Double(percent) / 100), symbol: DeviceSymbol.download)
+        if port.awaiting != nil {
+            return Activity("Waiting for Image", .working(nil), symbol: DeviceSymbol.download)
         }
         if let job = port.job {
             guard let stage = port.stage else {
@@ -96,8 +96,8 @@ struct Device: Identifiable, Equatable {
         let activity = activity
         if let job = port.job, job.phase == .preparing || job.phase == .running {
             var status = OperationStatus(title: job.operation.title, symbol: job.operation.symbol, mark: activity.mark)
-            if port.fetch != nil {
-                status.steps = [.init(name: "Downloading Image", state: .active)]
+            if port.awaiting != nil {
+                status.steps = [.init(name: "Waiting for Image", state: .active)]
             } else if let stage = port.stage {
                 status.steps = stage.steps.enumerated().map { index, name in
                     .init(name: name, state: index < stage.step ? .done : index == stage.step ? .active : .pending)
