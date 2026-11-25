@@ -93,7 +93,7 @@ impl<F: NorFlash> Store<F> {
     }
 
     /// A successful change is durable. Live saves never erase.
-    pub fn save(&mut self, change: Setting, busy: bool) -> bool {
+    pub fn save(&mut self, change: Setting) -> bool {
         let mut settings = self.settings;
         match change {
             Setting::Name(name) => settings.name = name,
@@ -106,9 +106,6 @@ impl<F: NorFlash> Store<F> {
         }
         if settings == self.settings {
             return true;
-        }
-        if busy {
-            return false;
         }
         let mut sector = self.latest_sector;
         if self.used[sector] == Self::SLOTS {
@@ -210,29 +207,27 @@ mod tests {
         let mut store = Store::open(Flash::default()).unwrap();
         let name = BoardName::new("Desk A").unwrap();
         assert_eq!(store.settings, Settings::default());
-        assert!(store.save(Setting::Name(name), false));
-        assert!(!store.save(Setting::Brightness(0), false));
-        assert!(store.save(Setting::Name(name), false));
-        assert!(store.save(Setting::Name(name), true));
-        assert!(!store.save(Setting::Brightness(65), true));
+        assert!(store.save(Setting::Name(name)));
+        assert!(!store.save(Setting::Brightness(0)));
+        assert!(store.save(Setting::Name(name)));
         assert_eq!(store.used, [1, 0]);
         for percent in 60..=62 {
-            assert!(store.save(Setting::Brightness(percent), false));
+            assert!(store.save(Setting::Brightness(percent)));
         }
         let expected = Settings {
             name,
             brightness: 62,
         };
         assert!(store.full());
-        assert!(!store.save(Setting::Brightness(65), false));
+        assert!(!store.save(Setting::Brightness(65)));
         assert_eq!(store.settings, expected);
         let mut reboot = Store::open(store.flash).unwrap();
         assert_eq!(reboot.settings, expected);
         for percent in 63..=100 {
             reboot.reclaim().unwrap();
-            assert!(reboot.save(Setting::Brightness(percent), false));
+            assert!(reboot.save(Setting::Brightness(percent)));
         }
-        assert!(reboot.save(Setting::Name(BoardName::default()), false));
+        assert!(reboot.save(Setting::Name(BoardName::default())));
         assert_eq!(
             Store::open(reboot.flash).unwrap().settings,
             Settings {
@@ -245,20 +240,20 @@ mod tests {
     #[test]
     fn torn_program_and_interrupted_collection_preserve_the_previous_save() {
         let mut store = Store::open(Flash::default()).unwrap();
-        assert!(store.save(Setting::Brightness(20), false));
-        assert!(store.save(Setting::Brightness(30), false));
+        assert!(store.save(Setting::Brightness(20)));
+        assert!(store.save(Setting::Brightness(30)));
         // The first write in the next sector never authorises erasing the
         // old one until its complete record reads back.
         for bytes in 0..RECORD {
             let mut reboot = Store::open(store.flash.clone()).unwrap();
             reboot.flash.write_limit = bytes;
-            assert!(!reboot.save(Setting::Brightness(40), false));
+            assert!(!reboot.save(Setting::Brightness(40)));
             let mut reboot = Store::open(reboot.flash).unwrap();
             assert_eq!(reboot.settings.brightness, 30);
             reboot.reclaim().unwrap();
             assert_eq!(Store::open(reboot.flash).unwrap().settings.brightness, 30);
         }
-        assert!(store.save(Setting::Brightness(40), false));
+        assert!(store.save(Setting::Brightness(40)));
         for erased in 0..=SECTOR {
             let mut flash = store.flash.clone();
             flash.data[SECTOR..SECTOR + erased].fill(0xff);

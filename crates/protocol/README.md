@@ -65,7 +65,7 @@ Send a `PortCommand` with a nonzero request ID. USB acceptance queues the comman
 | Debug USB complete        | The target's reply shows Debug USB on its primary USB 2 pair, or off its pins               |
 | Bootloader accepted       | ROM reboot queued; use picotool to detect the updater                                       |
 
-`SettingsRequest` changes one field in `Status.settings`. A name holds up to 16 printable ASCII characters, with spaces allowed inside. An empty name clears it. Brightness ranges from 10 to 100 percent and defaults to 50. The board acknowledges a change after saving it to flash. `Status.settings_busy` means a target operation or an erase arm is in progress. Retry a change once it finishes. A full settings store rejects changes and sets `Status.settings_full`. Unplug the targets and retry once this flag clears.
+`SettingsRequest` changes one field in `Status.settings`. A name holds up to 16 printable ASCII characters, with spaces allowed inside. An empty name clears it. Brightness ranges from 10 to 100 percent and defaults to 50. The board acknowledges a change after saving it to flash. A full settings store rejects changes and sets `Status.settings_full`. Unplug the targets and retry once this flag clears.
 
 `HostBudget` is the remaining legacy USB allowance including Iasis. Zero clears it; values above 1600 mA are rejected. It applies to Default-current Rp while the management interface is configured and awake. A USB reset or deconfiguration clears the hint. With 1.5 A or 3 A Rp and valid upstream VBUS, the board uses the advertised current independently of management USB.
 

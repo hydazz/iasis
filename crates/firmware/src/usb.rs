@@ -149,17 +149,7 @@ pub struct Management<'a> {
     pub host_budget: &'a Cell<u16>,
     pub settings: &'a RefCell<crate::SettingsStore>,
     pub ports: &'a crate::ports::Ports,
-    pub button_armed: &'a Cell<bool>,
     pub session: &'a Session,
-}
-
-impl Management<'_> {
-    fn settings_busy(&self, now: u64) -> bool {
-        self.command.get().is_some()
-            || self.button_armed.get()
-            || self.session.awaiting_button(now)
-            || self.ports.settings_busy(now)
-    }
 }
 
 fn matches(request: &Request) -> bool {
@@ -215,7 +205,6 @@ impl Handler for Management<'_> {
                 status.settings = store.settings;
                 status.settings_full = store.full();
                 let now = embassy_time::Instant::now().as_millis();
-                status.settings_busy = self.settings_busy(now);
                 status.host = self.session.active(now);
                 let session = status.host.map(|host| host.id);
                 status.restore_decision = status.restore_decision.filter(|decision| {
@@ -298,10 +287,7 @@ impl Handler for Management<'_> {
             protocol::SETTINGS => match protocol::decode::<protocol::SettingsRequest>(data) {
                 Ok(request)
                     if request.serial == self.info.serial
-                        && self.settings.borrow_mut().save(
-                            request.change,
-                            self.settings_busy(embassy_time::Instant::now().as_millis()),
-                        ) =>
+                        && self.settings.borrow_mut().save(request.change) =>
                 {
                     Some(OutResponse::Accepted)
                 }
