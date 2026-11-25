@@ -398,9 +398,11 @@ private struct BoardSettings: View {
 }
 
 /// The restore images the agent holds or is fetching, one row for each
-/// archive.
+/// archive. Selected rows go from the context menu, the Delete key, a swipe or
+/// the Remove button, as in Login Items.
 private struct ImageSettings: View {
     let model: AgentModel
+    @State private var selection = Set<AgentState.Image.ID>()
     @State private var choosingRelease = false
     @State private var choosingFile = false
     @State private var inspecting: AgentState.Image?
@@ -409,42 +411,58 @@ private struct ImageSettings: View {
         Form {
             if let store = model.state?.images {
                 Section {
-                    ForEach(store.images) { image in
-                        let remove: () -> Void = { model.perform([.remove(image: image.id)]) }
-                        ImageRow(image: image, fetch: store.fetch, remove: remove)
-                            .contextMenu {
-                                if image.ready {
-                                    if let path = image.path {
-                                        Button("Show in Finder") {
-                                            NSWorkspace.shared.activateFileViewerSelecting([URL(filePath: path)])
-                                        }
+                    List(selection: $selection) {
+                        ForEach(store.images) { image in
+                            ImageRow(image: image, fetch: store.fetch) { remove([image.id]) }
+                                .swipeActions {
+                                    Button(removal(of: [image]), systemImage: "trash", role: .destructive) {
+                                        remove([image.id])
                                     }
-                                    Button("Get Info") { inspecting = image }
-                                    Divider()
-                                    Button("Remove Image", action: remove)
-                                        .disabled(image.inUse)
-                                } else {
-                                    Button("Cancel Download", action: remove)
+                                    .disabled(image.inUse)
                                 }
-                            }
-                    }
-                    if let importing = model.importing {
-                        ImportRow(importing: importing)
-                    }
-                    HStack {
-                        Text(summary(of: store.images))
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Menu("Add Image") {
-                            Button("Download…") {
-                                choosingRelease = true
-                            }
-                            Button("From File…") {
-                                choosingFile = true
-                            }
                         }
-                        .fixedSize()
+                        if let importing = model.importing {
+                            ImportRow(importing: importing)
+                                .selectionDisabled()
+                        }
                     }
+                    .contextMenu(forSelectionType: AgentState.Image.ID.self) { ids in
+                        menu(for: store.images.filter { ids.contains($0.id) })
+                    } primaryAction: { ids in
+                        let chosen = store.images.filter { ids.contains($0.id) }
+                        if chosen.count == 1, let image = chosen.first, image.ready {
+                            inspecting = image
+                        }
+                    }
+                    .onDeleteCommand { remove(selection) }
+                    .overlay {
+                        if store.images.isEmpty, model.importing == nil {
+                            Text("No Images")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(height: 240)
+                    HStack(spacing: 4) {
+                        Menu {
+                            Button("Download…") { choosingRelease = true }
+                            Button("From File…") { choosingFile = true }
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .help("Add an image")
+                        Button("Remove", systemImage: "minus") { remove(selection) }
+                            .labelStyle(.iconOnly)
+                            .disabled(removable(selection).isEmpty)
+                            .help("Remove the selected images")
+                        Spacer()
+                        if let summary = summary(of: store.images) {
+                            Text(summary)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.borderless)
                 } footer: {
                     Text("A restore uses the newest image here that Apple still signs, or downloads the newest release. Images stay until you remove them.")
                 }
@@ -473,9 +491,45 @@ private struct ImageSettings: View {
         }
     }
 
-    private func summary(of images: [AgentState.Image]) -> String {
+    @ViewBuilder private func menu(for chosen: [AgentState.Image]) -> some View {
+        let held = chosen.filter(\.ready)
+        if !held.isEmpty, held.count == chosen.count {
+            Button("Show in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting(held.compactMap { $0.path.map { URL(filePath: $0) } })
+            }
+            if held.count == 1, let image = held.first {
+                Button("Get Info") { inspecting = image }
+            }
+            Divider()
+        }
+        if !chosen.isEmpty {
+            Button(removal(of: chosen)) { remove(Set(chosen.map(\.id))) }
+                .disabled(chosen.contains(where: \.inUse))
+        }
+    }
+
+    private func removal(of chosen: [AgentState.Image]) -> String {
+        if chosen.allSatisfy({ !$0.ready }) {
+            return chosen.count == 1 ? "Cancel Download" : "Cancel Downloads"
+        }
+        return chosen.count == 1 ? "Remove Image" : "Remove Images"
+    }
+
+    /// The selected images that can go: none a restore is reading.
+    private func removable(_ ids: Set<AgentState.Image.ID>) -> [AgentState.Image] {
+        model.state?.images.images.filter { ids.contains($0.id) && !$0.inUse } ?? []
+    }
+
+    private func remove(_ ids: Set<AgentState.Image.ID>) {
+        let going = removable(ids)
+        guard !going.isEmpty else { return }
+        model.perform(going.map { .remove(image: $0.id) })
+        selection.subtract(going.map(\.id))
+    }
+
+    private func summary(of images: [AgentState.Image]) -> String? {
         let held = images.filter(\.ready)
-        guard !held.isEmpty else { return "No Images" }
+        guard !held.isEmpty else { return nil }
         let size = held.reduce(0) { $0 + $1.bytes }.formatted(.byteCount(style: .file))
         return "\(held.count) image\(held.count == 1 ? "" : "s"), \(size)"
     }
@@ -486,7 +540,7 @@ private struct ImageSettings: View {
 private struct ImageRow: View {
     let image: AgentState.Image
     let fetch: AgentState.Fetch?
-    let remove: () -> Void
+    let cancel: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -507,7 +561,7 @@ private struct ImageRow: View {
             Spacer(minLength: 4)
             if !image.ready {
                 ActivityMark(activity: status)
-                Button("Cancel Download", systemImage: "xmark.circle", action: remove)
+                Button("Cancel Download", systemImage: "xmark.circle", action: cancel)
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
                     .help("Do not download this image")
