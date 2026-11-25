@@ -209,7 +209,7 @@ fn operation_rows(group: &adw::PreferencesGroup, operation: &OperationStatus) {
         match step.state {
             StepState::Done => row.add_prefix(&icon("object-select-symbolic", "dim-label")),
             StepState::Active => {
-                row.add_prefix(&gtk::Spinner::builder().spinning(true).build());
+                row.add_prefix(&icon(crate::row::TURNING, "turning"));
                 if let Some(detail) = &operation.detail {
                     row.set_subtitle(&glib::markup_escape_text(detail));
                 }
