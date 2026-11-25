@@ -148,7 +148,7 @@ target/release/iasis images add /path/to/UniversalMac.ipsw
 target/release/iasis images remove UniversalMac_27.2.1_26B131_Restore.ipsw
 ```
 
-An image stays until it is removed. Removing one that is still downloading stops the download. An image added from a file is never taken for an unsigned one, since the catalog may not list it. Images live in the agent's cache directory: `~/Library/Caches/com.hydaz.Iasis` on macOS and `/var/cache/iasis` on Linux. `images add` sends the archive to the agent, which keeps it once every member's checksum matches. A Mac image is about 26 GB and an iPad image about 11 GB.
+An image stays until it is removed. Removing one that is still downloading stops the download. An image added from a file is never taken for an unsigned one, since the catalog may not list it. Downloaded images live in the agent's cache directory, `~/Library/Caches/com.hydaz.Iasis` on macOS and `/var/cache/iasis` on Linux, which the system may clear; the agent then downloads an image again when a restore needs it. Images added from a file live in its state directory, `~/Library/Application Support/com.hydaz.Iasis` on macOS and `/var/lib/iasis` on Linux. `images add` sends the archive to the agent, which keeps it once every member's checksum matches. A Mac image is about 26 GB and an iPad image about 11 GB.
 
 While an image is being fetched for a target, its port pulses purple, the OLED labels it `IMG`, and `iasis` shows the percentage.
 

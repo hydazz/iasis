@@ -1,11 +1,13 @@
 //! The host's restore images.
 //!
-//! The store is a cache of IPSW archives, each restoring the models its
-//! manifest names. A restore asks the catalog what Apple signs for its
-//! device, then takes the newest image in the store that is still signed or
-//! has the newest release fetched. Any signed release can be fetched ahead
-//! of time. An image stays until it is removed, or until a restore finds
-//! that Apple no longer signs it.
+//! The store holds IPSW archives, each restoring the models its manifest
+//! names. A restore asks the catalog what Apple signs for its device, then
+//! takes the newest image in the store that is still signed or has the
+//! newest release fetched. Any signed release can be fetched ahead of time.
+//! An image stays until it is removed, or until a restore finds that Apple
+//! no longer signs it. Fetched archives live in the host's cache, which the
+//! system may clear: the store then fetches them again. Archives added from
+//! a file and the store's index live with the host's state.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -37,6 +39,8 @@ const IMAGE_HOSTS: [&str; 3] = [
 const LISTING: Duration = Duration::from_secs(600);
 /// The name an archive arriving from a client has until it is checked.
 const IMPORTING: &str = ".import-";
+/// How often the store looks for fetched archives the system has cleared.
+const CLEARED: Duration = Duration::from_secs(60);
 
 /// A release as the catalog lists it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -527,7 +531,10 @@ impl State {
 }
 
 struct Inner {
-    dir: PathBuf,
+    /// Fetched archives, in the host's cache.
+    cache: PathBuf,
+    /// Archives added from a file and the index, with the host's state.
+    kept: PathBuf,
     catalog: Box<dyn Catalog>,
     state: Mutex<State>,
     changed: Condvar,
@@ -545,9 +552,10 @@ impl Inner {
 
     fn save(&self, state: &State) {
         let write = || -> Result<()> {
-            let temporary = self.dir.join("index.json.new");
+            fs::create_dir_all(&self.kept)?;
+            let temporary = self.kept.join("index.json.new");
             fs::write(&temporary, serde_json::to_vec_pretty(&state.saved)?)?;
-            fs::rename(temporary, self.dir.join("index.json"))?;
+            fs::rename(temporary, self.kept.join("index.json"))?;
             Ok(())
         };
         if let Err(error) = write() {
@@ -578,7 +586,22 @@ impl Inner {
         Ok(devices)
     }
 
-    /// Fetch each release that is asked for, one at a time.
+    /// Forget the images whose files are gone, as when the system clears its
+    /// caches. Whether any were.
+    fn forget_cleared(&self, state: &mut State) -> bool {
+        let held = state.saved.images.len();
+        state.saved.images.retain(|image| {
+            let here = image.ipsw.path().is_file();
+            if !here {
+                log::info!("{} is gone", image.ipsw.path().display());
+            }
+            here
+        });
+        state.saved.images.len() != held
+    }
+
+    /// Fetch each release that is asked for, one at a time, and look for
+    /// images the system has cleared in between.
     fn work(&self) {
         if self.lock().saved.devices.is_empty() {
             let _ = self.devices();
@@ -586,12 +609,17 @@ impl Inner {
         loop {
             let firmware = {
                 let state = self.lock();
-                let state = self
+                let (mut state, _) = self
                     .changed
-                    .wait_while(state, |state| !state.stop && state.next().is_none())
+                    .wait_timeout_while(state, CLEARED, |state| {
+                        !state.stop && state.next().is_none()
+                    })
                     .unwrap();
                 if state.stop {
                     return;
+                }
+                if self.forget_cleared(&mut state) {
+                    self.save(&state);
                 }
                 state.next().map(|download| download.firmware.clone())
             };
@@ -627,10 +655,11 @@ impl Inner {
 
     fn fetch(&self, firmware: &Firmware) -> Result<()> {
         let name = firmware.file_name()?;
-        let path = self.dir.join(name);
-        let part = self.dir.join(format!("{name}.part"));
+        fs::create_dir_all(&self.cache)?;
+        let path = self.cache.join(name);
+        let part = self.cache.join(format!("{name}.part"));
         // An earlier release's partial download is of no further use.
-        for entry in fs::read_dir(&self.dir)?.flatten() {
+        for entry in fs::read_dir(&self.cache)?.flatten() {
             let other = entry.path();
             if other.extension().is_some_and(|ext| ext == "part") && other != part {
                 fs::remove_file(other).ok();
@@ -710,32 +739,33 @@ impl Drop for Lease {
 pub struct Store(Arc<Inner>);
 
 impl Store {
-    /// Open the store in `dir`, which one process holds at a time.
+    /// Open the store, which one process holds at a time: fetched archives
+    /// in `cache`, and those added from a file and the index in `kept`.
     pub fn open(
-        dir: impl Into<PathBuf>,
+        cache: impl Into<PathBuf>,
+        kept: impl Into<PathBuf>,
         catalog: impl Catalog,
         changes: Arc<Watch>,
     ) -> Result<Self> {
-        let dir = dir.into();
-        fs::create_dir_all(&dir).context("creating the image store")?;
-        let dir = dir.canonicalize()?;
-        let lock = File::create(dir.join("lock"))?;
+        let (cache, kept) = (cache.into(), kept.into());
+        fs::create_dir_all(&kept).context("creating the image store")?;
+        let kept = kept.canonicalize()?;
+        let lock = File::create(kept.join("lock"))?;
         lock.try_lock()
             .ok()
             .context("another Iasis process holds the image store")?;
         // An archive a client was still sending when its agent stopped.
-        for entry in fs::read_dir(&dir)?.flatten() {
+        for entry in fs::read_dir(&kept)?.flatten() {
             if entry.file_name().to_string_lossy().starts_with(IMPORTING) {
                 fs::remove_file(entry.path()).ok();
             }
         }
-        let index = dir.join("index.json");
+        let index = kept.join("index.json");
         let mut saved: Saved = match fs::read(&index) {
             Ok(bytes) => serde_json::from_slice(&bytes).with_context(|| {
                 format!(
-                    "{} is not an index this version reads; delete {} to empty the store",
-                    index.display(),
-                    dir.display()
+                    "{} is not an index this version reads; delete it to empty the store",
+                    index.display()
                 )
             })?,
             Err(error) if error.kind() == io::ErrorKind::NotFound => Saved::default(),
@@ -745,7 +775,7 @@ impl Store {
         };
         // An image whose file is not as the store left it is no longer the
         // one the store checked.
-        let kept = saved.images.len();
+        let listed = saved.images.len();
         saved
             .images
             .retain(|image| match image.ipsw.check_unchanged() {
@@ -755,9 +785,10 @@ impl Store {
                     false
                 }
             });
-        let index_changed = saved.images.len() != kept;
+        let index_changed = saved.images.len() != listed;
         let store = Self(Arc::new(Inner {
-            dir,
+            cache,
+            kept,
             catalog: Box::new(catalog),
             state: Mutex::new(State {
                 saved,
@@ -788,7 +819,13 @@ impl Store {
                 .find(|device| device.identifier == identifier);
             device.map_or_else(|| identifier.to_owned(), |device| device.name.clone())
         };
-        let held = state.saved.images.iter().map(|image| {
+        // The system may have cleared an image since the store last looked.
+        let here = state
+            .saved
+            .images
+            .iter()
+            .filter(|image| image.ipsw.path().is_file());
+        let held = here.map(|image| {
             let mut models = Vec::new();
             for model in image.ipsw.product_types.iter().map(|kind| name(kind)) {
                 if !models.contains(&model) {
@@ -1069,6 +1106,9 @@ impl Store {
     pub(crate) fn pick(&self, chip: u32, board: u32, latest: bool) -> Result<Pick> {
         let listed = self.listed(chip, board);
         let mut state = self.0.lock();
+        if self.0.forget_cleared(&mut state) {
+            self.0.save(&state);
+        }
         let signed = listed
             .as_ref()
             .ok()
@@ -1203,7 +1243,7 @@ impl Store {
         );
         let mut part = tempfile::Builder::new()
             .prefix(IMPORTING)
-            .tempfile_in(&self.0.dir)
+            .tempfile_in(&self.0.kept)
             .context("creating the image file")?;
         let received = io::copy(&mut source.take(bytes), part.as_file_mut())
             .context("receiving the archive")?;
@@ -1223,7 +1263,7 @@ impl Store {
         );
         let kept = self
             .0
-            .dir
+            .kept
             .join(format!("{}-{name}", received.build_version));
         part.persist_noclobber(&kept)
             .map_err(|error| error.error)
@@ -1281,6 +1321,16 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use zip::{ZipWriter, write::SimpleFileOptions};
 
+    /// A store with its cache and its kept files under `root`.
+    fn open(root: &Path, catalog: impl Catalog) -> Result<Store> {
+        Store::open(
+            root.join("cache"),
+            root.join("kept"),
+            catalog,
+            Arc::default(),
+        )
+    }
+
     fn import(store: &Store, path: &Path) -> Result<PreparedIpsw> {
         let mut file = File::open(path)?;
         let bytes = file.metadata()?.len();
@@ -1306,7 +1356,7 @@ mod tests {
         let local = temp.path().join("Mini.ipsw");
         archive(&local, "25.0", "24A1", &["Macmini9,1"]);
         let dir = temp.path().join("store");
-        let store = Store::open(&dir, Shelf::new(), Arc::default()).unwrap();
+        let store = open(&dir, Shelf::new()).unwrap();
         let whole = fs::read(&local).unwrap();
         let cut = &whole[..whole.len() / 2];
         // A client that stops sending, or sends a broken archive.
@@ -1324,10 +1374,10 @@ mod tests {
                 .import("../Mini.ipsw", &mut &whole[..], whole.len() as u64)
                 .is_err()
         );
-        assert_eq!(files(&dir), Vec::<String>::new());
+        assert_eq!(files(&dir.join("kept")), Vec::<String>::new());
         assert!(store.snapshot().images.is_empty());
         let added = import(&store, &local).unwrap();
-        assert_eq!(files(&dir), ["24A1-Mini.ipsw"]);
+        assert_eq!(files(&dir.join("kept")), ["24A1-Mini.ipsw"]);
         assert_eq!(fs::read(added.path()).unwrap(), whole);
         assert_eq!(store.snapshot().images.len(), 1);
         store.close();
@@ -1528,7 +1578,7 @@ mod tests {
     fn the_catalog_lists_only_models_apple_signs_a_release_for() {
         let temp = tempfile::tempdir().unwrap();
         let shelf = Shelf::new();
-        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
+        let store = open(temp.path(), shelf.clone()).unwrap();
         assert_eq!(catalog(&store), ["Macmini9,1", "iPad13,18"]);
         shelf.release("iPad13,19", "26.0", "23A340");
         shelf.sign("iPad13,18", &[]);
@@ -1600,10 +1650,27 @@ mod tests {
     }
 
     #[test]
+    fn an_image_the_system_clears_from_the_cache_is_fetched_again() {
+        let temp = tempfile::tempdir().unwrap();
+        let shelf = Shelf::new();
+        let store = open(temp.path(), shelf.clone()).unwrap();
+        let fetched = store.obtain(0x8103, 34, false, |_| Ok(())).unwrap();
+        let cache = temp.path().join("cache");
+        assert!(fetched.path().starts_with(cache.canonicalize().unwrap()));
+        fs::remove_dir_all(&cache).unwrap();
+        assert!(store.snapshot().images.is_empty());
+        let again = store.obtain(0x8103, 34, false, |_| Ok(())).unwrap();
+        assert!(again.path().is_file());
+        assert_eq!(shelf.fetched(), 2);
+        assert_eq!(builds(&store), ["25A354"]);
+        store.close();
+    }
+
+    #[test]
     fn a_restore_fetches_the_newest_release_and_the_next_reuses_it() {
         let temp = tempfile::tempdir().unwrap();
         let shelf = Shelf::new();
-        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
+        let store = open(temp.path(), shelf.clone()).unwrap();
         assert!(store.model_for(0x8103, 99).is_err());
         assert_eq!(store.offer(0x8103, 34).held, None);
         // A device nobody asked about is identified and its image fetched.
@@ -1634,8 +1701,8 @@ mod tests {
         // The index survives, and one process holds the store at a time.
         let shelf = Shelf::new();
         until("the store to be free", || {
-            Store::open(temp.path(), shelf.clone(), Arc::default()).is_ok_and(|store| {
-                assert!(Store::open(temp.path(), shelf.clone(), Arc::default()).is_err());
+            open(temp.path(), shelf.clone()).is_ok_and(|store| {
+                assert!(open(temp.path(), shelf.clone()).is_err());
                 assert_eq!(builds(&store), ["25A354"]);
                 store.close();
                 true
@@ -1647,7 +1714,7 @@ mod tests {
     fn a_newer_release_is_offered_and_fetched_only_when_asked_for() {
         let temp = tempfile::tempdir().unwrap();
         let shelf = Shelf::new();
-        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
+        let store = open(temp.path(), shelf.clone()).unwrap();
         store.obtain(0x8103, 34, false, |_| Ok(())).unwrap();
         shelf.sign("Macmini9,1", &[("26.1", "25B78"), ("26.0", "25A354")]);
         relist(&store);
@@ -1680,7 +1747,7 @@ mod tests {
     fn an_image_apple_no_longer_signs_gives_way_to_the_newest() {
         let temp = tempfile::tempdir().unwrap();
         let shelf = Shelf::new();
-        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
+        let store = open(temp.path(), shelf.clone()).unwrap();
         let old = store.obtain(0x8103, 20, false, |_| Ok(())).unwrap();
         assert_eq!(old.build_version, "23A340");
         shelf.release("iPad13,18", "26.1", "23B85");
@@ -1707,7 +1774,7 @@ mod tests {
     fn the_image_in_the_store_serves_while_the_catalog_cannot_be_asked() {
         let temp = tempfile::tempdir().unwrap();
         let shelf = Shelf::new();
-        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
+        let store = open(temp.path(), shelf.clone()).unwrap();
         store.obtain(0x8103, 34, false, |_| Ok(())).unwrap();
         shelf.offline.store(true, Ordering::SeqCst);
         relist(&store);
@@ -1732,7 +1799,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let shelf = Shelf::new();
         shelf.release("iPad13,18", "26.0", "25A354");
-        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
+        let store = open(temp.path(), shelf.clone()).unwrap();
         let mac = store.obtain(0x8103, 34, false, |_| Ok(())).unwrap();
         let ipad = store.obtain(0x8103, 20, false, |_| Ok(())).unwrap();
         assert_eq!(mac.build_version, ipad.build_version);
@@ -1757,7 +1824,7 @@ mod tests {
         let shelf = Shelf::new();
         *shelf.shared.lock().unwrap() = vec!["iPad13,18", "iPad13,19"];
         shelf.release("iPad13,19", "26.0", "23A340");
-        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
+        let store = open(temp.path(), shelf.clone()).unwrap();
         // Two restores ask at once, and so do two of one model.
         let asking: Vec<_> = [20, 21, 21]
             .map(|board| {
@@ -1783,7 +1850,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let shelf = Shelf::new();
         shelf.sign("Macmini9,1", &[("26.1", "25B78"), ("26.0", "25A354")]);
-        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
+        let store = open(temp.path(), shelf.clone()).unwrap();
         let listed = store.releases("macmini9,1").unwrap();
         let listed: Vec<&str> = listed.iter().map(|r| r.build.as_str()).collect();
         assert_eq!(listed, ["25B78", "25A354"]);
@@ -1811,7 +1878,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let shelf = Shelf::new();
         shelf.slow.store(true, Ordering::SeqCst);
-        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
+        let store = open(temp.path(), shelf.clone()).unwrap();
         store.download("Macmini9,1", None).unwrap();
         until("the download", || store.snapshot().fetch.is_some());
         let snapshot = store.snapshot();
@@ -1832,13 +1899,13 @@ mod tests {
         let local = temp.path().join("Mini.ipsw");
         archive(&local, "25.0", "24A1", &["Macmini9,1"]);
         let dir = temp.path().join("store");
-        let store = Store::open(&dir, Shelf::new(), Arc::default()).unwrap();
+        let store = open(&dir, Shelf::new()).unwrap();
         let added = import(&store, &local).unwrap();
         store.close();
         drop(store);
         archive(added.path(), "25.0", "24A1", &["Macmini9,1"]);
         until("the store to be free", || {
-            Store::open(&dir, Shelf::new(), Arc::default()).is_ok_and(|store| {
+            open(&dir, Shelf::new()).is_ok_and(|store| {
                 assert!(store.snapshot().images.is_empty());
                 store.close();
                 true
@@ -1851,7 +1918,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let shelf = Shelf::new();
         shelf.release("iBridge2,1", "10.2", "23P2101");
-        let store = Store::open(temp.path(), shelf, Arc::default()).unwrap();
+        let store = open(temp.path(), shelf).unwrap();
         assert_eq!(catalog(&store), ["Macmini9,1", "iPad13,18"]);
         assert!(store.offer(0x8103, board("iBridge2,1")).latest.is_none());
         store.close();
@@ -1860,9 +1927,10 @@ mod tests {
     #[test]
     fn an_index_the_store_cannot_read_is_reported_and_left_alone() {
         let temp = tempfile::tempdir().unwrap();
-        let index = temp.path().join("index.json");
+        let index = temp.path().join("kept/index.json");
+        fs::create_dir_all(temp.path().join("kept")).unwrap();
         fs::write(&index, r#"{"images": [{"path": "/a.ipsw"}]}"#).unwrap();
-        let Err(error) = Store::open(temp.path(), Shelf::new(), Arc::default()) else {
+        let Err(error) = open(temp.path(), Shelf::new()) else {
             panic!("the store opened");
         };
         assert!(format!("{error:#}").contains("index.json"), "{error:#}");
@@ -1874,7 +1942,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let shelf = Shelf::new();
         *shelf.fail.lock().unwrap() = Some("no route".into());
-        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
+        let store = open(temp.path(), shelf.clone()).unwrap();
         let error = store.obtain(0x8103, 20, false, |_| Ok(())).unwrap_err();
         assert!(format!("{error:#}").contains("no route"), "{error:#}");
         // The failure shows on the image that did not come.
@@ -1898,7 +1966,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let shelf = Shelf::new();
         *shelf.fail.lock().unwrap() = Some("no route".into());
-        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
+        let store = open(temp.path(), shelf.clone()).unwrap();
         // Two targets of one model wait for one release, asked for once.
         let wanted: Vec<Wanted> = (0..2)
             .map(|_| match store.pick(0x8103, 20, false).unwrap() {
@@ -1937,13 +2005,14 @@ mod tests {
         let local = temp.path().join("Mini.ipsw");
         archive(&local, "25.0", "24A1", &["Macmini9,1"]);
         let shelf = Shelf::new();
-        let store = Store::open(temp.path().join("store"), shelf.clone(), Arc::default()).unwrap();
+        let store = open(&temp.path().join("store"), shelf.clone()).unwrap();
         let added = import(&store, &local).unwrap();
         assert!(import(&store, &local).is_err());
+        // It is kept with the host's state, which the system does not clear.
         assert!(
             added
                 .path()
-                .starts_with(temp.path().join("store").canonicalize().unwrap())
+                .starts_with(temp.path().join("store/kept").canonicalize().unwrap())
         );
         // It serves its hardware without a fetch, though the catalog does
         // not list its build.

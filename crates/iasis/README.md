@@ -18,13 +18,13 @@ The package runs the agent at boot as the `iasisd` service, under the system use
 sudo usermod -aG iasis "$USER"
 ```
 
-| Path                                         | Contents                                      |
-| -------------------------------------------- | --------------------------------------------- |
-| `/usr/bin/iasis`                             | The command line                              |
-| `/usr/libexec/iasis/iasisd`, `iasis-gateway` | The agent and its gateway                     |
-| `/run/iasis/agent.sock`                      | The agent's socket                            |
-| `/var/lib/iasis`                             | Settings                                      |
-| `/var/cache/iasis`                           | Restore images, worker logs and scratch space |
+| Path                                         | Contents                                                        |
+| -------------------------------------------- | --------------------------------------------------------------- |
+| `/usr/bin/iasis`                             | The command line                                                |
+| `/usr/libexec/iasis/iasisd`, `iasis-gateway` | The agent and its gateway                                       |
+| `/run/iasis/agent.sock`                      | The agent's socket                                              |
+| `/var/lib/iasis`                             | Settings, the supervision identity and images added from a file |
+| `/var/cache/iasis`                           | Downloaded images and restore scratch space                     |
 
 Only the service touches the boards and targets directly. Its udev rule gives the `iasis-usb` group, whose one member is the service user, these devices:
 
