@@ -19,7 +19,6 @@
       "host": true,
       "restores": true,
       "brightness": 50,
-      "settings_busy": true,
       "ports": [
         {
           "number": 1,
@@ -247,7 +246,6 @@
       "host": true,
       "restores": false,
       "brightness": 0,
-      "settings_busy": false,
       "ports": [
         {
           "number": 1,
@@ -480,7 +478,6 @@
       "host": false,
       "restores": false,
       "brightness": 0,
-      "settings_busy": false,
       "ports": [],
       "notice": "not attended"
     },
@@ -499,7 +496,6 @@
       "host": false,
       "restores": false,
       "brightness": 0,
-      "settings_busy": false,
       "ports": [],
       "notice": null
     }
