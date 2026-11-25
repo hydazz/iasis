@@ -146,8 +146,8 @@ private struct StepLabel: View {
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("Done")
             case .active:
-                Image(systemName: "progress.indicator")
-                    .symbolEffect(.variableColor.iterative, options: .repeat(.continuous))
+                Image(systemName: "\(ActivityMark.turning).circle")
+                    .symbolEffect(.rotate, options: .repeat(.continuous))
                     .accessibilityLabel("Under Way")
             case .pending:
                 Image(systemName: "circle")

@@ -55,7 +55,8 @@ struct DeviceName: View {
         HStack(spacing: 6) {
             Group {
                 if device.port.identifying {
-                    ProgressView().controlSize(.small)
+                    Image(systemName: ActivityMark.turning)
+                        .symbolEffect(.rotate, options: .repeat(.continuous))
                 } else if let symbol = device.symbol {
                     Image(systemName: symbol)
                 } else {
@@ -114,9 +115,13 @@ private struct ConnectionMarks: View {
     }
 }
 
-/// What a port is doing or how it ended, as one symbol. Work with a known
-/// fraction is its operation's symbol in a ring drawn that far round.
+/// What a port is doing or how it ended, as one circled symbol: an open
+/// circle while work runs, a filled one once it ends. Work with a known
+/// fraction is its operation's symbol in a ring drawn that far round; without
+/// one, arrows turn.
 struct ActivityMark: View {
+    static let turning = "arrow.trianglehead.2.clockwise.rotate.90"
+
     let activity: Activity
 
     var body: some View {
@@ -128,15 +133,16 @@ struct ActivityMark: View {
                 Image(systemName: activity.symbol, variableValue: fraction)
                     .symbolVariableValueMode(.draw)
             case .working(nil):
-                ProgressView().controlSize(.small)
+                Image(systemName: "\(Self.turning).circle")
+                    .symbolEffect(.rotate, options: .repeat(.continuous))
             case .done:
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
             case .failed:
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
             case .uncertain:
                 Image(systemName: "questionmark.circle.fill").foregroundStyle(.purple)
             case .caution:
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+                Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.yellow)
             }
         }
         .imageScale(.large)
