@@ -3,6 +3,7 @@ mod gateway;
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn main() -> anyhow::Result<()> {
+    iasis::logging::system();
     let args: Vec<_> = std::env::args().skip(1).collect();
     match args.as_slice() {
         [link, network, target, dns] => gateway::run(

@@ -421,7 +421,7 @@ impl Sharing {
             }
         };
         if let Err(error) = follow_network(announce) {
-            eprintln!("Sharing: host networks are read every {REFRESH:?}: {error:#}");
+            log::warn!("Host networks are read every {REFRESH:?}: {error:#}");
         }
         let mut inputs: Option<Inputs> = None;
         loop {

@@ -109,11 +109,6 @@ private struct OperationView: View {
                 Text(detail).foregroundStyle(.secondary)
             }
         }
-        if let directory = operation.logDirectory {
-            Button("Show Logs in Finder") {
-                NSWorkspace.shared.open(URL(filePath: directory, directoryHint: .isDirectory))
-            }
-        }
     }
 }
 

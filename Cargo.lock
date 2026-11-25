@@ -1714,8 +1714,10 @@ dependencies = [
  "indicatif",
  "io-kit-sys",
  "keepawake",
+ "log",
  "nix",
  "nusb",
+ "oslog",
  "pcap",
  "picoboot",
  "pktkit",
@@ -2482,6 +2484,15 @@ checksum = "9aa2b01e1d916879f73a53d01d1d6cee68adbb31d6d9177a8cfce093cced1d50"
 dependencies = [
  "futures-core",
  "pin-project-lite",
+]
+
+[[package]]
+name = "oslog"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80d2043d1f61d77cb2f4b1f7b7b2295f40507f5f8e9d1c8bf10a1ca5f97a3969"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

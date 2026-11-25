@@ -551,7 +551,7 @@ impl Inner {
             Ok(())
         };
         if let Err(error) = write() {
-            eprintln!("Images: saving the index: {error:#}");
+            log::error!("Saving the index: {error:#}");
         }
         self.changes.changed();
     }
@@ -559,7 +559,7 @@ impl Inner {
     fn drop_files(&self, state: &mut State, paths: &[PathBuf]) {
         for path in paths {
             if let Err(error) = fs::remove_file(path) {
-                eprintln!("Images: removing {}: {error}", path.display());
+                log::warn!("Removing {}: {error}", path.display());
             }
         }
         state
@@ -611,7 +611,11 @@ impl Inner {
                     let error = format!("{error:#}");
                     for download in &mut state.downloads {
                         if download.firmware == firmware {
-                            eprintln!("Images: {} ({}): {error}", firmware.version, firmware.build);
+                            log::error!(
+                                "{} ({}) did not download: {error}",
+                                firmware.version,
+                                firmware.build
+                            );
                             download.error = Some(error.clone());
                         }
                     }
@@ -641,8 +645,8 @@ impl Inner {
         };
         self.lock().fetch = Some(fetch.clone());
         self.changes.changed();
-        println!(
-            "Images: fetching {} ({}), {:.1} GB",
+        log::info!(
+            "Fetching {} ({}), {:.1} GB",
             firmware.version,
             firmware.build,
             firmware.bytes as f64 / 1e9
@@ -675,7 +679,7 @@ impl Inner {
             ipsw.build_version,
             firmware.build
         );
-        println!("Images: {} ({}) is ready", firmware.version, firmware.build);
+        log::info!("{} ({}) is ready", firmware.version, firmware.build);
         self.lock().saved.images.push(Image {
             ipsw,
             fetched: true,
@@ -747,7 +751,7 @@ impl Store {
             .retain(|image| match image.ipsw.check_unchanged() {
                 Ok(()) => true,
                 Err(error) => {
-                    eprintln!("Images: {}: {error:#}", image.ipsw.path().display());
+                    log::warn!("{}: {error:#}", image.ipsw.path().display());
                     false
                 }
             });
@@ -1086,7 +1090,7 @@ impl Store {
             (Ok(listed), Some(_)) if latest => listed,
             (Ok(_), Some(held)) => return Ok(Pick::Held(held)),
             (Err(error), Some(held)) => {
-                eprintln!("Images: using the image in the store: {error:#}");
+                log::warn!("Using the image in the store: {error:#}");
                 return Ok(Pick::Held(held));
             }
             (Err(error), None) => return Err(error),

@@ -42,6 +42,8 @@ pub fn run_if_worker() {
         std::process::exit(0);
     }
     if first.is_some_and(|argument| argument == WORKER) {
+        // Its agent reads its stderr.
+        crate::logging::terminal();
         let arguments: Vec<_> = arguments.collect();
         std::process::exit(match worker::run(&arguments) {
             Ok(()) => 0,
