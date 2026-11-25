@@ -299,12 +299,17 @@ impl Window {
                 model.hubs = hubs;
                 model.state = Some(*state);
             }
-            Event::Absent | Event::Refused(_) => {
+            Event::Absent | Event::Refused(_) | Event::Unreadable => {
                 let (icon, title, description) = match &event {
                     Event::Refused(reason) => (
                         "changes-prevent-symbolic",
                         "No Access to Iasis",
                         format!("{reason}."),
+                    ),
+                    Event::Unreadable => (
+                        "dialog-warning-symbolic",
+                        "Iasis Service Is a Different Version",
+                        "Restart it with “sudo systemctl restart iasisd”.".to_owned(),
                     ),
                     _ => (
                         "computer-fail-symbolic",
