@@ -61,7 +61,7 @@ restorekit-sys.workspace = true
 [target.'cfg(target_os = "windows")'.dependencies]
 uds_windows = "1.2"
 windows-service = "0.8"
-windows-sys = { version = "0.60", features = [
+windows-sys = { version = "0.61", features = [
   "Win32_Devices_DeviceAndDriverInstallation",
   "Win32_Foundation",
   "Win32_Security",

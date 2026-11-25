@@ -2065,7 +2065,7 @@ dependencies = [
  "uds_windows",
  "ureq",
  "windows-service",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
  "zeroize",
  "zip",
 ]
