@@ -14,6 +14,8 @@ struct Device: Identifiable, Equatable {
     let session: UInt32?
     let port: AgentState.Port
     let sharing: AgentState.Sharing.Port?
+    /// What the host lacks for this device's restore.
+    var needs: AgentState.Prerequisite?
 
     static let dfuPortHelp = "Connect the cable to the Mac’s DFU port."
 
@@ -206,7 +208,8 @@ extension AgentState {
             let title = title(for: board)
             return BoardDevices(board: board, title: title, devices: board.ports.map { port in
                 let portSharing = sharing.ports.first { $0.board == board.serial && $0.port == port.number }
-                return Device(boardTitle: title, serial: board.serial, session: board.session, port: port, sharing: portSharing)
+                let needs = missing.first { $0.id == port.needs }
+                return Device(boardTitle: title, serial: board.serial, session: board.session, port: port, sharing: portSharing, needs: needs)
             })
         }
     }

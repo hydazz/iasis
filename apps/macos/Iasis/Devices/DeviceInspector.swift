@@ -6,8 +6,9 @@ struct DeviceInspector: View {
 
     var body: some View {
         let operation = device.operation
-        // The operation or fault leads, under the device's name.
-        let leads = operation != nil || device.port.fault != nil
+        // The operation or fault, and what the host lacks, lead under the
+        // device's name.
+        let leads = operation != nil || device.port.fault != nil || device.needs != nil
         Form {
             if leads {
                 Section {
@@ -15,6 +16,12 @@ struct DeviceInspector: View {
                         Label(fault, systemImage: "exclamationmark.triangle.fill")
                     } else if let operation {
                         OperationView(operation: operation)
+                    }
+                    if let needs = device.needs {
+                        Label(needs.reason, systemImage: "exclamationmark.triangle")
+                        if let url = URL(string: needs.url) {
+                            Link("Get \(needs.name)", destination: url)
+                        }
                     }
                 } header: {
                     DeviceTitle(device: device)

@@ -72,11 +72,33 @@ public sealed partial class MainWindow : Window
 
     private void Show(AgentState state)
     {
-        Status.IsOpen = false;
+        // What the host lacks shows, with where to get it, until it is
+        // installed.
+        if (state.Missing.FirstOrDefault() is { } missing)
+        {
+            Status.Severity = InfoBarSeverity.Warning;
+            Status.Message = missing.Reason;
+            if ((Status.ActionButton as HyperlinkButton)?.NavigateUri?.OriginalString != missing.Url)
+            {
+                Status.ActionButton = new HyperlinkButton
+                {
+                    Content = $"Get {missing.Name}",
+                    NavigateUri = new Uri(missing.Url),
+                };
+            }
+            Status.IsOpen = true;
+        }
+        else
+        {
+            Status.ActionButton = null;
+            Status.IsOpen = false;
+        }
+        var lacking = state.Missing.ToDictionary(prerequisite => prerequisite.Id);
         Ports.ItemsSource = state.Boards
             .SelectMany(board => board.Ports.Select(port =>
                 $"{(board.Name.Length == 0 ? "Iasis" : board.Name)}, port {port.Number}: " +
-                (port.Device ?? (port.Occupied ? "Unknown device" : "Empty"))))
+                (port.Device ?? (port.Occupied ? "Unknown device" : "Empty")) +
+                (port.Needs is { } id && lacking.TryGetValue(id, out var needs) ? $", needs {needs.Name}" : "")))
             .ToList();
     }
 
@@ -84,6 +106,7 @@ public sealed partial class MainWindow : Window
     {
         Status.Severity = severity;
         Status.Message = message;
+        Status.ActionButton = null;
         Status.IsOpen = true;
         Ports.ItemsSource = null;
     }
