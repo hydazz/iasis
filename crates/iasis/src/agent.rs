@@ -43,6 +43,8 @@ use crate::{
 /// A board whose session could not be taken is tried again this often
 /// while it stays attached.
 const RETRY: Duration = Duration::from_secs(2);
+/// How often the agent looks for software the host has gained or lost.
+const PREREQUISITES: Duration = Duration::from_secs(5);
 /// A UF2 file of IasisOS, whose flash is 2 MB, is at most twice that.
 const UF2_BYTES: u64 = 4 << 20;
 
@@ -259,6 +261,7 @@ impl Agent {
             images: self.store.snapshot(),
             sharing: self.sharing.state(),
             supervision: self.supervision.state(),
+            missing: crate::native::mux::missing().into_iter().collect(),
         }
     }
 
@@ -575,6 +578,32 @@ impl Agent {
         }
     }
 
+    /// Look for software the host has gained or lost, such as Apple's
+    /// service on Windows, and have each board decide again what its
+    /// targets allow.
+    fn follow_prerequisites(&self) {
+        let mut missing = crate::native::mux::missing();
+        loop {
+            thread::sleep(PREREQUISITES);
+            let now = crate::native::mux::missing();
+            if now == missing {
+                continue;
+            }
+            missing = now;
+            let links: Vec<Arc<Link>> = self
+                .boards
+                .lock()
+                .unwrap()
+                .values()
+                .filter_map(|board| board.link.lock().unwrap().clone())
+                .collect();
+            for link in links {
+                link.reassess();
+            }
+            self.changes.changed();
+        }
+    }
+
     /// Attend boards as they come and go. Returns only on a failure that
     /// leaves the agent without its socket.
     pub fn run(self: &Arc<Self>, options: &Options) -> Result<()> {
@@ -605,6 +634,12 @@ impl Agent {
             thread::Builder::new()
                 .name("debug-usb".into())
                 .spawn(move || agent.present())?;
+        }
+        {
+            let agent = self.clone();
+            thread::Builder::new()
+                .name("prerequisites".into())
+                .spawn(move || agent.follow_prerequisites())?;
         }
         let mut attendants: BTreeMap<u64, Attendant> = BTreeMap::new();
         let mut errors: BTreeMap<u64, String> = BTreeMap::new();
