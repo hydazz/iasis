@@ -4,7 +4,8 @@
 
 use iasis_api::{
     AppleMode, BoardView, Offer, Operation, Planned, Port, PortPower, PortView, PowerSource,
-    Release, Request, RestorePhase, Selection, SharingPort, SignalProgress, State, Target, UsbLink,
+    Prerequisite, Release, Request, RestorePhase, Selection, SharingPort, SignalProgress, State,
+    Target, UsbLink,
 };
 
 /// A port, named by its board's serial and its number.
@@ -18,6 +19,8 @@ pub struct Device {
     pub session: Option<u32>,
     pub port: PortView,
     pub sharing: Option<SharingPort>,
+    /// What the host lacks for this device's restore.
+    pub needs: Option<Prerequisite>,
 }
 
 /// A board, its title among the others, and its ports.
@@ -50,6 +53,11 @@ pub fn boards(state: &State) -> Vec<Board> {
                         .ports
                         .iter()
                         .find(|shared| shared.board == view.serial && shared.port == port.number)
+                        .cloned(),
+                    needs: state
+                        .missing
+                        .iter()
+                        .find(|missing| port.needs.as_ref() == Some(&missing.id))
                         .cloned(),
                 })
                 .collect();
@@ -676,6 +684,7 @@ mod tests {
             session: Some(3),
             port,
             sharing: None,
+            needs: None,
         }
     }
 

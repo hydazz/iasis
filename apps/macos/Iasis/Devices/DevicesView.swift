@@ -109,14 +109,14 @@ struct DevicesView: View {
                     }
                 }
                 .disabled(actions.revive == nil)
-                .help("Reinstall the system on the selected device and keep its data")
+                .help(browser.lacking?.reason ?? "Reinstall the system on the selected device and keep its data")
                 Button("Restore…", systemImage: DeviceSymbol.restore) {
                     if let restore = actions.restore {
                         browser.confirm(restore)
                     }
                 }
                 .disabled(actions.restore == nil)
-                .help("Erase the selected devices and reinstall their system")
+                .help(browser.lacking?.reason ?? "Erase the selected devices and reinstall their system")
             }
             ToolbarSpacer(.fixed)
             ToolbarItem {
