@@ -218,7 +218,7 @@ fn run_batch(
     if let Some(ma) = source.host_ma {
         board.host_budget(ma)?;
     }
-    let (targets, failed) = if button {
+    let selected = if button {
         ensure!(
             board.info().capabilities & protocol::CAP_RESTORE_ARM != 0,
             "board does not support prepared erase confirmation"
@@ -229,10 +229,7 @@ fn run_batch(
                 "On Iasis, tap to select the targets, then hold the button until Restore and release to prepare them for erase."
             );
         }
-        let selected = selection(&link, ports, None)?.0;
-        let targets = prepare_selected(board, &link, &engine, &selected, &images)?;
-        link.restore_ready(false)?;
-        (targets, false)
+        selection(&link, ports, None)?.0
     } else {
         let deadline = Instant::now() + Duration::from_secs(3);
         let status = loop {
@@ -249,15 +246,19 @@ fn run_batch(
             ensure!(link.alive(), link.failure());
             link.changed_after(status.revision, deadline);
         };
-        let selected = select_ports(ports, &status)?;
-        let (targets, unready) = enter_dfu(board, &link, &engine, &selected)?;
-        unready.print();
-        (
-            resolve(&link, &targets, &images, source.latest)?,
-            !unready.0.is_empty(),
-        )
+        select_ports(ports, &status)?
     };
-    let running = start(&link, &engine, &images, targets, operation, failed, button)?;
+    let (targets, unready) = enter_dfu(board, &link, &engine, &selected)?;
+    unready.print();
+    let (targets, unresolved) = resolve(&link, &targets, &images, source.latest)?;
+    unresolved.print();
+    if button {
+        confirm_erase(board, &link, &targets)?;
+        link.restore_ready(false)?;
+    }
+    let failed = !unready.0.is_empty() || !unresolved.0.is_empty();
+    let (running, changed) = start(&link, &engine, &images, targets, operation, failed, button)?;
+    changed.print();
     // Each worker keeps the host awake while it restores.
     drop(preparing);
     monitor(&link, running, &Endings::default())
@@ -293,6 +294,39 @@ pub fn listen(
         }
         link.changes().changed();
     }
+    let fail = |target: &Target, message: String| {
+        finish(
+            endings,
+            link.changes(),
+            target.port,
+            Ended {
+                // The attachment the target is on now, which entering DFU or
+                // recovery changes.
+                attachment: Some((
+                    link.session(),
+                    link.status().map_or(target.generation, |status| {
+                        status.ports[target.port.index()].generation
+                    }),
+                )),
+                ending: Ending {
+                    operation,
+                    ecid: target.ecid.map(|id| format!("{id:016x}")),
+                    log_directory: None,
+                    phase: RestorePhase::Failed,
+                    message,
+                },
+            },
+        );
+    };
+    // A target that stops short ends there, with its reason, while the
+    // others go on.
+    let report = |unready: &Unready| {
+        for target in &selected {
+            if let Some(reason) = unready.reason(target.port) {
+                fail(target, reason.to_owned());
+            }
+        }
+    };
     // A declined or unavailable batch finishes this request. The listener
     // can immediately accept the next one.
     let request = (|| -> Result<_> {
@@ -304,42 +338,23 @@ pub fn listen(
             control.info().serial == link.board().info().serial,
             "board serial changed"
         );
-        let targets = if button {
-            prepare_selected(&control, link, engine, &selected, images)?
-        } else {
-            let (targets, unready) = enter_dfu(&control, link, engine, &selected)?;
-            unready.check()?;
-            let latest = matches!(asked, Asked::Client { latest: true, .. });
-            resolve(link, &targets, images, latest)?
-        };
-        start(link, engine, images, targets, operation, false, true)
+        let (targets, unready) = enter_dfu(&control, link, engine, &selected)?;
+        report(&unready);
+        let latest = matches!(asked, Asked::Client { latest: true, .. });
+        let (targets, unresolved) = resolve(link, &targets, images, latest)?;
+        report(&unresolved);
+        if button {
+            confirm_erase(&control, link, &targets)?;
+        }
+        let (running, changed) = start(link, engine, images, targets, operation, false, true)?;
+        report(&changed);
+        Ok(running)
     })();
     let running = match request {
         Ok(running) => running,
         Err(error) => {
-            for target in selected {
-                finish(
-                    endings,
-                    link.changes(),
-                    target.port,
-                    Ended {
-                        // The attachment the target is on now, which entering DFU or
-                        // recovery changes.
-                        attachment: Some((
-                            link.session(),
-                            link.status().map_or(target.generation, |status| {
-                                status.ports[target.port.index()].generation
-                            }),
-                        )),
-                        ending: Ending {
-                            operation,
-                            ecid: target.ecid.map(|id| format!("{id:016x}")),
-                            log_directory: None,
-                            phase: RestorePhase::Failed,
-                            message: unstarted_message(&error, target.port),
-                        },
-                    },
-                );
+            for target in &selected {
+                fail(target, unstarted_message(&error, target.port));
             }
             eprintln!("Restore request: {error:#}");
             return Ok(Some(format!("{error:#}")));
@@ -374,27 +389,24 @@ fn in_dfu(
 /// descriptor, or its product type. The store gives the
 /// newest image it has that Apple still signs, or with `latest` the newest
 /// release, and fetches what it lacks, which the target's port shows.
+/// Returns the targets with their images and why the others have none.
 fn resolve(
     link: &Link,
     targets: &VerifiedTargets,
     images: &Images,
     latest: bool,
-) -> Result<ChosenTargets> {
+) -> Result<(ChosenTargets, Unready)> {
     let (_, snapshot) = link.observe()?;
-    let mut models = Vec::new();
-    for (target, _) in targets {
-        let (_, model) = in_dfu(link.board(), target, &snapshot)
-            .with_context(|| format!("port {} lost its DFU identity", target.port.number()))?;
-        models.push(model);
-    }
-    let chosen = targets
-        .iter()
-        .zip(&models)
-        .map(|((target, generation), model)| {
-            let image = match images {
-                Images::Given(images) => image_for_model(images, model)?.clone(),
+    let mut chosen = Vec::new();
+    let mut unresolved = Unready::default();
+    for (target, generation) in targets {
+        let image = (|| -> Result<PreparedIpsw> {
+            let (_, model) = in_dfu(link.board(), target, &snapshot)
+                .context("the target left DFU or recovery")?;
+            Ok(match images {
+                Images::Given(images) => image_for_model(images, &model)?.clone(),
                 Images::Store(store) => {
-                    let (chip, id) = store.hardware_for(model)?;
+                    let (chip, id) = store.hardware_for(&model)?;
                     let mut announced = false;
                     store.obtain(chip, id, latest, |fetch| {
                         ensure!(link.alive(), link.failure());
@@ -423,26 +435,29 @@ fn resolve(
                         Ok(())
                     })?
                 }
-            };
-            Ok((target.clone(), *generation, image))
-        })
-        .collect::<Result<ChosenTargets>>()
-        .with_context(|| "choosing restore images");
-    for (target, generation) in targets {
+            })
+        })();
         link.fetching(target.port, *generation, None);
+        match image {
+            Ok(image) => chosen.push((target.clone(), *generation, image)),
+            Err(error) => unresolved.add(target.port, format_args!("{error:#}")),
+        }
     }
-    chosen
+    Ok((chosen, unresolved))
 }
 
+/// Launch a worker for each target that is still the one prepared. Returns
+/// the batch and why each other target did not start. `board_ready` also
+/// needs the board to report each port ready.
 fn start(
     link: &Link,
     engine: &RestoreEngine,
     images: &Images,
     mut targets: ChosenTargets,
     operation: Operation,
-    mut failed: bool,
-    require_all: bool,
-) -> Result<Running> {
+    failed: bool,
+    board_ready: bool,
+) -> Result<(Running, Unready)> {
     // Waiting for another port may outlive the earlier selection. Revalidate
     // every physical slot immediately before launching destructive workers.
     let (status, snapshot) = link.observe()?;
@@ -458,7 +473,7 @@ fn start(
                         status.ports[target.port.index()].state,
                         PortState::Ready | PortState::Contract
                     )
-                    && (!require_all || status.ready_mask() & (1 << target.port.index()) != 0)
+                    && (!board_ready || status.ready_mask() & (1 << target.port.index()) != 0)
             });
         if mode.is_none() {
             changed.add(target.port, "the target changed before its restore started");
@@ -466,16 +481,13 @@ fn start(
         modes.extend(mode);
         mode.is_some()
     });
-    if require_all {
-        changed.check()?;
-    } else {
-        failed |= !changed.0.is_empty();
-        changed.print();
+    if targets.is_empty() {
+        if !changed.0.is_empty() {
+            return Err(changed.into());
+        }
+        bail!("no selected target reached DFU or recovery; no restore started");
     }
-    ensure!(
-        !targets.is_empty(),
-        "no selected target reached DFU or recovery; no restore started"
-    );
+    let failed = failed || !changed.0.is_empty();
     let inputs: Vec<_> = targets
         .iter()
         .zip(modes)
@@ -490,7 +502,7 @@ fn start(
         Images::Given(_) => Vec::new(),
     };
     let workers = engine.start_selected(&inputs, operation)?;
-    Ok(Running {
+    let running = Running {
         targets: targets
             .into_iter()
             .map(|(target, generation, _)| (target, generation))
@@ -498,7 +510,8 @@ fn start(
         workers,
         failed,
         _leases: leases,
-    })
+    };
+    Ok((running, changed))
 }
 
 struct Running {
@@ -723,15 +736,14 @@ fn selection(
     }
 }
 
-/// Put the selected targets in DFU, then have the board confirm their erase.
-fn prepare_selected(
-    board: &Board,
-    link: &Link,
-    engine: &RestoreEngine,
-    selected: &[Target],
-    images: &Images,
-) -> Result<ChosenTargets> {
-    let status = board.status()?;
+/// Have the board confirm the erase of the prepared targets with a fresh
+/// three-second hold.
+fn confirm_erase(board: &Board, link: &Link, targets: &ChosenTargets) -> Result<()> {
+    ensure!(
+        !targets.is_empty(),
+        "no selected target reached DFU or recovery; no erase armed"
+    );
+    // The arm names each attachment as it is now, in DFU or recovery.
     let mut draft = RestoreArm {
         session: link.session(),
         id: 0,
@@ -739,26 +751,11 @@ fn prepare_selected(
         generations: [0; protocol::PORT_COUNT],
         expires: 0,
     };
-    for &Target {
-        port, generation, ..
-    } in selected
-    {
-        draft.ports |= 1 << port.index();
-        draft.generations[port.index()] = generation;
-    }
-    ensure!(
-        draft.matches_targets(&status),
-        "selected targets changed, are busy or are unavailable"
-    );
-    let (targets, unready) = enter_dfu(board, link, engine, selected)?;
-    unready.check()?;
-    // Fetching an image can take long enough for a target to leave.
-    let targets = resolve(link, &targets, images, false)?;
-    // The arm names each attachment as it is now, in DFU.
-    for (target, generation, _) in &targets {
+    for (target, generation, _) in targets {
+        draft.ports |= 1 << target.port.index();
         draft.generations[target.port.index()] = *generation;
     }
-    // The board must have received the host observation for the new DFU enumeration.
+    // The board must have received the host observation for the new enumeration.
     let deadline = Instant::now() + Duration::from_millis(protocol::HOST_SESSION_MS);
     let status = loop {
         let status = board.status()?;
@@ -771,12 +768,12 @@ fn prepare_selected(
         }
         ensure!(
             Instant::now() < deadline,
-            "board has no verified DFU report for the prepared targets"
+            "board has no verified DFU or recovery report for the prepared targets"
         );
         ensure!(link.alive(), link.failure());
         link.changed_after(status.revision, deadline);
     };
-    for (target, _, image) in &targets {
+    for (target, _, image) in targets {
         println!(
             "Prepared port {}, ECID {:016x} for {} ({})",
             target.port.number(),
@@ -805,7 +802,7 @@ fn prepare_selected(
     }
     // The confirmation counts only while this host still holds the board.
     link.check().context("host session lost; erase cancelled")?;
-    Ok(targets)
+    Ok(())
 }
 
 fn confirmed(arm: RestoreArm, status: &Status) -> Result<bool> {
@@ -821,8 +818,8 @@ fn confirmed(arm: RestoreArm, status: &Status) -> Result<bool> {
     }
 }
 
-/// Why each selected target that did not reach DFU or recovery stopped short,
-/// by port. As an error, it is why no restore started.
+/// Why each selected target that stopped short of its restore did, by port.
+/// As an error, it is why no restore started.
 #[derive(Debug, Default)]
 struct Unready(Vec<(Port, String)>);
 
@@ -838,16 +835,7 @@ impl Unready {
             .map(|(_, reason)| reason.as_str())
     }
 
-    /// Fail unless every selected target got there.
-    fn check(self) -> Result<()> {
-        if self.0.is_empty() {
-            Ok(())
-        } else {
-            Err(self.into())
-        }
-    }
-
-    /// Say why, for a run that goes on with the targets that got there.
+    /// Say why, for a run that goes on with the other targets.
     fn print(&self) {
         for (port, reason) in &self.0 {
             eprintln!("port {}: {reason}", port.number());
@@ -1066,7 +1054,7 @@ mod tests {
         let [one, .., five] = Port::ALL;
         let mut unready = Unready::default();
         unready.add(five, "the device is locked; unlock it and retry");
-        let error = unready.check().unwrap_err();
+        let error = anyhow::Error::from(unready);
         assert_eq!(
             unstarted_message(&error, five),
             "the device is locked; unlock it and retry"
