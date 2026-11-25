@@ -328,7 +328,7 @@ pub struct RestoreStatus {
 ///
 /// One engine owns the active ECID set. Clone this engine to submit batches
 /// from multiple callers without starting the same target twice. A batch is
-/// one board's targets; batches for several boards run side by side.
+/// one hub's targets; batches for several hubs run side by side.
 #[derive(Clone)]
 pub struct RestoreEngine {
     /// The executable the workers run.

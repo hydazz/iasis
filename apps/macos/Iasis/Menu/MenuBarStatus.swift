@@ -1,18 +1,18 @@
 import AppKit
 
 enum MenuBarStatus: String, CaseIterable {
-    case offline = "Iasis, no board connected"
+    case offline = "Iasis, no hub connected"
     case ready = "Iasis, ready"
     case busy = "Iasis, busy"
     case fault = "Iasis, needs attention"
 
     init(_ state: AgentState?) {
-        guard let state, !state.boards.isEmpty else {
+        guard let state, !state.hubs.isEmpty else {
             self = .offline
             return
         }
-        let ports = state.boards.lazy.flatMap(\.ports)
-        if state.boards.contains(where: { $0.notice != nil }) || ports.contains(where: { $0.light.hue == .red }) {
+        let ports = state.hubs.lazy.flatMap(\.ports)
+        if state.hubs.contains(where: { $0.notice != nil }) || ports.contains(where: { $0.light.hue == .red }) {
             self = .fault
         } else if state.images.fetch != nil || ports.contains(where: \.light.pulse) {
             self = .busy

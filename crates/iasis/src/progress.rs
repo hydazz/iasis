@@ -115,7 +115,7 @@ pub fn update(
         Ok(Observation::Ambiguous) => "Ambiguous USB identity".into(),
         Ok(Observation::Replaced { ecid }) => format!("Replaced by ECID {ecid:016x}"),
         Ok(Observation::Moved { port }) => format!("Moved to port {}", port.number()),
-        Ok(Observation::BoardChanged) => "Board changed".into(),
+        Ok(Observation::HubChanged) => "Hub changed".into(),
         Err(err) => format!("USB discovery failed: {err}"),
     };
     let mut message = format!("{status}  {connection}");

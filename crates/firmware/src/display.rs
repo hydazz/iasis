@@ -81,7 +81,7 @@ pub struct View {
     pub targets: u8,
     pub connected: bool,
     internet_sharing: bool,
-    name: iasis_protocol::BoardName,
+    name: iasis_protocol::HubName,
     brick: bool,
     face: Face,
     /// Bars beside each port number: one for a USB 2 link, two for USB 3.
@@ -131,9 +131,9 @@ impl View {
     }
 }
 
-/// The lower workspace shows, in priority order: a board fault, restore
+/// The lower workspace shows, in priority order: a hub fault, restore
 /// confirmation, the held action, the selected port's fault or job, button
-/// feedback, then readings for the selected port or the whole board.
+/// feedback, then readings for the selected port or the whole hub.
 pub fn view(status: &Status, button: &Button, now: u64) -> View {
     let ports = button.marked(status, now);
     let acting = button.armed().is_some() || button.held(now).is_some();
@@ -276,7 +276,7 @@ pub fn label(port: &PortStatus) -> &'static str {
         return "IMG";
     }
     if matches!(port.state, PortState::Ready | PortState::Contract) {
-        // What a host sees comes before what the board asked for.
+        // What a host sees comes before what the hub asked for.
         match port.observed.map(|seen| seen.usb) {
             Some(Usb::Apple(AppleMode::Dfu | AppleMode::KisDfu)) => return "DFU",
             Some(Usb::Apple(AppleMode::Recovery)) => return "REC",
@@ -1031,11 +1031,11 @@ mod tests {
     }
 
     #[test]
-    fn renaming_a_board_refreshes_its_title() {
+    fn renaming_a_hub_refreshes_its_title() {
         let mut status = Status::default();
         let button = Button::default();
         let before = view(&status, &button, 0);
-        status.settings.name = iasis_protocol::BoardName::new("Workshop Bench 2").unwrap();
+        status.settings.name = iasis_protocol::HubName::new("Workshop Bench 2").unwrap();
         let after = view(&status, &button, 0);
         assert_eq!(after.name, status.settings.name);
         assert_eq!(after.changed_pages(Some(&before)), 0b11);
@@ -1052,7 +1052,7 @@ mod tests {
             }),
             ..Status::default()
         };
-        status.settings.name = iasis_protocol::BoardName::new("ABCDEFGHIJKLMNOP").unwrap();
+        status.settings.name = iasis_protocol::HubName::new("ABCDEFGHIJKLMNOP").unwrap();
         let mut shown = view(&status, &Button::default(), 0);
         for face in [
             Face::Idle,
@@ -1113,7 +1113,7 @@ mod tests {
             }),
             ..Status::default()
         };
-        status.settings.name = iasis_protocol::BoardName::new("ABCDEFGHIJKLMNOP").unwrap();
+        status.settings.name = iasis_protocol::HubName::new("ABCDEFGHIJKLMNOP").unwrap();
         let button = Button::default();
         let idle = view(&status, &button, 0);
         status.host.as_mut().unwrap().internet_sharing = true;
@@ -1168,7 +1168,7 @@ mod tests {
     }
 
     #[test]
-    fn the_board_total_includes_a_usb_port_without_a_pd_contract() {
+    fn the_hub_total_includes_a_usb_port_without_a_pd_contract() {
         let mut status = Status {
             supply: Supply::Brick,
             bus_voltage_adc: Some(2081),
@@ -1429,7 +1429,7 @@ mod tests {
             if now == 17_600 {
                 status = Status::default();
             }
-            // Cover the port detail, the action row and the board summary.
+            // Cover the port detail, the action row and the hub summary.
             match now {
                 15_000 => {
                     status.ports[1].restore = None;

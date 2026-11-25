@@ -13,7 +13,7 @@ final class AgentModel {
     private(set) var menuSnapshot: AgentState?
     /// An archive on its way into the agent's store.
     private(set) var importing: Importing?
-    /// Boards being written IasisOS, by serial.
+    /// Hubs being written IasisOS, by serial.
     private(set) var updating: Set<String> = []
     private var menuRefreshPending = false
     private let agent: any AgentService
@@ -79,12 +79,12 @@ final class AgentModel {
         }
     }
 
-    /// Write the IasisOS the agent carries to a board.
-    func updateFirmware(of board: String) {
-        guard updating.insert(board).inserted else { return }
+    /// Write the IasisOS the agent carries to a hub.
+    func updateFirmware(of hub: String) {
+        guard updating.insert(hub).inserted else { return }
         Task {
-            await send(.update(board: board, bytes: nil))
-            updating.remove(board)
+            await send(.update(hub: hub, bytes: nil))
+            updating.remove(hub)
         }
     }
 
@@ -116,9 +116,9 @@ final class AgentModel {
 
     /// What a restore would install on each target, or nil once the agent's
     /// refusal has been shown.
-    func plan(_ boards: [RestoreSelection]) async -> [AgentState.Planned]? {
+    func plan(_ hubs: [RestoreSelection]) async -> [AgentState.Planned]? {
         do {
-            return try await agent.plan(boards)
+            return try await agent.plan(hubs)
         } catch {
             report(error)
             return nil

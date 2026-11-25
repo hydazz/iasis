@@ -14,7 +14,7 @@ use iasis::{
 use anyhow::{Context, Result, bail, ensure};
 use clap::{Parser, Subcommand, ValueEnum};
 use iasis::{
-    Board, UsbIds,
+    Hub, UsbIds,
     agent::Client,
     dfu::{self, Attempt, Outcome, Signal},
     home::Home,
@@ -23,7 +23,7 @@ use iasis::{
     view,
 };
 use iasis_api::{
-    BoardView, Job, Operation, PortPower, PortView, PowerSource, Reply, Request, Selection,
+    HubView, Job, Operation, PortPower, PortView, PowerSource, Reply, Request, Selection,
     SignalProgress, State, Supply, Target, Usb, UsbLink,
 };
 use iasis_protocol::{CommandResult, DebugActions, Link, Port, PortAction, RestorePhase, Status};
@@ -31,16 +31,16 @@ use iasis_protocol::{CommandResult, DebugActions, Link, Port, PortAction, Restor
 #[derive(Parser)]
 #[command(
     version,
-    about = "Manage Iasis ports and controller firmware. Without a command, show every board's ports.",
-    long_about = "Manage Iasis ports and controller firmware. Without a command, show every board's ports.\n\nWith iasisd running, every command except status and ports goes through it; otherwise the command opens the board itself."
+    about = "Manage Iasis ports and controller firmware. Without a command, show every hub's ports.",
+    long_about = "Manage Iasis ports and controller firmware. Without a command, show every hub's ports.\n\nWith iasisd running, every command except status and ports goes through it; otherwise the command opens the hub itself."
 )]
 struct Cli {
-    /// Board serial, sixteen hexadecimal digits
+    /// Hub serial, sixteen hexadecimal digits
     #[arg(long, global = true, value_parser = parse_serial)]
     serial: Option<u64>,
-    /// Select a board by its display name (case-insensitive)
+    /// Select a hub by its display name (case-insensitive)
     #[arg(long, global = true, conflicts_with = "serial")]
-    board: Option<String>,
+    hub: Option<String>,
     /// USB vendor ID in hexadecimal
     #[arg(long, global = true, default_value = "1209", value_parser = parse_id)]
     vid: u16,
@@ -53,7 +53,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Show every board's ports and keep the view current
+    /// Show every hub's ports and keep the view current
     Watch,
     /// Validate a local IPSW without opening USB devices
     Ipsw { path: std::path::PathBuf },
@@ -79,7 +79,7 @@ enum Command {
         #[command(subcommand)]
         command: Option<SupervisionCommand>,
     },
-    /// List boards, IasisOS versions and USB paths
+    /// List hubs, IasisOS versions and USB paths
     List,
     /// Read ADC counts, faults and bus observations
     Status {
@@ -103,7 +103,7 @@ enum Command {
         #[arg(value_parser = clap::value_parser!(u16).range(0..=1600))]
         milliamps: u16,
     },
-    /// Set the board name on its display and in host tools; an empty name clears it
+    /// Set the hub name on its display and in host tools; an empty name clears it
     Rename { name: String },
     /// Set the indicator brightness in percent of full; 50 is the default
     Brightness {
@@ -199,15 +199,15 @@ fn main() -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&prepared)?);
         return Ok(());
     }
-    // Diagnostics read the board's USB device themselves, beside any agent.
+    // Diagnostics read the hub's USB device themselves, beside any agent.
     if !matches!(
         command,
         Some(Command::Status { .. } | Command::Ports { .. })
     ) && let Some(agent) = Client::connect(&Home::locate()?)?
     {
-        return through_agent(agent, cli.serial, cli.board.as_deref(), command);
+        return through_agent(agent, cli.serial, cli.hub.as_deref(), command);
     }
-    let serial = match cli.board {
+    let serial = match cli.hub {
         Some(name) => Some(resolve_name(ids, &name)?),
         None => cli.serial,
     };
@@ -234,15 +234,15 @@ fn main() -> Result<()> {
         return Ok(());
     }
     let devices = iasis::discover(ids, serial)?;
-    let mut boards = Vec::new();
+    let mut hubs = Vec::new();
     for device in &devices {
-        let board = match command {
-            Command::Status { .. } | Command::Ports { .. } => Board::observe(device),
-            _ => Board::open(device),
+        let hub = match command {
+            Command::Status { .. } | Command::Ports { .. } => Hub::observe(device),
+            _ => Hub::open(device),
         }
         .with_context(|| {
             format!(
-                "opening the board on USB bus {} port {:?}{}",
+                "opening the hub on USB bus {} port {:?}{}",
                 device.bus_id(),
                 device.port_chain(),
                 if cfg!(target_os = "linux") {
@@ -255,18 +255,18 @@ fn main() -> Result<()> {
             )
         })?;
         anyhow::ensure!(
-            serial.is_none_or(|serial| serial == board.info().serial),
-            "board serial changed"
+            serial.is_none_or(|serial| serial == hub.info().serial),
+            "hub serial changed"
         );
-        boards.push(board);
+        hubs.push(hub);
     }
-    if boards.len() != 1 {
+    if hubs.len() != 1 {
         bail!(
-            "expected one Iasis board, found {}; use --board NAME or --serial SERIAL",
-            boards.len()
+            "expected one Iasis hub, found {}; use --hub NAME or --serial SERIAL",
+            hubs.len()
         );
     }
-    let board = &boards[0];
+    let hub = &hubs[0];
     match command {
         Command::List
         | Command::Ipsw { .. }
@@ -277,16 +277,16 @@ fn main() -> Result<()> {
         | Command::Update { .. } => {
             unreachable!()
         }
-        Command::Restore(options) => batch::run(&devices[0], board, options)?,
-        Command::Revive(options) => batch::revive(&devices[0], board, options)?,
-        Command::Rename { name } => board.rename(&name)?,
-        Command::Brightness { percent } => board.brightness(percent)?,
+        Command::Restore(options) => batch::run(&devices[0], hub, options)?,
+        Command::Revive(options) => batch::revive(&devices[0], hub, options)?,
+        Command::Rename { name } => hub.rename(&name)?,
+        Command::Brightness { percent } => hub.brightness(percent)?,
         Command::HostBudget { milliamps } => {
-            board.host_budget(milliamps)?;
+            hub.host_budget(milliamps)?;
             println!("{}", host_budget_text(milliamps));
         }
         Command::Status { json, watch } => loop {
-            let status = board.status()?;
+            let status = hub.status()?;
             if json {
                 println!("{}", serde_json::to_string(&status)?);
             } else {
@@ -299,8 +299,8 @@ fn main() -> Result<()> {
             thread::sleep(Duration::from_secs(1));
         },
         Command::Ports { json, watch } => loop {
-            let status = board.status()?;
-            let mut snapshot = topology::discover(board.topology())?;
+            let status = hub.status()?;
+            let mut snapshot = topology::discover(hub.topology())?;
             let mut identity_ports = 0;
             for port in Port::ALL {
                 if !dfu::job_in_progress(&status.ports[port.index()]) {
@@ -308,10 +308,10 @@ fn main() -> Result<()> {
                 }
             }
             snapshot.query_port_identities(identity_ports);
-            let current = board.status()?;
+            let current = hub.status()?;
             let reports = Port::ALL.map(|port| {
                 let slot = &snapshot.ports[port.index()];
-                let mut report = dfu::assess(board.info().serial, port, &current, &snapshot, None);
+                let mut report = dfu::assess(hub.info().serial, port, &current, &snapshot, None);
                 if status.ports[port.index()].generation != report.generation {
                     report.outcome = Some(Outcome::AttachmentChanged);
                     report.signal = Signal::Settling;
@@ -356,7 +356,7 @@ fn main() -> Result<()> {
             thread::sleep(Duration::from_secs(1));
         },
         Command::Power { port, state } => {
-            board.command(
+            hub.command(
                 port,
                 match state {
                     Power::On => PortAction::Enable,
@@ -366,10 +366,10 @@ fn main() -> Result<()> {
             println!("{}", power_text(port, state));
         }
         Command::Dfu { port } => {
-            request_dfu(board, port)?;
+            request_dfu(hub, port)?;
         }
         Command::Reboot { port } => {
-            let result = board.command(port, PortAction::Reboot)?;
+            let result = hub.command(port, PortAction::Reboot)?;
             println!(
                 "Port {} reboot signalling: {}; target restart is not yet confirmed.",
                 port.number(),
@@ -377,7 +377,7 @@ fn main() -> Result<()> {
             );
         }
         Command::DebugUsb { port, state } => {
-            let result = board.command(
+            let result = hub.command(
                 port,
                 match state {
                     Power::On => PortAction::MapDebugUsb,
@@ -396,11 +396,11 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-const SELECT: &str = "select a board with --board NAME or --serial SERIAL; see `iasis list`";
+const SELECT: &str = "select a hub with --hub NAME or --serial SERIAL; see `iasis list`";
 
 fn host_budget_text(milliamps: u16) -> String {
     if milliamps == 0 {
-        "Allowance cleared; the board takes what USB grants on its link.".to_owned()
+        "Allowance cleared; the hub takes what USB grants on its link.".to_owned()
     } else {
         format!(
             "Allowance set to {milliamps} mA including Iasis; native USB-C advertisement takes priority."
@@ -442,7 +442,7 @@ fn firmware(file: Option<&Path>) -> Result<update::Image> {
     }
 }
 
-/// Run a command through the running agent, which holds every board.
+/// Run a command through the running agent, which holds every hub.
 fn through_agent(
     mut agent: Client,
     serial: Option<u64>,
@@ -455,15 +455,15 @@ fn through_agent(
         (None, Some(name)) => Some(named(&state, name)?),
         (None, None) => None,
     };
-    let board = || selected.clone().context(SELECT);
+    let hub = || selected.clone().context(SELECT);
     match command {
         None => overview_through(agent, selected.as_deref(), false),
         Some(Command::Watch) => overview_through(agent, selected.as_deref(), true),
         Some(Command::List) => {
-            if state.boards.is_empty() {
-                println!("No Iasis boards found.");
+            if state.hubs.is_empty() {
+                println!("No Iasis hubs found.");
             }
-            for view in &state.boards {
+            for view in &state.hubs {
                 let name = if view.name.is_empty() {
                     "(unnamed)"
                 } else {
@@ -478,11 +478,11 @@ fn through_agent(
             }
             Ok(())
         }
-        Some(Command::Restore(options)) => restore_through(&mut agent, &state, &board()?, &options),
+        Some(Command::Restore(options)) => restore_through(&mut agent, &state, &hub()?, &options),
         Some(Command::Revive(options)) => submit_through(
             &mut agent,
             &state,
-            &board()?,
+            &hub()?,
             Operation::Revive,
             &options.source,
             &options.ports,
@@ -490,10 +490,10 @@ fn through_agent(
         Some(Command::Images { command }) => images(&mut agent, command.as_ref()),
         Some(Command::Sharing { command, json }) => sharing(&mut agent, command.as_ref(), json),
         Some(Command::Supervision { command }) => supervision(&mut agent, command.as_ref()),
-        Some(Command::Dfu { port }) => dfu_through(&mut agent, &state, &board()?, port),
+        Some(Command::Dfu { port }) => dfu_through(&mut agent, &state, &hub()?, port),
         Some(Command::Reboot { port }) => {
             agent.request(&Request::Reboot {
-                board: board()?,
+                hub: hub()?,
                 port: port.number(),
             })?;
             println!(
@@ -504,7 +504,7 @@ fn through_agent(
         }
         Some(Command::Power { port, state }) => {
             agent.request(&Request::Power {
-                board: board()?,
+                hub: hub()?,
                 port: port.number(),
                 on: matches!(state, Power::On),
             })?;
@@ -513,31 +513,28 @@ fn through_agent(
         }
         Some(Command::DebugUsb { port, state }) => {
             agent.request(&Request::DebugUsb {
-                board: board()?,
+                hub: hub()?,
                 port: port.number(),
                 on: matches!(state, Power::On),
             })?;
             println!("{}", debug_usb_text(port, state));
             Ok(())
         }
-        Some(Command::Rename { name }) => agent.request(&Request::Rename {
-            board: board()?,
-            name,
-        }),
+        Some(Command::Rename { name }) => agent.request(&Request::Rename { hub: hub()?, name }),
         Some(Command::Brightness { percent }) => agent.request(&Request::Brightness {
-            board: board()?,
+            hub: hub()?,
             percent,
         }),
         Some(Command::HostBudget { milliamps }) => {
             agent.request(&Request::HostBudget {
-                board: board()?,
+                hub: hub()?,
                 milliamps,
             })?;
             println!("{}", host_budget_text(milliamps));
             Ok(())
         }
         Some(Command::Update { file }) => {
-            let board = board()?;
+            let hub = hub()?;
             match file {
                 Some(file) => {
                     // The agent cannot read the caller's files; it is sent the image.
@@ -547,7 +544,7 @@ fn through_agent(
                     let _writing = progress::waiting("Writing IasisOS");
                     agent.upload(
                         &Request::Update {
-                            board,
+                            hub,
                             bytes: Some(bytes),
                         },
                         &mut image,
@@ -555,7 +552,7 @@ fn through_agent(
                 }
                 None => {
                     let _writing = progress::waiting("Writing IasisOS");
-                    agent.request(&Request::Update { board, bytes: None })?;
+                    agent.request(&Request::Update { hub, bytes: None })?;
                 }
             }
             println!("IasisOS written.");
@@ -567,18 +564,18 @@ fn through_agent(
     }
 }
 
-/// The serial of the one board the agent shows under this name.
+/// The serial of the one hub the agent shows under this name.
 fn named(state: &State, name: &str) -> Result<String> {
-    ensure!(!name.is_empty(), "select an unnamed board by serial");
+    ensure!(!name.is_empty(), "select an unnamed hub by serial");
     let hits: Vec<_> = state
-        .boards
+        .hubs
         .iter()
         .filter(|view| view.name.eq_ignore_ascii_case(name))
         .collect();
     match hits.as_slice() {
         [view] => Ok(view.serial.clone()),
-        [] => bail!("no connected board named {name:?}; see `iasis list`"),
-        _ => bail!("multiple boards named {name:?}; select one with --serial"),
+        [] => bail!("no connected hub named {name:?}; see `iasis list`"),
+        _ => bail!("multiple hubs named {name:?}; select one with --serial"),
     }
 }
 
@@ -590,13 +587,13 @@ struct PortReport<'a> {
 }
 
 fn inspect_dfu(
-    board: &Board,
+    hub: &Hub,
     port: Port,
     attempt: Option<&Attempt>,
     identify: bool,
 ) -> Result<Option<(Snapshot, dfu::Assessment)>> {
-    let before = board.status()?;
-    let mut snapshot = topology::discover(board.topology())?;
+    let before = hub.status()?;
+    let mut snapshot = topology::discover(hub.topology())?;
     let slot = &snapshot.ports[port.index()];
     let busy = dfu::job_in_progress(&before.ports[port.index()]);
     if !busy
@@ -608,8 +605,8 @@ fn inspect_dfu(
     {
         snapshot.query_port_identity(port);
     }
-    let after = board.status()?;
-    let report = dfu::assess(board.info().serial, port, &after, &snapshot, attempt);
+    let after = hub.status()?;
+    let report = dfu::assess(hub.info().serial, port, &after, &snapshot, attempt);
     if after.uptime_ms < before.uptime_ms {
         bail!("Iasis restarted during USB enumeration.");
     }
@@ -619,10 +616,10 @@ fn inspect_dfu(
     Ok(Some((snapshot, report)))
 }
 
-fn request_dfu(board: &Board, port: Port) -> Result<()> {
+fn request_dfu(hub: &Hub, port: Port) -> Result<()> {
     let changes = Arc::<Watch>::default();
-    let _inventory = follow(&changes, board)?;
-    let (snapshot, before) = inspect_dfu(board, port, None, true)?
+    let _inventory = follow(&changes, hub)?;
+    let (snapshot, before) = inspect_dfu(hub, port, None, true)?
         .context("The attachment changed before signalling. Inspect the current target.")?;
     match before.signal {
         Signal::Available => {}
@@ -632,19 +629,19 @@ fn request_dfu(board: &Board, port: Port) -> Result<()> {
         }
         _ => bail!("Port {}  {}", port.number(), before.describe()),
     }
-    let result = board.command_for_generation(port, before.generation, PortAction::Dfu)?;
+    let result = hub.command_for_generation(port, before.generation, PortAction::Dfu)?;
     println!(
         "Port {} DFU signal {}.",
         port.number(),
         signal_result(result)
     );
-    let attempt = Attempt::new(board.info().serial, port, &before, &snapshot, result);
+    let attempt = Attempt::new(hub.info().serial, port, &before, &snapshot, result);
     let deadline = Instant::now() + Duration::from_secs(10);
     let waiting = progress::waiting(format!("Waiting for USB DFU on port {}", port.number()));
     loop {
         let seen = changes.count();
         let final_read = Instant::now() >= deadline;
-        let Some((_, report)) = inspect_dfu(board, port, Some(&attempt), final_read)? else {
+        let Some((_, report)) = inspect_dfu(hub, port, Some(&attempt), final_read)? else {
             if final_read {
                 bail!(
                     "Port {} is still reconnecting. Check its USB mode.",
@@ -663,7 +660,7 @@ fn request_dfu(board: &Board, port: Port) -> Result<()> {
             _ if !final_read && result == CommandResult::Acknowledged && report.unclear() => {
                 changes.wait(seen, Some(deadline));
             }
-            Some(Outcome::IdentityChanged | Outcome::TargetUnclear | Outcome::BoardRestarted) => {
+            Some(Outcome::IdentityChanged | Outcome::TargetUnclear | Outcome::HubRestarted) => {
                 bail!("Port {}  {}", port.number(), report.describe())
             }
             _ if final_read
@@ -681,19 +678,19 @@ fn request_dfu(board: &Board, port: Port) -> Result<()> {
     }
 }
 
-/// Advance `changes` whenever the host's USB devices change or the board
+/// Advance `changes` whenever the host's USB devices change or the hub
 /// announces a new status, for as long as the inventory is held.
-fn follow(changes: &Arc<Watch>, board: &Board) -> Result<Arc<Inventory>> {
+fn follow(changes: &Arc<Watch>, hub: &Hub) -> Result<Arc<Inventory>> {
     let inventory = Inventory::follow(changes.clone())?;
-    hear(changes, board);
+    hear(changes, hub);
     Ok(inventory)
 }
 
-/// Advance `changes` whenever the board announces a new status, until it
+/// Advance `changes` whenever the hub announces a new status, until it
 /// leaves. Another client may hold the announcements, and then only USB
 /// changes are seen.
-fn hear(changes: &Arc<Watch>, board: &Board) {
-    let Ok(mut events) = board.events() else {
+fn hear(changes: &Arc<Watch>, hub: &Hub) {
+    let Ok(mut events) = hub.events() else {
         return;
     };
     let changes = changes.clone();
@@ -721,7 +718,7 @@ fn link_text(link: Link) -> &'static str {
     }
 }
 
-/// A board that cannot be read is still listed, with the reason: it may run
+/// A hub that cannot be read is still listed, with the reason: it may run
 /// firmware for another protocol version and need an update.
 fn unreadable(device: &nusb::DeviceInfo, error: &iasis::Error) -> String {
     let serial = device.serial_number().unwrap_or("unknown serial");
@@ -735,42 +732,42 @@ fn unreadable(device: &nusb::DeviceInfo, error: &iasis::Error) -> String {
 }
 
 fn resolve_name(ids: UsbIds, name: &str) -> Result<u64> {
-    ensure!(!name.is_empty(), "select an unnamed board by serial");
+    ensure!(!name.is_empty(), "select an unnamed hub by serial");
     // Pin the name to its serial before opening an interface for any command.
     let mut hits = Vec::new();
     for device in iasis::discover(ids, None)? {
-        let board = Board::observe(&device)?;
-        if board.current().is_err() {
+        let hub = Hub::observe(&device)?;
+        if hub.current().is_err() {
             continue;
         }
-        if board
+        if hub
             .status()?
             .settings
             .name
             .as_str()
             .eq_ignore_ascii_case(name)
         {
-            hits.push(board.info().serial);
+            hits.push(hub.info().serial);
         }
     }
     match hits.as_slice() {
         [serial] => Ok(*serial),
-        [] => bail!("no connected board named {name:?}; see `iasis list`"),
-        _ => bail!("multiple boards named {name:?}; select one with --serial"),
+        [] => bail!("no connected hub named {name:?}; see `iasis list`"),
+        _ => bail!("multiple hubs named {name:?}; select one with --serial"),
     }
 }
 
 fn list(ids: UsbIds, serial: Option<u64>) -> Result<()> {
     let devices = iasis::discover(ids, serial)?;
     if devices.is_empty() {
-        println!("No Iasis boards found.");
+        println!("No Iasis hubs found.");
     }
     for device in &devices {
-        match Board::observe(device)
-            .and_then(|board| board.status().map(|status| (board, status.settings.name)))
+        match Hub::observe(device)
+            .and_then(|hub| hub.status().map(|status| (hub, status.settings.name)))
         {
-            Ok((board, name)) => {
-                let info = board.info();
+            Ok((hub, name)) => {
+                let info = hub.info();
                 let [major, minor, patch] = info.firmware_version;
                 println!(
                     "{:016x}  {}  IasisOS {major}.{minor}.{patch}  bus {} port {:?}",
@@ -780,8 +777,8 @@ fn list(ids: UsbIds, serial: Option<u64>) -> Result<()> {
                     } else {
                         name.as_str()
                     },
-                    board.topology().bus,
-                    board.topology().port_chain
+                    hub.topology().bus,
+                    hub.topology().port_chain
                 );
             }
             Err(error) => println!("{}", unreadable(device, &error)),
@@ -790,14 +787,14 @@ fn list(ids: UsbIds, serial: Option<u64>) -> Result<()> {
     Ok(())
 }
 
-/// The boards as a running agent shows them, with its images.
+/// The hubs as a running agent shows them, with its images.
 fn agent_text(state: &State) -> String {
     let mut text = String::new();
-    if state.boards.is_empty() {
-        text.push_str("No Iasis boards found.\n");
+    if state.hubs.is_empty() {
+        text.push_str("No Iasis hubs found.\n");
     }
-    for board in &state.boards {
-        text.push_str(&board_text(board));
+    for hub in &state.hubs {
+        text.push_str(&hub_text(hub));
     }
     if let Some(fetch) = fetch_text(state, 1) {
         text.push_str(&fetch);
@@ -806,9 +803,9 @@ fn agent_text(state: &State) -> String {
     // What the host lacks, once a target waits for it.
     for missing in &state.missing {
         if state
-            .boards
+            .hubs
             .iter()
-            .flat_map(|board| &board.ports)
+            .flat_map(|hub| &hub.ports)
             .any(|port| port.needs.as_ref() == Some(&missing.id))
         {
             text.push_str(&format!("{} Get it from {}\n", missing.reason, missing.url));
@@ -824,9 +821,9 @@ fn fetch_text(state: &State, step: u64) -> Option<String> {
     let percent = fetch.done * 100 / fetch.bytes.max(1) / step * step;
     let mut text = format!("Fetching {} ({}): {percent}%", fetch.version, fetch.build);
     let waiting = state
-        .boards
+        .hubs
         .iter()
-        .flat_map(|board| &board.ports)
+        .flat_map(|hub| &hub.ports)
         .filter(|port| port.awaiting.as_deref() == Some(fetch.id.as_str()))
         .count();
     match waiting {
@@ -837,19 +834,19 @@ fn fetch_text(state: &State, step: u64) -> Option<String> {
     Some(text)
 }
 
-/// The board and its ports, a line each.
-fn board_text(board: &BoardView) -> String {
-    if board.ports.is_empty() {
-        let reason = match &board.update {
+/// The hub and its ports, a line each.
+fn hub_text(hub: &HubView) -> String {
+    if hub.ports.is_empty() {
+        let reason = match &hub.update {
             Some(update) if update.required => format!(
                 "IasisOS {} is from another build; update it with `iasis --serial {} update`",
-                board.firmware, board.serial
+                hub.firmware, hub.serial
             ),
-            _ => board.notice.clone().unwrap_or_default(),
+            _ => hub.notice.clone().unwrap_or_default(),
         };
-        return format!("{}  {reason}\n", board.serial);
+        return format!("{}  {reason}\n", hub.serial);
     }
-    let supply = match (board.supply, board.pool) {
+    let supply = match (hub.supply, hub.pool) {
         (Supply::Brick, Some(pool)) => {
             format!("power supply, {} W for targets", pool.budget_mw / 1000)
         }
@@ -857,25 +854,25 @@ fn board_text(board: &BoardView) -> String {
         (Supply::Host, _) => "host power".into(),
         (Supply::Off, _) => "USB power off".into(),
     };
-    let host = match (board.host, board.restores) {
+    let host = match (hub.host, hub.restores) {
         (true, true) => "host attached, restores ready",
         (true, false) => "host attached",
         _ => "no host: start iasisd to see USB modes",
     };
-    let id = if board.name.is_empty() {
-        board.serial.clone()
+    let id = if hub.name.is_empty() {
+        hub.serial.clone()
     } else {
-        format!("{}  {}", board.name, board.serial)
+        format!("{}  {}", hub.name, hub.serial)
     };
     let mut text = format!("{id}  {supply}  {host}");
-    if let Some(speed) = board.upstream_mbps {
+    if let Some(speed) = hub.upstream_mbps {
         text.push_str(&format!("  upstream {speed} Mb/s"));
     }
-    if let Some(update) = &board.update {
+    if let Some(update) = &hub.update {
         text.push_str(&format!("  IasisOS {} available", update.version));
     }
     text.push('\n');
-    for port in &board.ports {
+    for port in &hub.ports {
         let line = format!(
             "  {}  {:<16} {:<34}{:<7}{}",
             port.number,
@@ -887,7 +884,7 @@ fn board_text(board: &BoardView) -> String {
         text.push_str(line.trim_end());
         text.push('\n');
     }
-    if let Some(notice) = &board.notice {
+    if let Some(notice) = &hub.notice {
         text.push_str(&format!("  {notice}\n"));
     }
     text
@@ -936,7 +933,7 @@ fn job_text(job: Job) -> &'static str {
     }
 }
 
-/// What the board's host sees on a port's USB.
+/// What the hub's host sees on a port's USB.
 fn usb_text(usb: Option<Usb>, mode: Option<AppleMode>, ecid: Option<&str>) -> String {
     let what = match usb {
         None => return String::new(),
@@ -983,8 +980,8 @@ fn show(text: &str, watch: bool) -> Result<()> {
     Ok(())
 }
 
-/// Every board's ports, or one board's, as the agent sees them.
-fn overview_through(mut agent: Client, board: Option<&str>, watch: bool) -> Result<()> {
+/// Every hub's ports, or one hub's, as the agent sees them.
+fn overview_through(mut agent: Client, hub: Option<&str>, watch: bool) -> Result<()> {
     let mut reply = agent.ask(&if watch {
         Request::Watch
     } else {
@@ -994,8 +991,8 @@ fn overview_through(mut agent: Client, board: Option<&str>, watch: bool) -> Resu
         match reply {
             Reply::State(mut state) => {
                 state
-                    .boards
-                    .retain(|view| board.is_none_or(|board| view.serial == board));
+                    .hubs
+                    .retain(|view| hub.is_none_or(|hub| view.serial == hub));
                 show(&agent_text(&state), watch)?;
             }
             Reply::Error(error) => bail!(error),
@@ -1008,8 +1005,8 @@ fn overview_through(mut agent: Client, board: Option<&str>, watch: bool) -> Resu
     }
 }
 
-/// Every board's ports, read from the boards. A target's USB mode is what
-/// the board's host reports to it, so this agrees with the lights.
+/// Every hub's ports, read from the hubs. A target's USB mode is what
+/// the hub's host reports to it, so this agrees with the lights.
 fn overview(ids: UsbIds, serial: Option<u64>, watch: bool) -> Result<()> {
     let changes = Arc::<Watch>::default();
     let inventory = watch
@@ -1020,21 +1017,19 @@ fn overview(ids: UsbIds, serial: Option<u64>, watch: bool) -> Result<()> {
         let seen = changes.count();
         let mut text = String::new();
         let devices = match &inventory {
-            Some(inventory) => iasis::boards(inventory.devices(), ids, serial),
+            Some(inventory) => iasis::hubs(inventory.devices(), ids, serial),
             None => iasis::discover(ids, serial)?,
         };
         if devices.is_empty() {
-            text.push_str("No Iasis boards found.\n");
+            text.push_str("No Iasis hubs found.\n");
         }
         for device in &devices {
-            match Board::observe(device)
-                .and_then(|board| board.status().map(|status| (board, status)))
-            {
-                Ok((board, status)) => {
+            match Hub::observe(device).and_then(|hub| hub.status().map(|status| (hub, status))) {
+                Ok((hub, status)) => {
                     if watch && heard.insert(device.id()) {
-                        hear(&changes, &board);
+                        hear(&changes, &hub);
                     }
-                    text.push_str(&board_text(&view::board(board.info(), &status)));
+                    text.push_str(&hub_text(&view::hub(hub.info(), &status)));
                 }
                 Err(error) => text.push_str(&format!("{}\n", unreadable(device, &error))),
             }
@@ -1048,17 +1043,17 @@ fn overview(ids: UsbIds, serial: Option<u64>, watch: bool) -> Result<()> {
 }
 
 /// Signal DFU and follow the port until the host sees the target in DFU,
-/// or the board gives up on it.
-fn dfu_through(agent: &mut Client, state: &State, board: &str, port: Port) -> Result<()> {
+/// or the hub gives up on it.
+fn dfu_through(agent: &mut Client, state: &State, hub: &str, port: Port) -> Result<()> {
     let row = |state: &State| {
         state
-            .boards
+            .hubs
             .iter()
-            .find(|view| view.serial == board)
+            .find(|view| view.serial == hub)
             .and_then(|view| view.ports.get(port.index()))
             .cloned()
     };
-    let before = row(state).context("the board is not connected")?;
+    let before = row(state).context("the hub is not connected")?;
     let in_dfu = |row: &PortView| {
         use iasis_protocol::AppleMode::{Dfu, KisDfu, PortDfu};
         matches!(row.mode, Some(Dfu | KisDfu | PortDfu))
@@ -1074,18 +1069,18 @@ fn dfu_through(agent: &mut Client, state: &State, board: &str, port: Port) -> Re
         activity(&before)
     );
     agent.request(&Request::Dfu {
-        board: board.into(),
+        hub: hub.into(),
         port: port.number(),
     })?;
     let waiting = progress::waiting(format!("Waiting for USB DFU on port {}", port.number()));
-    // The board gives up on an unconfirmed signal well before this. A target
+    // The hub gives up on an unconfirmed signal well before this. A target
     // entering DFU over Debug USB re-attaches, so the port can be empty on the
     // way.
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut last = before;
     let mut reply = Some(agent.ask(&Request::Watch)?);
     while let Some(Reply::State(state)) = reply {
-        last = row(&state).context("the board left USB")?;
+        last = row(&state).context("the hub left USB")?;
         if in_dfu(&last) {
             waiting.finish_and_clear();
             println!("Port {} is in DFU.", port.number());
@@ -1121,7 +1116,7 @@ fn sharing(agent: &mut Client, command: Option<&SharingCommand>, json: bool) -> 
     for target in sharing.ports {
         println!(
             "{}  port {}  {}",
-            target.board,
+            target.hub,
             target.port,
             target
                 .problem
@@ -1295,18 +1290,18 @@ fn import(agent: &mut Client, path: &Path) -> Result<()> {
 fn restore_through(
     agent: &mut Client,
     state: &State,
-    board: &str,
+    hub: &str,
     options: &batch::Options,
 ) -> Result<()> {
     ensure!(options.erase, "restore requires --erase");
     ensure!(
         !options.button,
-        "iasisd is running and already answers the board's Restore hold; make the hold there"
+        "iasisd is running and already answers the hub's Restore hold; make the hold there"
     );
     submit_through(
         agent,
         state,
-        board,
+        hub,
         Operation::Restore,
         &options.source,
         &options.ports,
@@ -1318,17 +1313,17 @@ fn restore_through(
 fn submit_through(
     agent: &mut Client,
     state: &State,
-    board: &str,
+    hub: &str,
     operation: Operation,
     source: &batch::Source,
     ports: &[Port],
 ) -> Result<()> {
     let view = state
-        .boards
+        .hubs
         .iter()
-        .find(|b| b.serial == board)
-        .context("the board is not connected")?;
-    let session = view.session.context("the board is not attended")?;
+        .find(|b| b.serial == hub)
+        .context("the hub is not connected")?;
+    let session = view.session.context("the hub is not attended")?;
     let targets = ports
         .iter()
         .map(|&physical| {
@@ -1358,20 +1353,20 @@ fn submit_through(
             _ => {}
         }
     }
-    let boards = vec![Selection {
-        board: board.into(),
+    let hubs = vec![Selection {
+        hub: hub.into(),
         session,
         targets,
     }];
     let latest = source.latest;
     agent.request(&match operation {
-        Operation::Restore => Request::Restore { boards, latest },
-        Operation::Revive => Request::Revive { boards, latest },
+        Operation::Restore => Request::Restore { hubs, latest },
+        Operation::Revive => Request::Revive { hubs, latest },
     })?;
-    follow_work(agent, board, ports)
+    follow_work(agent, hub, ports)
 }
 
-fn follow_work(agent: &mut Client, board: &str, ports: &[Port]) -> Result<()> {
+fn follow_work(agent: &mut Client, hub: &str, ports: &[Port]) -> Result<()> {
     let mut shown = vec![String::new(); ports.len()];
     let mut download = None;
     let mut reply = agent.ask(&Request::Watch)?;
@@ -1388,7 +1383,7 @@ fn follow_work(agent: &mut Client, board: &str, ports: &[Port]) -> Result<()> {
             println!("{}", fetch.as_deref().unwrap_or_default());
         }
         download = fetch;
-        let view = state.boards.iter().find(|view| view.serial == board);
+        let view = state.hubs.iter().find(|view| view.serial == hub);
         for ((port, shown), result) in ports.iter().zip(&mut shown).zip(&state.submitted) {
             if result.is_none()
                 && let Some(row) = view.and_then(|view| view.ports.get(port.index()))
@@ -1539,9 +1534,9 @@ fn print_status(status: &Status) {
         status.charging_budget_mw
     );
     for (bank, adc) in ["A", "B"].into_iter().zip(status.thermistor_adc) {
-        match adc.and_then(board_temperature) {
-            Some(celsius) => println!("board temperature {bank}  {celsius:.1} °C"),
-            None => println!("board temperature {bank}  unavailable (ADC {adc:?})"),
+        match adc.and_then(hub_temperature) {
+            Some(celsius) => println!("hub temperature {bank}  {celsius:.1} °C"),
+            None => println!("hub temperature {bank}  unavailable (ADC {adc:?})"),
         }
     }
     println!(
@@ -1550,7 +1545,7 @@ fn print_status(status: &Status) {
     );
 }
 
-fn board_temperature(adc: u16) -> Option<f64> {
+fn hub_temperature(adc: u16) -> Option<f64> {
     if !(1..4095).contains(&adc) {
         return None;
     }
@@ -1582,9 +1577,9 @@ mod tests {
 
     #[test]
     fn thermistor_matches_nominal_divider_and_rejects_rails() {
-        assert!((board_temperature(2048).unwrap() - 25.0).abs() < 0.1);
-        assert!((board_temperature(1204).unwrap() - 50.0).abs() < 0.2);
-        assert_eq!(board_temperature(0), None);
-        assert_eq!(board_temperature(4095), None);
+        assert!((hub_temperature(2048).unwrap() - 25.0).abs() < 0.1);
+        assert!((hub_temperature(1204).unwrap() - 50.0).abs() < 0.2);
+        assert_eq!(hub_temperature(0), None);
+        assert_eq!(hub_temperature(4095), None);
     }
 }

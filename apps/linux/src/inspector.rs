@@ -48,7 +48,7 @@ fn groups(device: &Device) -> Vec<adw::PreferencesGroup> {
     let port = &device.port;
     let lead = adw::PreferencesGroup::builder()
         .title(glib::markup_escape_text(&device.name()))
-        .description(format!("{} · port {}", device.board_title, port.number))
+        .description(format!("{} · port {}", device.hub_title, port.number))
         .build();
     if let Some(fault) = &port.fault {
         let row = adw::ActionRow::builder()

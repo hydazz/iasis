@@ -1,15 +1,15 @@
 import Foundation
 
-/// One port of one board and what is on it, as every view shows it.
+/// One port of one hub and what is on it, as every view shows it.
 struct Device: Identifiable, Equatable {
     struct ID: Hashable {
         // periphery:ignore
-        let board: String
+        let hub: String
         // periphery:ignore
         let port: Int
     }
 
-    let boardTitle: String
+    let hubTitle: String
     let serial: String
     let session: UInt32?
     let port: AgentState.Port
@@ -24,7 +24,7 @@ struct Device: Identifiable, Equatable {
     }
 
     var id: ID {
-        ID(board: serial, port: port.number)
+        ID(hub: serial, port: port.number)
     }
 
     /// The port holds a device or is switched off; an empty port offers nothing.
@@ -191,31 +191,31 @@ struct Activity: Equatable {
     }
 }
 
-/// A board and its five ports.
-struct BoardDevices: Identifiable, Equatable {
-    let board: AgentState.Board
+/// A hub and its five ports.
+struct HubDevices: Identifiable, Equatable {
+    let hub: AgentState.Hub
     let title: String
     let devices: [Device]
 
     var id: String {
-        board.serial
+        hub.serial
     }
 }
 
 extension AgentState {
-    var boardDevices: [BoardDevices] {
-        boards.map { board in
-            let title = title(for: board)
-            return BoardDevices(board: board, title: title, devices: board.ports.map { port in
-                let portSharing = sharing.ports.first { $0.board == board.serial && $0.port == port.number }
+    var hubDevices: [HubDevices] {
+        hubs.map { hub in
+            let title = title(for: hub)
+            return HubDevices(hub: hub, title: title, devices: hub.ports.map { port in
+                let portSharing = sharing.ports.first { $0.hub == hub.serial && $0.port == port.number }
                 let needs = missing.first { $0.id == port.needs }
-                return Device(boardTitle: title, serial: board.serial, session: board.session, port: port, sharing: portSharing, needs: needs)
+                return Device(hubTitle: title, serial: hub.serial, session: hub.session, port: port, sharing: portSharing, needs: needs)
             })
         }
     }
 
     var devices: [Device] {
-        boardDevices.flatMap(\.devices)
+        hubDevices.flatMap(\.devices)
     }
 }
 
@@ -234,20 +234,20 @@ struct DeviceActions: Equatable {
     init() {}
 
     init(_ devices: [Device]) {
-        dfu = devices.filter(\.port.dfu).map { .dfu(board: $0.serial, port: $0.port.number) }
-        restart = devices.filter(\.port.reboot).map { .reboot(board: $0.serial, port: $0.port.number) }
+        dfu = devices.filter(\.port.dfu).map { .dfu(hub: $0.serial, port: $0.port.number) }
+        restart = devices.filter(\.port.reboot).map { .reboot(hub: $0.serial, port: $0.port.number) }
         restore = RestoreConfirmation(devices)
-        revive = restore.map { .revive(boards: $0.boards, latest: false) }
+        revive = restore.map { .revive(hubs: $0.hubs, latest: false) }
         let enabled = Set(devices.map(\.port.enabled))
         if enabled.count == 1, let on = enabled.first {
             powered = on
-            power = devices.map { .power(board: $0.serial, port: $0.port.number, on: !on) }
+            power = devices.map { .power(hub: $0.serial, port: $0.port.number, on: !on) }
         }
     }
 }
 
 /// An erase the user is asked to confirm: the attachments as shown, on any
-/// number of boards, and what the agent says each would be restored with.
+/// number of hubs, and what the agent says each would be restored with.
 struct RestoreConfirmation: Equatable {
     /// One way to go on: its button and the request that makes.
     struct Choice: Equatable, Identifiable {
@@ -260,24 +260,24 @@ struct RestoreConfirmation: Equatable {
     }
 
     let devices: [Device]
-    let boards: [RestoreSelection]
+    let hubs: [RestoreSelection]
     var planned: [AgentState.Planned] = []
 
     init?(_ devices: [Device]) {
         guard !devices.isEmpty,
               devices.allSatisfy({ $0.port.occupied && $0.port.restore && $0.session != nil })
         else { return nil }
-        var boards: [RestoreSelection] = []
+        var hubs: [RestoreSelection] = []
         for device in devices {
             guard let session = device.session else { return nil }
-            if let index = boards.firstIndex(where: { $0.board == device.serial }) {
-                boards[index].targets.append(device.restoreTarget)
+            if let index = hubs.firstIndex(where: { $0.hub == device.serial }) {
+                hubs[index].targets.append(device.restoreTarget)
             } else {
-                boards.append(RestoreSelection(board: device.serial, session: session, targets: [device.restoreTarget]))
+                hubs.append(RestoreSelection(hub: device.serial, session: session, targets: [device.restoreTarget]))
             }
         }
         self.devices = devices
-        self.boards = boards
+        self.hubs = hubs
     }
 
     var title: String {
@@ -297,24 +297,24 @@ struct RestoreConfirmation: Equatable {
         guard !blocked else { return [] }
         let newer = devices.compactMap(offer).filter { $0.newer != nil }
         guard !newer.isEmpty else {
-            return [Choice(title: "Restore", request: .restore(boards: boards, latest: false))]
+            return [Choice(title: "Restore", request: .restore(hubs: hubs, latest: false))]
         }
         let latest = Set(newer.compactMap(\.latest?.title))
         let held = Set(newer.compactMap(\.held?.title))
         return [
             Choice(
                 title: latest.count == 1 ? "Download \(latest.first ?? "")" : "Download Latest",
-                request: .restore(boards: boards, latest: true)
+                request: .restore(hubs: hubs, latest: true)
             ),
             Choice(
                 title: held.count == 1 ? "Use \(held.first ?? "")" : "Use Downloaded",
-                request: .restore(boards: boards, latest: false)
+                request: .restore(hubs: hubs, latest: false)
             ),
         ]
     }
 
     private func offer(for device: Device) -> AgentState.Offer? {
-        planned.first { $0.board == device.serial && $0.port == device.port.number }?.offer
+        planned.first { $0.hub == device.serial && $0.port == device.port.number }?.offer
     }
 
     /// A device has no image in the store and the catalog offers none.
@@ -323,7 +323,7 @@ struct RestoreConfirmation: Equatable {
     }
 
     private func line(for device: Device) -> String {
-        let place = "\(device.boardTitle), Port \(device.port.number): \(device.name)"
+        let place = "\(device.hubTitle), Port \(device.port.number): \(device.name)"
         // A device the agent has not identified gets its image once in DFU.
         guard let offer = offer(for: device) else { return place }
         let size = { (release: AgentState.Release) in release.bytes.formatted(.byteCount(style: .file)) }

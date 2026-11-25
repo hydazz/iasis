@@ -15,7 +15,7 @@ struct LightLevelEditTests {
         #expect(level.value(reading: 58) == 58)
     }
 
-    @Test func aRejectedWriteRestoresTheBoardReading() {
+    @Test func aRejectedWriteRestoresTheHubReading() {
         var level = LightLevelEdit()
         level.drag(to: 53)
         _ = level.release(reading: 40)

@@ -10,7 +10,7 @@ namespace Iasis.Agent;
 public sealed record AgentState
 {
     public required string Version { get; init; }
-    public required IReadOnlyList<Board> Boards { get; init; }
+    public required IReadOnlyList<Hub> Hubs { get; init; }
     /// A submitting connection's results in target order, each null until it has one.
     public IReadOnlyList<Ending?>? Submitted { get; init; }
     public required ImageStore Images { get; init; }
@@ -20,15 +20,15 @@ public sealed record AgentState
     public required IReadOnlyList<Prerequisite> Missing { get; init; }
 }
 
-public sealed record Board
+public sealed record Hub
 {
     public required string Serial { get; init; }
-    /// Empty for an unnamed board.
+    /// Empty for an unnamed hub.
     public required string Name { get; init; }
     public uint? Session { get; init; }
-    /// The IasisOS version the board runs; empty while it cannot be read.
+    /// The IasisOS version the hub runs; empty while it cannot be read.
     public required string Firmware { get; init; }
-    /// The IasisOS the agent carries, when the board runs another.
+    /// The IasisOS the agent carries, when the hub runs another.
     public FirmwareUpdate? Update { get; init; }
     public int? UpstreamMbps { get; init; }
     public required Supply Supply { get; init; }
@@ -110,7 +110,7 @@ public sealed record Fetch(string Id, string Version, string Build, long Bytes, 
 
 public sealed record Sharing(bool Enabled, string? Problem, IReadOnlyList<SharingPort> Ports);
 
-public sealed record SharingPort(string Board, int Port, bool Active, string? Problem);
+public sealed record SharingPort(string Hub, int Port, bool Active, string? Problem);
 
 /// The identity the host pairs with as supervisor: its certificate's common
 /// name and the certificate in base64 DER.
@@ -119,13 +119,13 @@ public sealed record Supervision(string? Name, string? Certificate, string? Prob
 /// Software the host lacks, and what goes without it.
 public sealed record Prerequisite(string Id, string Name, string Url, string Reason);
 
-/// The targets selected on one board, in the session the client saw.
-public sealed record Selection(string Board, uint Session, IReadOnlyList<Target> Targets);
+/// The targets selected on one hub, in the session the client saw.
+public sealed record Selection(string Hub, uint Session, IReadOnlyList<Target> Targets);
 
 /// One attachment, and the device on it when it is identified.
 public sealed record Target(int Port, uint Generation, string? Ecid);
 
-public sealed record Planned(string Board, int Port, Offer? Offer);
+public sealed record Planned(string Hub, int Port, Offer? Offer);
 
 public sealed record Offer(Release? Latest, Release? Held, string? Problem);
 
@@ -157,7 +157,7 @@ public enum PowerSource { Pd, Usb }
 [JsonConverter(typeof(SnakeCaseEnum<Operation>))]
 public enum Operation { Restore, Revive }
 
-/// The board's restore phases keep their own names on the wire.
+/// The hub's restore phases keep their own names on the wire.
 [JsonConverter(typeof(JsonStringEnumConverter<RestorePhase>))]
 public enum RestorePhase { Preparing, Running, Reported, Unconfirmed, Failed }
 
@@ -195,18 +195,18 @@ public abstract record Request
 
 public sealed record StateRequest : Request;
 public sealed record WatchRequest : Request;
-public sealed record PlanRequest(IReadOnlyList<Selection> Boards) : Request;
-public sealed record RestoreRequest(IReadOnlyList<Selection> Boards, bool Latest) : Request;
-public sealed record ReviveRequest(IReadOnlyList<Selection> Boards, bool Latest) : Request;
-public sealed record DfuRequest(string Board, int Port) : Request;
-public sealed record RebootRequest(string Board, int Port) : Request;
-public sealed record PowerRequest(string Board, int Port, bool On) : Request;
-public sealed record DebugUsbRequest(string Board, int Port, bool On) : Request;
-public sealed record RenameRequest(string Board, string Name) : Request;
-public sealed record BrightnessRequest(string Board, int Percent) : Request;
-public sealed record HostBudgetRequest(string Board, int Milliamps) : Request;
+public sealed record PlanRequest(IReadOnlyList<Selection> Hubs) : Request;
+public sealed record RestoreRequest(IReadOnlyList<Selection> Hubs, bool Latest) : Request;
+public sealed record ReviveRequest(IReadOnlyList<Selection> Hubs, bool Latest) : Request;
+public sealed record DfuRequest(string Hub, int Port) : Request;
+public sealed record RebootRequest(string Hub, int Port) : Request;
+public sealed record PowerRequest(string Hub, int Port, bool On) : Request;
+public sealed record DebugUsbRequest(string Hub, int Port, bool On) : Request;
+public sealed record RenameRequest(string Hub, string Name) : Request;
+public sealed record BrightnessRequest(string Hub, int Percent) : Request;
+public sealed record HostBudgetRequest(string Hub, int Milliamps) : Request;
 
-public sealed record UpdateRequest(string Board, long? Bytes) : Request
+public sealed record UpdateRequest(string Hub, long? Bytes) : Request
 {
     public override long Payload() => Bytes ?? 0;
 }
