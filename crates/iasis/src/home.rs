@@ -5,16 +5,16 @@ use std::{env, path::PathBuf};
 use anyhow::Result;
 
 pub struct Home {
-    /// Restore images and worker scratch: large, and safe to delete.
+    /// Downloaded restore images and worker scratch: large, and fetched or
+    /// made again when deleted.
     pub cache: PathBuf,
     pub state: PathBuf,
     runtime: PathBuf,
 }
 
 impl Home {
-    /// `IASIS_HOME` holds everything under one directory. On Linux the agent
-    /// is a system service and uses the directories its unit has systemd
-    /// create. Elsewhere it runs for one user and keeps that user's files.
+    /// `IASIS_HOME` holds everything under one directory. Otherwise the agent
+    /// keeps its files where its platform runs it.
     pub fn locate() -> Result<Self> {
         if let Some(root) = env::var_os("IASIS_HOME").map(PathBuf::from) {
             return Ok(Self {
@@ -23,29 +23,47 @@ impl Home {
                 runtime: root,
             });
         }
-        #[cfg(target_os = "linux")]
-        return Ok(Self {
+        Self::platform()
+    }
+
+    /// The directories the service's unit has systemd create.
+    #[cfg(target_os = "linux")]
+    fn platform() -> Result<Self> {
+        Ok(Self {
             cache: "/var/cache/iasis".into(),
             state: "/var/lib/iasis".into(),
             runtime: "/run/iasis".into(),
-        });
-        #[cfg(not(target_os = "linux"))]
-        {
-            use anyhow::Context;
-            let dirs =
-                directories::ProjectDirs::from("", "", "iasis").context("no home directory")?;
-            let state = dirs
-                .state_dir()
-                .unwrap_or_else(|| dirs.data_local_dir())
-                .to_owned();
-            Ok(Self {
-                cache: dirs.cache_dir().to_owned(),
-                runtime: dirs
-                    .runtime_dir()
-                    .map_or_else(|| state.clone(), ToOwned::to_owned),
-                state,
-            })
-        }
+        })
+    }
+
+    /// The login user's folders, named after the app: the agent runs for one
+    /// user.
+    #[cfg(target_os = "macos")]
+    fn platform() -> Result<Self> {
+        use anyhow::Context;
+        let library = env::home_dir()
+            .context("no home directory")?
+            .join("Library");
+        let state = library.join("Application Support/com.hydaz.Iasis");
+        Ok(Self {
+            cache: library.join("Caches/com.hydaz.Iasis"),
+            runtime: state.clone(),
+            state,
+        })
+    }
+
+    /// The service's folder in ProgramData.
+    #[cfg(windows)]
+    fn platform() -> Result<Self> {
+        use anyhow::Context;
+        let root = PathBuf::from(env::var_os("ProgramData").context("no ProgramData folder")?)
+            .join("Iasis");
+        let cache = root.join("cache");
+        Ok(Self {
+            runtime: cache.clone(),
+            cache,
+            state: root.join("state"),
+        })
     }
 
     /// The supervision identity the agent makes and pairs with.

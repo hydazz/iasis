@@ -42,7 +42,7 @@ nonisolated enum AgentError: LocalizedError {
 /// The agent's local socket. Each request and each watch has a connection of
 /// its own, carrying JSON a line at a time.
 nonisolated struct AgentClient: AgentService {
-    var socket: URL = .applicationSupportDirectory.appending(path: "iasis/agent.sock")
+    var socket: URL = .applicationSupportDirectory.appending(path: "com.hydaz.Iasis/agent.sock")
 
     func states() -> AsyncThrowingStream<AgentState, any Error> {
         let (states, continuation) = AsyncThrowingStream.makeStream(of: AgentState.self)
