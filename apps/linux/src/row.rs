@@ -19,7 +19,6 @@ pub struct PortRow {
     pub check: gtk::CheckButton,
     badge: gtk::Label,
     kind: gtk::Image,
-    identifying: gtk::Spinner,
     power: gtk::Image,
     link: gtk::Image,
     sharing: gtk::Image,
@@ -46,14 +45,9 @@ impl PortRow {
             .tooltip_text(format!("Port {number}"))
             .build();
         let kind = gtk::Image::builder().css_classes(["dim-label"]).build();
-        let identifying = gtk::Spinner::builder()
-            .spinning(true)
-            .visible(false)
-            .build();
         row.add_prefix(&check);
         row.add_prefix(&badge);
         row.add_prefix(&kind);
-        row.add_prefix(&identifying);
 
         let marks = gtk::Box::builder()
             .spacing(8)
@@ -84,7 +78,6 @@ impl PortRow {
             check,
             badge,
             kind,
-            identifying,
             power,
             link,
             sharing,
@@ -117,14 +110,14 @@ impl PortRow {
         self.row.set_subtitle(&glib::markup_escape_text(subtitle));
 
         show_light(&self.badge, &port.light);
-        match device.icon() {
-            Some(icon) if !port.identifying => {
-                self.kind.set_icon_name(Some(icon));
-                self.kind.set_visible(true);
-            }
-            _ => self.kind.set_visible(false),
-        }
-        self.identifying.set_visible(port.identifying);
+        let kind = if port.identifying {
+            Some(TURNING)
+        } else {
+            device.icon()
+        };
+        self.kind.set_visible(kind.is_some());
+        self.kind.set_icon_name(kind);
+        set_class(&self.kind, "turning", port.identifying);
 
         self.power.set_visible(port.powered);
         if port.powered {
@@ -219,11 +212,13 @@ pub fn set_class(widget: &impl IsA<gtk::Widget>, class: &str, on: bool) {
     }
 }
 
+/// Work under way whose end is unknown, turned by the `turning` class.
+pub const TURNING: &str = "view-refresh-symbolic";
+
 /// What a port is doing or how it ended, as one mark. Work with a known
-/// fraction is a ring drawn that far round.
+/// fraction is a ring drawn that far round; without one, an arrow turns.
 pub struct ActivityMark {
     pub widget: gtk::Stack,
-    spinner: gtk::Spinner,
     ring: gtk::DrawingArea,
     fraction: Rc<Cell<f64>>,
     icon: gtk::Image,
@@ -240,8 +235,6 @@ impl ActivityMark {
             &gtk::Box::new(gtk::Orientation::Horizontal, 0),
             Some("none"),
         );
-        let spinner = gtk::Spinner::new();
-        widget.add_named(&spinner, Some("spinner"));
         let fraction = Rc::new(Cell::new(0.0));
         let ring = gtk::DrawingArea::builder()
             .content_width(18)
@@ -272,7 +265,6 @@ impl ActivityMark {
         widget.set_visible_child_name("none");
         Self {
             widget,
-            spinner,
             ring,
             fraction,
             icon,
@@ -282,15 +274,9 @@ impl ActivityMark {
     pub fn show(&self, activity: &Activity) {
         self.widget
             .set_tooltip_text((!activity.text.is_empty()).then_some(activity.text.as_str()));
-        self.spinner
-            .set_spinning(activity.mark == Mark::Working(None));
-        let (icon, class) = match activity.mark {
+        let (icon, classes): (_, &[_]) = match activity.mark {
             Mark::None => {
                 self.widget.set_visible_child_name("none");
-                return;
-            }
-            Mark::Working(None) => {
-                self.widget.set_visible_child_name("spinner");
                 return;
             }
             Mark::Working(Some(fraction)) => {
@@ -299,16 +285,14 @@ impl ActivityMark {
                 self.widget.set_visible_child_name("ring");
                 return;
             }
-            Mark::Done => ("object-select-symbolic", "success"),
-            Mark::Failed => ("dialog-error-symbolic", "error"),
-            Mark::Uncertain => ("dialog-question-symbolic", "uncertain"),
-            Mark::Caution => ("dialog-warning-symbolic", "warning"),
+            Mark::Working(None) => (TURNING, &["accent", "turning"]),
+            Mark::Done => ("object-select-symbolic", &["success"]),
+            Mark::Failed => ("dialog-error-symbolic", &["error"]),
+            Mark::Uncertain => ("dialog-question-symbolic", &["uncertain"]),
+            Mark::Caution => ("dialog-warning-symbolic", &["warning"]),
         };
         self.icon.set_icon_name(Some(icon));
-        for other in ["success", "error", "uncertain", "warning"] {
-            self.icon.remove_css_class(other);
-        }
-        self.icon.add_css_class(class);
+        self.icon.set_css_classes(classes);
         self.widget.set_visible_child_name("icon");
     }
 }
