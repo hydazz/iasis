@@ -56,7 +56,7 @@
             "operation": "restore",
             "phase": "Running"
           },
-          "fetch": 12,
+          "awaiting": "iPad_Fall_2022_26.2_24C101_Restore.ipsw",
           "stage": {
             "name": "Restoring the system",
             "percent": 42,
@@ -109,7 +109,7 @@
             "operation": "revive",
             "phase": "Preparing"
           },
-          "fetch": null,
+          "awaiting": null,
           "stage": null,
           "result": {
             "operation": "revive",
@@ -154,7 +154,7 @@
             "operation": "restore",
             "phase": "Unconfirmed"
           },
-          "fetch": null,
+          "awaiting": null,
           "stage": null,
           "result": null
         },
@@ -189,7 +189,7 @@
             "operation": "restore",
             "phase": "Reported"
           },
-          "fetch": null,
+          "awaiting": null,
           "stage": null,
           "result": null
         },
@@ -228,7 +228,7 @@
             "operation": "restore",
             "phase": "Failed"
           },
-          "fetch": null,
+          "awaiting": null,
           "stage": null,
           "result": null
         }
@@ -281,7 +281,7 @@
           "restore": true,
           "enabled": true,
           "job": null,
-          "fetch": null,
+          "awaiting": null,
           "stage": null,
           "result": null
         },
@@ -317,7 +317,7 @@
           "restore": true,
           "enabled": true,
           "job": null,
-          "fetch": null,
+          "awaiting": null,
           "stage": null,
           "result": null
         },
@@ -353,7 +353,7 @@
           "restore": true,
           "enabled": true,
           "job": null,
-          "fetch": null,
+          "awaiting": null,
           "stage": null,
           "result": null
         },
@@ -389,7 +389,7 @@
           "restore": true,
           "enabled": true,
           "job": null,
-          "fetch": null,
+          "awaiting": null,
           "stage": null,
           "result": null
         },
@@ -425,7 +425,7 @@
           "restore": true,
           "enabled": true,
           "job": null,
-          "fetch": null,
+          "awaiting": null,
           "stage": null,
           "result": null
         },
@@ -461,7 +461,7 @@
           "restore": true,
           "enabled": true,
           "job": null,
-          "fetch": null,
+          "awaiting": null,
           "stage": null,
           "result": null
         }

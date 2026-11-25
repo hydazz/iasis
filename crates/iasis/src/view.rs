@@ -103,7 +103,7 @@ pub fn board(info: &Info, status: &Status) -> BoardView {
                         operation: Operation::Restore,
                         phase: job.phase,
                     }),
-                    fetch: state.fetch,
+                    awaiting: None,
                     stage: None,
                     result: None,
                 }
@@ -172,7 +172,7 @@ pub(crate) fn identify_for(row: &mut PortView, attachment_age_ms: u64) {
         && !row.waiting_for_power
         && row.job.is_none()
         && row.request.is_none()
-        && row.fetch.is_none()
+        && row.awaiting.is_none()
         && attachment_age_ms < IDENTIFYING_MS;
 }
 
@@ -318,13 +318,8 @@ mod tests {
     }
 
     #[test]
-    fn image_progress_changes_within_one_port_state() {
+    fn a_fault_without_a_reason_is_a_port_fault() {
         let mut status = Status::default();
-        status.ports[0].state = PortState::Contract;
-        for value in [0, 23, 100] {
-            status.ports[0].fetch = Some(value);
-            assert_eq!(board(&info(), &status).ports[0].fetch, Some(value));
-        }
         status.ports[0].state = PortState::Fault;
         assert_eq!(
             board(&info(), &status).ports[0].fault.as_deref(),

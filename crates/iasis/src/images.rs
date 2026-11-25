@@ -369,6 +369,37 @@ struct Download {
     error: Option<String>,
 }
 
+/// What a restore of some hardware installs.
+pub(crate) enum Pick {
+    /// An image the store holds.
+    Held(PreparedIpsw),
+    /// A release the store fetches first.
+    Fetch(Wanted),
+}
+
+/// A release a restore waits for, and the hardware it is for.
+#[derive(Clone)]
+pub(crate) struct Wanted {
+    device: Device,
+    firmware: Firmware,
+    chip: u32,
+    board: u32,
+}
+
+impl Wanted {
+    /// The store's id for the archive, as the image list names it.
+    pub(crate) fn id(&self) -> &str {
+        self.firmware.name()
+    }
+}
+
+/// Where a wanted release stands.
+pub(crate) enum Poll {
+    Ready(PreparedIpsw),
+    /// Its download, once it has begun.
+    Coming(Option<Fetch>),
+}
+
 /// The system a product type runs, for the families the store keeps.
 fn system(product_type: &str) -> Option<&'static str> {
     let families = [
@@ -965,10 +996,100 @@ impl Store {
 
     /// The image to restore this hardware with: the newest in the store
     /// that Apple still signs, or with `latest` the newest release Apple
-    /// signs, fetched if the store lacks it. A fetched image Apple no longer
-    /// signs is deleted. When the catalog cannot be asked, the newest image
-    /// in the store serves. `waiting` hears of a download, and ends the wait
-    /// by failing.
+    /// signs, which the store may have to fetch first. A fetched image Apple
+    /// no longer signs is deleted. When the catalog cannot be asked, the
+    /// newest image in the store serves.
+    pub(crate) fn pick(&self, chip: u32, board: u32, latest: bool) -> Result<Pick> {
+        let listed = self.listed(chip, board);
+        let mut state = self.0.lock();
+        let signed = listed
+            .as_ref()
+            .ok()
+            .map(|(_, releases)| releases.as_slice());
+        let survey = state.survey(chip, board, signed);
+        let held = survey.held.first().map(|image| image.ipsw.clone());
+        let lapsed: Vec<PathBuf> = survey
+            .lapsed
+            .iter()
+            .filter(|image| !state.leased.contains_key(image.id()))
+            .map(|image| image.ipsw.path().to_owned())
+            .collect();
+        if !lapsed.is_empty() {
+            self.0.drop_files(&mut state, &lapsed);
+            self.0.save(&state);
+        }
+        let (device, releases) = match (listed, held) {
+            (Ok(listed), None) => listed,
+            (Ok(listed), Some(_)) if latest => listed,
+            (Ok(_), Some(held)) => return Ok(Pick::Held(held)),
+            (Err(error), Some(held)) => {
+                eprintln!("Images: using the image in the store: {error:#}");
+                return Ok(Pick::Held(held));
+            }
+            (Err(error), None) => return Err(error),
+        };
+        let firmware = releases
+            .into_iter()
+            .next()
+            .with_context(|| format!("Apple signs no release for {}", device.name))?;
+        Ok(Pick::Fetch(Wanted {
+            device,
+            firmware,
+            chip,
+            board,
+        }))
+    }
+
+    /// Ask for a wanted release: queue it unless it is here, and try it
+    /// again if it failed.
+    pub(crate) fn queue(&self, wanted: &Wanted) {
+        self.want(&wanted.device, wanted.firmware.clone());
+    }
+
+    /// Where a wanted release stands: its archive once it is here, its
+    /// download while it comes, or why it will not come. A failure stays
+    /// until the release is asked for again.
+    pub(crate) fn poll(&self, wanted: &Wanted) -> Result<Poll> {
+        let Wanted {
+            device,
+            firmware,
+            chip,
+            board,
+        } = wanted;
+        let state = self.0.lock();
+        let here = state
+            .saved
+            .images
+            .iter()
+            .find(|image| image.is(&device.identifier, firmware));
+        if let Some(image) = here {
+            ensure!(
+                image.ipsw.erases(*chip, *board),
+                "the image for {} does not cover this device",
+                device.name
+            );
+            return Ok(Poll::Ready(image.ipsw.clone()));
+        }
+        let download = state
+            .downloads
+            .iter()
+            .find(|download| download.firmware == *firmware)
+            .with_context(|| format!("the image for {} was removed", device.name))?;
+        if let Some(error) = &download.error {
+            bail!("{}: {error}", device.name);
+        }
+        // Another archive's download is not this one's progress.
+        Ok(Poll::Coming(
+            state
+                .fetch
+                .clone()
+                .filter(|fetch| fetch.id == firmware.name()),
+        ))
+    }
+
+    /// The image to restore this hardware with, as `pick` chooses it,
+    /// waiting for its download. `waiting` hears of the download, and ends
+    /// the wait by failing.
     pub fn obtain(
         &self,
         chip: u32,
@@ -976,74 +1097,17 @@ impl Store {
         latest: bool,
         mut waiting: impl FnMut(Option<&Fetch>) -> Result<()>,
     ) -> Result<PreparedIpsw> {
-        let listed = self.listed(chip, board);
         let mut seen = self.0.changes.count();
-        let (device, newest) = {
-            let mut state = self.0.lock();
-            let signed = listed
-                .as_ref()
-                .ok()
-                .map(|(_, releases)| releases.as_slice());
-            let survey = state.survey(chip, board, signed);
-            let held = survey.held.first().map(|image| image.ipsw.clone());
-            let lapsed: Vec<PathBuf> = survey
-                .lapsed
-                .iter()
-                .filter(|image| !state.leased.contains_key(image.id()))
-                .map(|image| image.ipsw.path().to_owned())
-                .collect();
-            if !lapsed.is_empty() {
-                self.0.drop_files(&mut state, &lapsed);
-                self.0.save(&state);
-            }
-            let (device, releases) = match (listed, held) {
-                (Ok(listed), None) => listed,
-                (Ok(listed), Some(_)) if latest => listed,
-                (Ok(_), Some(held)) => return Ok(held),
-                (Err(error), Some(held)) => {
-                    eprintln!("Images: using the image in the store: {error:#}");
-                    return Ok(held);
-                }
-                (Err(error), None) => return Err(error),
-            };
-            let newest = releases
-                .into_iter()
-                .next()
-                .with_context(|| format!("Apple signs no release for {}", device.name))?;
-            (device, newest)
+        let wanted = match self.pick(chip, board, latest)? {
+            Pick::Held(ipsw) => return Ok(ipsw),
+            Pick::Fetch(wanted) => wanted,
         };
-        self.want(&device, newest.clone());
+        self.queue(&wanted);
         loop {
-            let fetch = {
-                let state = self.0.lock();
-                let here = state
-                    .saved
-                    .images
-                    .iter()
-                    .find(|image| image.is(&device.identifier, &newest));
-                if let Some(image) = here {
-                    ensure!(
-                        image.ipsw.erases(chip, board),
-                        "the image for {} does not cover this device",
-                        device.name
-                    );
-                    return Ok(image.ipsw.clone());
-                }
-                let download = state
-                    .downloads
-                    .iter()
-                    .find(|download| download.firmware == newest)
-                    .with_context(|| format!("the image for {} was removed", device.name))?;
-                if let Some(error) = &download.error {
-                    bail!("{}: {error}", device.name);
-                }
-                // Another archive's download is not this one's progress.
-                state
-                    .fetch
-                    .clone()
-                    .filter(|fetch| fetch.id == newest.name())
-            };
-            waiting(fetch.as_ref())?;
+            match self.poll(&wanted)? {
+                Poll::Ready(ipsw) => return Ok(ipsw),
+                Poll::Coming(fetch) => waiting(fetch.as_ref())?,
+            }
             // The download, the store and whatever `waiting` watches all
             // advance this count.
             seen = self.0.changes.wait(seen, None);
@@ -1733,6 +1797,44 @@ mod tests {
             format!("{error:#}").contains("signs no release"),
             "{error:#}"
         );
+        store.close();
+    }
+
+    #[test]
+    fn a_failed_download_ends_every_wait_on_it_until_it_is_asked_for_again() {
+        let temp = tempfile::tempdir().unwrap();
+        let shelf = Shelf::new();
+        *shelf.fail.lock().unwrap() = Some("no route".into());
+        let store = Store::open(temp.path(), shelf.clone(), Arc::default()).unwrap();
+        // Two targets of one model wait for one release, asked for once.
+        let wanted: Vec<Wanted> = (0..2)
+            .map(|_| match store.pick(0x8103, 20, false).unwrap() {
+                Pick::Fetch(wanted) => wanted,
+                Pick::Held(_) => panic!("the store holds no image yet"),
+            })
+            .collect();
+        assert_eq!(wanted[0].id(), wanted[1].id());
+        let settle = |wanted: &Wanted| {
+            let mut seen = store.0.changes.count();
+            while matches!(store.poll(wanted), Ok(Poll::Coming(_))) {
+                seen = store.0.changes.wait(seen, None);
+            }
+        };
+        store.queue(&wanted[0]);
+        settle(&wanted[0]);
+        for wanted in &wanted {
+            let error = store.poll(wanted).err().unwrap();
+            assert!(format!("{error:#}").contains("no route"), "{error:#}");
+        }
+        assert_eq!(shelf.fetched(), 1);
+        // Asking again tries again, for every target waiting on it.
+        *shelf.fail.lock().unwrap() = None;
+        store.queue(&wanted[1]);
+        settle(&wanted[1]);
+        for wanted in &wanted {
+            assert!(matches!(store.poll(wanted), Ok(Poll::Ready(_))));
+        }
+        assert_eq!(shelf.fetched(), 2);
         store.close();
     }
 
