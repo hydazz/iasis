@@ -60,6 +60,10 @@ actor FakeAgent: AgentService {
         stream.continuation.yield(state)
     }
 
+    func fail(with error: any Error) {
+        stream.continuation.finish(throwing: error)
+    }
+
     func send(_ request: AgentRequest) async throws {
         requests.append(request)
     }
