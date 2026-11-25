@@ -148,7 +148,7 @@ target/release/iasis images add /path/to/UniversalMac.ipsw
 target/release/iasis images remove UniversalMac_27.2.1_26B131_Restore.ipsw
 ```
 
-An image stays until it is removed. Removing one that is still downloading stops the download. An image added from a file is never taken for an unsigned one, since the catalog may not list it. Images live in the agent's cache directory: `~/Library/Caches/iasis` on macOS and `/var/cache/iasis` on Linux. `images add` sends the archive to the agent, which keeps it once every member's checksum matches. A Mac image is about 26 GB and an iPad image about 11 GB.
+An image stays until it is removed. Removing one that is still downloading stops the download. An image added from a file is never taken for an unsigned one, since the catalog may not list it. Images live in the agent's cache directory: `~/Library/Caches/com.hydaz.Iasis` on macOS and `/var/cache/iasis` on Linux. `images add` sends the archive to the agent, which keeps it once every member's checksum matches. A Mac image is about 26 GB and an iPad image about 11 GB.
 
 While an image is being fetched for a target, its port pulses purple, the OLED labels it `IMG`, and `iasis` shows the percentage.
 
@@ -182,7 +182,7 @@ An iPhone or iPad whose enrollment profile lists the agent's supervision certifi
 
 The agent makes its identity when it first starts. Export the certificate with Export… in the identity's ⋯ menu, in the Mac app's Settings or the Linux app's Preferences, or with `iasis supervision certificate Iasis.cer`, and add it to the devices' Automated Device Enrollment profile as a supervising host certificate. In Intune that is Sync with computers, Allow Apple Configurator by certificate, in the enrollment program token's profile. A device takes the certificate when it enrolls, so an enrolled one needs one erase, with a Trust tap, and enrollment again first.
 
-To back the identity up or give another host the same one, export it with its private key in a password-protected PKCS #12 archive, with Export… in the apps or `iasis supervision export Iasis.p12`, and import it with Import… or `iasis supervision import Iasis.p12`. The agent keeps it as `supervision.pem` in its state directory, open to the agent's account alone: mode 600 in a 700 directory on macOS (`~/Library/Application Support/iasis`) and Linux (`/var/lib/iasis`), and on Windows an access list of the agent's account and Administrators. Anyone holding the identity can pair with every device that lists its certificate.
+To back the identity up or give another host the same one, export it with its private key in a password-protected PKCS #12 archive, with Export… in the apps or `iasis supervision export Iasis.p12`, and import it with Import… or `iasis supervision import Iasis.p12`. The agent keeps it as `supervision.pem` in its state directory, open to the agent's account alone: mode 600 in a 700 directory on macOS (`~/Library/Application Support/com.hydaz.Iasis`) and Linux (`/var/lib/iasis`), and on Windows an access list of the agent's account and Administrators. Anyone holding the identity can pair with every device that lists its certificate.
 
 #### Button restores
 
