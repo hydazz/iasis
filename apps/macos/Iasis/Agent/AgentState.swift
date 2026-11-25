@@ -13,6 +13,8 @@ nonisolated struct AgentState: Codable, Equatable {
     var images: ImageStore
     var sharing: Sharing
     var supervision: Supervision
+    /// What the host lacks that some of Iasis needs.
+    var missing: [Prerequisite]
 
     /// How many ports wait for the image being downloaded.
     var waitingForDownload: Int {
@@ -111,6 +113,9 @@ nonisolated struct AgentState: Codable, Equatable {
         var awaiting: String?
         var stage: Stage?
         var result: Ending?
+        /// The `id` of the missing prerequisite the target's restore waits
+        /// for.
+        var needs: String?
 
         var id: Int {
             number
@@ -163,6 +168,17 @@ nonisolated struct AgentState: Codable, Equatable {
             var active: Bool
             var problem: String?
         }
+    }
+
+    /// Software the host lacks, and what goes without it.
+    struct Prerequisite: Codable, Equatable, Identifiable {
+        var id: String
+        /// What to install.
+        var name: String
+        /// Where to get it.
+        var url: String
+        /// What can't be done without it, as a sentence.
+        var reason: String
     }
 
     /// The identity the host pairs with as supervisor, so supervised devices
