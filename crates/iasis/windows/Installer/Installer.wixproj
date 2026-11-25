@@ -4,6 +4,8 @@
     <InstallerPlatform>x64</InstallerPlatform>
     <AcceptEula>wix7</AcceptEula>
     <DefineConstants>Version=$(Version);ToolsDir=$(ToolsDir)</DefineConstants>
+    <!-- ICE61 flags same-version upgrades. -->
+    <SuppressIces>ICE61</SuppressIces>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="WixToolset.Util.wixext" />

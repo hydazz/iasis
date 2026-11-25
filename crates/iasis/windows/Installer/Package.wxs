@@ -5,7 +5,7 @@
       Version="$(var.Version)"
       UpgradeCode="5e1c6d2b-6b57-4c0a-9c4e-3a0e7c9b2f41"
       Scope="perMachine">
-    <MajorUpgrade DowngradeErrorMessage="A newer version of Iasis is already installed." />
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of Iasis is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
