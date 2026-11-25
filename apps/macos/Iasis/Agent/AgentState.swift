@@ -280,6 +280,12 @@ nonisolated struct AgentState: Codable, Equatable {
         /// The archive is in the store.
         var ready: Bool
         var error: String?
+        /// The archive's file, once it is in the store.
+        var path: String?
+        /// Fetched from Apple's catalog, as opposed to added from a file.
+        var fetched: Bool
+        /// A restore is reading it, so the agent will not remove it.
+        var inUse: Bool
 
         var title: String {
             os.isEmpty ? version : "\(os) \(version)"

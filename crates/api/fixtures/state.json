@@ -522,7 +522,10 @@
           "MacBook Air (M1, 2020)"
         ],
         "ready": true,
-        "error": null
+        "error": null,
+        "path": "/var/cache/iasis/images/26B131-UniversalMac_27.2.1_26B131_Restore.ipsw",
+        "fetched": true,
+        "in_use": true
       },
       {
         "id": "iPad_Fall_2022_26.2_24C101_Restore.ipsw",
@@ -534,7 +537,10 @@
           "iPad (10th generation)"
         ],
         "ready": false,
-        "error": "the download stopped"
+        "error": "the download stopped",
+        "path": null,
+        "fetched": true,
+        "in_use": false
       }
     ],
     "fetch": {

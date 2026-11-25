@@ -250,6 +250,12 @@ fn state() -> State {
                     models: vec!["MacBook Air (M1, 2020)".into()],
                     ready: true,
                     error: None,
+                    path: Some(
+                        "/var/cache/iasis/images/26B131-UniversalMac_27.2.1_26B131_Restore.ipsw"
+                            .into(),
+                    ),
+                    fetched: true,
+                    in_use: true,
                 },
                 Image {
                     id: "iPad_Fall_2022_26.2_24C101_Restore.ipsw".into(),
@@ -260,6 +266,9 @@ fn state() -> State {
                     models: vec!["iPad (10th generation)".into()],
                     ready: false,
                     error: Some("the download stopped".into()),
+                    path: None,
+                    fetched: true,
+                    in_use: false,
                 },
             ],
             fetch: Some(Fetch {
