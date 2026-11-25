@@ -33,6 +33,7 @@ from build123d import (
     Pos,
     Rectangle,
     RectangleRounded,
+    Rot,
     Sketch,
     SlotOverall,
     Text,
@@ -53,8 +54,8 @@ from .side import assemble as side_board
 
 # Fit
 CLEARANCE = 0.3  # board edge to inner wall
+PORT_FACE = 1.8  # board edge to the front and rear faces, placed by the plug shoulders
 PORT_FIT = 0.30  # each side of the metal shell
-PORT_ERROR = 0.15  # additional axial print and connector-placement allowance
 SHOULDER_GAP = 0.05  # minimum fully seated plug shoulder to exterior wall
 HEADROOM = 1.2  # tallest model or envelope to the cover's inner top
 MIN_GAP = 0.3  # smallest gap between the case and a part
@@ -71,10 +72,12 @@ FOOT_D, FOOT_H = 8.0, 3.0  # adhesive bumper envelope
 
 # Board support
 HOLE_D = 3.2  # the board's M3 drill, which identifies the case holes
-PCB_CAPTURE = 1.80  # 1.6 mm finished PCB plus one 0.2 mm layer across the printed seats
-LOCATOR_D, LOCATOR_INSERT = 3.1, 1.6
+PCB_T = 1.6  # finished board, resting on the tray; Rev A measures 1.61 mm
+PCB_FLOAT = 0.2  # one layer up to the cover's posts, so a thick board never holds the seam open
+# The pegs align the board and cover without gripping either; the screws clamp the case.
+LOCATOR_D, LOCATOR_INSERT = 2.8, 1.6
 LOCATOR_TAPER = 0.4
-LOCATOR_CLEARANCE = 0.20  # total socket diameter allowance
+LOCATOR_CLEARANCE = 0.4  # total socket diameter allowance; printed sockets come out smaller
 LOCATOR_END_GAP = 1.2  # blind socket extends beyond the seated peg tip
 LOCATOR_RELIEF = 0.4  # the plain socket locates the shell without bearing on the board
 PILLAR_D = 6.6  # inside the mounting holes' 7 mm courtyard
@@ -90,11 +93,6 @@ PORTS = {  # reference: (kind, label)
     "J1001": ("usb-c", "POWER"),
 }
 
-# Minimum fully mated shoulder-to-mouth distances, not generic receptacle depths.
-# Molex SD-105450-001: USB-IF exposed shell 6.51 min - mouth depth (4.70 + 0.20).
-# GCT USB4105 drawing: 1.85 min in the plug/receptacle mating view.
-MATED_SHOULDER = {ref: 1.85 if ref == "J1001" else 6.51 - 4.90 for ref in PORTS}
-
 # The CM5 build adds the side board's rear edge (side.py prefixes its references): the
 # accessory port is the Molex receptacle, the service port the GCT, and nRPIBOOT is a
 # side-actuated button behind a pinhole.
@@ -104,21 +102,31 @@ SIDE_PORTS = {
     "S:J601": ("rj45", "ETHERNET"),
     "S:SW501": ("pin", "RPIBOOT"),
 }
-MATED_SHOULDER |= {"S:J401": 6.51 - 4.90, "S:J501": 1.85}
 PIN_D = 1.6
 
-# Side-emitting LEDs at the board edge shine through windows no larger than their
-# emitting face. A captive round cap operates the target-control switch.
+# Fully seated plug shoulder to receptacle mouth, gauged with paper on a printed case: an
+# Apple 240W plug passed six 80 gsm sheets (0.60 mm) at the 1.32 mm GCT USB4105 recess, and
+# other cables seven at the 1.08 mm Molex 105450 recesses. Both use the Apple figure.
+GCT = ("J1001", "S:J501")
+MATED_SHOULDER = {
+    ref: 1.92 if ref in GCT else 1.68
+    for ref, (kind, _) in (PORTS | SIDE_PORTS).items()
+    if kind == "usb-c"
+}
+
+# Side-emitting LEDs shine through the plain front wall. A captive round cap operates the
+# target-control switch.
 LIGHTS = ("D1170", "D1171", "D1172", "D1173", "D1174", "D1175")  # status, targets
-WINDOW = (3.0, 1.6)
+LIGHT_PACKAGE = (4.1, 1.7, 2.1)  # OPSCO SK6812SIDE-A-012 B/2, maximum
 BUTTON = "SW1171"
 BUTTON_D, BUTTON_FIT = 10.0, 0.10  # radial fit in the cover
 BUTTON_BORE_R = BUTTON_D / 2 + BUTTON_FIT
 BUTTON_RING_W = 0.7  # one continuous line on the bed-facing layer
 BUTTON_GUIDE_D = 14.0
-BUTTON_FLANGE_D = 13.0
-BUTTON_FLANGE_H = 1.2
-BUTTON_ROOF_GAP, BUTTON_PROUD = 0.1, 0.2
+BUTTON_FLANGE_D, BUTTON_FLANGE_H = 12.0, 1.2  # 45 degree top, so it prints either way up
+# The cap rises this far off the switch before its flange meets the guide: more than the
+# board's float, so neither the board nor a pressed roof holds the switch down.
+BUTTON_LIFT, BUTTON_PROUD = 0.5, 0.2
 BUTTON_ACTUATOR_D = 4.0  # switch region allowed to move under the cap
 BUTTON_TRAVEL = 0.6  # case clearance envelope, not the switch's permitted stroke
 
@@ -161,7 +169,7 @@ COVERS = {"passive": None, "display": OLED}
 SLOT_W = 2.6
 
 # Marks
-TEXT_DEPTH = 0.4  # two 0.20 mm layers, flush with the top
+TEXT_DEPTH = 0.2  # one 0.20 mm layer, so the second colour only ever crosses the face layer
 WORDMARK = "iasis"
 WORDMARK_SIZE = 8.0
 
@@ -175,7 +183,7 @@ class Opening:
     the part's face toward that wall, y_wall the wall's outer face."""
 
     ref: str
-    kind: str  # usb-c, rj45, pin or light
+    kind: str  # usb-c, rj45 or pin
     label: str | None
     x: float
     z: float
@@ -201,8 +209,6 @@ class Opening:
                      z_dir=(0, -self.inward, 0))  # fmt: skip
 
     def profile(self) -> Sketch:
-        if self.kind == "light":
-            return SlotOverall(self.width, self.height)
         return RectangleRounded(self.width, self.height, self.radius)
 
 
@@ -215,7 +221,6 @@ class Layout:
     cavity: Face  # cover inner outline, z = 0
     length: float  # outer
     width: float
-    port_wall: float
     z_bottom: float  # tray underside
     corner_r: float  # outer vertical corners: the board's plus clearance and wall
     holes: list[Vector]
@@ -242,9 +247,7 @@ class Layout:
 
     @cached_property
     def openings(self) -> list[Opening]:
-        out = [_port(self, ref, kind, label) for ref, (kind, label) in self.ports.items()]
-        out += [_light(self, ref) for ref in LIGHTS]
-        return out
+        return [_port(self, ref, kind, label) for ref, (kind, label) in self.ports.items()]
 
     @cached_property
     def display_x(self) -> float:
@@ -267,12 +270,18 @@ class Layout:
 
     @property
     def support_z(self) -> float:
-        """Tray bearing face, referenced to the component side of the finished PCB."""
-        return self.seat - PCB_CAPTURE
+        """Tray bearing face. The board rests on it with its parts where the STEP has them,
+        which is where the openings and button are centred."""
+        return self.seat - PCB_T
+
+    @property
+    def post_face(self) -> float:
+        """The cover's screw posts."""
+        return self.seat + PCB_FLOAT
 
     @property
     def locator_face(self) -> float:
-        return self.seat + LOCATOR_RELIEF
+        return self.post_face + LOCATOR_RELIEF
 
     @cached_property
     def top_inside(self) -> float:
@@ -321,38 +330,24 @@ def layout(
     size = board.size
     radii = [e.radius for e in board.outline().edges() if e.geom_type == GeomType.CIRCLE]
     corner = min(radii, default=0.0)
-    # Both the nominal board gap and its full sideways movement consume recess.
-    # Round down to a printable wall thickness, retaining the seating/error budget.
-    wall_limit = min(
-        MATED_SHOULDER[ref]
-        - SHOULDER_GAP
-        + abs(_mouth_y(board, ref))
-        - size.Y / 2
-        - 2 * CLEARANCE
-        - PORT_ERROR
-        for ref, (kind, _) in ports.items()
-        if kind == "usb-c"
-    )
-    port_wall = min(WALL, math.floor((wall_limit + 1e-6) * 10) / 10)
-    if port_wall < 0.8:
-        raise ValueError(f"USB seating budget leaves only {port_wall:.1f} mm wall")
     return Layout(
         board=board,
-        seat=board.body.bounding_box().max.Z,
+        # KiCad seats the parts on the finished board's top face; its body is the bare core.
+        seat=min(board.box(ref).min.Z for ref in (*LIGHTS, BUTTON)),
         # Arc joins add zero-length arcs at the outline's tangent points, which mesh badly.
         cavity=Face(board.outline().outer_wire().offset_2d(CLEARANCE, kind=Kind.INTERSECTION)),
         length=size.X + 2 * (CLEARANCE + WALL),
-        width=size.Y + 2 * (CLEARANCE + port_wall),
-        port_wall=port_wall,
+        width=size.Y + 2 * PORT_FACE,
         z_bottom=-(FLOOR_DEPTH + FLOOR),
-        corner_r=corner + CLEARANCE + min(WALL, port_wall),
+        corner_r=corner + CLEARANCE + min(WALL, PORT_FACE - CLEARANCE),
         holes=board.holes(HOLE_D),
         parts_top=max(
             board.box(ref, exact=False).max.Z
             for ref in board.parts
             if ports.get(ref, (None, None))[0] != "rj45"
         ),
-        split=board.body.bounding_box().max.Z + 1.6,
+        # The tray holds the LEDs whole, so only the tray passes them during assembly.
+        split=max(board.box(ref).max.Z for ref in LIGHTS) + 0.4,
         ports=dict(ports),
     )
 
@@ -405,12 +400,6 @@ def _port(lay: Layout, ref: str, kind: str, label: str) -> Opening:
     )
 
 
-def _light(lay: Layout, ref: str) -> Opening:
-    bb, y_face, y_wall = _facing(lay, ref)
-    w, h = min(WINDOW[0], bb.size.X), min(WINDOW[1], bb.size.Z)
-    return Opening(ref, "light", None, bb.center().X, bb.center().Z, w, h, h / 2, y_face, y_wall)
-
-
 def _outline(lay: Layout) -> Sketch:
     return RectangleRounded(lay.length, lay.width, lay.corner_r)
 
@@ -446,15 +435,29 @@ def tray(lay: Layout) -> Part:
         ]
     )
     taper_z = lay.locator_face + LOCATOR_INSERT - LOCATOR_TAPER
-    for h in lay.holes:
-        if lay.fastener_at(h) is not None:
-            continue
-        body += Pos(h.X, h.Y, lay.support_z - 0.1) * Cylinder(
+    pegs = [h for h in lay.holes if lay.fastener_at(h) is None]
+    for h in pegs:
+        peg = Pos(h.X, h.Y, lay.support_z - 0.1) * Cylinder(
             LOCATOR_D / 2, taper_z - lay.support_z + 0.1, align=BASE
         )
-        body += Pos(h.X, h.Y, taper_z) * Cone(
+        peg += Pos(h.X, h.Y, taper_z) * Cone(
             LOCATOR_D / 2, LOCATOR_D / 2 - LOCATOR_TAPER, LOCATOR_TAPER, align=BASE
         )
+        if h != pegs[0]:
+            # Only the first peg fixes both axes. Flats on the others release hole-spacing error.
+            delta = h - pegs[0]
+            along = math.degrees(math.atan2(delta.Y, delta.X))
+            peg &= (
+                Pos(h.X, h.Y, lay.support_z - 0.1)
+                * Rot(Z=along)
+                * Box(
+                    LOCATOR_D - 0.4,
+                    LOCATOR_D + 1,
+                    taper_z - lay.support_z + LOCATOR_TAPER + 1,
+                    align=BASE,
+                )
+            )
+        body += peg
     body -= Compound([_wall_cut(o) for o in lay.openings])
     for f in lay.fasteners:
         # Reinforce the recessed head below the PCB support face.
@@ -488,12 +491,12 @@ def cover(lay: Layout, name: str, display: Display | None) -> Cover:
     cuts: list[Part] = []
     # A hole nearer the edge than the pillar's radius gets a pillar cut flush with the board edge,
     # clear of the tray wall that rises beyond it.
-    board_edge = Face(lay.cavity.outer_wire().offset_2d(-CLEARANCE, kind=Kind.INTERSECTION))
+    board_edge = Face(lay.board.outline().outer_wire())
     edge = extrude(Pos(0, 0, lay.seat) * board_edge, amount=top_in - lay.seat + 1, dir=Z_UP)
     outside = extrude(Pos(0, 0, lay.seat) * _outline(lay), amount=top_in - lay.seat + 1)
     for i, h in enumerate(lay.holes):
         if (f := lay.fastener_at(h)) is not None:
-            bottom = lay.seat
+            bottom = lay.post_face
             stem_top = 4.2
             shoulder = stem_top + (retention.BOSS_D - PILLAR_D) / 2
             pillar = (
@@ -521,7 +524,8 @@ def cover(lay: Layout, name: str, display: Display | None) -> Cover:
         intrusions[f"pillar {i + 1}"] = cast(Part, pillar)
     switch = lay.board.box(BUTTON)
     sw = switch.center()
-    guide_bottom = switch.max.Z + BUTTON_FLANGE_H + BUTTON_ROOF_GAP
+    # The flange's 45 degree top meets the bore edge BUTTON_FIT below its full height.
+    guide_bottom = switch.max.Z + BUTTON_FLANGE_H - BUTTON_FIT + BUTTON_LIFT
     button_bore = Pos(sw.X, sw.Y, guide_bottom - 0.1) * Cylinder(
         BUTTON_BORE_R, top_out - guide_bottom + 1, align=BASE
     )
@@ -657,9 +661,10 @@ def _button(lay: Layout) -> Part:
     cap = Pos(sw.X, sw.Y, flange_top) * Cylinder(
         BUTTON_D / 2, lay.top_inside + TOP + BUTTON_PROUD - flange_top, align=BASE
     )
-    cap += Pos(sw.X, sw.Y, flange_bottom) * Cylinder(
+    flange = Pos(sw.X, sw.Y, flange_bottom) * Cylinder(
         BUTTON_FLANGE_D / 2, BUTTON_FLANGE_H, align=BASE
     )
+    cap += chamfer(flange.edges().group_by(Axis.Z)[-1], (BUTTON_FLANGE_D - BUTTON_D) / 2)
     cap.label = "button"
     return cast(Part, cap)
 
