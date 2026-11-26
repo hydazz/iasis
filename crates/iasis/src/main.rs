@@ -2,37 +2,29 @@ use std::{
     fs::File,
     io::{self, IsTerminal, Write},
     path::{Path, PathBuf},
-    sync::Arc,
     thread,
     time::{Duration, Instant},
 };
 
-use iasis::{
-    batch, inventory::Inventory, parse_port, parse_serial, progress, update, watch::Watch,
-};
-
 use anyhow::{Context, Result, bail, ensure};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use iasis::{
-    Hub, UsbIds,
     agent::Client,
-    dfu::{self, Attempt, Outcome, Signal},
     home::Home,
     identity::{self, AppleMode},
-    topology::{self, Snapshot},
-    view,
+    parse_port, parse_serial, progress, update, view,
 };
 use iasis_api::{
-    HubView, Job, Operation, PortPower, PortView, PowerSource, Reply, Request, Selection,
-    SignalProgress, State, Supply, Target, Usb, UsbLink,
+    AppleUsb, Companion, Diagnostics, HubView, Job, Operation, PortPower, PortView, PowerSource,
+    Reply, Request, Selection, SignalProgress, State, Supply, Target, Usb, UsbDevice, UsbLink,
 };
-use iasis_protocol::{CommandResult, DebugActions, Link, Port, PortAction, RestorePhase, Status};
+use iasis_protocol::{DebugActions, Link, Port, PortAction, RestorePhase, Status};
 
 #[derive(Parser)]
 #[command(
     version,
-    about = "Manage Iasis ports and controller firmware. Without a command, show every hub's ports.",
-    long_about = "Manage Iasis ports and controller firmware. Without a command, show every hub's ports.\n\nWith iasisd running, every command except status and ports goes through it; otherwise the command opens the hub itself."
+    about = "Manage Iasis hubs through the iasisd agent. Without a command, show every hub's ports.",
+    long_about = "Manage Iasis hubs through the iasisd agent. Without a command, show every hub's ports.\n\nA command for one hub needs --hub or --serial only while the agent sees more than one."
 )]
 struct Cli {
     /// Hub serial, sixteen hexadecimal digits
@@ -41,12 +33,6 @@ struct Cli {
     /// Select a hub by its display name (case-insensitive)
     #[arg(long, global = true, conflicts_with = "serial")]
     hub: Option<String>,
-    /// USB vendor ID in hexadecimal
-    #[arg(long, global = true, default_value = "1209", value_parser = parse_id)]
-    vid: u16,
-    /// USB product ID in hexadecimal
-    #[arg(long, global = true, default_value = "0001", value_parser = parse_id)]
-    pid: u16,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -55,12 +41,10 @@ struct Cli {
 enum Command {
     /// Show every hub's ports and keep the view current
     Watch,
-    /// Validate a local IPSW without opening USB devices
-    Ipsw { path: std::path::PathBuf },
     /// Erase the devices on the selected ports
-    Restore(batch::Options),
+    Restore(Restore),
     /// Repair the devices on the selected ports from a restore image and keep their data
-    Revive(batch::Revive),
+    Revive(Revive),
     /// List and manage restore images
     Images {
         #[command(subcommand)]
@@ -79,9 +63,9 @@ enum Command {
         #[command(subcommand)]
         command: Option<SupervisionCommand>,
     },
-    /// List hubs, IasisOS versions and USB paths
+    /// List hubs and their IasisOS versions
     List,
-    /// Read ADC counts, faults and bus observations
+    /// Read ADC counts, faults, PD counters and bus observations
     Status {
         #[arg(long)]
         json: bool,
@@ -116,13 +100,15 @@ enum Command {
     },
     /// Send an Apple DFU VDM; does not start a restore
     Dfu {
-        #[arg(value_parser = parse_port)]
-        port: Port,
+        /// Physical ports, comma-separated
+        #[arg(value_delimiter = ',', value_parser = parse_port, required = true)]
+        ports: Vec<Port>,
     },
     /// Send an Apple reboot VDM
     Reboot {
-        #[arg(value_parser = parse_port)]
-        port: Port,
+        /// Physical ports, comma-separated
+        #[arg(value_delimiter = ',', value_parser = parse_port, required = true)]
+        ports: Vec<Port>,
     },
     /// Carry the target's Apple Debug USB on its USB 2 pair, or take it off
     DebugUsb {
@@ -131,6 +117,31 @@ enum Command {
         #[arg(value_enum)]
         state: Power,
     },
+}
+
+#[derive(Args)]
+struct Restore {
+    /// Physical ports to erase, comma-separated
+    #[arg(long, value_delimiter = ',', value_parser = parse_port, required = true)]
+    ports: Vec<Port>,
+    /// Authorize erasing the selected targets
+    #[arg(long, required = true)]
+    erase: bool,
+    /// Fetch the newest release Apple signs for each target, even when the
+    /// image store has an older one that fits
+    #[arg(long)]
+    latest: bool,
+}
+
+#[derive(Args)]
+struct Revive {
+    /// Physical ports to revive, comma-separated
+    #[arg(long, value_delimiter = ',', value_parser = parse_port, required = true)]
+    ports: Vec<Port>,
+    /// Fetch the newest release Apple signs for each target, even when the
+    /// image store has an older one that fits
+    #[arg(long)]
+    latest: bool,
 }
 
 #[derive(Subcommand)]
@@ -176,218 +187,186 @@ enum Power {
     Off,
 }
 
-fn parse_id(value: &str) -> Result<u16, String> {
-    u16::from_str_radix(value.trim_start_matches("0x"), 16).map_err(|error| error.to_string())
-}
-
 fn main() -> Result<()> {
     iasis::native::run_if_worker();
     iasis::logging::terminal();
     let cli = Cli::parse();
-    let ids = UsbIds {
-        vendor: cli.vid,
-        product: cli.pid,
+    let mut agent = Client::connect(&Home::locate()?)?;
+    let state = agent.state()?;
+    let selected = match (cli.serial, cli.hub.as_deref()) {
+        (Some(serial), _) => Some(format!("{serial:016x}")),
+        (None, Some(name)) => Some(named(&state, name)?),
+        (None, None) => None,
     };
-    let command = cli.command;
-    if let Some(Command::Ipsw { path }) = &command {
-        let prepared = progress::check_ipsw(path)?;
-        println!("{}", serde_json::to_string_pretty(&prepared)?);
-        return Ok(());
-    }
-    // Diagnostics read the hub's USB device themselves, beside any agent.
-    if !matches!(
-        command,
-        Some(Command::Status { .. } | Command::Ports { .. })
-    ) && let Some(agent) = Client::connect(&Home::locate()?)?
-    {
-        return through_agent(agent, cli.serial, cli.hub.as_deref(), command);
-    }
-    let serial = match cli.hub {
-        Some(name) => Some(resolve_name(ids, &name)?),
-        None => cli.serial,
-    };
-    let command = match command {
-        None => return overview(ids, serial, false),
-        Some(Command::Watch) => return overview(ids, serial, true),
-        Some(Command::List) => return list(ids, serial),
-        Some(Command::Sharing { .. }) => bail!("USB Internet Sharing requires the running agent"),
-        Some(Command::Images { .. }) => bail!("the agent keeps the restore images; start iasisd"),
-        Some(Command::Supervision { .. }) => {
-            bail!("the agent keeps the supervision identity; start iasisd")
-        }
-        Some(command) => command,
-    };
-    if !matches!(command, Command::Status { .. } | Command::Ports { .. }) && serial.is_none() {
-        bail!(SELECT);
-    }
-    if let Command::Update { file } = &command {
-        let image = firmware(file.as_deref())?;
-        let inventory = Inventory::follow(Arc::default())?;
-        let _writing = progress::waiting("Writing IasisOS");
-        let [major, minor, patch] = update::write(serial.context(SELECT)?, &image, &inventory)?;
-        println!("IasisOS {major}.{minor}.{patch} is running.");
-        return Ok(());
-    }
-    let devices = iasis::discover(ids, serial)?;
-    let mut hubs = Vec::new();
-    for device in &devices {
-        let hub = match command {
-            Command::Status { .. } | Command::Ports { .. } => Hub::observe(device),
-            _ => Hub::open(device),
-        }
-        .with_context(|| {
-            format!(
-                "opening the hub on USB bus {} port {:?}{}",
-                device.bus_id(),
-                device.port_chain(),
-                if cfg!(target_os = "linux") {
-                    "; its USB device is open to root and the iasis-usb group"
-                } else if cfg!(windows) {
-                    "; on Windows one process at a time opens it, and the iasisd service does while it runs"
-                } else {
-                    ""
-                }
-            )
-        })?;
-        anyhow::ensure!(
-            serial.is_none_or(|serial| serial == hub.info().serial),
-            "hub serial changed"
-        );
-        hubs.push(hub);
-    }
-    if hubs.len() != 1 {
-        bail!(
-            "expected one Iasis hub, found {}; use --hub NAME or --serial SERIAL",
-            hubs.len()
-        );
-    }
-    let hub = &hubs[0];
-    match command {
-        Command::List
-        | Command::Ipsw { .. }
-        | Command::Watch
-        | Command::Images { .. }
-        | Command::Sharing { .. }
-        | Command::Supervision { .. }
-        | Command::Update { .. } => {
-            unreachable!()
-        }
-        Command::Restore(options) => batch::run(&devices[0], hub, options)?,
-        Command::Revive(options) => batch::revive(&devices[0], hub, options)?,
-        Command::Rename { name } => hub.rename(&name)?,
-        Command::Brightness { percent } => hub.brightness(percent)?,
-        Command::Status { json, watch } => loop {
-            let status = hub.status()?;
-            if json {
-                println!("{}", serde_json::to_string(&status)?);
-            } else {
-                print_status(&status);
+    let hub = || selected.clone().map_or_else(|| only(&state), Ok);
+    match cli.command {
+        None => overview(agent, selected.as_deref(), false),
+        Some(Command::Watch) => overview(agent, selected.as_deref(), true),
+        Some(Command::List) => {
+            if state.hubs.is_empty() {
+                println!("No Iasis hubs found.");
             }
-            io::stdout().flush()?;
-            if !watch {
-                break;
-            }
-            thread::sleep(Duration::from_secs(1));
-        },
-        Command::Ports { json, watch } => loop {
-            let status = hub.status()?;
-            let mut snapshot = topology::discover(hub.topology())?;
-            let mut identity_ports = 0;
-            for port in Port::ALL {
-                if !dfu::job_in_progress(&status.ports[port.index()]) {
-                    identity_ports |= 1 << port.index();
+            for view in &state.hubs {
+                match &view.notice {
+                    Some(notice) if view.ports.is_empty() => {
+                        println!("{}  {notice}", view.serial);
+                    }
+                    _ => println!("{}  IasisOS {}", hub_name(view), view.firmware),
                 }
             }
-            snapshot.query_port_identities(identity_ports);
-            let current = hub.status()?;
-            let reports = Port::ALL.map(|port| {
-                let slot = &snapshot.ports[port.index()];
-                let mut report = dfu::assess(hub.info().serial, port, &current, &snapshot, None);
-                if status.ports[port.index()].generation != report.generation {
-                    report.outcome = Some(Outcome::AttachmentChanged);
-                    report.signal = Signal::Settling;
-                    report.usb_mode = None;
-                    report.ecid = None;
-                }
-                PortReport { slot, dfu: report }
-            });
-            if json {
+            Ok(())
+        }
+        Some(Command::Restore(restore)) => submit(
+            &mut agent,
+            &state,
+            &hub()?,
+            Operation::Restore,
+            &restore.ports,
+            restore.latest,
+        ),
+        Some(Command::Revive(revive)) => submit(
+            &mut agent,
+            &state,
+            &hub()?,
+            Operation::Revive,
+            &revive.ports,
+            revive.latest,
+        ),
+        Some(Command::Images { command }) => images(&mut agent, command.as_ref()),
+        Some(Command::Sharing { command, json }) => sharing(&mut agent, command.as_ref(), json),
+        Some(Command::Supervision { command }) => supervision(&mut agent, command.as_ref()),
+        Some(Command::Dfu { ports }) => dfu(&mut agent, &state, &hub()?, &ports),
+        Some(Command::Reboot { ports }) => {
+            agent.request(&Request::Reboot {
+                hubs: vec![selection(&state, &hub()?, &ports)?],
+            })?;
+            for port in ports {
                 println!(
-                    "{}",
-                    serde_json::json!({"hub":snapshot.hub,"upstream_mbps":snapshot.upstream_mbps,"ports":reports})
+                    "Port {} reboot signalled; target restart is not yet confirmed.",
+                    port.number()
                 );
-            } else {
-                if let Some(speed) = snapshot.upstream_mbps {
-                    println!("upstream {speed} Mb/s");
-                }
-                for report in reports {
-                    let slot = report.slot;
-                    println!("port {}  {}", slot.port.number(), report.dfu.describe());
-                    if let Some(link) = current.ports[slot.port.index()].link {
-                        println!("  link {}", link_text(link));
-                    }
-                    println!("  SuperSpeed companion {:?}", slot.superspeed);
-                    for device in &slot.devices {
-                        println!(
-                            "  {:04x}:{:04x}  {:?}  {:?}  {:?}  {:?}",
-                            device.vendor_id,
-                            device.product_id,
-                            device.topology.port_chain,
-                            device.product,
-                            device.serial_number,
-                            device.apple
-                        );
-                    }
-                }
             }
-            io::stdout().flush()?;
-            if !watch {
-                break;
-            }
-            thread::sleep(Duration::from_secs(1));
-        },
-        Command::Power { port, state } => {
-            hub.command(
-                port,
-                match state {
-                    Power::On => PortAction::Enable,
-                    Power::Off => PortAction::Disable,
-                },
-            )?;
+            Ok(())
+        }
+        Some(Command::Power { port, state }) => {
+            agent.request(&Request::Power {
+                hub: hub()?,
+                port: port.number(),
+                on: matches!(state, Power::On),
+            })?;
             println!("{}", power_text(port, state));
+            Ok(())
         }
-        Command::Dfu { port } => {
-            request_dfu(hub, port)?;
-        }
-        Command::Reboot { port } => {
-            let result = hub.command(port, PortAction::Reboot)?;
-            println!(
-                "Port {} reboot signalling: {}; target restart is not yet confirmed.",
-                port.number(),
-                signal_result(result)
-            );
-        }
-        Command::DebugUsb { port, state } => {
-            let result = hub.command(
-                port,
-                match state {
-                    Power::On => PortAction::MapDebugUsb,
-                    Power::Off => PortAction::UnmapDebugUsb,
-                },
-            )?;
-            ensure!(
-                result == CommandResult::Complete,
-                "Port {} Debug USB: {}; the target did not confirm its pins.",
-                port.number(),
-                signal_result(result)
-            );
+        Some(Command::DebugUsb { port, state }) => {
+            agent.request(&Request::DebugUsb {
+                hub: hub()?,
+                port: port.number(),
+                on: matches!(state, Power::On),
+            })?;
             println!("{}", debug_usb_text(port, state));
+            Ok(())
+        }
+        Some(Command::Rename { name }) => agent.request(&Request::Rename { hub: hub()?, name }),
+        Some(Command::Brightness { percent }) => agent.request(&Request::Brightness {
+            hub: hub()?,
+            percent,
+        }),
+        Some(Command::Update { file }) => {
+            let hub = hub()?;
+            let session = state
+                .hubs
+                .iter()
+                .find(|view| view.serial == hub)
+                .and_then(|view| view.session);
+            let writing = progress::waiting("Writing IasisOS");
+            match file {
+                Some(file) => {
+                    // The agent cannot read the caller's files; it is sent the image.
+                    firmware(Some(&file))?;
+                    let mut image = File::open(&file)?;
+                    let bytes = image.metadata()?.len();
+                    agent.upload(
+                        &Request::Update {
+                            hub: hub.clone(),
+                            bytes: Some(bytes),
+                        },
+                        &mut image,
+                    )?;
+                }
+                None => agent.request(&Request::Update {
+                    hub: hub.clone(),
+                    bytes: None,
+                })?,
+            }
+            writing.finish_and_clear();
+            running(&mut agent, &hub, session)
+        }
+        Some(Command::Status { json, watch }) => {
+            let hub = hub()?;
+            loop {
+                let status = diagnostics(&mut agent, &hub)?.status;
+                if json {
+                    println!("{}", serde_json::to_string(&status)?);
+                } else {
+                    print_status(&status);
+                }
+                io::stdout().flush()?;
+                if !watch {
+                    return Ok(());
+                }
+                thread::sleep(Duration::from_secs(1));
+            }
+        }
+        Some(Command::Ports { json, watch }) => {
+            let hub = hub()?;
+            loop {
+                let diagnostics = diagnostics(&mut agent, &hub)?;
+                if json {
+                    let mut ports = serde_json::to_value(&diagnostics)?;
+                    if let Some(fields) = ports.as_object_mut() {
+                        fields.remove("status");
+                    }
+                    println!("{ports}");
+                } else {
+                    print_ports(&diagnostics);
+                }
+                io::stdout().flush()?;
+                if !watch {
+                    return Ok(());
+                }
+                thread::sleep(Duration::from_secs(1));
+            }
         }
     }
-    Ok(())
 }
 
-const SELECT: &str = "select a hub with --hub NAME or --serial SERIAL; see `iasis list`";
+/// The one hub the agent sees, which a command for a hub then needs no
+/// name for.
+fn only(state: &State) -> Result<String> {
+    match state.hubs.as_slice() {
+        [view] => Ok(view.serial.clone()),
+        [] => bail!("the agent sees no Iasis hub"),
+        views => {
+            let mut text =
+                "several hubs are attached; select one with --hub NAME or --serial SERIAL:"
+                    .to_owned();
+            for view in views {
+                text.push_str(&format!("\n  {}", hub_name(view)));
+            }
+            bail!(text)
+        }
+    }
+}
+
+/// The hub's serial and name.
+fn hub_name(view: &HubView) -> String {
+    let name = if view.name.is_empty() {
+        "(unnamed)"
+    } else {
+        view.name.as_str()
+    };
+    format!("{}  {name}", view.serial)
+}
 
 fn power_text(port: Port, state: Power) -> String {
     format!(
@@ -423,120 +402,6 @@ fn firmware(file: Option<&Path>) -> Result<update::Image> {
     }
 }
 
-/// Run a command through the running agent, which holds every hub.
-fn through_agent(
-    mut agent: Client,
-    serial: Option<u64>,
-    name: Option<&str>,
-    command: Option<Command>,
-) -> Result<()> {
-    let state = agent.state()?;
-    let selected = match (serial, name) {
-        (Some(serial), _) => Some(format!("{serial:016x}")),
-        (None, Some(name)) => Some(named(&state, name)?),
-        (None, None) => None,
-    };
-    let hub = || selected.clone().context(SELECT);
-    match command {
-        None => overview_through(agent, selected.as_deref(), false),
-        Some(Command::Watch) => overview_through(agent, selected.as_deref(), true),
-        Some(Command::List) => {
-            if state.hubs.is_empty() {
-                println!("No Iasis hubs found.");
-            }
-            for view in &state.hubs {
-                let name = if view.name.is_empty() {
-                    "(unnamed)"
-                } else {
-                    view.name.as_str()
-                };
-                match &view.notice {
-                    Some(notice) if view.ports.is_empty() => {
-                        println!("{}  {notice}", view.serial);
-                    }
-                    _ => println!("{}  {name}  IasisOS {}", view.serial, view.firmware),
-                }
-            }
-            Ok(())
-        }
-        Some(Command::Restore(options)) => restore_through(&mut agent, &state, &hub()?, &options),
-        Some(Command::Revive(options)) => submit_through(
-            &mut agent,
-            &state,
-            &hub()?,
-            Operation::Revive,
-            &options.source,
-            &options.ports,
-        ),
-        Some(Command::Images { command }) => images(&mut agent, command.as_ref()),
-        Some(Command::Sharing { command, json }) => sharing(&mut agent, command.as_ref(), json),
-        Some(Command::Supervision { command }) => supervision(&mut agent, command.as_ref()),
-        Some(Command::Dfu { port }) => dfu_through(&mut agent, &state, &hub()?, port),
-        Some(Command::Reboot { port }) => {
-            agent.request(&Request::Reboot {
-                hub: hub()?,
-                port: port.number(),
-            })?;
-            println!(
-                "Port {} reboot signalled; target restart is not yet confirmed.",
-                port.number()
-            );
-            Ok(())
-        }
-        Some(Command::Power { port, state }) => {
-            agent.request(&Request::Power {
-                hub: hub()?,
-                port: port.number(),
-                on: matches!(state, Power::On),
-            })?;
-            println!("{}", power_text(port, state));
-            Ok(())
-        }
-        Some(Command::DebugUsb { port, state }) => {
-            agent.request(&Request::DebugUsb {
-                hub: hub()?,
-                port: port.number(),
-                on: matches!(state, Power::On),
-            })?;
-            println!("{}", debug_usb_text(port, state));
-            Ok(())
-        }
-        Some(Command::Rename { name }) => agent.request(&Request::Rename { hub: hub()?, name }),
-        Some(Command::Brightness { percent }) => agent.request(&Request::Brightness {
-            hub: hub()?,
-            percent,
-        }),
-        Some(Command::Update { file }) => {
-            let hub = hub()?;
-            match file {
-                Some(file) => {
-                    // The agent cannot read the caller's files; it is sent the image.
-                    firmware(Some(&file))?;
-                    let mut image = File::open(&file)?;
-                    let bytes = image.metadata()?.len();
-                    let _writing = progress::waiting("Writing IasisOS");
-                    agent.upload(
-                        &Request::Update {
-                            hub,
-                            bytes: Some(bytes),
-                        },
-                        &mut image,
-                    )?;
-                }
-                None => {
-                    let _writing = progress::waiting("Writing IasisOS");
-                    agent.request(&Request::Update { hub, bytes: None })?;
-                }
-            }
-            println!("IasisOS written.");
-            Ok(())
-        }
-        Some(Command::Status { .. } | Command::Ports { .. } | Command::Ipsw { .. }) => {
-            unreachable!()
-        }
-    }
-}
-
 /// The serial of the one hub the agent shows under this name.
 fn named(state: &State, name: &str) -> Result<String> {
     ensure!(!name.is_empty(), "select an unnamed hub by serial");
@@ -552,135 +417,85 @@ fn named(state: &State, name: &str) -> Result<String> {
     }
 }
 
-#[derive(serde::Serialize)]
-struct PortReport<'a> {
-    #[serde(flatten)]
-    slot: &'a topology::PortDevices,
-    dfu: dfu::Assessment,
+fn diagnostics(agent: &mut Client, hub: &str) -> Result<Diagnostics> {
+    match agent.ask(&Request::Diagnostics { hub: hub.into() })? {
+        Reply::Diagnostics(diagnostics) => Ok(*diagnostics),
+        Reply::Error(error) => bail!(error),
+        _ => bail!("the agent sent no diagnostics"),
+    }
 }
 
-fn inspect_dfu(
-    hub: &Hub,
-    port: Port,
-    attempt: Option<&Attempt>,
-    identify: bool,
-) -> Result<Option<(Snapshot, dfu::Assessment)>> {
-    let before = hub.status()?;
-    let mut snapshot = topology::discover(hub.topology())?;
-    let slot = &snapshot.ports[port.index()];
-    let busy = dfu::job_in_progress(&before.ports[port.index()]);
-    if !busy
-        && (identify
-            || slot
-                .devices
-                .iter()
-                .any(|d| d.apple.as_ref().is_some_and(|a| a.mode == AppleMode::Kis)))
+/// Each port's USB devices, as the host enumerates them, and what the agent
+/// makes of the port.
+fn print_ports(diagnostics: &Diagnostics) {
+    if let Some(speed) = diagnostics.upstream_mbps {
+        println!("upstream {speed} Mb/s");
+    }
+    for (port, status) in diagnostics.ports.iter().zip(&diagnostics.status.ports) {
+        println!("port {}  {}", port.number, port.assessment);
+        if let Some(link) = status.link {
+            println!("  link {}", link_text(link));
+        }
+        let superspeed = match &port.superspeed {
+            Companion::Mapped { topology } => path_text(&topology.bus, &topology.port_chain),
+            Companion::Unavailable => "unavailable".into(),
+            Companion::Ambiguous => "ambiguous".into(),
+        };
+        println!("  SuperSpeed companion {superspeed}");
+        for device in &port.devices {
+            println!("  {}", device_text(device));
+        }
+    }
+}
+
+/// A USB device's IDs, place, speed, names and what Iasis knows of it.
+fn device_text(device: &UsbDevice) -> String {
+    let mut text = format!(
+        "{:04x}:{:04x}  {}  {:?}",
+        device.vendor_id,
+        device.product_id,
+        path_text(&device.topology.bus, &device.topology.port_chain),
+        device.speed
+    );
+    for name in [&device.product, &device.serial_number]
+        .into_iter()
+        .flatten()
     {
-        snapshot.query_port_identity(port);
+        text.push_str(&format!("  {name:?}"));
     }
-    let after = hub.status()?;
-    let report = dfu::assess(hub.info().serial, port, &after, &snapshot, attempt);
-    if after.uptime_ms < before.uptime_ms {
-        bail!("Iasis restarted during USB enumeration.");
+    if let Some(AppleUsb { mode, model, ecid }) = &device.apple {
+        text.push_str(&format!("  {}", identity::mode_name(*mode)));
+        for detail in [model, ecid].into_iter().flatten() {
+            text.push_str(&format!(" {detail}"));
+        }
     }
-    if before.ports[port.index()].generation != report.generation {
-        return Ok(None);
-    }
-    Ok(Some((snapshot, report)))
+    text
 }
 
-fn request_dfu(hub: &Hub, port: Port) -> Result<()> {
-    let changes = Arc::<Watch>::default();
-    let _inventory = follow(&changes, hub)?;
-    let (snapshot, before) = inspect_dfu(hub, port, None, true)?
-        .context("The attachment changed before signalling. Inspect the current target.")?;
-    match before.signal {
-        Signal::Available => {}
-        Signal::AlreadyDfu => {
-            println!("Port {}  {}", port.number(), before.describe());
+/// A bus and port chain as `bus-1.2.3`.
+fn path_text(bus: &str, chain: &[u8]) -> String {
+    let chain: Vec<String> = chain.iter().map(u8::to_string).collect();
+    format!("{bus}-{}", chain.join("."))
+}
+
+/// Follow the agent until it attends the hub in a new session, and say
+/// which IasisOS it runs.
+fn running(agent: &mut Client, hub: &str, before: Option<u32>) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut reply = Some(agent.ask(&Request::Watch)?);
+    while let Some(Reply::State(state)) = reply {
+        if let Some(view) = state
+            .hubs
+            .iter()
+            .find(|view| view.serial == hub && !view.ports.is_empty() && view.session != before)
+        {
+            println!("IasisOS {} is running.", view.firmware);
             return Ok(());
         }
-        _ => bail!("Port {}  {}", port.number(), before.describe()),
+        reply = agent.receive_by(deadline)?;
     }
-    let result = hub.command_for_generation(port, before.generation, PortAction::Dfu)?;
-    println!(
-        "Port {} DFU signal {}.",
-        port.number(),
-        signal_result(result)
-    );
-    let attempt = Attempt::new(hub.info().serial, port, &before, &snapshot, result);
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let waiting = progress::waiting(format!("Waiting for USB DFU on port {}", port.number()));
-    loop {
-        let seen = changes.count();
-        let final_read = Instant::now() >= deadline;
-        let Some((_, report)) = inspect_dfu(hub, port, Some(&attempt), final_read)? else {
-            if final_read {
-                bail!(
-                    "Port {} is still reconnecting. Check its USB mode.",
-                    port.number()
-                );
-            }
-            changes.wait(seen, Some(deadline));
-            continue;
-        };
-        match report.outcome {
-            Some(Outcome::Dfu | Outcome::DfuAfterReattach) => {
-                waiting.finish_and_clear();
-                println!("Port {}  {}", port.number(), report.describe());
-                return Ok(());
-            }
-            _ if !final_read && result == CommandResult::Acknowledged && report.unclear() => {
-                changes.wait(seen, Some(deadline));
-            }
-            Some(Outcome::IdentityChanged | Outcome::TargetUnclear | Outcome::HubRestarted) => {
-                bail!("Port {}  {}", port.number(), report.describe())
-            }
-            _ if final_read
-                || matches!(
-                    report.signal,
-                    Signal::Fault | Signal::Disabled | Signal::Restoring
-                ) =>
-            {
-                bail!("Port {}  {}", port.number(), report.describe())
-            }
-            _ => {
-                changes.wait(seen, Some(deadline));
-            }
-        }
-    }
-}
-
-/// Advance `changes` whenever the host's USB devices change or the hub
-/// announces a new status, for as long as the inventory is held.
-fn follow(changes: &Arc<Watch>, hub: &Hub) -> Result<Arc<Inventory>> {
-    let inventory = Inventory::follow(changes.clone())?;
-    hear(changes, hub);
-    Ok(inventory)
-}
-
-/// Advance `changes` whenever the hub announces a new status, until it
-/// leaves. Another client may hold the announcements, and then only USB
-/// changes are seen.
-fn hear(changes: &Arc<Watch>, hub: &Hub) {
-    let Ok(mut events) = hub.events() else {
-        return;
-    };
-    let changes = changes.clone();
-    thread::spawn(move || {
-        while let Ok(announced) = events.next(Duration::from_secs(3600)) {
-            if announced.is_some() {
-                changes.changed();
-            }
-        }
-    });
-}
-
-fn signal_result(result: CommandResult) -> &'static str {
-    match result {
-        CommandResult::Acknowledged => "PD acknowledged",
-        _ => "attempted without acknowledgement; effect unknown",
-    }
+    println!("IasisOS written; the agent has not attended the hub since.");
+    Ok(())
 }
 
 fn link_text(link: Link) -> &'static str {
@@ -689,75 +504,6 @@ fn link_text(link: Link) -> &'static str {
         Link::Usb2 => "USB 2",
         Link::Usb3 => "USB 3",
     }
-}
-
-/// A hub that cannot be read is still listed, with the reason: it may run
-/// firmware for another protocol version and need an update.
-fn unreadable(device: &nusb::DeviceInfo, error: &iasis::Error) -> String {
-    let serial = device.serial_number().unwrap_or("unknown serial");
-    match error {
-        // Firmware older than protocol 11 answers only its own version.
-        iasis::Error::Transfer(nusb::transfer::TransferError::Stall) => format!(
-            "{serial}  does not answer this tool; update its firmware with the tool it was built with, or through BOOTSEL"
-        ),
-        _ => format!("{serial}  {error}"),
-    }
-}
-
-fn resolve_name(ids: UsbIds, name: &str) -> Result<u64> {
-    ensure!(!name.is_empty(), "select an unnamed hub by serial");
-    // Pin the name to its serial before opening an interface for any command.
-    let mut hits = Vec::new();
-    for device in iasis::discover(ids, None)? {
-        let hub = Hub::observe(&device)?;
-        if hub.current().is_err() {
-            continue;
-        }
-        if hub
-            .status()?
-            .settings
-            .name
-            .as_str()
-            .eq_ignore_ascii_case(name)
-        {
-            hits.push(hub.info().serial);
-        }
-    }
-    match hits.as_slice() {
-        [serial] => Ok(*serial),
-        [] => bail!("no connected hub named {name:?}; see `iasis list`"),
-        _ => bail!("multiple hubs named {name:?}; select one with --serial"),
-    }
-}
-
-fn list(ids: UsbIds, serial: Option<u64>) -> Result<()> {
-    let devices = iasis::discover(ids, serial)?;
-    if devices.is_empty() {
-        println!("No Iasis hubs found.");
-    }
-    for device in &devices {
-        match Hub::observe(device)
-            .and_then(|hub| hub.status().map(|status| (hub, status.settings.name)))
-        {
-            Ok((hub, name)) => {
-                let info = hub.info();
-                let [major, minor, patch] = info.firmware_version;
-                println!(
-                    "{:016x}  {}  IasisOS {major}.{minor}.{patch}  bus {} port {:?}",
-                    info.serial,
-                    if name.as_str().is_empty() {
-                        "(unnamed)"
-                    } else {
-                        name.as_str()
-                    },
-                    hub.topology().bus,
-                    hub.topology().port_chain
-                );
-            }
-            Err(error) => println!("{}", unreadable(device, &error)),
-        }
-    }
-    Ok(())
 }
 
 /// The hubs as a running agent shows them, with its images.
@@ -781,7 +527,10 @@ fn agent_text(state: &State) -> String {
             .flat_map(|hub| &hub.ports)
             .any(|port| port.needs.as_ref() == Some(&missing.id))
         {
-            text.push_str(&format!("{} Get it from {}\n", missing.reason, missing.url));
+            match &missing.url {
+                Some(url) => text.push_str(&format!("{} Get it from {url}\n", missing.reason)),
+                None => text.push_str(&format!("{}\n", missing.reason)),
+            }
         }
     }
     text
@@ -830,7 +579,7 @@ fn hub_text(hub: &HubView) -> String {
     let host = match (hub.host, hub.restores) {
         (true, true) => "host attached, restores ready",
         (true, false) => "host attached",
-        _ => "no host: start iasisd to see USB modes",
+        _ => "no host session",
     };
     let id = if hub.name.is_empty() {
         hub.serial.clone()
@@ -927,8 +676,10 @@ fn power_reading(power: PortPower) -> String {
         PowerSource::Pd => "PD",
         PowerSource::Usb => "USB",
     };
-    let mut current = String::new();
-    iasis_pd::write_current(&mut current, power.milliamps).expect("writing to a string");
+    let current = match power.milliamps {
+        ma @ 1..1000 => format!("{ma}mA"),
+        ma => format!("{}A", f64::from(ma) / 1000.0),
+    };
     let watts = f64::from(u32::from(power.millivolts) * u32::from(power.milliamps)) / 1_000_000.0;
     format!(
         "{kind} {}V {current} ({watts}W)",
@@ -954,7 +705,7 @@ fn show(text: &str, watch: bool) -> Result<()> {
 }
 
 /// Every hub's ports, or one hub's, as the agent sees them.
-fn overview_through(mut agent: Client, hub: Option<&str>, watch: bool) -> Result<()> {
+fn overview(mut agent: Client, hub: Option<&str>, watch: bool) -> Result<()> {
     let mut reply = agent.ask(&if watch {
         Request::Watch
     } else {
@@ -978,47 +729,10 @@ fn overview_through(mut agent: Client, hub: Option<&str>, watch: bool) -> Result
     }
 }
 
-/// Every hub's ports, read from the hubs. A target's USB mode is what
-/// the hub's host reports to it, so this agrees with the lights.
-fn overview(ids: UsbIds, serial: Option<u64>, watch: bool) -> Result<()> {
-    let changes = Arc::<Watch>::default();
-    let inventory = watch
-        .then(|| Inventory::follow(changes.clone()))
-        .transpose()?;
-    let mut heard = std::collections::HashSet::new();
-    loop {
-        let seen = changes.count();
-        let mut text = String::new();
-        let devices = match &inventory {
-            Some(inventory) => iasis::hubs(inventory.devices(), ids, serial),
-            None => iasis::discover(ids, serial)?,
-        };
-        if devices.is_empty() {
-            text.push_str("No Iasis hubs found.\n");
-        }
-        for device in &devices {
-            match Hub::observe(device).and_then(|hub| hub.status().map(|status| (hub, status))) {
-                Ok((hub, status)) => {
-                    if watch && heard.insert(device.id()) {
-                        hear(&changes, &hub);
-                    }
-                    text.push_str(&hub_text(&view::hub(hub.info(), &status)));
-                }
-                Err(error) => text.push_str(&format!("{}\n", unreadable(device, &error))),
-            }
-        }
-        show(&text, watch)?;
-        if !watch {
-            return Ok(());
-        }
-        changes.wait(seen, None);
-    }
-}
-
-/// Signal DFU and follow the port until the host sees the target in DFU,
+/// Signal DFU and follow each port until the host sees its target in DFU,
 /// or the hub gives up on it.
-fn dfu_through(agent: &mut Client, state: &State, hub: &str, port: Port) -> Result<()> {
-    let row = |state: &State| {
+fn dfu(agent: &mut Client, state: &State, hub: &str, ports: &[Port]) -> Result<()> {
+    let row = |state: &State, port: Port| {
         state
             .hubs
             .iter()
@@ -1026,46 +740,60 @@ fn dfu_through(agent: &mut Client, state: &State, hub: &str, port: Port) -> Resu
             .and_then(|view| view.ports.get(port.index()))
             .cloned()
     };
-    let before = row(state).context("the hub is not connected")?;
     let in_dfu = |row: &PortView| {
         use iasis_protocol::AppleMode::{Dfu, KisDfu, PortDfu};
         matches!(row.mode, Some(Dfu | KisDfu | PortDfu))
     };
-    if in_dfu(&before) {
-        println!("Port {} is in DFU.", port.number());
+    let mut pending = Vec::new();
+    for &port in ports {
+        if in_dfu(&row(state, port).context("the hub is not connected")?) {
+            println!("Port {} is in DFU.", port.number());
+        } else {
+            pending.push(port);
+        }
+    }
+    if pending.is_empty() {
         return Ok(());
     }
-    ensure!(
-        before.dfu,
-        "port {} cannot be signalled into DFU: {}",
-        port.number(),
-        activity(&before)
-    );
     agent.request(&Request::Dfu {
-        hub: hub.into(),
-        port: port.number(),
+        hubs: vec![selection(state, hub, &pending)?],
     })?;
-    let waiting = progress::waiting(format!("Waiting for USB DFU on port {}", port.number()));
+    let waiting = progress::waiting("Waiting for USB DFU");
     // The hub gives up on an unconfirmed signal well before this. A target
     // entering DFU over Debug USB re-attaches, so the port can be empty on the
     // way.
     let deadline = Instant::now() + Duration::from_secs(30);
-    let mut last = before;
+    let mut failed = Vec::new();
+    let mut last = Vec::new();
     let mut reply = Some(agent.ask(&Request::Watch)?);
     while let Some(Reply::State(state)) = reply {
-        last = row(&state).context("the hub left USB")?;
-        if in_dfu(&last) {
-            waiting.finish_and_clear();
-            println!("Port {} is in DFU.", port.number());
-            return Ok(());
+        last.clear();
+        for port in std::mem::take(&mut pending) {
+            let now = row(&state, port).context("the hub left USB")?;
+            if in_dfu(&now) {
+                waiting.suspend(|| println!("Port {} is in DFU.", port.number()));
+            } else if now.fault.is_some() || now.request == Some(SignalProgress::DfuUnconfirmed) {
+                failed.push(format!("Port {}  {}", port.number(), activity(&now)));
+            } else {
+                pending.push(port);
+                last.push(now);
+            }
         }
-        if last.fault.is_some() || last.request == Some(SignalProgress::DfuUnconfirmed) {
-            bail!("Port {}  {}", port.number(), activity(&last));
+        if pending.is_empty() {
+            break;
         }
         reply = agent.receive_by(deadline)?;
     }
-    ensure!(last.occupied, "port {} is empty", port.number());
-    bail!("Port {} did not enter DFU", port.number())
+    waiting.finish_and_clear();
+    for (port, row) in pending.iter().zip(&last) {
+        failed.push(if row.occupied {
+            format!("Port {} did not enter DFU", port.number())
+        } else {
+            format!("Port {} is empty", port.number())
+        });
+    }
+    ensure!(failed.is_empty(), "{}", failed.join("\n"));
+    Ok(())
 }
 
 fn sharing(agent: &mut Client, command: Option<&SharingCommand>, json: bool) -> Result<()> {
@@ -1259,38 +987,28 @@ fn import(agent: &mut Client, path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Ask the running agent for a restore and follow it to its end.
-fn restore_through(
-    agent: &mut Client,
-    state: &State,
-    hub: &str,
-    options: &batch::Options,
-) -> Result<()> {
-    ensure!(options.erase, "restore requires --erase");
-    ensure!(
-        !options.button,
-        "iasisd is running and already answers the hub's Restore hold; make the hold there"
-    );
-    submit_through(
-        agent,
-        state,
-        hub,
-        Operation::Restore,
-        &options.source,
-        &options.ports,
-    )
-}
-
 /// Have the agent restore or revive the selected ports' targets, and follow
 /// them to their end.
-fn submit_through(
+fn submit(
     agent: &mut Client,
     state: &State,
     hub: &str,
     operation: Operation,
-    source: &batch::Source,
     ports: &[Port],
+    latest: bool,
 ) -> Result<()> {
+    // The agent refuses a target it would not restore, and says why.
+    let hubs = vec![selection(state, hub, ports)?];
+    agent.request(&match operation {
+        Operation::Restore => Request::Restore { hubs, latest },
+        Operation::Revive => Request::Revive { hubs, latest },
+    })?;
+    follow_work(agent, hub, ports)
+}
+
+/// The ports' attachments on the hub as the state shows them, for the agent
+/// to check before it acts on them.
+fn selection(state: &State, hub: &str, ports: &[Port]) -> Result<Selection> {
     let view = state
         .hubs
         .iter()
@@ -1299,17 +1017,15 @@ fn submit_through(
     let session = view.session.context("the hub is not attended")?;
     let targets = ports
         .iter()
-        .map(|&physical| {
-            let number = physical.number();
-            let port = view
+        .map(|&port| {
+            let row = view
                 .ports
-                .iter()
-                .find(|p| p.number == number && p.restore)
-                .with_context(|| format!("port {number} has no ready target"))?;
+                .get(port.index())
+                .with_context(|| format!("the hub has no port {}", port.number()))?;
             Ok(Target {
-                port: physical,
-                generation: port.generation,
-                ecid: port
+                port,
+                generation: row.generation,
+                ecid: row
                     .ecid
                     .as_deref()
                     .map(parse_serial)
@@ -1318,29 +1034,19 @@ fn submit_through(
             })
         })
         .collect::<Result<_>>()?;
-    if let Some(path) = &source.ipsw {
-        match import(agent, path) {
-            Err(error) if !format!("{error:#}").contains("already in the store") => {
-                return Err(error);
-            }
-            _ => {}
-        }
-    }
-    let hubs = vec![Selection {
+    Ok(Selection {
         hub: hub.into(),
         session,
         targets,
-    }];
-    let latest = source.latest;
-    agent.request(&match operation {
-        Operation::Restore => Request::Restore { hubs, latest },
-        Operation::Revive => Request::Revive { hubs, latest },
-    })?;
-    follow_work(agent, hub, ports)
+    })
 }
 
+/// Show each port's progress as it changes and its ending as soon as the
+/// agent reports it.
 fn follow_work(agent: &mut Client, hub: &str, ports: &[Port]) -> Result<()> {
     let mut shown = vec![String::new(); ports.len()];
+    let mut ended = vec![false; ports.len()];
+    let mut success = true;
     let mut download = None;
     let mut reply = agent.ask(&Request::Watch)?;
     loop {
@@ -1357,27 +1063,39 @@ fn follow_work(agent: &mut Client, hub: &str, ports: &[Port]) -> Result<()> {
         }
         download = fetch;
         let view = state.hubs.iter().find(|view| view.serial == hub);
-        for ((port, shown), result) in ports.iter().zip(&mut shown).zip(&state.submitted) {
-            if result.is_none()
-                && let Some(row) = view.and_then(|view| view.ports.get(port.index()))
+        for (index, port) in ports.iter().enumerate() {
+            if ended[index] {
+                continue;
+            }
+            if let Some(ending) = &state.submitted[index] {
+                let phase = job_text(Job {
+                    operation: ending.operation,
+                    phase: ending.phase,
+                });
+                println!("Port {}  {phase}: {}", port.number(), ending.message);
+                ended[index] = true;
+                success &= ending.phase == RestorePhase::Reported;
+            } else if let Some(row) = view
+                .and_then(|view| view.ports.get(port.index()))
+                // A job that has ended says so in its ending, or starts again.
+                .filter(|row| {
+                    row.job.is_none_or(|job| {
+                        matches!(job.phase, RestorePhase::Preparing | RestorePhase::Running)
+                    })
+                })
             {
                 let line = format!(
                     "{}  {}",
                     activity(row),
                     usb_text(row.usb, row.mode, row.ecid.as_deref())
                 );
-                if *shown != line {
+                if shown[index] != line {
                     println!("Port {}  {}", port.number(), line.trim_end());
-                    *shown = line;
+                    shown[index] = line;
                 }
             }
         }
-        if state.submitted.iter().all(Option::is_some) {
-            let mut success = true;
-            for (port, ending) in ports.iter().zip(state.submitted.iter().flatten()) {
-                println!("Port {}  {}", port.number(), ending.message);
-                success &= ending.phase == RestorePhase::Reported;
-            }
+        if ended.iter().all(|ended| *ended) {
             ensure!(
                 success,
                 "one or more selected operations failed or remain unconfirmed"
@@ -1423,22 +1141,26 @@ fn print_status(status: &Status) {
         status.host, status.settings.brightness
     );
     println!(
-        "CM5 power {}  I²C root fault {}  timeouts {}  expander {:?}  port capacity {}",
+        "CM5 power {}  I²C root fault {}  timeouts {}  port capacity {}",
         status.side_power_enabled,
         status.i2c_root_fault,
         status.i2c_timeouts,
-        status.expander_inputs,
         status.available_ports
     );
     for port in Port::ALL {
         let state = &status.ports[port.index()];
         println!(
-            "port {}  {:?}  {:?}  generation {}  VBUS ADC {:?}  allocated {} mW  contract {} mV / {} mA  faults {:?}  error {:?}  command {} {:?}",
+            "port {}  {:?}  {:?}  generation {}  VBUS {:?} mV ({})  allocated {} mW  contract {} mV / {} mA  faults {:?}  error {:?}  command {} {:?}",
             port.number(),
             state.state,
             state.orientation,
             state.generation,
-            state.vbus_adc,
+            state.vbus_mv,
+            if state.vbus_ok {
+                "holds"
+            } else {
+                "out of window"
+            },
             state.allocated_mw,
             state.contract_mv,
             state.contract_ma,
@@ -1446,6 +1168,14 @@ fn print_status(status: &Status) {
             state.error,
             state.command_id,
             state.command_result
+        );
+        println!(
+            "  PD hard resets sent {} received {}  write retries {}  requests rejected {}  fault recoveries {}",
+            state.hard_resets_sent,
+            state.hard_resets_received,
+            state.pd_write_retries,
+            state.requests_rejected,
+            state.recoveries
         );
         if let Some(link) = state.link {
             println!("  link: {}", link_text(link));
@@ -1487,10 +1217,10 @@ fn print_status(status: &Status) {
         }
         if let Some(fault) = state.fault_sample {
             println!(
-                "  fault at {} ms in {:?}  VBUS ADC {:?}  pins {:?}  prior {:?}  target {:?}",
+                "  fault at {} ms in {:?}  VBUS {:?} mV  pins {:?}  prior {:?}  target {:?}",
                 fault.uptime_ms,
                 fault.state,
-                fault.vbus_adc,
+                fault.vbus_mv,
                 fault.faults,
                 fault.contract,
                 fault.target
@@ -1498,9 +1228,8 @@ fn print_status(status: &Status) {
         }
     }
     println!(
-        "bus ADC {:?}  CH224 status {:?}  input request {} mV  qualified allowance {:?} mA  allocated {} / {} mW",
-        status.bus_voltage_adc,
-        status.ch224_status,
+        "bus {:?} mV  input request {} mV  qualified allowance {:?} mA  allocated {} / {} mW",
+        status.bus_mv,
         status.brick_requested_mv,
         status.ch224_current_50ma.map(|units| u16::from(units) * 50),
         status.allocated_mw(),

@@ -5,9 +5,12 @@
 //! takes the newest image in the store that is still signed or has the
 //! newest release fetched. Any signed release can be fetched ahead of time.
 //! An image stays until it is removed, or until a restore finds that Apple
-//! no longer signs it. Fetched archives live in the host's cache, which the
-//! system may clear: the store then fetches them again. Archives added from
-//! a file and the store's index live with the host's state.
+//! no longer signs it; one a restore is reading goes when that restore ends.
+//! Fetched archives live in the host's cache, which the system may clear:
+//! the store then fetches them again. Archives added from a file and the
+//! store's index live with the host's state. The store owns both
+//! directories: its index names each archive by its file there, and it
+//! takes in any archive it finds there unlisted once every member checks.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -110,35 +113,26 @@ pub trait Catalog: Send + Sync + 'static {
 
 /// ipsw.me for the listings, Apple's servers for the archives.
 pub struct Network {
-    listings: ureq::Agent,
-    archives: ureq::Agent,
+    listings: reqwest::blocking::Client,
+    archives: reqwest::blocking::Client,
 }
 
-impl Default for Network {
-    fn default() -> Self {
-        let agent = concat!("iasis/", env!("CARGO_PKG_VERSION"));
-        let tls = || {
-            ureq::tls::TlsConfig::builder()
-                .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+impl Network {
+    pub fn new() -> Result<Self> {
+        // `timeout` bounds the wait for an answer and each read of its body.
+        let client = |timeout| {
+            reqwest::blocking::Client::builder()
+                .user_agent(concat!("iasis/", env!("CARGO_PKG_VERSION")))
+                .connect_timeout(Duration::from_secs(20))
+                .timeout(timeout)
                 .build()
+                .context("starting the image catalog's HTTP client")
         };
-        Self {
-            listings: ureq::Agent::config_builder()
-                .user_agent(agent)
-                .tls_config(tls())
-                .timeout_global(Some(Duration::from_secs(30)))
-                .build()
-                .into(),
+        Ok(Self {
+            listings: client(Duration::from_secs(30))?,
             // An archive takes as long as it takes, unless it stalls.
-            archives: ureq::Agent::config_builder()
-                .user_agent(agent)
-                .tls_config(tls())
-                .timeout_connect(Some(Duration::from_secs(20)))
-                .timeout_recv_response(Some(Duration::from_secs(30)))
-                .timeout_per_read(Some(Duration::from_secs(60)))
-                .build()
-                .into(),
-        }
+            archives: client(Duration::from_secs(60))?,
+        })
     }
 }
 
@@ -190,16 +184,21 @@ struct SignedRelease {
 
 impl Network {
     fn json<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T> {
-        let text = self
+        let response = self
             .listings
             .get(format!("{CATALOG}/{path}"))
-            .call()
-            .context("asking the image catalog")?
-            .body_mut()
-            .with_config()
-            .limit(CATALOG_BYTES)
-            .read_to_string()
+            .send()
+            .and_then(reqwest::blocking::Response::error_for_status)
+            .context("asking the image catalog")?;
+        let mut text = String::new();
+        response
+            .take(CATALOG_BYTES + 1)
+            .read_to_string(&mut text)
             .context("reading the image catalog")?;
+        ensure!(
+            text.len() as u64 <= CATALOG_BYTES,
+            "the image catalog's answer is too large"
+        );
         serde_json::from_str(&text).context("reading the image catalog's answer")
     }
 }
@@ -301,11 +300,11 @@ impl Catalog for Network {
             }
         }
         if have < firmware.bytes {
-            let response = self
+            let mut response = self
                 .archives
                 .get(&firmware.url)
-                .header("Range", format!("bytes={have}-"))
-                .call()
+                .header(reqwest::header::RANGE, format!("bytes={have}-"))
+                .send()
                 .context("asking for the image")?;
             match response.status().as_u16() {
                 206 => {}
@@ -317,9 +316,8 @@ impl Catalog for Network {
                 }
                 status => bail!("the image server answered {status}"),
             }
-            let mut body = response.into_body().into_reader();
             loop {
-                let count = body.read(&mut buffer).context("receiving the image")?;
+                let count = response.read(&mut buffer).context("receiving the image")?;
                 if count == 0 {
                     break;
                 }
@@ -351,9 +349,12 @@ impl Catalog for Network {
 /// An archive in the store.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Image {
+    /// Its file in the store's directory for it, which names it.
+    pub name: String,
     #[serde(flatten)]
     pub ipsw: PreparedIpsw,
-    /// Fetched from the catalog, as opposed to added from a file.
+    /// Fetched from the catalog into the cache, as opposed to added from a
+    /// file and kept with the host's state.
     pub fetched: bool,
 }
 
@@ -366,7 +367,7 @@ fn file_id(path: &Path) -> &str {
 
 impl Image {
     fn id(&self) -> &str {
-        file_id(self.ipsw.path())
+        &self.name
     }
 
     fn covers(&self, identifier: &str) -> bool {
@@ -406,19 +407,23 @@ struct Download {
     firmware: Firmware,
     /// Why the fetch failed. It is tried again when it is next asked for.
     error: Option<String>,
+    /// Restores waiting for it. A download that no restore waits for and
+    /// nobody asked for by name is given up.
+    waiting: usize,
+    asked: bool,
 }
 
 /// What a restore of some hardware installs.
-pub(crate) enum Pick {
+enum Pick {
     /// An image the store holds.
-    Held(PreparedIpsw),
+    Held(Lease),
     /// A release the store fetches first.
     Fetch(Wanted),
 }
 
 /// A release a restore waits for, and the hardware it is for.
 #[derive(Clone)]
-pub(crate) struct Wanted {
+struct Wanted {
     device: Device,
     firmware: Firmware,
     chip: u32,
@@ -427,14 +432,14 @@ pub(crate) struct Wanted {
 
 impl Wanted {
     /// The store's id for the archive, as the image list names it.
-    pub(crate) fn id(&self) -> &str {
+    fn id(&self) -> &str {
         self.firmware.name()
     }
 }
 
 /// Where a wanted release stands.
-pub(crate) enum Poll {
-    Ready(PreparedIpsw),
+enum Poll {
+    Ready(Lease),
     /// Its download, once it has begun.
     Coming(Option<Fetch>),
 }
@@ -493,6 +498,8 @@ struct State {
     fetch: Option<Fetch>,
     /// Images a restore is reading, by how many.
     leased: BTreeMap<String, usize>,
+    /// Leased images that are removed once their last lease ends.
+    removing: BTreeSet<String>,
     /// What the catalog last listed for each model, and when.
     listings: BTreeMap<String, (Instant, Vec<Firmware>)>,
     /// The models the catalog last said Apple signs a release for, and when.
@@ -511,11 +518,32 @@ struct Survey<'a> {
 }
 
 impl State {
-    fn holds(&self, identifier: &str, firmware: &Firmware) -> bool {
+    /// The images a restore can take: all but those being removed.
+    fn images(&self) -> impl Iterator<Item = &Image> {
         self.saved
             .images
             .iter()
-            .any(|image| image.is(identifier, firmware))
+            .filter(|image| !self.removing.contains(image.id()))
+    }
+
+    fn holds(&self, identifier: &str, firmware: &Firmware) -> bool {
+        self.images().any(|image| image.is(identifier, firmware))
+    }
+
+    /// Keep the image of a release that is waiting for its removal: a later
+    /// request for it outweighs the removal, and its file is here, checked.
+    fn keep(&mut self, identifier: &str, firmware: &Firmware) {
+        let wanted: Vec<String> = self
+            .saved
+            .images
+            .iter()
+            .filter(|image| self.removing.contains(image.id()) && image.is(identifier, firmware))
+            .map(|image| image.id().to_owned())
+            .collect();
+        for id in wanted {
+            log::info!("{id} is wanted again; it stays");
+            self.removing.remove(&id);
+        }
     }
 
     /// The next release to fetch.
@@ -535,11 +563,7 @@ impl State {
     /// them. An image added from a file is never taken for a lapsed one: the
     /// catalog may not list it at all.
     fn survey(&self, chip: u32, board: u32, signed: Option<&[Firmware]>) -> Survey<'_> {
-        let fits = self
-            .saved
-            .images
-            .iter()
-            .filter(|image| image.ipsw.erases(chip, board));
+        let fits = self.images().filter(|image| image.ipsw.erases(chip, board));
         let (lapsed, mut held): (Vec<_>, Vec<_>) = fits.partition(|image| {
             image.fetched
                 && signed.is_some_and(|signed| {
@@ -571,6 +595,69 @@ struct Inner {
 impl Inner {
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap()
+    }
+
+    /// The directory of the fetched images, or of those added from a file.
+    fn dir(&self, fetched: bool) -> &Path {
+        if fetched { &self.cache } else { &self.kept }
+    }
+
+    /// List an archive in the index, once.
+    fn index(&self, state: &mut State, image: Image) {
+        state.removing.remove(&image.name);
+        if !state
+            .saved
+            .images
+            .iter()
+            .any(|held| held.fetched == image.fetched && held.name == image.name)
+        {
+            state.saved.images.push(image);
+            self.save(state);
+        }
+    }
+
+    /// Take in each archive the store's directories hold that its index does
+    /// not list, once every member checks, and delete one that does not.
+    fn adopt(&self) {
+        for fetched in [true, false] {
+            let Ok(entries) = fs::read_dir(self.dir(fetched)) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                    continue;
+                };
+                let listed = self
+                    .lock()
+                    .saved
+                    .images
+                    .iter()
+                    .any(|image| image.fetched == fetched && image.name == name);
+                if listed
+                    || name.starts_with('.')
+                    || !name.to_ascii_lowercase().ends_with(".ipsw")
+                    || !path.is_file()
+                {
+                    continue;
+                }
+                log::info!("Checking {}, which the store does not list", path.display());
+                match PreparedIpsw::open(&path) {
+                    Ok(ipsw) => {
+                        let image = Image {
+                            name: name.to_owned(),
+                            ipsw,
+                            fetched,
+                        };
+                        self.index(&mut self.lock(), image);
+                    }
+                    Err(error) => {
+                        log::warn!("{}: {error:#}; deleting it", path.display());
+                        fs::remove_file(&path).ok();
+                    }
+                }
+            }
+        }
     }
 
     fn save(&self, state: &State) {
@@ -626,6 +713,7 @@ impl Inner {
     /// Fetch each release that is asked for, one at a time, and look for
     /// images the system has cleared in between.
     fn work(&self) {
+        self.adopt();
         if self.lock().saved.devices.is_empty() {
             let _ = self.devices();
         }
@@ -642,6 +730,19 @@ impl Inner {
                     return;
                 }
                 if self.forget_cleared(&mut state) {
+                    self.save(&state);
+                }
+                // One the store took in from its directory is here.
+                let held: Vec<Firmware> = state
+                    .downloads
+                    .iter()
+                    .filter(|download| state.holds(&download.identifier, &download.firmware))
+                    .map(|download| download.firmware.clone())
+                    .collect();
+                if !held.is_empty() {
+                    state
+                        .downloads
+                        .retain(|download| !held.contains(&download.firmware));
                     self.save(&state);
                 }
                 state.next().map(|download| download.firmware.clone())
@@ -749,10 +850,12 @@ impl Inner {
             firmware.build
         );
         log::info!("{} ({}) is ready", firmware.version, firmware.build);
-        self.lock().saved.images.push(Image {
+        let image = Image {
+            name: name.into(),
             ipsw,
             fetched: true,
-        });
+        };
+        self.index(&mut self.lock(), image);
         Ok(())
     }
 }
@@ -760,16 +863,77 @@ impl Inner {
 /// Keeps an image from being cleared away while a restore reads it.
 pub struct Lease {
     inner: Arc<Inner>,
-    id: String,
+    image: PreparedIpsw,
+}
+
+impl std::ops::Deref for Lease {
+    type Target = PreparedIpsw;
+    fn deref(&self) -> &PreparedIpsw {
+        &self.image
+    }
+}
+
+impl std::fmt::Debug for Lease {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.image.fmt(f)
+    }
 }
 
 impl Drop for Lease {
     fn drop(&mut self) {
+        let id = file_id(self.image.path());
         let mut state = self.inner.lock();
-        if let Some(count) = state.leased.get_mut(&self.id) {
+        if let Some(count) = state.leased.get_mut(id) {
             *count -= 1;
             if *count == 0 {
-                state.leased.remove(&self.id);
+                state.leased.remove(id);
+                // A removal waits for the last restore reading the image.
+                if state.removing.remove(id) {
+                    let paths = paths_of(&state, id);
+                    self.inner.drop_files(&mut state, &paths);
+                    self.inner.save(&state);
+                }
+            }
+        }
+    }
+}
+
+/// The files of the images with this id.
+fn paths_of(state: &State, id: &str) -> Vec<PathBuf> {
+    state
+        .saved
+        .images
+        .iter()
+        .filter(|image| image.id() == id)
+        .map(|image| image.ipsw.path().to_owned())
+        .collect()
+}
+
+/// A restore's wait for a download. When the last one ends, a download
+/// nobody asked for by name is given up; others go on.
+struct Interest {
+    inner: Arc<Inner>,
+    firmware: Firmware,
+}
+
+impl Drop for Interest {
+    fn drop(&mut self) {
+        let mut state = self.inner.lock();
+        let firmware = &self.firmware;
+        if let Some(download) = state
+            .downloads
+            .iter_mut()
+            .find(|download| download.firmware == *firmware)
+        {
+            download.waiting = download.waiting.saturating_sub(1);
+            // A failed one stays, to say why, until it is asked for again.
+            if download.waiting == 0 && !download.asked && download.error.is_none() {
+                state
+                    .downloads
+                    .retain(|download| download.firmware != *firmware);
+                drop(state);
+                self.inner.changed.notify_all();
+                self.inner.changes.changed();
             }
         }
     }
@@ -787,34 +951,50 @@ impl Store {
         catalog: impl Catalog,
         changes: Arc<Watch>,
     ) -> Result<Self> {
-        let (cache, kept) = (cache.into(), kept.into());
+        let (cache, kept) = (
+            std::path::absolute(cache.into())?,
+            std::path::absolute(kept.into())?,
+        );
         fs::create_dir_all(&kept).context("creating the image store")?;
-        let kept = kept.canonicalize()?;
         let lock = File::create(kept.join("lock"))?;
         lock.try_lock()
             .ok()
             .context("another Iasis process holds the image store")?;
-        // An archive a client was still sending when its agent stopped.
-        for entry in fs::read_dir(&kept)?.flatten() {
-            if entry.file_name().to_string_lossy().starts_with(IMPORTING) {
-                fs::remove_file(entry.path()).ok();
+        // What a stopped agent left unfinished: an archive a client was
+        // still sending, a download.
+        for (dir, unfinished) in [(&kept, IMPORTING), (&cache, "")] {
+            for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if (!unfinished.is_empty() && name.starts_with(unfinished))
+                    || name.ends_with(".part")
+                {
+                    fs::remove_file(entry.path()).ok();
+                }
             }
         }
+        // An index this version cannot read gives way to what the
+        // directories hold, which the store takes in again.
         let index = kept.join("index.json");
         let mut saved: Saved = match fs::read(&index) {
-            Ok(bytes) => serde_json::from_slice(&bytes).with_context(|| {
-                format!(
-                    "{} is not an index this version reads; delete it to empty the store",
+            Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|error| {
+                log::warn!(
+                    "{}: {error}; the store lists its archives again",
                     index.display()
-                )
-            })?,
+                );
+                Saved::default()
+            }),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Saved::default(),
             Err(error) => {
                 return Err(error).with_context(|| format!("reading {}", index.display()));
             }
         };
-        // An image whose file is not as the store left it is no longer the
-        // one the store checked.
+        for image in &mut saved.images {
+            let dir = if image.fetched { &cache } else { &kept };
+            image.ipsw.place(dir.join(&image.name));
+        }
+        // An image whose file is not as the store left it is checked again
+        // as one the index does not list.
         let listed = saved.images.len();
         saved
             .images
@@ -860,11 +1040,7 @@ impl Store {
             device.map_or_else(|| identifier.to_owned(), |device| device.name.clone())
         };
         // The system may have cleared an image since the store last looked.
-        let here = state
-            .saved
-            .images
-            .iter()
-            .filter(|image| image.ipsw.path().is_file());
+        let here = state.images().filter(|image| image.ipsw.path().is_file());
         let held = here.map(|image| {
             let mut models = Vec::new();
             for model in image.ipsw.product_types.iter().map(|kind| name(kind)) {
@@ -1027,27 +1203,38 @@ impl Store {
             Some(build) => format!("Apple signs no build {build} for {}", device.name),
             None => format!("Apple signs no release for {}", device.name),
         })?;
-        self.want(&device, firmware);
+        self.want(&device, firmware, true);
         Ok(())
     }
 
-    /// Queue a release unless it is here, and try it again if it failed.
-    fn want(&self, device: &Device, firmware: Firmware) {
+    /// Queue a release unless it is here, and try it again if it failed:
+    /// by name when `asked`, else for a restore that waits for it.
+    fn want(&self, device: &Device, firmware: Firmware, asked: bool) {
         let mut state = self.0.lock();
+        state.keep(&device.identifier, &firmware);
         if state.holds(&device.identifier, &firmware) {
+            drop(state);
+            self.0.changes.changed();
             return;
         }
+        let waiting = usize::from(!asked);
         match state
             .downloads
             .iter_mut()
             .find(|download| download.firmware == firmware)
         {
-            Some(download) => download.error = None,
+            Some(download) => {
+                download.error = None;
+                download.asked |= asked;
+                download.waiting += waiting;
+            }
             None => state.downloads.push(Download {
                 identifier: device.identifier.clone(),
                 name: device.name.clone(),
                 firmware,
                 error: None,
+                waiting,
+                asked,
             }),
         }
         drop(state);
@@ -1143,7 +1330,7 @@ impl Store {
     /// signs, which the store may have to fetch first. A fetched image Apple
     /// no longer signs is deleted. When the catalog cannot be asked, the
     /// newest image in the store serves.
-    pub(crate) fn pick(&self, chip: u32, board: u32, latest: bool) -> Result<Pick> {
+    fn pick(&self, chip: u32, board: u32, latest: bool) -> Result<Pick> {
         let listed = self.listed(chip, board);
         let mut state = self.0.lock();
         if self.0.forget_cleared(&mut state) {
@@ -1155,23 +1342,29 @@ impl Store {
             .map(|(_, releases)| releases.as_slice());
         let survey = state.survey(chip, board, signed);
         let held = survey.held.first().map(|image| image.ipsw.clone());
-        let lapsed: Vec<PathBuf> = survey
+        let lapsed: Vec<String> = survey
             .lapsed
             .iter()
-            .filter(|image| !state.leased.contains_key(image.id()))
-            .map(|image| image.ipsw.path().to_owned())
+            .map(|image| image.id().to_owned())
             .collect();
         if !lapsed.is_empty() {
-            self.0.drop_files(&mut state, &lapsed);
+            for id in lapsed {
+                if state.leased.contains_key(&id) {
+                    state.removing.insert(id);
+                } else {
+                    let paths = paths_of(&state, &id);
+                    self.0.drop_files(&mut state, &paths);
+                }
+            }
             self.0.save(&state);
         }
         let (device, releases) = match (listed, held) {
             (Ok(listed), None) => listed,
             (Ok(listed), Some(_)) if latest => listed,
-            (Ok(_), Some(held)) => return Ok(Pick::Held(held)),
+            (Ok(_), Some(held)) => return Ok(Pick::Held(self.lease(&mut state, held))),
             (Err(error), Some(held)) => {
                 log::warn!("Using the image in the store: {error:#}");
-                return Ok(Pick::Held(held));
+                return Ok(Pick::Held(self.lease(&mut state, held)));
             }
             (Err(error), None) => return Err(error),
         };
@@ -1187,27 +1380,29 @@ impl Store {
         }))
     }
 
-    /// Ask for a wanted release: queue it unless it is here, and try it
+    /// Wait for a wanted release: queue it unless it is here, and try it
     /// again if it failed.
-    pub(crate) fn queue(&self, wanted: &Wanted) {
-        self.want(&wanted.device, wanted.firmware.clone());
+    fn queue(&self, wanted: &Wanted) -> Interest {
+        self.want(&wanted.device, wanted.firmware.clone(), false);
+        Interest {
+            inner: self.0.clone(),
+            firmware: wanted.firmware.clone(),
+        }
     }
 
     /// Where a wanted release stands: its archive once it is here, its
     /// download while it comes, or why it will not come. A failure stays
     /// until the release is asked for again.
-    pub(crate) fn poll(&self, wanted: &Wanted) -> Result<Poll> {
+    fn poll(&self, wanted: &Wanted) -> Result<Poll> {
         let Wanted {
             device,
             firmware,
             chip,
             board,
         } = wanted;
-        let state = self.0.lock();
+        let mut state = self.0.lock();
         let here = state
-            .saved
-            .images
-            .iter()
+            .images()
             .find(|image| image.is(&device.identifier, firmware));
         if let Some(image) = here {
             ensure!(
@@ -1215,7 +1410,8 @@ impl Store {
                 "the image for {} does not cover this device",
                 device.name
             );
-            return Ok(Poll::Ready(image.ipsw.clone()));
+            let image = image.ipsw.clone();
+            return Ok(Poll::Ready(self.lease(&mut state, image)));
         }
         let download = state
             .downloads
@@ -1235,38 +1431,44 @@ impl Store {
     }
 
     /// The image to restore this hardware with, as `pick` chooses it,
-    /// waiting for its download. `waiting` hears of the download, and ends
-    /// the wait by failing.
+    /// waiting for its download. `waiting` hears of the image the wait is
+    /// for and its download, at least every second, and ends the wait by
+    /// failing.
     pub fn obtain(
         &self,
         chip: u32,
         board: u32,
         latest: bool,
-        mut waiting: impl FnMut(Option<&Fetch>) -> Result<()>,
-    ) -> Result<PreparedIpsw> {
+        mut waiting: impl FnMut(&str, Option<&Fetch>) -> Result<()>,
+    ) -> Result<Lease> {
         let mut seen = self.0.changes.count();
         let wanted = match self.pick(chip, board, latest)? {
             Pick::Held(ipsw) => return Ok(ipsw),
             Pick::Fetch(wanted) => wanted,
         };
-        self.queue(&wanted);
+        let _interest = self.queue(&wanted);
         loop {
             match self.poll(&wanted)? {
                 Poll::Ready(ipsw) => return Ok(ipsw),
-                Poll::Coming(fetch) => waiting(fetch.as_ref())?,
+                Poll::Coming(fetch) => waiting(wanted.id(), fetch.as_ref())?,
             }
             // The download, the store and whatever `waiting` watches all
             // advance this count.
-            seen = self.0.changes.wait(seen, None);
+            seen = self
+                .0
+                .changes
+                .wait(seen, Some(Instant::now() + Duration::from_secs(1)));
         }
     }
 
-    pub fn hold(&self, ipsw: &PreparedIpsw) -> Lease {
-        let id = file_id(ipsw.path()).to_owned();
-        *self.0.lock().leased.entry(id.clone()).or_default() += 1;
+    fn lease(&self, state: &mut State, image: PreparedIpsw) -> Lease {
+        *state
+            .leased
+            .entry(file_id(image.path()).to_owned())
+            .or_default() += 1;
         Lease {
             inner: self.0.clone(),
-            id,
+            image,
         }
     }
 
@@ -1309,29 +1511,20 @@ impl Store {
             .map_err(|error| error.error)
             .with_context(|| format!("{} is already in the store", kept.display()))?;
         let ipsw = PreparedIpsw::open_stored(&kept)?;
-        let mut state = self.0.lock();
-        state.saved.images.push(Image {
+        let image = Image {
+            name: file_id(&kept).to_owned(),
             ipsw: ipsw.clone(),
             fetched: false,
-        });
-        self.0.save(&state);
+        };
+        self.0.index(&mut self.0.lock(), image);
         Ok(ipsw)
     }
 
-    /// Delete an image, or cancel its download.
+    /// Delete an image, or cancel its download. An image a restore is
+    /// reading goes when the last such restore ends.
     pub fn remove(&self, id: &str) -> Result<()> {
         let mut state = self.0.lock();
-        ensure!(
-            !state.leased.contains_key(id),
-            "a restore is using this image"
-        );
-        let held: Vec<PathBuf> = state
-            .saved
-            .images
-            .iter()
-            .filter(|image| image.id() == id)
-            .map(|image| image.ipsw.path().to_owned())
-            .collect();
+        let held = paths_of(&state, id);
         let queued = state.downloads.len();
         state
             .downloads
@@ -1340,7 +1533,12 @@ impl Store {
             !held.is_empty() || state.downloads.len() != queued,
             "the store has no image {id}"
         );
-        self.0.drop_files(&mut state, &held);
+        if state.leased.contains_key(id) {
+            log::info!("{id} goes once the restores reading it end");
+            state.removing.insert(id.to_owned());
+        } else {
+            self.0.drop_files(&mut state, &held);
+        }
         self.0.save(&state);
         Ok(())
     }
@@ -1694,12 +1892,12 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let shelf = Shelf::new();
         let store = open(temp.path(), shelf.clone()).unwrap();
-        let fetched = store.obtain(0x8103, 34, false, |_| Ok(())).unwrap();
+        let fetched = store.obtain(0x8103, 34, false, |_, _| Ok(())).unwrap();
         let cache = temp.path().join("cache");
-        assert!(fetched.path().starts_with(cache.canonicalize().unwrap()));
+        assert!(fetched.path().starts_with(&cache));
         fs::remove_dir_all(&cache).unwrap();
         assert!(store.snapshot().images.is_empty());
-        let again = store.obtain(0x8103, 34, false, |_| Ok(())).unwrap();
+        let again = store.obtain(0x8103, 34, false, |_, _| Ok(())).unwrap();
         assert!(again.path().is_file());
         assert_eq!(shelf.fetched(), 2);
         assert_eq!(builds(&store), ["25A354"]);
@@ -1716,7 +1914,7 @@ mod tests {
         // A device nobody asked about is identified and its image fetched.
         let mut waits = 0;
         let image = store
-            .obtain(0x8103, 34, false, |_| {
+            .obtain(0x8103, 34, false, |_, _| {
                 waits += 1;
                 Ok(())
             })
@@ -1731,10 +1929,11 @@ mod tests {
         // The same hardware again waits for nothing.
         for latest in [false, true] {
             store
-                .obtain(0x8103, 34, latest, |_| bail!("waited"))
+                .obtain(0x8103, 34, latest, |_, _| bail!("waited"))
                 .unwrap();
         }
         assert_eq!(shelf.fetched(), 1);
+        drop(image);
         store.close();
         drop(store);
 
@@ -1755,7 +1954,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let shelf = Shelf::new();
         let store = open(temp.path(), shelf.clone()).unwrap();
-        store.obtain(0x8103, 34, false, |_| Ok(())).unwrap();
+        store.obtain(0x8103, 34, false, |_, _| Ok(())).unwrap();
         shelf.sign("Macmini9,1", &[("26.1", "25B78"), ("26.0", "25A354")]);
         relist(&store);
         let offer = store.offer(0x8103, 34);
@@ -1766,16 +1965,16 @@ mod tests {
 
         // The image in the store serves until the newest is asked for.
         let held = store
-            .obtain(0x8103, 34, false, |_| bail!("waited"))
+            .obtain(0x8103, 34, false, |_, _| bail!("waited"))
             .unwrap();
         assert_eq!(held.build_version, "25A354");
-        let newest = store.obtain(0x8103, 34, true, |_| Ok(())).unwrap();
+        let newest = store.obtain(0x8103, 34, true, |_, _| Ok(())).unwrap();
         assert_eq!(newest.build_version, "25B78");
         assert_eq!(shelf.fetched(), 2);
         // Both stay, and the newer is the one in the store a restore takes.
         assert_eq!(builds(&store), ["25A354", "25B78"]);
         let reused = store
-            .obtain(0x8103, 34, false, |_| bail!("waited"))
+            .obtain(0x8103, 34, false, |_, _| bail!("waited"))
             .unwrap();
         assert_eq!(reused.build_version, "25B78");
         let offer = store.offer(0x8103, 34);
@@ -1788,23 +1987,23 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let shelf = Shelf::new();
         let store = open(temp.path(), shelf.clone()).unwrap();
-        let old = store.obtain(0x8103, 20, false, |_| Ok(())).unwrap();
+        let old = store.obtain(0x8103, 20, false, |_, _| Ok(())).unwrap();
         assert_eq!(old.build_version, "23A340");
         shelf.release("iPad13,18", "26.1", "23B85");
         relist(&store);
         // Nothing in the store is offered, and a restore reading the old
         // image keeps it.
         assert_eq!(store.offer(0x8103, 20).held, None);
-        let lease = store.hold(&old);
-        let new = store.obtain(0x8103, 20, false, |_| Ok(())).unwrap();
+        let old_path = old.path().to_owned();
+        let new = store.obtain(0x8103, 20, false, |_, _| Ok(())).unwrap();
         assert_eq!(new.build_version, "23B85");
         assert!(old.path().exists());
-        drop(lease);
+        drop(old);
         // The next restore clears it away.
         store
-            .obtain(0x8103, 20, false, |_| bail!("waited"))
+            .obtain(0x8103, 20, false, |_, _| bail!("waited"))
             .unwrap();
-        assert!(!old.path().exists());
+        assert!(!old_path.exists());
         assert_eq!(builds(&store), ["23B85"]);
         assert_eq!(shelf.fetched(), 2);
         store.close();
@@ -1815,7 +2014,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let shelf = Shelf::new();
         let store = open(temp.path(), shelf.clone()).unwrap();
-        store.obtain(0x8103, 34, false, |_| Ok(())).unwrap();
+        store.obtain(0x8103, 34, false, |_, _| Ok(())).unwrap();
         shelf.offline.store(true, Ordering::SeqCst);
         relist(&store);
         let offer = store.offer(0x8103, 34);
@@ -1824,12 +2023,12 @@ mod tests {
         assert!(offer.problem.unwrap().contains("no route"));
         for latest in [false, true] {
             let image = store
-                .obtain(0x8103, 34, latest, |_| bail!("waited"))
+                .obtain(0x8103, 34, latest, |_, _| bail!("waited"))
                 .unwrap();
             assert_eq!(image.build_version, "25A354");
         }
         // With nothing in the store, the restore ends with the reason.
-        let error = store.obtain(0x8103, 20, false, |_| Ok(())).unwrap_err();
+        let error = store.obtain(0x8103, 20, false, |_, _| Ok(())).unwrap_err();
         assert!(format!("{error:#}").contains("no route"), "{error:#}");
         store.close();
     }
@@ -1840,21 +2039,27 @@ mod tests {
         let shelf = Shelf::new();
         shelf.release("iPad13,18", "26.0", "25A354");
         let store = open(temp.path(), shelf.clone()).unwrap();
-        let mac = store.obtain(0x8103, 34, false, |_| Ok(())).unwrap();
-        let ipad = store.obtain(0x8103, 20, false, |_| Ok(())).unwrap();
+        let mac = store.obtain(0x8103, 34, false, |_, _| Ok(())).unwrap();
+        let ipad = store.obtain(0x8103, 20, false, |_, _| Ok(())).unwrap();
         assert_eq!(mac.build_version, ipad.build_version);
         assert_ne!(mac.path(), ipad.path());
         assert!(ipad.erases(0x8103, 20) && !mac.erases(0x8103, 20));
         assert_eq!(shelf.fetched(), 2);
-        // A restore holding one does not hold the other.
-        let lease = store.hold(&ipad);
-        store.remove(file_id(mac.path())).unwrap();
-        assert!(store.remove(file_id(ipad.path())).is_err());
-        drop(lease);
-        assert!(!mac.path().exists() && ipad.path().exists());
-        let images = store.snapshot().images;
-        assert_eq!(images.len(), 1);
-        assert_eq!(images[0].models, ["A iPad13,18"]);
+        // A restore holding one does not hold the other. A removal of the
+        // one it holds waits for its lease, and no restore takes it meanwhile.
+        let mac_path = mac.path().to_owned();
+        let ipad_path = ipad.path().to_owned();
+        drop(mac);
+        store.remove(file_id(&mac_path)).unwrap();
+        store.remove(file_id(ipad.path())).unwrap();
+        assert!(!mac_path.exists() && ipad.path().exists());
+        assert!(store.snapshot().images.is_empty());
+        assert!(!matches!(
+            store.pick(0x8103, 20, false).unwrap(),
+            Pick::Held(_)
+        ));
+        drop(ipad);
+        assert!(!ipad_path.exists());
         store.close();
     }
 
@@ -1869,10 +2074,10 @@ mod tests {
         let asking: Vec<_> = [20, 21, 21]
             .map(|board| {
                 let store = store.clone();
-                thread::spawn(move || store.obtain(0x8103, board, false, |_| Ok(())).unwrap())
+                thread::spawn(move || store.obtain(0x8103, board, false, |_, _| Ok(())).unwrap())
             })
             .into();
-        let images: Vec<PreparedIpsw> = asking
+        let images: Vec<_> = asking
             .into_iter()
             .map(|asked| asked.join().unwrap())
             .collect();
@@ -1902,7 +2107,7 @@ mod tests {
         store.download("Macmini9,1", Some("25A354")).unwrap();
         until("the older image", || builds(&store) == ["25A354"]);
         let image = store
-            .obtain(0x8103, 34, false, |_| bail!("waited"))
+            .obtain(0x8103, 34, false, |_, _| bail!("waited"))
             .unwrap();
         assert_eq!(image.build_version, "25A354");
         // Asking for one that is here fetches nothing.
@@ -1965,16 +2170,96 @@ mod tests {
     }
 
     #[test]
-    fn an_index_the_store_cannot_read_is_reported_and_left_alone() {
+    fn the_store_takes_in_what_its_directories_hold_and_clears_what_does_not_check() {
         let temp = tempfile::tempdir().unwrap();
-        let index = temp.path().join("kept/index.json");
-        fs::create_dir_all(temp.path().join("kept")).unwrap();
-        fs::write(&index, r#"{"images": [{"path": "/a.ipsw"}]}"#).unwrap();
-        let Err(error) = open(temp.path(), Shelf::new()) else {
-            panic!("the store opened");
+        let (kept, cache) = (temp.path().join("kept"), temp.path().join("cache"));
+        fs::create_dir_all(&kept).unwrap();
+        fs::create_dir_all(&cache).unwrap();
+        // An index from another version, an archive it does not list, a
+        // broken one, and what a stopped agent left half done.
+        fs::write(
+            kept.join("index.json"),
+            r#"{"images": [{"path": "/a.ipsw"}]}"#,
+        )
+        .unwrap();
+        archive(
+            &kept.join("24A1-Mini.ipsw"),
+            "25.0",
+            "24A1",
+            &["Macmini9,1"],
+        );
+        archive(
+            &cache.join("Mini_26.0_25A354_Restore.ipsw"),
+            "26.0",
+            "25A354",
+            &["Macmini9,1"],
+        );
+        fs::write(cache.join("Broken.ipsw"), b"not an archive").unwrap();
+        fs::write(cache.join("Other.ipsw.part"), b"half").unwrap();
+        fs::write(kept.join(".import-x"), b"half").unwrap();
+        let store = open(temp.path(), Shelf::new()).unwrap();
+        until("the store to take its archives in", || {
+            store.snapshot().images.len() == 2
+        });
+        let images = store.snapshot().images;
+        let fetched: Vec<bool> = images.iter().map(|image| image.fetched).collect();
+        assert_eq!(fetched, [true, false]);
+        assert_eq!(files(&cache), ["Mini_26.0_25A354_Restore.ipsw"]);
+        assert!(!kept.join(".import-x").exists());
+        // The index names each by its file, not by where the store was.
+        let index = fs::read_to_string(kept.join("index.json")).unwrap();
+        assert!(index.contains(r#""name": "24A1-Mini.ipsw""#), "{index}");
+        assert!(
+            !index.contains(&temp.path().display().to_string()),
+            "{index}"
+        );
+        store.close();
+        drop(store);
+        // Reopened where the directories are now, it finds them there.
+        let moved = tempfile::tempdir().unwrap();
+        let root = moved.path().join("moved");
+        fs::rename(temp.path(), &root).unwrap();
+        until("the store to be free", || {
+            open(&root, Shelf::new()).is_ok_and(|store| {
+                let paths: Vec<String> = store
+                    .snapshot()
+                    .images
+                    .into_iter()
+                    .filter_map(|image| image.path)
+                    .collect();
+                store.close();
+                assert_eq!(paths.len(), 2);
+                assert!(paths.iter().all(|path| Path::new(path).starts_with(&root) && Path::new(path).is_file()));
+                true
+            })
+        });
+    }
+
+    #[test]
+    fn a_download_no_restore_waits_for_any_longer_is_given_up() {
+        let temp = tempfile::tempdir().unwrap();
+        let shelf = Shelf::new();
+        shelf.slow.store(true, Ordering::SeqCst);
+        let store = open(temp.path(), shelf.clone()).unwrap();
+        let wanted = match store.pick(0x8103, 20, false).unwrap() {
+            Pick::Fetch(wanted) => wanted,
+            Pick::Held(_) => panic!("the store holds no image yet"),
         };
-        assert!(format!("{error:#}").contains("index.json"), "{error:#}");
-        assert!(fs::read_to_string(index).unwrap().contains("/a.ipsw"));
+        let first = store.queue(&wanted);
+        let second = store.queue(&wanted);
+        // One restore stops waiting: the other's download goes on.
+        drop(first);
+        assert!(matches!(store.poll(&wanted), Ok(Poll::Coming(_))));
+        // The last stops: nobody asked for it by name, so it is given up.
+        drop(second);
+        assert!(store.poll(&wanted).is_err());
+        assert!(store.snapshot().images.is_empty());
+        // One asked for by name stays.
+        store.download("iPad13,18", None).unwrap();
+        drop(store.queue(&wanted));
+        assert!(matches!(store.poll(&wanted), Ok(Poll::Coming(_))));
+        shelf.slow.store(false, Ordering::SeqCst);
+        store.close();
     }
 
     #[test]
@@ -1983,17 +2268,17 @@ mod tests {
         let shelf = Shelf::new();
         *shelf.fail.lock().unwrap() = Some("no route".into());
         let store = open(temp.path(), shelf.clone()).unwrap();
-        let error = store.obtain(0x8103, 20, false, |_| Ok(())).unwrap_err();
+        let error = store.obtain(0x8103, 20, false, |_, _| Ok(())).unwrap_err();
         assert!(format!("{error:#}").contains("no route"), "{error:#}");
         // The failure shows on the image that did not come.
         let images = store.snapshot().images;
         assert!(!images[0].ready && images[0].error.as_deref() == Some("no route"));
         *shelf.fail.lock().unwrap() = None;
-        store.obtain(0x8103, 20, false, |_| Ok(())).unwrap();
+        store.obtain(0x8103, 20, false, |_, _| Ok(())).unwrap();
         assert_eq!(shelf.fetched(), 2);
         // A model Apple signs nothing for ends the same way.
         shelf.sign("Macmini9,1", &[]);
-        let error = store.obtain(0x8103, 34, false, |_| Ok(())).unwrap_err();
+        let error = store.obtain(0x8103, 34, false, |_, _| Ok(())).unwrap_err();
         assert!(
             format!("{error:#}").contains("signs no release"),
             "{error:#}"
@@ -2021,7 +2306,7 @@ mod tests {
                 seen = store.0.changes.wait(seen, None);
             }
         };
-        store.queue(&wanted[0]);
+        let first = store.queue(&wanted[0]);
         settle(&wanted[0]);
         for wanted in &wanted {
             let error = store.poll(wanted).err().unwrap();
@@ -2030,12 +2315,13 @@ mod tests {
         assert_eq!(shelf.fetched(), 1);
         // Asking again tries again, for every target waiting on it.
         *shelf.fail.lock().unwrap() = None;
-        store.queue(&wanted[1]);
+        let second = store.queue(&wanted[1]);
         settle(&wanted[1]);
         for wanted in &wanted {
             assert!(matches!(store.poll(wanted), Ok(Poll::Ready(_))));
         }
         assert_eq!(shelf.fetched(), 2);
+        drop((first, second));
         store.close();
     }
 
@@ -2049,29 +2335,58 @@ mod tests {
         let added = import(&store, &local).unwrap();
         assert!(import(&store, &local).is_err());
         // It is kept with the host's state, which the system does not clear.
-        assert!(
-            added
-                .path()
-                .starts_with(temp.path().join("store/kept").canonicalize().unwrap())
-        );
+        assert!(added.path().starts_with(temp.path().join("store/kept")));
         // It serves its hardware without a fetch, though the catalog does
         // not list its build.
         let image = store
-            .obtain(0x8103, 34, false, |_| bail!("waited"))
+            .obtain(0x8103, 34, false, |_, _| bail!("waited"))
             .unwrap();
         assert_eq!(image.build_version, "24A1");
         // With the newest fetched beside it, the newest serves.
-        let newest = store.obtain(0x8103, 34, true, |_| Ok(())).unwrap();
+        let newest = store.obtain(0x8103, 34, true, |_, _| Ok(())).unwrap();
         assert_eq!(newest.build_version, "25A354");
         assert!(added.path().exists());
         let id = file_id(added.path());
-        let lease = store.hold(&added);
-        assert!(store.remove(id).is_err());
-        drop(lease);
+        // Removed while a restore reads it, it goes when the restore ends.
+
         store.remove(id).unwrap();
+        assert!(added.path().exists());
+        drop(image);
         assert!(!added.path().exists());
         assert!(store.remove(id).is_err());
         assert_eq!(builds(&store), ["25A354"]);
+        store.close();
+    }
+
+    #[test]
+    fn an_image_wanted_again_while_it_waits_for_its_removal_stays() {
+        let temp = tempfile::tempdir().unwrap();
+        let shelf = Shelf::new();
+        let store = open(temp.path(), shelf.clone()).unwrap();
+        let image = store.obtain(0x8103, 34, false, |_, _| Ok(())).unwrap();
+        let id = file_id(image.path()).to_owned();
+        // Removed while a restore reads it, then asked for again by name.
+        let path = image.path().to_owned();
+        store.remove(&id).unwrap();
+        assert!(store.snapshot().images.is_empty());
+        store.download("Macmini9,1", None).unwrap();
+        assert_eq!(builds(&store), ["25A354"]);
+        drop(image);
+        assert!(path.is_file());
+        assert_eq!(builds(&store), ["25A354"]);
+        // A restore's pick keeps one too, without a fetch.
+        let lease = store
+            .obtain(0x8103, 34, false, |_, _| bail!("waited"))
+            .unwrap();
+        store.remove(&id).unwrap();
+        let again = store
+            .obtain(0x8103, 34, false, |_, _| bail!("waited"))
+            .unwrap();
+        assert_eq!(again.path(), path);
+        drop(lease);
+        assert!(path.is_file());
+        assert_eq!(builds(&store), ["25A354"]);
+        assert_eq!(shelf.fetched(), 1);
         store.close();
     }
 }

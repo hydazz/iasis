@@ -8,6 +8,8 @@ mod macos;
 mod windows;
 #[cfg(target_os = "linux")]
 pub use linux::{linux_usb_id, ncm_interfaces, public_ncm_control};
+#[cfg(all(test, target_os = "macos"))]
+pub(crate) use macos::host_serial;
 #[cfg(target_os = "macos")]
 pub use macos::ncm_interfaces;
 
@@ -15,6 +17,8 @@ use iasis_protocol::{PORT_COUNT, Port};
 use nusb::{DeviceInfo, MaybeFuture};
 use serde::Serialize;
 use thiserror::Error;
+
+pub use iasis_api::{Companion, Speed};
 
 use crate::{Topology, identity::AppleDevice};
 
@@ -30,46 +34,32 @@ pub enum Error {
     Host(#[from] std::io::Error),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Speed {
-    Unknown,
-    Low,
-    Full,
-    High,
-    Super,
-    SuperPlus,
+fn is_superspeed(speed: Speed) -> bool {
+    matches!(speed, Speed::Super | Speed::SuperPlus)
 }
 
-impl Speed {
-    fn is_superspeed(self) -> bool {
-        matches!(self, Self::Super | Self::SuperPlus)
-    }
-
-    fn mbps(self) -> Option<u16> {
-        match self {
-            Self::SuperPlus => Some(10000),
-            Self::Super => Some(5000),
-            Self::High => Some(480),
-            Self::Full => Some(12),
-            _ => None,
-        }
+fn mbps(speed: Speed) -> Option<u16> {
+    match speed {
+        Speed::SuperPlus => Some(10000),
+        Speed::Super => Some(5000),
+        Speed::High => Some(480),
+        Speed::Full => Some(12),
+        _ => None,
     }
 }
 
-impl From<Option<nusb::Speed>> for Speed {
-    fn from(speed: Option<nusb::Speed>) -> Self {
-        match speed {
-            Some(nusb::Speed::Low) => Self::Low,
-            Some(nusb::Speed::Full) => Self::Full,
-            Some(nusb::Speed::High) => Self::High,
-            Some(nusb::Speed::Super) => Self::Super,
-            Some(nusb::Speed::SuperPlus) => Self::SuperPlus,
-            _ => Self::Unknown,
-        }
+fn usb_speed(speed: Option<nusb::Speed>) -> Speed {
+    match speed {
+        Some(nusb::Speed::Low) => Speed::Low,
+        Some(nusb::Speed::Full) => Speed::Full,
+        Some(nusb::Speed::High) => Speed::High,
+        Some(nusb::Speed::Super) => Speed::Super,
+        Some(nusb::Speed::SuperPlus) => Speed::SuperPlus,
+        _ => Speed::Unknown,
     }
 }
 
+/// One USB device on the host, as one enumeration of it.
 #[derive(Clone, Debug, Serialize)]
 pub struct UsbDevice {
     pub topology: Topology,
@@ -79,23 +69,97 @@ pub struct UsbDevice {
     pub product: Option<String>,
     pub speed: Speed,
     pub apple: Option<AppleDevice>,
-    #[cfg(target_os = "macos")]
     #[serde(skip)]
-    pub macos_attachment: Option<MacAttachment>,
-    #[cfg(not(target_os = "macos"))]
+    pub attachment: Attachment,
+    /// What the host lists for the device, to open it by. A device a tunnel
+    /// presents has none.
     #[serde(skip)]
-    pub device_address: u8,
+    pub info: Option<DeviceInfo>,
 }
 
-#[cfg(target_os = "macos")]
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct MacAttachment {
-    pub location_id: u32,
-    pub registry_entry_id: u64,
+/// One enumeration of a USB device, which the next enumeration at the same
+/// place, as when a target changes mode, does not share: the host's registry
+/// entry on macOS, and elsewhere the bus, the address and the ports, since an
+/// address is reused.
+#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct Attachment {
+    #[cfg(target_os = "macos")]
+    registry: u64,
+    #[cfg(not(target_os = "macos"))]
+    bus: String,
+    #[cfg(not(target_os = "macos"))]
+    address: u8,
+    #[cfg(not(target_os = "macos"))]
+    ports: Vec<u8>,
+}
+
+impl Attachment {
+    pub fn of(info: &DeviceInfo) -> Self {
+        Self {
+            #[cfg(target_os = "macos")]
+            registry: info.registry_entry_id(),
+            #[cfg(not(target_os = "macos"))]
+            bus: info.bus_id().to_owned(),
+            #[cfg(not(target_os = "macos"))]
+            address: info.device_address(),
+            #[cfg(not(target_os = "macos"))]
+            ports: info.port_chain().to_vec(),
+        }
+    }
+
+    /// A device presented on `topology` under `address`, which the host does
+    /// not list.
+    #[cfg(any(target_os = "linux", all(test, not(target_os = "macos"))))]
+    pub(crate) fn presented(topology: &Topology, address: u8) -> Self {
+        Self {
+            bus: topology.bus.clone(),
+            address,
+            ports: topology.port_chain.clone(),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn registry(&self) -> u64 {
+        self.registry
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn address(&self) -> u8 {
+        self.address
+    }
+
+    /// The attachment as a number, for another process to find it by.
+    #[cfg(target_os = "linux")]
+    pub fn id(&self) -> Option<u64> {
+        linux_usb_id(self.bus.parse().ok()?, self.address, &self.ports)
+    }
+}
+
+impl UsbDevice {
+    /// A Mac wired back to its own hub enumerates its gadget like another Mac.
+    pub(crate) fn is_host(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.vendor_id == 0x05ac
+                && (0x1901..=0x1905).contains(&self.product_id)
+                && self
+                    .serial_number
+                    .as_deref()
+                    .is_some_and(|serial| Some(serial) == macos::host_serial())
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
 }
 
 impl From<DeviceInfo> for UsbDevice {
     fn from(device: DeviceInfo) -> Self {
+        // Windows reports string descriptors with their trailing NULs.
+        let text = |text: Option<&str>| text.map(|text| text.trim_end_matches('\0').to_owned());
+        let serial_number = text(device.serial_number());
+        let product = text(device.product_string());
         Self {
             topology: Topology {
                 bus: device.bus_id().to_owned(),
@@ -103,38 +167,20 @@ impl From<DeviceInfo> for UsbDevice {
             },
             vendor_id: device.vendor_id(),
             product_id: device.product_id(),
-            serial_number: device.serial_number().map(str::to_owned),
-            product: device.product_string().map(str::to_owned),
-            speed: device.speed().into(),
             apple: AppleDevice::from_usb(
                 device.vendor_id(),
                 device.product_id(),
                 device.device_version(),
-                device.product_string(),
-                device.serial_number(),
+                product.as_deref(),
+                serial_number.as_deref(),
             ),
-            #[cfg(target_os = "macos")]
-            macos_attachment: Some(MacAttachment {
-                location_id: device.location_id(),
-                registry_entry_id: device.registry_entry_id(),
-            }),
-            #[cfg(not(target_os = "macos"))]
-            device_address: device.device_address(),
+            serial_number,
+            product,
+            speed: usb_speed(device.speed()),
+            attachment: Attachment::of(&device),
+            info: Some(device),
         }
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum Companion {
-    Mapped {
-        topology: Topology,
-    },
-    /// The USB hub's SuperSpeed function is not enumerated, or nothing the
-    /// host reports identifies it.
-    Unavailable,
-    /// The host's evidence disagrees. No SuperSpeed device is assigned.
-    Ambiguous,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -180,7 +226,7 @@ impl PortDevices {
             }
             let tunnelled = device.topology.port_chain.len() > tunnel.port_chain.len()
                 && below(&device.topology, tunnel);
-            let linked = device.speed.is_superspeed() && direct(device);
+            let linked = is_superspeed(device.speed) && direct(device);
             let name = device
                 .serial_number
                 .as_deref()
@@ -287,7 +333,12 @@ pub fn locate(management: &Topology, devices: Vec<DeviceInfo>) -> Result<Snapsho
         ports: macos::ports()?,
         containers: Vec::new(),
     };
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(target_os = "windows")]
+    let host = Host {
+        ports: Vec::new(),
+        containers: windows::containers(&devices),
+    };
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     let host = Host::default();
     #[cfg(target_os = "windows")]
     let devices = windows::devices(devices);
@@ -311,7 +362,7 @@ fn hub_path(management: &Topology) -> Result<&[u8], Error> {
 const USB2_HUB: (u16, u16) = (0x0424, 0x4206);
 const SUPERSPEED_HUB: (u16, u16) = (0x0424, 0x7206);
 /// Apple Debug USB.
-const DEBUG_USB: (u16, u16) = (0x05ac, 0x1881);
+const DEBUG_USB: (u16, u16) = (restorekit::device::APPLE_VID, restorekit::device::KIS_PID);
 
 /// What the host reports about its USB ports and hubs.
 #[derive(Debug, Default)]
@@ -387,7 +438,7 @@ fn superspeed_hub<'a>(
             let (superspeed, others): (Vec<_>, Vec<_>) = devices
                 .iter()
                 .filter(|d| d.topology != usb2.topology && host.container(&d.topology) == Some(id))
-                .partition(|d| d.speed.is_superspeed());
+                .partition(|d| is_superspeed(d.speed));
             // A second USB 2 hub with this ID would make any pairing a guess.
             match (superspeed.as_slice(), others.as_slice()) {
                 ([], []) => Some(None),
@@ -398,7 +449,7 @@ fn superspeed_hub<'a>(
         None => None,
     };
     let is_superspeed_hub =
-        |d: &UsbDevice| (d.vendor_id, d.product_id) == SUPERSPEED_HUB && d.speed.is_superspeed();
+        |d: &UsbDevice| (d.vendor_id, d.product_id) == SUPERSPEED_HUB && is_superspeed(d.speed);
     let found = match (linked, shared) {
         (Some(a), Some(b)) if a.map(|d| &d.topology) == b.map(|d| &d.topology) => a,
         (Some(found), None) | (None, Some(found)) => found,
@@ -432,14 +483,14 @@ fn group_devices(
     };
     let devices: Vec<_> = devices.into_iter().collect();
     let usb2 = devices.iter().find(|d| {
-        d.topology == hub && (d.vendor_id, d.product_id) == USB2_HUB && !d.speed.is_superspeed()
+        d.topology == hub && (d.vendor_id, d.product_id) == USB2_HUB && !is_superspeed(d.speed)
     });
     let superspeed = match usb2 {
         Some(usb2) => superspeed_hub(usb2, &devices, host),
         None => Err(Companion::Unavailable),
     };
     let upstream_mbps = match superspeed {
-        Ok(found) => found.or(usb2).and_then(|d| d.speed.mbps()),
+        Ok(found) => found.or(usb2).and_then(|d| mbps(d.speed)),
         Err(_) => None,
     };
     // A USB 3 hub numbers each connector's USB 2 and SuperSpeed ports alike.
@@ -464,8 +515,8 @@ fn group_devices(
     });
     for device in devices {
         let matches: Vec<_> = ports.iter().enumerate().filter(|(_, port)| {
-            let usb2 = !device.speed.is_superspeed() && below(&device.topology, &port.usb2);
-            let superspeed = (device.speed.is_superspeed() || device.speed == Speed::Unknown)
+            let usb2 = !is_superspeed(device.speed) && below(&device.topology, &port.usb2);
+            let superspeed = (is_superspeed(device.speed) || device.speed == Speed::Unknown)
                 && matches!(&port.superspeed, Companion::Mapped { topology } if below(&device.topology, topology));
             usb2 || superspeed
         }).map(|(index, _)| index).collect();
@@ -506,16 +557,14 @@ mod tests {
             product: None,
             speed,
             apple: None,
-            #[cfg(target_os = "macos")]
-            macos_attachment: None,
-            #[cfg(not(target_os = "macos"))]
-            device_address: 1,
+            attachment: Attachment::default(),
+            info: None,
         }
     }
 
     fn hub(bus: &str, chain: &[u8], speed: Speed) -> UsbDevice {
         let mut hub = device(bus, chain, speed);
-        (hub.vendor_id, hub.product_id) = if speed.is_superspeed() {
+        (hub.vendor_id, hub.product_id) = if is_superspeed(speed) {
             SUPERSPEED_HUB
         } else {
             USB2_HUB

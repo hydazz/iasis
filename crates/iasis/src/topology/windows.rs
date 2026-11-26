@@ -9,9 +9,12 @@ use std::ffi::{OsStr, OsString};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 
 use nusb::DeviceInfo;
-use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
-    CM_Get_Device_IDW, CM_Get_Parent, CM_LOCATE_DEVNODE_NORMAL, CM_Locate_DevNodeW, CR_SUCCESS,
-    MAX_DEVICE_ID_LEN,
+use windows_sys::Win32::Devices::{
+    DeviceAndDriverInstallation::{
+        CM_Get_DevNode_PropertyW, CM_Get_Device_IDW, CM_Get_Parent, CM_LOCATE_DEVNODE_NORMAL,
+        CM_Locate_DevNodeW, CR_SUCCESS, MAX_DEVICE_ID_LEN,
+    },
+    Properties::{DEVPKEY_Device_ContainerId, DEVPROP_TYPE_GUID},
 };
 
 use super::UsbDevice;
@@ -49,6 +52,47 @@ pub(super) fn devices(devices: Vec<DeviceInfo>) -> Vec<UsbDevice> {
             device
         })
         .collect()
+}
+
+/// The Container ID of each USB hub. Windows takes a hub's from its BOS
+/// descriptor, which both functions of a USB 3 hub report alike, and gives a
+/// hub without one its parent's or a container of its own.
+pub(super) fn containers(devices: &[DeviceInfo]) -> Vec<(Topology, [u8; 16])> {
+    devices
+        .iter()
+        .filter(|device| device.class() == 0x09 && !device.port_chain().is_empty())
+        .filter_map(|device| {
+            let id = container_id(locate(device.instance_id())?)?;
+            let location = Topology {
+                bus: device.bus_id().to_owned(),
+                port_chain: device.port_chain().to_vec(),
+            };
+            Some((location, id))
+        })
+        .collect()
+}
+
+/// The device's Container ID, other than the one Windows gives devices that
+/// belong to no container.
+fn container_id(node: u32) -> Option<[u8; 16]> {
+    const NONE: [u8; 16] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    ];
+    let mut kind = 0;
+    let mut id = [0u8; 16];
+    let mut size = id.len() as u32;
+    // SAFETY: the buffer's length is passed with it.
+    let result = unsafe {
+        CM_Get_DevNode_PropertyW(
+            node,
+            &DEVPKEY_Device_ContainerId,
+            &mut kind,
+            id.as_mut_ptr(),
+            &mut size,
+            0,
+        )
+    };
+    (result == CR_SUCCESS && kind == DEVPROP_TYPE_GUID && size == 16 && id != NONE).then_some(id)
 }
 
 fn below_ancestor(info: &DeviceInfo, located: &HashMap<String, Topology>) -> Option<Topology> {

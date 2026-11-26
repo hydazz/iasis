@@ -1,0 +1,474 @@
+{
+  "diagnostics": {
+    "status": {
+      "uptime_ms": 3600000,
+      "revision": 812,
+      "reset_reason": 0,
+      "watchdog_reason": 0,
+      "retained_update": false,
+      "side_power_enabled": false,
+      "shift_outputs_enabled": false,
+      "brick_input_fault": false,
+      "host_limiter_fault": false,
+      "host_limiter_assertions": 0,
+      "ports": [
+        {
+          "vbus_mv": 30037,
+          "vbus_ok": true,
+          "faults": null,
+          "fusb_device_id": null,
+          "enabled": true,
+          "generation": 7,
+          "attached_ms": 0,
+          "state": "Contract",
+          "orientation": "Cc1",
+          "error": null,
+          "command_id": 4,
+          "command_result": "Acknowledged",
+          "supply": "Off",
+          "restore": null,
+          "pd_source_pdos": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "pd_request": null,
+          "allocated_mw": 68250,
+          "contract_mv": 20000,
+          "contract_ma": 3250,
+          "pd_transition": false,
+          "demand": "Unknown",
+          "fault_sample": null,
+          "recoveries": 0,
+          "pd_write_retries": 3,
+          "hard_resets_sent": 1,
+          "hard_resets_received": 2,
+          "requests_rejected": 4,
+          "debug_actions": {
+            "Listed": [
+              262,
+              1542,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "link": null,
+          "observed": null,
+          "restore_access": "Unavailable",
+          "ecid": 7452288191545372,
+          "request": null,
+          "fetch": null
+        },
+        {
+          "vbus_mv": null,
+          "vbus_ok": false,
+          "faults": null,
+          "fusb_device_id": null,
+          "enabled": false,
+          "generation": 0,
+          "attached_ms": 0,
+          "state": "Disabled",
+          "orientation": null,
+          "error": null,
+          "command_id": 0,
+          "command_result": "Idle",
+          "supply": "Off",
+          "restore": null,
+          "pd_source_pdos": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "pd_request": null,
+          "allocated_mw": 0,
+          "contract_mv": 0,
+          "contract_ma": 0,
+          "pd_transition": false,
+          "demand": "Unknown",
+          "fault_sample": null,
+          "recoveries": 0,
+          "pd_write_retries": 0,
+          "hard_resets_sent": 0,
+          "hard_resets_received": 0,
+          "requests_rejected": 0,
+          "debug_actions": "Pending",
+          "link": null,
+          "observed": null,
+          "restore_access": "Unavailable",
+          "ecid": null,
+          "request": null,
+          "fetch": null
+        },
+        {
+          "vbus_mv": null,
+          "vbus_ok": false,
+          "faults": null,
+          "fusb_device_id": null,
+          "enabled": false,
+          "generation": 0,
+          "attached_ms": 0,
+          "state": "Disabled",
+          "orientation": null,
+          "error": null,
+          "command_id": 0,
+          "command_result": "Idle",
+          "supply": "Off",
+          "restore": null,
+          "pd_source_pdos": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "pd_request": null,
+          "allocated_mw": 0,
+          "contract_mv": 0,
+          "contract_ma": 0,
+          "pd_transition": false,
+          "demand": "Unknown",
+          "fault_sample": null,
+          "recoveries": 0,
+          "pd_write_retries": 0,
+          "hard_resets_sent": 0,
+          "hard_resets_received": 0,
+          "requests_rejected": 0,
+          "debug_actions": "Pending",
+          "link": null,
+          "observed": null,
+          "restore_access": "Unavailable",
+          "ecid": null,
+          "request": null,
+          "fetch": null
+        },
+        {
+          "vbus_mv": null,
+          "vbus_ok": false,
+          "faults": null,
+          "fusb_device_id": null,
+          "enabled": false,
+          "generation": 0,
+          "attached_ms": 0,
+          "state": "Disabled",
+          "orientation": null,
+          "error": null,
+          "command_id": 0,
+          "command_result": "Idle",
+          "supply": "Off",
+          "restore": null,
+          "pd_source_pdos": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "pd_request": null,
+          "allocated_mw": 0,
+          "contract_mv": 0,
+          "contract_ma": 0,
+          "pd_transition": false,
+          "demand": "Unknown",
+          "fault_sample": null,
+          "recoveries": 0,
+          "pd_write_retries": 0,
+          "hard_resets_sent": 0,
+          "hard_resets_received": 0,
+          "requests_rejected": 0,
+          "debug_actions": "Pending",
+          "link": null,
+          "observed": null,
+          "restore_access": "Unavailable",
+          "ecid": null,
+          "request": null,
+          "fetch": null
+        },
+        {
+          "vbus_mv": null,
+          "vbus_ok": false,
+          "faults": null,
+          "fusb_device_id": null,
+          "enabled": false,
+          "generation": 0,
+          "attached_ms": 0,
+          "state": "Disabled",
+          "orientation": null,
+          "error": null,
+          "command_id": 0,
+          "command_result": "Idle",
+          "supply": "Off",
+          "restore": null,
+          "pd_source_pdos": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "pd_request": null,
+          "allocated_mw": 0,
+          "contract_mv": 0,
+          "contract_ma": 0,
+          "pd_transition": false,
+          "demand": "Unknown",
+          "fault_sample": null,
+          "recoveries": 0,
+          "pd_write_retries": 0,
+          "hard_resets_sent": 0,
+          "hard_resets_received": 0,
+          "requests_rejected": 0,
+          "debug_actions": "Pending",
+          "link": null,
+          "observed": null,
+          "restore_access": "Unavailable",
+          "ecid": null,
+          "request": null,
+          "fetch": null
+        }
+      ],
+      "bus_mv": 24030,
+      "thermistor_adc": [
+        2048,
+        1990
+      ],
+      "upstream_fusb_device_id": null,
+      "upstream_cc": null,
+      "upstream_orientation": null,
+      "upstream_error": null,
+      "host_allowance_ma": 0,
+      "host_limit_ma": 0,
+      "ch224_current_50ma": null,
+      "brick_source_pdos": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "brick_requested_mv": 0,
+      "charging_budget_mw": 90000,
+      "i2c_timeouts": 0,
+      "i2c_recoveries": 0,
+      "i2c_isolated": 0,
+      "i2c_root_fault": false,
+      "available_ports": 0,
+      "supply": "Off",
+      "button": null,
+      "restore_decision": null,
+      "host": {
+        "id": 3,
+        "restore_ready": true,
+        "internet_sharing": false
+      },
+      "settings": {
+        "name": "",
+        "brightness": 50
+      },
+      "settings_full": false
+    },
+    "hub": {
+      "bus": "1",
+      "port_chain": [
+        2
+      ]
+    },
+    "upstream_mbps": 10000,
+    "ports": [
+      {
+        "number": 1,
+        "usb2": {
+          "bus": "1",
+          "port_chain": [
+            2,
+            1
+          ]
+        },
+        "superspeed": {
+          "state": "mapped",
+          "topology": {
+            "bus": "1",
+            "port_chain": [
+              3,
+              1
+            ]
+          }
+        },
+        "devices": [
+          {
+            "topology": {
+              "bus": "1",
+              "port_chain": [
+                2,
+                1
+              ]
+            },
+            "vendor_id": 1452,
+            "product_id": 4647,
+            "serial_number": "CPID:8103 ECID:001A79D10E6BC01C",
+            "product": "Apple Mobile Device (DFU Mode)",
+            "speed": "high",
+            "apple": {
+              "mode": "dfu",
+              "model": "MacBookAir10,1",
+              "ecid": "001a79d10e6bc01c"
+            }
+          }
+        ],
+        "assessment": "USB DFU (05ac:1227), ECID 001a79d10e6bc01c. DFU is already present."
+      },
+      {
+        "number": 2,
+        "usb2": {
+          "bus": "1",
+          "port_chain": [
+            2,
+            2
+          ]
+        },
+        "superspeed": {
+          "state": "unavailable"
+        },
+        "devices": [
+          {
+            "topology": {
+              "bus": "1",
+              "port_chain": [
+                2,
+                2
+              ]
+            },
+            "vendor_id": 1452,
+            "product_id": 4737,
+            "serial_number": "000001",
+            "product": "USB 10/100/1000 LAN",
+            "speed": "super_plus",
+            "apple": {
+              "mode": "recovery",
+              "model": null,
+              "ecid": null
+            }
+          }
+        ],
+        "assessment": "No CC attachment."
+      },
+      {
+        "number": 3,
+        "usb2": {
+          "bus": "1",
+          "port_chain": [
+            2,
+            3
+          ]
+        },
+        "superspeed": {
+          "state": "ambiguous"
+        },
+        "devices": [
+          {
+            "topology": {
+              "bus": "1",
+              "port_chain": [
+                2,
+                3
+              ]
+            },
+            "vendor_id": 3034,
+            "product_id": 33107,
+            "serial_number": "000001",
+            "product": "USB 10/100/1000 LAN",
+            "speed": "full",
+            "apple": null
+          },
+          {
+            "topology": {
+              "bus": "1",
+              "port_chain": [
+                2,
+                3,
+                1
+              ]
+            },
+            "vendor_id": 3034,
+            "product_id": 33107,
+            "serial_number": "000001",
+            "product": "USB 10/100/1000 LAN",
+            "speed": "low",
+            "apple": null
+          }
+        ],
+        "assessment": "No CC attachment."
+      },
+      {
+        "number": 4,
+        "usb2": {
+          "bus": "1",
+          "port_chain": [
+            2,
+            4
+          ]
+        },
+        "superspeed": {
+          "state": "unavailable"
+        },
+        "devices": [
+          {
+            "topology": {
+              "bus": "1",
+              "port_chain": [
+                2,
+                4
+              ]
+            },
+            "vendor_id": 3034,
+            "product_id": 33107,
+            "serial_number": "000001",
+            "product": "USB 10/100/1000 LAN",
+            "speed": "super",
+            "apple": null
+          }
+        ],
+        "assessment": "No CC attachment."
+      },
+      {
+        "number": 5,
+        "usb2": {
+          "bus": "1",
+          "port_chain": [
+            2,
+            5
+          ]
+        },
+        "superspeed": {
+          "state": "unavailable"
+        },
+        "devices": [
+          {
+            "topology": {
+              "bus": "1",
+              "port_chain": [
+                2,
+                5
+              ]
+            },
+            "vendor_id": 3034,
+            "product_id": 33107,
+            "serial_number": "000001",
+            "product": "USB 10/100/1000 LAN",
+            "speed": "unknown",
+            "apple": null
+          }
+        ],
+        "assessment": "No CC attachment."
+      }
+    ]
+  }
+}

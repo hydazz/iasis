@@ -52,7 +52,8 @@ impl Supervision {
     }
 
     /// The identity in this file, without making one.
-    pub fn read(file: &Path) -> Self {
+    #[cfg(test)]
+    fn read(file: &Path) -> Self {
         Self::holding(file, load(file))
     }
 

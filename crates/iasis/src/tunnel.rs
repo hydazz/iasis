@@ -11,11 +11,13 @@
 //! port's internet gateway through a socket.
 //!
 //! KIS replies are matched to requests by sequence on shared endpoints, so a
-//! device has one holder at a time. The agent holds a Debug USB device only
-//! while it serves a running Mac behind it and no restore runs on the port.
-//! Otherwise it looks every few seconds, for as long as one read of the
-//! doorbells takes, and leaves the device to RestoreKit: DFU identity reads,
-//! and a restore's libirecovery link for KIS DFU and recovery.
+//! device has one holder at a time, and in the agent that is its tunnel. It
+//! holds a Debug USB device while it serves a running Mac behind it, and
+//! otherwise looks every few seconds, for as long as one read of the
+//! doorbells takes: a Mac in DFU there answers with its identity, which the
+//! tunnel presents on the device. From a job's start on the port to its final
+//! result, relaunches included, the device is the job's: its DFU signal and
+//! its restore's libirecovery link, and the tunnel opens nothing.
 
 mod rsm;
 mod vhci;
@@ -32,7 +34,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, ensure};
-use iasis_protocol::{Port, RestorePhase};
+use iasis_protocol::Port;
 use nix::{
     errno::Errno,
     poll::{PollFd, PollFlags, PollTimeout, poll},
@@ -41,9 +43,9 @@ use nix::{
 use nusb::{DeviceInfo, descriptors::ConfigurationDescriptor};
 
 use crate::{
-    host::Jobs,
-    identity::AppleDevice,
-    topology::{self, Snapshot, Speed, UsbDevice},
+    host::Work,
+    identity::{AppleDevice, AppleMode, Identity, IdentitySource},
+    topology::{self, Attachment, Snapshot, Speed, UsbDevice},
     watch::Watch,
 };
 
@@ -64,7 +66,7 @@ const QUIET: Duration = Duration::from_secs(1);
 const QUIET_WAIT: Duration = Duration::from_millis(40);
 /// At most this much is written to the ring at once.
 const BATCH: usize = 0xf000;
-const DEBUG_USB: (u16, u16) = (0x05ac, 0x1881);
+const DEBUG_USB: (u16, u16) = (restorekit::device::APPLE_VID, restorekit::device::KIS_PID);
 
 /// A tunnelled device the agent presents, for as long as its session lasts.
 pub(crate) struct Session {
@@ -112,9 +114,9 @@ impl Session {
 #[derive(Default)]
 struct State {
     stop: AtomicBool,
-    /// The tunnel has the device's KIS interface claimed.
-    holding: AtomicBool,
     session: Mutex<Option<Arc<Session>>>,
+    /// What a Mac in DFU behind the device said of itself at the last look.
+    identity: Mutex<Option<AppleDevice>>,
 }
 
 struct Handle {
@@ -135,19 +137,19 @@ impl Drop for Handle {
 /// The tunnels of one hub's Debug USB devices.
 pub(crate) struct Tunnels {
     changes: Arc<Watch>,
-    jobs: Jobs,
+    work: Arc<Work>,
     /// Advances when a session starts or ends.
     version: Arc<AtomicU64>,
     sessions: Arc<AtomicU64>,
     /// By the Debug USB enumeration each comes through.
-    tunnels: Mutex<BTreeMap<u64, Handle>>,
+    tunnels: Mutex<BTreeMap<Attachment, Handle>>,
 }
 
 impl Tunnels {
-    pub(crate) fn new(changes: Arc<Watch>, jobs: Jobs) -> Self {
+    pub(crate) fn new(changes: Arc<Watch>, work: Arc<Work>) -> Self {
         Self {
             changes,
-            jobs,
+            work,
             version: Arc::default(),
             sessions: Arc::default(),
             tunnels: Mutex::default(),
@@ -160,7 +162,7 @@ impl Tunnels {
 
     /// Follow each connector whose only device is Debug USB: a Mac behind it
     /// may present its running system there.
-    pub(crate) fn follow(&self, snapshot: &Snapshot, devices: &[DeviceInfo]) {
+    pub(crate) fn follow(&self, snapshot: &Snapshot) {
         let mut wanted = BTreeMap::new();
         for slot in &snapshot.ports {
             let [debug] = slot.devices.as_slice() else {
@@ -169,13 +171,11 @@ impl Tunnels {
             if debug.topology != slot.usb2 || (debug.vendor_id, debug.product_id) != DEBUG_USB {
                 continue;
             }
-            let info = devices.iter().find(|info| {
-                info.bus_id() == debug.topology.bus
-                    && info.port_chain() == debug.topology.port_chain
-                    && info.device_address() == debug.device_address
-            });
-            if let (Some(key), Some(info)) = (enumeration(debug), info) {
-                wanted.insert(key, (slot.port, info.clone(), debug.clone()));
+            if let Some(info) = &debug.info {
+                wanted.insert(
+                    debug.attachment.clone(),
+                    (slot.port, info.clone(), debug.clone()),
+                );
             }
         }
         let mut tunnels = self.tunnels.lock().unwrap();
@@ -201,7 +201,7 @@ impl Tunnels {
             info,
             debug,
             sessions: self.sessions.clone(),
-            jobs: self.jobs.clone(),
+            work: self.work.clone(),
             version: self.version.clone(),
             changes: self.changes.clone(),
         };
@@ -216,17 +216,24 @@ impl Tunnels {
         }
     }
 
-    /// Add each presented device to its connector while the Debug USB
-    /// enumeration it came through is still there.
+    /// Name each Debug USB device a Mac in DFU is behind, and add each
+    /// presented device to its connector, while the Debug USB enumeration
+    /// it came through is still there.
     pub(crate) fn present(&self, snapshot: &mut Snapshot) {
         for (key, handle) in self.tunnels.lock().unwrap().iter() {
+            let slot = &mut snapshot.ports[handle.port.index()];
+            if let Some(apple) = handle.state.identity.lock().unwrap().clone()
+                && let Some(debug) = slot.devices.iter_mut().find(|device| {
+                    (device.vendor_id, device.product_id) == DEBUG_USB && device.attachment == *key
+                })
+            {
+                debug.apple = Some(apple);
+            }
             let Some(session) = handle.state.session.lock().unwrap().clone() else {
                 continue;
             };
-            let slot = &mut snapshot.ports[handle.port.index()];
             let carried = slot.devices.iter().any(|device| {
-                (device.vendor_id, device.product_id) == DEBUG_USB
-                    && enumeration(device) == Some(*key)
+                (device.vendor_id, device.product_id) == DEBUG_USB && device.attachment == *key
             });
             if carried
                 && !slot
@@ -239,32 +246,13 @@ impl Tunnels {
         }
     }
 
-    /// Whether a tunnel has the port's Debug USB device claimed.
-    pub(crate) fn holds(&self, port: Port) -> bool {
-        self.tunnels
-            .lock()
-            .unwrap()
-            .values()
-            .any(|handle| handle.port == port && handle.state.holding.load(Ordering::Relaxed))
-    }
-
     /// The session that presents `device`.
     pub(crate) fn session(&self, device: &UsbDevice) -> Option<Arc<Session>> {
         self.tunnels.lock().unwrap().values().find_map(|handle| {
             let session = handle.state.session.lock().unwrap().clone()?;
-            (session.device.topology == device.topology
-                && session.device.device_address == device.device_address)
-                .then_some(session)
+            (session.device.attachment == device.attachment).then_some(session)
         })
     }
-}
-
-fn enumeration(device: &UsbDevice) -> Option<u64> {
-    topology::linux_usb_id(
-        device.topology.bus.parse().ok()?,
-        device.device_address,
-        &device.topology.port_chain,
-    )
 }
 
 /// Why a look at the device ended without an error.
@@ -284,27 +272,19 @@ struct Tunnel {
     info: DeviceInfo,
     debug: UsbDevice,
     sessions: Arc<AtomicU64>,
-    jobs: Jobs,
+    work: Arc<Work>,
     version: Arc<AtomicU64>,
     changes: Arc<Watch>,
 }
 
 impl Tunnel {
-    /// A restore owns its target's USB from preparation until it is
-    /// confirmed.
-    fn restoring(&self) -> bool {
-        self.jobs.lock().unwrap()[self.port.index()]
-            .as_ref()
-            .is_some_and(|job| {
-                matches!(
-                    job.status.phase,
-                    RestorePhase::Preparing | RestorePhase::Running | RestorePhase::Unconfirmed
-                )
-            })
+    /// A job owns its target's USB from its start until its final result.
+    fn taken(&self) -> bool {
+        self.work.taken(self.port)
     }
 
     fn stopped(&self) -> bool {
-        self.state.stop.load(Ordering::Relaxed) || self.restoring()
+        self.state.stop.load(Ordering::Relaxed) || self.taken()
     }
 
     fn publish(&self, session: Option<Arc<Session>>) {
@@ -321,12 +301,11 @@ impl Tunnel {
     fn run(self) {
         let mut reported = None;
         while !self.state.stop.load(Ordering::Relaxed) {
-            let result = if self.restoring() {
+            let result = if self.taken() {
                 Ok(Ended::Stopped)
             } else {
                 self.serve()
             };
-            self.state.holding.store(false, Ordering::Relaxed);
             self.publish(None);
             let wait = match &result {
                 Ok(Ended::Other) => OTHER,
@@ -344,18 +323,25 @@ impl Tunnel {
         }
     }
 
-    /// Claim the device and serve what is behind it, until it ends.
+    /// Claim the device and serve what is behind it, until it ends. A Mac in
+    /// DFU serves nothing, and gives its identity instead.
     fn serve(&self) -> Result<Ended> {
-        let mut kis = rsm::Kis::open(&self.info)?;
-        self.state.holding.store(true, Ordering::Relaxed);
-        let block = kis.doorbells()?;
+        let Some(_held) = self.work.tunnel(self.port) else {
+            return Ok(Ended::Stopped);
+        };
+        let mut kis = rsm::open(&self.info)?;
+        let block = rsm::doorbells(&mut kis)?;
         let Some((index, _)) = rsm::channels(&block).find(|&(_, kind)| kind == 3) else {
+            self.identify(&mut kis);
             return Ok(Ended::Nothing);
         };
+        self.named(None);
         let channel = rsm::Channel::open(&block, index).context("invalid RSM channel")?;
         let (mut controller, device) = vhci::Controller::open(kis, channel)?;
         // A running Mac. A restore OS is served by its direct device.
-        if device.vendor != 0x05ac || !matches!(device.product, 0x1901..=0x1905) {
+        if restorekit::device::describe(device.vendor, device.product, "").mode
+            != restorekit::UsbMode::Booted
+        {
             controller.close();
             return Ok(Ended::Other);
         }
@@ -378,6 +364,43 @@ impl Tunnel {
         Ok(Ended::Stopped)
     }
 
+    /// Read what a Mac in DFU says of itself. A read that fails says nothing
+    /// new.
+    fn identify(&self, kis: &mut restorekit::kis::Kis) {
+        use restorekit::{device, kis::Read};
+        match kis
+            .get_info()
+            .map(|block| restorekit::kis::parse_info(&block))
+        {
+            Ok(Read::Serial(serial)) => {
+                let described = device::describe(device::APPLE_VID, device::DFU_PID, &serial);
+                if let (Some(ecid), Some(identity)) = (described.ecid, described.identity) {
+                    self.named(Some(AppleDevice {
+                        mode: AppleMode::KisDfu,
+                        model: identity.model.map(|model| model.identifier.to_owned()),
+                        identity: Identity::Known {
+                            ecid,
+                            source: IdentitySource::Kis,
+                        },
+                        hardware: Some((identity.cpid, identity.bdid)),
+                    }));
+                }
+            }
+            Ok(Read::NotInDfu) => self.named(None),
+            Ok(Read::Failed) | Err(_) => {}
+        }
+    }
+
+    fn named(&self, identity: Option<AppleDevice>) {
+        let mut known = self.state.identity.lock().unwrap();
+        if *known != identity {
+            *known = identity;
+            drop(known);
+            self.version.fetch_add(1, Ordering::Relaxed);
+            self.changes.changed();
+        }
+    }
+
     fn session(&self, device: &vhci::Device, network: bool) -> Session {
         let id = self.sessions.fetch_add(1, Ordering::Relaxed) + 1;
         let mut topology = self.debug.topology.clone();
@@ -390,6 +413,8 @@ impl Tunnel {
             device.name.as_deref(),
             device.serial.as_deref(),
         );
+        // Each session is a new enumeration.
+        let attachment = Attachment::presented(&topology, (id % 255 + 1) as u8);
         Session {
             id,
             device: UsbDevice {
@@ -400,8 +425,8 @@ impl Tunnel {
                 product: device.name.clone(),
                 speed: Speed::High,
                 apple,
-                // Each session is a new enumeration.
-                device_address: (id % 255 + 1) as u8,
+                attachment,
+                info: None,
             },
             network,
             gateway: Mutex::new(None),
@@ -522,13 +547,20 @@ mod tests {
             product: None,
             speed: Speed::High,
             apple: AppleDevice::from_usb(0x05ac, 0x1881, 0x400, None, None),
-            device_address: address,
+            attachment: Attachment::presented(
+                &Topology {
+                    bus: "003".into(),
+                    port_chain: vec![3, 2],
+                },
+                address,
+            ),
+            info: None,
         }
     }
 
     #[test]
     fn a_tunnelled_mac_names_the_port_while_its_debug_usb_enumeration_lasts() {
-        let tunnels = Tunnels::new(Arc::default(), Jobs::default());
+        let tunnels = Tunnels::new(Arc::default(), Arc::new(Work::new(Arc::default())));
         let port = Port::ALL[1];
         let debug = debug_usb(41);
         let mut device = debug.clone();
@@ -537,7 +569,7 @@ mod tests {
         device.serial_number = Some("LGDMX57L7X".into());
         device.apple =
             AppleDevice::from_usb(0x05ac, 0x1905, 0x1705, Some("Mac"), Some("LGDMX57L7X"));
-        device.device_address = 2;
+        device.attachment = Attachment::presented(&device.topology, 2);
         let state = Arc::new(State::default());
         *state.session.lock().unwrap() = Some(Arc::new(Session {
             id: 1,
@@ -546,7 +578,7 @@ mod tests {
             gateway: Mutex::new(None),
         }));
         tunnels.tunnels.lock().unwrap().insert(
-            enumeration(&debug).unwrap(),
+            debug.attachment.clone(),
             Handle {
                 port,
                 state,

@@ -582,6 +582,12 @@
       "name": "Apple Devices",
       "url": "https://apps.microsoft.com/detail/9NP83LWLPZ9K",
       "reason": "Restoring or reviving a running iPhone or iPad needs Apple Devices."
+    },
+    {
+      "id": "usbmuxd",
+      "name": "usbmuxd",
+      "url": null,
+      "reason": "The system usbmuxd stopped answering, so restores can't reach their targets. Restart it with `sudo systemctl restart usbmuxd`."
     }
   ]
 }

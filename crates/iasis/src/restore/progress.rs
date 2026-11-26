@@ -17,7 +17,7 @@ pub(super) trait Stages: Sized {
     fn complete(&mut self);
     fn advance(&mut self, name: &str, percent: f64);
     /// A worker's step record: the restore step ID and its fraction done.
-    fn worker_step(&mut self, fields: &str) -> Option<()>;
+    fn worker_step(&mut self, id: u32, fraction: f32) -> Option<()>;
 }
 
 impl Stages for Progress {
@@ -40,13 +40,11 @@ impl Stages for Progress {
         self.percent = self.percent.max((percent as u8).min(99));
     }
 
-    fn worker_step(&mut self, fields: &str) -> Option<()> {
-        let mut fields = fields.split_whitespace();
-        let id: u32 = fields.next()?.parse().ok()?;
-        let fraction: f64 = fields.next()?.parse().ok()?;
-        if fields.next().is_some() || !(0.0..=1.0).contains(&fraction) {
+    fn worker_step(&mut self, id: u32, fraction: f32) -> Option<()> {
+        if !(0.0..=1.0).contains(&fraction) {
             return None;
         }
+        let fraction = f64::from(fraction);
 
         if self.steps.is_empty() {
             self.steps = MILESTONES.iter().map(|step| step.0.into()).collect();
@@ -83,26 +81,26 @@ mod tests {
     #[test]
     fn interleaved_component_transfers_do_not_restart_or_finish_a_job() {
         let mut progress = Progress::starting();
-        for (fields, name, percent) in [
-            ("0 0.8", "Detecting Device", 1),
-            ("1 1.0", "Preparing Device", 10),
-            ("4 1.0", "Flashing Firmware", 10),
-            ("7 1.0", "Sending Image", 10),
-            ("2 0.5", "Sending Filesystem", 45),
-            ("6 0.5", "Updating Firmware", 45),
-            ("7 0.01", "Sending Image", 45),
-            ("7 1.0", "Sending Image", 45),
-            ("2 0.3", "Sending Filesystem", 45),
-            ("2 1", "Sending Filesystem", 80),
-            ("3 1", "Verifying Filesystem", 95),
-            ("7 1.0", "Sending Image", 95),
-            ("9 1.0", "Stage 9", 95),
+        for (id, fraction, name, percent) in [
+            (0, 0.8, "Detecting Device", 1),
+            (1, 1.0, "Preparing Device", 10),
+            (4, 1.0, "Flashing Firmware", 10),
+            (7, 1.0, "Sending Image", 10),
+            (2, 0.5, "Sending Filesystem", 45),
+            (6, 0.5, "Updating Firmware", 45),
+            (7, 0.01, "Sending Image", 45),
+            (7, 1.0, "Sending Image", 45),
+            (2, 0.3, "Sending Filesystem", 45),
+            (2, 1.0, "Sending Filesystem", 80),
+            (3, 1.0, "Verifying Filesystem", 95),
+            (7, 1.0, "Sending Image", 95),
+            (9, 1.0, "Stage 9", 95),
         ] {
-            assert_eq!(progress.worker_step(fields), Some(()));
+            assert_eq!(progress.worker_step(id, fraction), Some(()));
             assert_eq!((progress.name.as_str(), progress.percent), (name, percent));
         }
-        for fields in ["2 NaN", "2 inf", "2 1.1", "2 -0.1", "2 1.0 extra", "2"] {
-            assert_eq!(progress.worker_step(fields), None);
+        for fraction in [f32::NAN, f32::INFINITY, 1.1, -0.1] {
+            assert_eq!(progress.worker_step(2, fraction), None);
             assert_eq!((progress.name.as_str(), progress.percent), ("Stage 9", 95));
         }
         assert_eq!((progress.steps.len(), progress.step), (4, 3));

@@ -17,7 +17,6 @@ clap = { version = "4.6", features = ["derive"] }
 ctrlc = { version = "3.5", features = ["termination"] }
 iasis-api.workspace = true
 iasis-protocol.workspace = true
-iasis-pd.workspace = true
 indicatif = { version = "0.18", default-features = false, features = ["unicode-width"] }
 keepawake = "0.6.1"
 log = { version = "0.4", features = ["std"] }
@@ -29,13 +28,23 @@ tempfile = "3.27.0"
 thiserror = "2.0"
 zeroize = "1"
 zip = { version = "9.1.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
-ureq = { version = "3", features = ["platform-verifier"] }
-sha2 = "0.11.1"
+sha2 = "0.10"
 restorekit.workspace = true
+restorekit-sys.workspace = true
+reqwest = { version = "0.12", default-features = false, features = [
+  "blocking",
+  "rustls-tls-native-roots",
+] }
 futures-core = "0.3"
 picoboot = { version = "0.4.0", default-features = false }
 picoboot-nusb = { version = "0.1.0", default-features = false, features = ["smol"] }
 pollster = "1.0"
+process-wrap = { version = "11.0.0", default-features = false, features = [
+  "job-object",
+  "kill-on-drop",
+  "process-group",
+  "std",
+] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
@@ -56,14 +65,12 @@ nix = { version = "0.32", features = [
 pcap = "2.5"
 pktkit = { version = "=0.1.12", features = ["dhcp", "l2adapter", "slirp"] }
 
-[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
-restorekit-sys.workspace = true
-
 [target.'cfg(target_os = "windows")'.dependencies]
 uds_windows = "1.2"
 windows-service = "0.8"
 windows-sys = { version = "0.61", features = [
   "Win32_Devices_DeviceAndDriverInstallation",
+  "Win32_Devices_Properties",
   "Win32_Foundation",
   "Win32_Security",
   "Win32_Security_Authorization",
@@ -77,7 +84,7 @@ copyright = "hydazz"
 license-file = ["../../LICENSE", "0"]
 extended-description = "The iasis CLI and the iasisd agent. The console user and members of the iasis group can use the agent."
 section = "utils"
-depends = "$auto, usbmuxd, systemd | systemd-standalone-sysusers | systemd-sysusers"
+depends = "$auto, udev, usbmuxd, systemd | systemd-standalone-sysusers | systemd-sysusers"
 recommends = "polkitd"
 maintainer-scripts = "debian/"
 assets = [

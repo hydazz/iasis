@@ -7,7 +7,8 @@ use core_foundation::{
 };
 use io_kit_sys::{
     IOIteratorNext, IOObjectRelease, IORegistryEntryCreateCFProperty, IORegistryEntryGetPath,
-    IOServiceGetMatchingServices, IOServiceMatching, types::io_object_t,
+    IOServiceGetMatchingService, IOServiceGetMatchingServices, IOServiceMatching,
+    types::io_object_t,
 };
 
 use super::HostPort;
@@ -22,6 +23,23 @@ impl Drop for Object {
             IOObjectRelease(self.0);
         }
     }
+}
+
+pub(crate) fn host_serial() -> Option<&'static str> {
+    static SERIAL: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    SERIAL
+        .get_or_init(|| {
+            let platform = unsafe {
+                IOServiceGetMatchingService(
+                    0,
+                    IOServiceMatching(c"IOPlatformExpertDevice".as_ptr()),
+                )
+            };
+            (platform != 0)
+                .then(|| Object(platform))
+                .and_then(|entry| string_property(&entry, "IOPlatformSerialNumber"))
+        })
+        .as_deref()
 }
 
 pub(super) fn ports() -> io::Result<Vec<HostPort>> {

@@ -9,7 +9,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{images::Store, restore::dfu_hardware, topology::UsbDevice};
+use crate::{images::Store, topology::UsbDevice};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct DeviceModel {
@@ -24,16 +24,9 @@ impl DeviceModel {
         };
         Self {
             identifier: apple.model.clone().filter(|name| !name.is_empty()),
-            hardware: match apple.identity {
-                super::Identity::Known {
-                    source: super::IdentitySource::Kis { chip, board },
-                    ..
-                } => Some((u32::from(chip), u32::from(board))),
-                _ => device
-                    .serial_number
-                    .as_deref()
-                    .and_then(|s| dfu_hardware(s).ok()),
-            },
+            hardware: apple
+                .hardware
+                .map(|(chip, board)| (u32::from(chip), u32::from(board))),
         }
     }
 

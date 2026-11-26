@@ -1,6 +1,6 @@
 # Agent socket
 
-`iasisd` serves its clients on a local Unix socket, which Windows has too: the `iasis` command line, the Mac app and any other client. This crate defines the messages, and [`fixtures/`](fixtures) holds an example of each, with every field set and every value of every enumeration. A client's models read each fixture and write it back unchanged; the Mac app tests this. After a change to the messages, `IASIS_FIXTURES=write cargo test -p iasis-api` rewrites the fixtures.
+`iasisd` serves its clients on a local Unix socket, which Windows has too: the `iasis` command line, the Mac app and any other client. This crate defines the messages, and [`fixtures/`](fixtures) holds an example of each, with every field set and every value of every enumeration. A client's models read each fixture and write it back unchanged; the Mac app tests this. `diagnostics.json` holds the `diagnostics` reply, which only the command line reads. After a change to the messages, `IASIS_FIXTURES=write cargo test -p iasis-api` rewrites the fixtures.
 
 | Agent                            | Socket                                                     | Whom the agent serves                                                      |
 | -------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------- |
@@ -24,8 +24,8 @@ A client writes requests and reads replies as JSON, one to a line. A request is 
 | `plan`               | `hubs`                   | Reply with what a restore would install on each target               |
 | `restore`            | `hubs`, `latest`         | Erase and restore the confirmed attachments on those hubs            |
 | `revive`             | `hubs`, `latest`         | Repair the confirmed attachments on those hubs and keep their data   |
-| `dfu`                | `hub`, `port`            | Send DFU                                                             |
-| `reboot`             | `hub`, `port`            | Send a reboot                                                        |
+| `dfu`                | `hubs`                   | Signal the selected attachments into DFU                             |
+| `reboot`             | `hubs`                   | Signal the selected attachments to restart                           |
 | `power`              | `hub`, `port`, `on`      | Enable or disable a port                                             |
 | `debug_usb`          | `hub`, `port`, `on`      | Carry the target's Apple Debug USB on its USB 2 pair, or take it off |
 | `brightness`         | `hub`, `percent`         | Save one hub's light level                                           |
@@ -39,14 +39,15 @@ A client writes requests and reads replies as JSON, one to a line. A request is 
 | `import`             | `name`, `bytes`          | Check the IPSW archive sent and keep it in the store as `name`       |
 | `remove`             | `image`                  | Delete an image by its `id`, or cancel its download                  |
 | `catalog`            |                          | Reply with every model the store can fetch images for                |
+| `diagnostics`        | `hub`                    | Reply with what the agent reads from the hub and finds on its USB    |
 
 `hub` is the serial as sixteen hexadecimal digits, and ports are numbered 1 to 5.
 
 A request with `bytes` is followed on the connection by exactly that many bytes of the file it sends, and the next request comes after them. The agent reads them as they arrive and keeps only what it checks: an imported archive enters the store whole, under its name, once every member's checksum matches. A refused upload is answered with the reason, and the agent then closes the connection.
 
-A reply is `"ok"`, `{"error": "…"}`, `{"state": {…}}`, to `catalog` `{"catalog": […]}` with each model's `identifier` and `name`, to `releases` `{"releases": […]}` with each release's `os`, `version`, `build` and `bytes`, to `plan` `{"plan": […]}`, or to `export_supervision` `{"supervision": "…"}` with the archive in base64. After `watch` the connection carries only states.
+A reply is `"ok"`, `{"error": "…"}`, `{"state": {…}}`, to `catalog` `{"catalog": […]}` with each model's `identifier` and `name`, to `releases` `{"releases": […]}` with each release's `os`, `version`, `build` and `bytes`, to `plan` `{"plan": […]}`, to `export_supervision` `{"supervision": "…"}` with the archive in base64, or to `diagnostics` `{"diagnostics": {…}}`. After `watch` the connection carries only states.
 
-**A `restore` request erases its targets with no further confirmation.** A client asks its user first. Each entry in `hubs` names a `hub`, its `session` and its `targets`, copied from the state the user reviewed. Each target has its `port`, `generation` and the port's `ecid` when it has one; an unidentified target is selected by its attachment. The agent checks every hub before it asks any: a changed session, attachment or ECID refuses the whole request, and the client confirms again.
+**A `restore` request erases its targets with no further confirmation.** A client asks its user first. Each entry in `hubs` names a `hub`, its `session` and its `targets`, copied from the state the user reviewed. Each target has its `port`, `generation` and the port's `ecid` when it has one; an unidentified target is selected by its attachment. The agent checks every hub before it asks any: a changed session, attachment or ECID refuses the whole request, as does a target it would not restore now, named by its port and device with the reason, and the client confirms again. `dfu` and `reboot` select and refuse their targets the same way.
 
 A restore takes, for each target, the newest image in the store that Apple still signs. With `latest` true it takes the newest release Apple signs, fetched first if the store lacks it. `plan` says beforehand what there is to choose from: each entry has the `hub`, the `port` and an `offer`, which is null while the agent does not know the target's model. An offer has the `latest` release Apple signs and the newest `held` image that fits, each a release or null, and a `problem` when the catalog could not be asked. A client asks its user only when `held` is older than `latest`.
 
@@ -55,6 +56,8 @@ To follow a restore or revive, `watch` on the connection that sent it. The state
 ```sh
 printf '{"op":"state"}\n' | nc -U /run/iasis/agent.sock
 ```
+
+`diagnostics` reads the hub and the host's USB when it is asked, for a person looking into a problem. Its `status` is the hub's own status as IasisOS reports it, in the hub protocol's terms, which change with IasisOS: voltages, raw thermistor counts, faults, PD counters and what the hub keeps of each port. `hub` is where the hub's USB 2 hub sits, as a `bus` and `port_chain`, and `upstream_mbps` the rate to the host. Each of its `ports` has its `number`, its `usb2` path, its `superspeed` companion (`state` `mapped` with its `topology`, `unavailable` or `ambiguous`), the `devices` the host enumerates there, and the agent's `assessment` of the port as a sentence. Each device has its `topology`, `vendor_id`, `product_id`, `serial_number`, `product`, `speed` (`unknown`, `low`, `full`, `high`, `super`, `super_plus`) and, for an Apple device, `apple`: its `mode`, `model` and `ecid`.
 
 ## State
 
@@ -92,7 +95,7 @@ Each port has:
 | `link`                         | USB link: `usb2`, `usb3`, `usb` for unknown speed, or null                                                                    |
 | `power`                        | PD contract or default USB allowance with `source` (`pd` or `usb`), `millivolts` and operating `milliamps`, or null           |
 | `allocated_mw`                 | Power supply capacity committed to the port, including voltage tolerance and the USB starting allowance                       |
-| `short`                        | The target reported a Capability Mismatch on its highest-power offer                                                          |
+| `short`                        | The target would take more power than the charging pool lets its port offer                                                   |
 | `fault`                        | Why the port faulted, in the words the hub's display uses, or null                                                            |
 | `dfu`, `reboot`, `restore`     | The actions the target would take now. A target that can be restored can be revived                                           |
 | `enabled`                      | Port power is enabled                                                                                                         |
@@ -120,12 +123,12 @@ The hub drops a job when its target leaves, which a restored target does by rest
 | `error`                  | Why it could not be fetched, or null                   |
 | `path`                   | The archive's file once it is in the store, or null    |
 | `fetched`                | It came from Apple's catalog rather than from a file   |
-| `in_use`                 | A restore is reading it, so `remove` refuses it        |
+| `in_use`                 | A restore is reading it; `remove` takes it out after   |
 
 Archives for different models share version and build numbers, so only the `id` names one.
 
 `sharing.enabled` is the saved USB Internet Sharing setting. Each entry in `sharing.ports` names a `hub` and `port`; `active` means the port's gateway is running. A `problem` on the sharing state or on a port describes a failure.
 
-Each entry in `missing` has an `id`, the `name` of what to install, a `url` to get it from and a `reason`, a sentence saying what can't be done without it. The agent looks again every few seconds, so installing it takes effect without a restart. On Windows, Apple Devices or iTunes brings Apple's service, without which the host can't take a running iPhone or iPad into recovery to restore or revive it.
+Each entry in `missing` has an `id`, the `name` of what to install or fix, a `url` to get it from (null when the `reason` says what to do) and a `reason`, a sentence saying what can't be done without it. The agent looks again every few seconds, so installing or fixing it takes effect without a restart. On Windows, Apple Devices or iTunes brings Apple's service, without which the host can't take a running iPhone or iPad into recovery to restore or revive it. On Linux, a system usbmuxd that takes connections and stops answering is one, with no `url`: restores reach restore mode and running devices through it.
 
 `supervision` is the identity the host pairs with as the supervisor of iPhones and iPads that list its certificate: the certificate's common `name` and the `certificate` in base64 DER, for an enrollment profile's supervising host certificates. A `problem` says why the host has no usable identity. `import_supervision` and `export_supervision` carry the identity, private key included, in a PKCS #12 archive in base64, encrypted with `password`.

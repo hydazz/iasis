@@ -25,7 +25,9 @@ use std::{
 use anyhow::{Context, Result, bail, ensure};
 use nusb::descriptors::{ConfigurationDescriptor, TransferType};
 
-use super::rsm::{self, Channel, Kis};
+use restorekit::kis::Kis;
+
+use super::rsm::{self, Channel};
 
 const COMMANDS: u8 = 0x80;
 const EVENTS: u8 = 0x81;

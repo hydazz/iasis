@@ -13,8 +13,11 @@ use crate::topology::{Snapshot, UsbDevice};
 #[serde(rename_all = "snake_case")]
 pub enum IdentitySource {
     UsbSerial,
-    Kis { chip: u16, board: u8 },
+    Kis,
     Bos,
+    /// What a running system reported over RemoteXPC service discovery.
+    #[cfg(target_os = "macos")]
+    ServiceDiscovery,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -22,7 +25,6 @@ pub enum IdentitySource {
 pub enum Identity {
     Known { ecid: u64, source: IdentitySource },
     Missing,
-    Invalid { reason: String },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -30,6 +32,8 @@ pub struct AppleDevice {
     pub mode: AppleMode,
     pub model: Option<String>,
     pub identity: Identity,
+    /// The chip and board IDs, from a DFU or recovery serial or a KIS read.
+    pub hardware: Option<(u16, u8)>,
 }
 
 impl AppleDevice {
@@ -40,10 +44,10 @@ impl AppleDevice {
         }
     }
 
-    /// What an Apple device's descriptors say: its mode from the product ID,
-    /// its ECID from the serial where the mode carries one, and, for a running
-    /// system or restore OS, its model from the product name and release
-    /// number.
+    /// What an Apple device's descriptors say, as RestoreKit reads its IDs
+    /// and serial: its mode, and the ECID, chip and board its serial carries.
+    /// A running system or restore OS also names its model by its product
+    /// name and release number.
     pub(crate) fn from_usb(
         vendor: u16,
         product: u16,
@@ -51,60 +55,34 @@ impl AppleDevice {
         name: Option<&str>,
         serial: Option<&str>,
     ) -> Option<Self> {
-        if vendor != 0x05ac {
-            return None;
-        }
-        let mode = match product {
-            0x1227 => AppleMode::Dfu,
-            0xf014 => AppleMode::PortDfu,
-            0x1280..=0x1283 => AppleMode::Recovery,
-            0x1881 => AppleMode::Kis,
-            // Restore OS, on a Mac, iPhone or iPad alike.
-            0x12ac => AppleMode::Restored,
-            // A running iPhone or iPad.
-            0x1290..=0x12af => AppleMode::Normal,
-            // A running Mac, by model family: Mac mini, MacBook Pro, MacBook
-            // Air, iMac, then every MacNN,N.
-            0x1901..=0x1905 => AppleMode::Normal,
-            _ => return None,
+        use restorekit::{UsbMode, device};
+        let described = device::describe(vendor, product, serial.unwrap_or_default());
+        let mode = match described.mode {
+            UsbMode::Dfu => AppleMode::Dfu,
+            UsbMode::PortDfu => AppleMode::PortDfu,
+            UsbMode::Kis => AppleMode::Kis,
+            UsbMode::Recovery => AppleMode::Recovery,
+            UsbMode::Restore => AppleMode::Restored,
+            UsbMode::Booted | UsbMode::Mobile => AppleMode::Normal,
+            UsbMode::Wtf | UsbMode::Billboard | UsbMode::Other => return None,
         };
-        // Windows reports string descriptors with their trailing NULs.
-        let serial = serial.map(|serial| serial.trim_end_matches('\0'));
-        let (identity, model) = match mode {
-            AppleMode::Dfu | AppleMode::PortDfu | AppleMode::Recovery => {
-                (serial.map_or(Identity::Missing, parse_ecid), None)
-            }
-            AppleMode::Restored | AppleMode::Normal => (
-                serial
-                    .and_then(chip_ecid)
-                    .map_or(Identity::Missing, |ecid| Identity::Known {
-                        ecid,
-                        source: IdentitySource::UsbSerial,
-                    }),
-                name.and_then(|name| product_type(name, release)),
-            ),
-            AppleMode::Kis | AppleMode::KisDfu => (Identity::Missing, None),
-        };
+        let model = matches!(mode, AppleMode::Restored | AppleMode::Normal)
+            .then(|| product_type(name?, release))
+            .flatten();
         Some(Self {
             mode,
-            identity,
             model,
+            identity: described
+                .ecid
+                .map_or(Identity::Missing, |ecid| Identity::Known {
+                    ecid,
+                    source: IdentitySource::UsbSerial,
+                }),
+            hardware: described
+                .identity
+                .map(|identity| (identity.cpid, identity.bdid)),
         })
     }
-}
-
-/// The ECID in the serial of a restore OS (`CPID-ECID`) or a running iPhone or
-/// iPad (the same digits without the dash).
-fn chip_ecid(serial: &str) -> Option<u64> {
-    let ecid = match serial.split_once('-') {
-        Some((chip, ecid)) if chip.len() == 8 => ecid,
-        None if serial.len() == 24 => &serial[8..],
-        _ => return None,
-    };
-    (ecid.len() == 16 && serial.bytes().all(|b| b == b'-' || b.is_ascii_hexdigit()))
-        .then(|| u64::from_str_radix(ecid, 16).ok())
-        .flatten()
-        .filter(|&ecid| ecid != 0)
 }
 
 /// The model identifier a running system or restore OS gives as its product
@@ -133,45 +111,6 @@ pub fn mode_name(mode: AppleMode) -> &'static str {
         AppleMode::Recovery => "recovery",
         AppleMode::Restored => "restore service",
         AppleMode::Normal => "booted",
-    }
-}
-
-fn parse_ecid(serial: &str) -> Identity {
-    let fields: Vec<_> = serial
-        .split_ascii_whitespace()
-        .filter_map(|token| token.strip_prefix("ECID:"))
-        .collect();
-    let [value] = fields.as_slice() else {
-        return if fields.is_empty() {
-            Identity::Missing
-        } else {
-            Identity::Invalid {
-                reason: "multiple ECID fields in USB serial".into(),
-            }
-        };
-    };
-    let value = value
-        .strip_prefix("0x")
-        .or_else(|| value.strip_prefix("0X"))
-        .unwrap_or(value);
-    let ecid = if !value.is_empty()
-        && value.len() <= 16
-        && value.bytes().all(|byte| byte.is_ascii_hexdigit())
-    {
-        u64::from_str_radix(value, 16)
-            .ok()
-            .filter(|ecid| *ecid != 0)
-    } else {
-        None
-    };
-    match ecid {
-        Some(ecid) => Identity::Known {
-            ecid,
-            source: IdentitySource::UsbSerial,
-        },
-        None => Identity::Invalid {
-            reason: "USB serial ECID is not a nonzero 64-bit hexadecimal value".into(),
-        },
     }
 }
 
@@ -288,7 +227,8 @@ fn matching_ports(snapshot: &Snapshot, ecid: u64) -> Vec<Port> {
 
 /// Name each masked port's target from what its descriptors leave out: the
 /// identity of one on Apple Debug USB, read over KIS, and the ECID of a running
-/// system without it in its serial, read from its BOS.
+/// system without it in its serial, read from its BOS or, on macOS, from what
+/// it reported to `remoted`.
 pub(crate) fn query(snapshot: &mut Snapshot, mask: u8) {
     crate::native::identify(snapshot, mask);
 }
@@ -335,10 +275,8 @@ pub(crate) mod tests {
             product: None,
             speed: Speed::High,
             apple: AppleDevice::from_usb(0x05ac, pid, 0, None, serial.as_deref()),
-            #[cfg(target_os = "macos")]
-            macos_attachment: None,
-            #[cfg(not(target_os = "macos"))]
-            device_address: 1,
+            attachment: crate::topology::Attachment::default(),
+            info: None,
         }
     }
 
@@ -397,33 +335,43 @@ pub(crate) mod tests {
         assert_eq!(product_type("Mac", 0), None);
         assert_eq!(product_type("Mac", 0x1a03), None);
         assert_eq!(product_type("Mac 2", 0x1703), None);
-        assert_eq!(chip_ecid("00008101-0000000000000000"), None);
-        assert_eq!(chip_ecid("0000810100146922-21E0801E"), None);
+        assert_eq!(
+            read(0x12ac, 0x1318, "iPad", "00008101-0000000000000000").2,
+            None
+        );
+        assert_eq!(
+            read(0x12ac, 0x1318, "iPad", "0000810100146922-21E0801E").2,
+            None
+        );
     }
 
     #[test]
-    fn parses_iboot_ecid_fields_without_partial_or_duplicate_acceptance() {
-        assert_eq!(
-            parse_ecid("CPID:8103 CPRV:11 ECID:001234567890ABCD IBFL:3C"),
-            Identity::Known {
-                ecid: 0x001234567890abcd,
-                source: IdentitySource::UsbSerial
-            }
-        );
-        assert_eq!(parse_ecid("00008103-001234567890ABCD"), Identity::Missing);
-        assert_eq!(parse_ecid("XECID:ABCD"), Identity::Missing);
+    fn a_dfu_serial_gives_the_ecid_chip_and_board_and_nothing_partial() {
+        let dfu = |serial| AppleDevice::from_usb(0x05ac, 0x1227, 0, None, Some(serial)).unwrap();
+        let read = dfu("CPID:8103 CPRV:11 BDID:22 ECID:001234567890ABCD IBFL:3C");
+        assert_eq!(read.ecid(), Some(0x001234567890abcd));
+        assert_eq!(read.hardware, Some((0x8103, 0x22)));
         for serial in [
-            "ECID:",
-            "ECID:0",
+            "CPID:8103 BDID:22 ECID:0",
+            "CPID:8103 BDID:22",
             "ECID:123G",
-            "ECID:1234567890abcdef0",
-            "ECID:1 ECID:2",
+            "",
         ] {
-            assert!(
-                matches!(parse_ecid(serial), Identity::Invalid { .. }),
-                "{serial}"
-            );
+            assert_eq!(dfu(serial).ecid(), None, "{serial}");
         }
+        // Port DFU packs the Mac's chip and board into its BDID.
+        let port = AppleDevice::from_usb(
+            0x05ac,
+            0xf014,
+            0,
+            None,
+            Some("CPID:1612 BDID:0E813200 ECID:001A2B3C4D5E6F70"),
+        )
+        .unwrap();
+        assert_eq!(
+            (port.mode, port.hardware),
+            (AppleMode::PortDfu, Some((0x8132, 0x0e)))
+        );
     }
 
     #[test]
@@ -447,6 +395,7 @@ pub(crate) mod tests {
                 ecid: 42,
                 source: IdentitySource::UsbSerial,
             },
+            hardware: None,
         });
         assert_eq!(
             target.observe(9, &snapshot),

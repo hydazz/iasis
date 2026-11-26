@@ -1,11 +1,16 @@
 //! An example of every message, with every field set and every variant of
 //! every enumeration used, kept in `fixtures/`. A client decodes and encodes
 //! each and gets the same JSON back, so nothing in the contract escapes it.
-//! `IASIS_FIXTURES=write cargo test -p iasis-api` rewrites the files.
+//! The `diagnostics` reply, which carries the hub's own status, has a file
+//! of its own. `IASIS_FIXTURES=write cargo test -p iasis-api` rewrites the
+//! files.
 
 use std::{env, fs, path::Path};
 
-use iasis_protocol::{AppleMode, Hue, Light, Port, RestorePhase};
+use iasis_protocol::{
+    AppleMode, CommandResult, DebugActions, HostSession, Hue, Light, Orientation, Port, PortState,
+    RestorePhase, Status,
+};
 use serde::Serialize;
 
 use super::*;
@@ -295,12 +300,23 @@ fn state() -> State {
             certificate: Some("MIIBszCCAVmgAwIBAgIIb3Vy".into()),
             problem: Some("supervision.pem: unusable supervision identity: no certificate".into()),
         },
-        missing: vec![Prerequisite {
-            id: "apple-devices".into(),
-            name: "Apple Devices".into(),
-            url: "https://apps.microsoft.com/detail/9NP83LWLPZ9K".into(),
-            reason: "Restoring or reviving a running iPhone or iPad needs Apple Devices.".into(),
-        }],
+        missing: vec![
+            Prerequisite {
+                id: "apple-devices".into(),
+                name: "Apple Devices".into(),
+                url: Some("https://apps.microsoft.com/detail/9NP83LWLPZ9K".into()),
+                reason: "Restoring or reviving a running iPhone or iPad needs Apple Devices."
+                    .into(),
+            },
+            Prerequisite {
+                id: "usbmuxd".into(),
+                name: "usbmuxd".into(),
+                url: None,
+                reason: "The system usbmuxd stopped answering, so restores can't reach their \
+                     targets. Restart it with `sudo systemctl restart usbmuxd`."
+                    .into(),
+            },
+        ],
     }
 }
 
@@ -333,12 +349,10 @@ fn requests() -> Vec<Request> {
             latest: false,
         },
         Request::Dfu {
-            hub: hub(),
-            port: 2,
+            hubs: vec![selection()],
         },
         Request::Reboot {
-            hub: hub(),
-            port: 2,
+            hubs: vec![selection()],
         },
         Request::Power {
             hub: hub(),
@@ -385,6 +399,7 @@ fn requests() -> Vec<Request> {
             image: "26B131-UniversalMac_27.2.1_26B131_Restore.ipsw".into(),
         },
         Request::Catalog,
+        Request::Diagnostics { hub: hub() },
     ]
 }
 
@@ -430,6 +445,118 @@ fn replies() -> Vec<Reply> {
     ]
 }
 
+fn diagnostics() -> Diagnostics {
+    let mut status = Status {
+        uptime_ms: 3_600_000,
+        revision: 812,
+        host: Some(HostSession {
+            id: 3,
+            restore_ready: true,
+            internet_sharing: false,
+        }),
+        bus_mv: Some(24_030),
+        thermistor_adc: [Some(2_048), Some(1_990)],
+        charging_budget_mw: 90_000,
+        ..Status::default()
+    };
+    let first = &mut status.ports[0];
+    first.enabled = true;
+    first.generation = 7;
+    first.state = PortState::Contract;
+    first.orientation = Some(Orientation::Cc1);
+    first.vbus_mv = Some(30_037);
+    first.vbus_ok = true;
+    first.contract_mv = 20_000;
+    first.contract_ma = 3_250;
+    first.allocated_mw = 68_250;
+    first.command_id = 4;
+    first.command_result = CommandResult::Acknowledged;
+    first.debug_actions = DebugActions::Listed([0x0106, 0x0606, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    first.ecid = Some(0x001a_79d1_0e6b_c01c);
+    first.hard_resets_sent = 1;
+    first.hard_resets_received = 2;
+    first.pd_write_retries = 3;
+    first.requests_rejected = 4;
+    let topology = |chain: &[u8]| Topology {
+        bus: "1".into(),
+        port_chain: chain.to_vec(),
+    };
+    let device = |chain: &[u8], speed| UsbDevice {
+        topology: topology(chain),
+        vendor_id: 0x0bda,
+        product_id: 0x8153,
+        serial_number: Some("000001".into()),
+        product: Some("USB 10/100/1000 LAN".into()),
+        speed,
+        apple: None,
+    };
+    let port = |number: u8, superspeed, devices| PortUsb {
+        number,
+        usb2: topology(&[2, number]),
+        superspeed,
+        devices,
+        assessment: "No CC attachment.".into(),
+    };
+    Diagnostics {
+        status,
+        hub: topology(&[2]),
+        upstream_mbps: Some(10_000),
+        ports: vec![
+            PortUsb {
+                assessment: "USB DFU (05ac:1227), ECID 001a79d10e6bc01c. DFU is already present."
+                    .into(),
+                ..port(
+                    1,
+                    Companion::Mapped {
+                        topology: topology(&[3, 1]),
+                    },
+                    vec![UsbDevice {
+                        vendor_id: 0x05ac,
+                        product_id: 0x1227,
+                        serial_number: Some("CPID:8103 ECID:001A79D10E6BC01C".into()),
+                        product: Some("Apple Mobile Device (DFU Mode)".into()),
+                        apple: Some(AppleUsb {
+                            mode: AppleMode::Dfu,
+                            model: Some("MacBookAir10,1".into()),
+                            ecid: Some("001a79d10e6bc01c".into()),
+                        }),
+                        ..device(&[2, 1], Speed::High)
+                    }],
+                )
+            },
+            port(
+                2,
+                Companion::Unavailable,
+                vec![UsbDevice {
+                    vendor_id: 0x05ac,
+                    product_id: 0x1281,
+                    apple: Some(AppleUsb {
+                        mode: AppleMode::Recovery,
+                        model: None,
+                        ecid: None,
+                    }),
+                    ..device(&[2, 2], Speed::SuperPlus)
+                }],
+            ),
+            port(
+                3,
+                Companion::Ambiguous,
+                vec![device(&[2, 3], Speed::Full), device(&[2, 3, 1], Speed::Low)],
+            ),
+            port(
+                4,
+                Companion::Unavailable,
+                vec![device(&[2, 4], Speed::Super)],
+            ),
+            port(
+                5,
+                Companion::Unavailable,
+                vec![device(&[2, 5], Speed::Unknown)],
+            ),
+        ],
+    }
+}
+
 /// The file holds exactly `value`, or is rewritten to when asked.
 fn check(name: &str, value: &impl Serialize) {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -466,6 +593,9 @@ fn every_message_matches_its_fixture() {
     let replies = replies();
     replies.iter().for_each(round_trip);
     check("replies.json", &replies);
+    let diagnostics = Reply::Diagnostics(Box::new(diagnostics()));
+    round_trip(&diagnostics);
+    check("diagnostics.json", &diagnostics);
 }
 
 #[test]

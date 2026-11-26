@@ -136,20 +136,20 @@ fn bring_up(index: i32) -> Result<()> {
 fn usb_device(target: u64) -> Result<nusb::DeviceInfo> {
     nusb::list_devices()
         .wait()?
-        .find(|d| {
-            iasis::topology::linux_usb_id(d.busnum(), d.device_address(), d.port_chain())
-                == Some(target)
-        })
+        .find(|d| iasis::topology::Attachment::of(d).id() == Some(target))
         .context("USB attachment disappeared")
 }
 
 pub(crate) fn prepare_usb(target: u64) -> Result<()> {
+    use restorekit::UsbMode;
     let info = usb_device(target)?;
-    let product = info.product_id();
-    if info.vendor_id() != 0x05ac || !matches!(product, 0x1290..=0x12af | 0x1901..=0x1905) {
+    // A booted iPad's network personality can present the restore OS's ID.
+    let mode = restorekit::device::describe(info.vendor_id(), info.product_id(), "").mode;
+    if !matches!(mode, UsbMode::Booted | UsbMode::Mobile | UsbMode::Restore) {
         println!("UNSUPPORTED");
         return Ok(());
     }
+    let product = info.product_id();
     let device = info
         .open()
         .wait()
@@ -199,7 +199,7 @@ pub(crate) fn prepare_usb(target: u64) -> Result<()> {
     }
 
     // iOS advertises its public NCM configuration only after entering mode 3.
-    let initial_ios = matches!(product, 0x1290..=0x12af)
+    let initial_ios = matches!(mode, UsbMode::Mobile | UsbMode::Restore)
         && desc.num_configurations() <= 4
         && device.configurations().any(|config| {
             let has = |signature| {

@@ -197,10 +197,12 @@ pub fn public_ncm_control(
     config: &nusb::descriptors::ConfigurationDescriptor<'_>,
 ) -> Option<u8> {
     use nusb::{descriptors::TransferType, transfer::Direction};
+    use restorekit::UsbMode;
     let signature = |i: nusb::descriptors::InterfaceDescriptor<'_>| {
         (i.interface_number(), i.class(), i.subclass(), i.protocol())
     };
-    if matches!(product, 0x1901..=0x1905) {
+    let mode = restorekit::device::describe(restorekit::device::APPLE_VID, product, "").mode;
+    if mode == UsbMode::Booted {
         // Apple's ncmAuxBringup configuration declares standard NCM first, Aux
         // second. Aux-only also starts at zero, so match the whole configuration.
         return config
@@ -210,8 +212,9 @@ pub fn public_ncm_control(
             .then_some(0);
     }
     // The booted iPad keeps PTP and usbmux alongside its network functions.
-    // RestoreOS also exposes usbmux and NCM, but has no PTP interface.
-    if !matches!(product, 0x1290..=0x12af)
+    // RestoreOS also exposes usbmux and NCM, and can present the same product
+    // ID, but has no PTP interface.
+    if !matches!(mode, UsbMode::Mobile | UsbMode::Restore)
         || !config
             .interfaces()
             .any(|i| matches!(signature(i.first_alt_setting()), (_, 6, 1, 1)))
