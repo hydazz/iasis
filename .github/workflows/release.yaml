@@ -47,6 +47,7 @@ jobs:
             v*)
               VERSION="${RELEASE_TAG#v}"
               grep -Fqx "version = \"${VERSION}\"" Cargo.toml
+              grep -Fqx "version = \"${VERSION}\" # x-release-please-version" crates/iasis/windows/.mise.toml
               grep -Fqx "MARKETING_VERSION = ${VERSION} // x-release-please-version" apps/macos/Config/Version.xcconfig
               ;;
             *-board-v*)
@@ -86,6 +87,13 @@ jobs:
       - name: Build IasisOS
         run: mise run firmware:build
 
+      - name: Keep IasisOS for the packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: iasisos
+          path: target/thumbv8m.main-none-eabihf/release/IasisOS.uf2
+          if-no-files-found: error
+
       - name: Upload release asset
         env:
           GH_TOKEN: ${{ github.token }}
@@ -95,7 +103,7 @@ jobs:
 
   linux:
     name: Linux (${{ matrix.arch }})
-    needs: tag
+    needs: [tag, firmware]
     if: needs.tag.outputs.board == ''
     strategy:
       fail-fast: false
@@ -129,17 +137,86 @@ jobs:
       - name: Install tools
         run: mise install --locked rust cargo:cargo-deb github:raspberrypi/pico-sdk-tools
 
+      - name: Download IasisOS
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: iasisos
+          path: target/thumbv8m.main-none-eabihf/release
+
       - name: Build package
-        run: mise run deb
+        run: |
+          mise run --skip-deps host:build
+          mise run --skip-deps deb
 
       - name: Upload release asset
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "${RELEASE_TAG}" target/debian/iasis_*_${{ matrix.arch }}.deb --clobber --repo "${GITHUB_REPOSITORY}"
 
+  windows:
+    name: Windows
+    needs: [tag, firmware]
+    if: needs.tag.outputs.board == ''
+    runs-on: windows-2025
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      VERSION: ${{ needs.tag.outputs.version }}
+    steps:
+      - name: Checkout release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Use the GNU Rust host
+        run: rustup set default-host x86_64-pc-windows-gnu
+
+      - name: Setup Mise
+        uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+        with:
+          cache: false
+          install: false
+
+      - name: Install tools
+        run: mise -C crates/iasis/windows install --locked rust github:raspberrypi/pico-sdk-tools dotnet
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@3c51bf698df1e37b2261f53cb67797b97761185c # v2.34.0
+        with:
+          msystem: MINGW64
+          release: false
+          update: true
+          path-type: inherit
+
+      - name: Install MSYS2 packages
+        run: mise run bootstrap
+
+      - name: Download IasisOS
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: iasisos
+          path: target/thumbv8m.main-none-eabihf/release
+
+      - name: Build host tools
+        shell: msys2 {0}
+        run: mise run --skip-deps host:build
+
+      - name: Build MSI
+        run: mise run //crates/iasis/windows:package
+
+      - name: Upload release asset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${RELEASE_TAG}" "crates/iasis/windows/build/Iasis-${VERSION}-x64.msi" --clobber --repo "${GITHUB_REPOSITORY}"
+
   macos:
     name: macOS
-    needs: tag
+    needs: [tag, firmware]
     if: needs.tag.outputs.board == ''
     runs-on: xcode-27
     timeout-minutes: 30
@@ -175,8 +252,14 @@ jobs:
       - name: Install system packages
         run: mise bootstrap packages apply --yes
 
+      - name: Download IasisOS
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: iasisos
+          path: target/thumbv8m.main-none-eabihf/release
+
       - name: Build host tools
-        run: mise run host:build
+        run: mise run --skip-deps host:build
 
       - name: Archive app
         run: |
