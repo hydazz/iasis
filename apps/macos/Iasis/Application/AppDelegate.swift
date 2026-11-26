@@ -5,22 +5,37 @@ import SwiftUI
 /// an ordinary app, with a Dock icon and a menu bar of its own.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var openWindow: OpenWindowAction?
+    private var showDevicesOnActivation = false
     private var statusMenu: StatusMenu?
     private var observers: [any NSObjectProtocol] = []
 
     func installStatusMenu(browser: DeviceBrowser, openWindow: OpenWindowAction, openSettings: OpenSettingsAction) {
         self.openWindow = openWindow
         guard statusMenu == nil else { return }
-        statusMenu = StatusMenu(browser: browser) {
-            openWindow(id: DevicesView.windowID)
-            NSApp.activate()
-        } showSettings: {
+        statusMenu = StatusMenu(browser: browser, showDevices: showDevices) {
             openSettings()
             NSApp.activate()
         }
     }
 
+    private func showDevices() {
+        if NSApp.isActive || !Self.hasOpenWindow {
+            openWindow?(id: DevicesView.windowID)
+        } else {
+            showDevicesOnActivation = true
+        }
+        NSApp.activate()
+    }
+
+    func applicationDidBecomeActive(_: Notification) {
+        guard showDevicesOnActivation else { return }
+        showDevicesOnActivation = false
+        openWindow?(id: DevicesView.windowID)
+    }
+
     func applicationDidFinishLaunching(_: Notification) {
+        // Open at Login owns startup when macOS reopens the previous session.
+        NSApp.disableRelaunchOnLogin()
         for name in [NSWindow.didBecomeKeyNotification, NSWindow.willCloseNotification] {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
                 // A closing window is still on screen while it says so.
