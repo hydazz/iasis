@@ -22,9 +22,7 @@ nonisolated enum Fixtures {
     """#
 
     static func decode(_ line: String) throws -> AgentReply {
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        return try decoder.decode(AgentReply.self, from: Data(line.utf8))
+        try AgentReply(line: Data(line.utf8))
     }
 
     static var state: AgentState {

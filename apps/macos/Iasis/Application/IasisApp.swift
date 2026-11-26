@@ -3,6 +3,8 @@ import SwiftUI
 @main
 struct IasisApp: App {
     @NSApplicationDelegateAdaptor private var delegate: AppDelegate
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
     @State private var browser: DeviceBrowser
     private var model: AgentModel {
         browser.model
@@ -15,12 +17,7 @@ struct IasisApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra {
-            StatusMenu(browser: browser)
-        } label: {
-            MenuBarLabel(status: MenuBarStatus(model.menuSnapshot), delegate: delegate)
-        }
-        .menuBarExtraStyle(.menu)
+        let _ = delegate.installStatusMenu(browser: browser, openWindow: openWindow, openSettings: openSettings)
 
         Window("Iasis", id: DevicesView.windowID) {
             DevicesView(browser: browser)
@@ -46,17 +43,5 @@ struct IasisApp: App {
         Settings {
             SettingsView(model: model)
         }
-    }
-}
-
-private struct MenuBarLabel: View {
-    let status: MenuBarStatus
-    let delegate: AppDelegate
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        Image(nsImage: status.image)
-            .accessibilityLabel(status.rawValue)
-            .onAppear { delegate.openWindow = openWindow }
     }
 }

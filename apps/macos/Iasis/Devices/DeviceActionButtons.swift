@@ -1,8 +1,6 @@
 import SwiftUI
 
-/// The device actions, in one order and with one symbol each wherever they
-/// appear: the toolbar, the Device menu, a row's context menu and the menu
-/// bar.
+/// The actions in the Device menu and a row's context menu.
 struct DeviceActionButtons: View {
     let actions: DeviceActions
     var shortcuts = false

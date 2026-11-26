@@ -7,15 +7,10 @@ import OSLog
 final class AgentModel {
     /// The agent's latest state, or nil while no agent answers.
     private(set) var state: AgentState?
-    /// The state as of the last time no menu was open, and all the menu bar
-    /// item reads. AppKit tracks a menu in its own run loop mode, so the copy
-    /// waits for the default one.
-    private(set) var menuSnapshot: AgentState?
     /// An archive on its way into the agent's store.
     private(set) var importing: Importing?
     /// Hubs being written IasisOS, by serial.
     private(set) var updating: Set<String> = []
-    private var menuRefreshPending = false
     private let agent: any AgentService
     /// Replaces the running agent with the one the app carries; nil when it
     /// carries none.
@@ -42,7 +37,7 @@ final class AgentModel {
                         if state.version != Self.version, await replaceAgent(running: state.version) {
                             break
                         }
-                        publish(state)
+                        self.state = state
                     }
                 } catch is DecodingError {
                     // A rebuild keeps the version, so a state this app cannot
@@ -53,7 +48,7 @@ final class AgentModel {
                 } catch {
                     Log.agent.debug("Agent unavailable: \(error.localizedDescription)")
                 }
-                publish(nil)
+                state = nil
                 try? await Task.sleep(for: .seconds(2))
             }
         }
@@ -70,18 +65,6 @@ final class AgentModel {
         Log.agent.notice("Restarting agent \(version, privacy: .public) for app \(Self.version, privacy: .public)")
         await restartAgent()
         return true
-    }
-
-    private func publish(_ next: AgentState?) {
-        state = next
-        guard !menuRefreshPending else { return }
-        menuRefreshPending = true
-        RunLoop.main.perform(inModes: [.default]) {
-            MainActor.assumeIsolated {
-                self.menuSnapshot = self.state
-                self.menuRefreshPending = false
-            }
-        }
     }
 
     func perform(_ requests: [AgentRequest]) {

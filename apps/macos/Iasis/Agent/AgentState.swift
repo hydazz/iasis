@@ -98,8 +98,8 @@ nonisolated struct AgentState: Codable, Equatable {
         var power: PortPower?
         /// Power supply capacity committed to this port.
         var allocatedMw: Int
-        /// The target took the largest offer its hub could make and would
-        /// use more.
+        /// The target would take more power than the charging pool lets its
+        /// port offer.
         var short: Bool
         /// Why the port faulted, in the hub's words.
         var fault: String?
@@ -170,13 +170,13 @@ nonisolated struct AgentState: Codable, Equatable {
         }
     }
 
-    /// Software the host lacks, and what goes without it.
+    /// Software the host lacks or must fix, and what goes without it.
     struct Prerequisite: Codable, Equatable, Identifiable {
         var id: String
-        /// What to install.
+        /// What to install or fix.
         var name: String
-        /// Where to get it.
-        var url: String
+        /// Where to get it; none when the reason says what to do.
+        var url: String?
         /// What can't be done without it, as a sentence.
         var reason: String
     }

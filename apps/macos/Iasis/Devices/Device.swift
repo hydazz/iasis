@@ -135,6 +135,23 @@ struct Device: Identifiable, Equatable {
     }
 }
 
+extension [Device] {
+    /// The devices' attachments by hub, as the agent checks them before it
+    /// acts on them; nil when a device's hub has no session.
+    var selections: [RestoreSelection]? {
+        var hubs: [RestoreSelection] = []
+        for device in self {
+            guard let session = device.session else { return nil }
+            if let index = hubs.firstIndex(where: { $0.hub == device.serial }) {
+                hubs[index].targets.append(device.restoreTarget)
+            } else {
+                hubs.append(RestoreSelection(hub: device.serial, session: session, targets: [device.restoreTarget]))
+            }
+        }
+        return hubs
+    }
+}
+
 /// A port's operation as the inspector lays it out: what it is, how it
 /// stands and the steps it goes through.
 struct OperationStatus: Equatable {
@@ -229,8 +246,12 @@ struct DeviceActions: Equatable {
     init() {}
 
     init(_ devices: [Device]) {
-        dfu = devices.filter(\.port.dfu).map { .dfu(hub: $0.serial, port: $0.port.number) }
-        restart = devices.filter(\.port.reboot).map { .reboot(hub: $0.serial, port: $0.port.number) }
+        let signal = { (devices: [Device], request: ([RestoreSelection]) -> AgentRequest) -> [AgentRequest] in
+            guard let hubs = devices.selections, !hubs.isEmpty else { return [] }
+            return [request(hubs)]
+        }
+        dfu = signal(devices.filter(\.port.dfu)) { .dfu(hubs: $0) }
+        restart = signal(devices.filter(\.port.reboot)) { .reboot(hubs: $0) }
         restore = RestoreConfirmation(devices)
         revive = restore.map { .revive(hubs: $0.hubs, latest: false) }
     }
@@ -255,17 +276,9 @@ struct RestoreConfirmation: Equatable {
 
     init?(_ devices: [Device]) {
         guard !devices.isEmpty,
-              devices.allSatisfy({ $0.port.occupied && $0.port.restore && $0.session != nil })
+              devices.allSatisfy({ $0.port.occupied && $0.port.restore }),
+              let hubs = devices.selections
         else { return nil }
-        var hubs: [RestoreSelection] = []
-        for device in devices {
-            guard let session = device.session else { return nil }
-            if let index = hubs.firstIndex(where: { $0.hub == device.serial }) {
-                hubs[index].targets.append(device.restoreTarget)
-            } else {
-                hubs.append(RestoreSelection(hub: device.serial, session: session, targets: [device.restoreTarget]))
-            }
-        }
         self.devices = devices
         self.hubs = hubs
     }

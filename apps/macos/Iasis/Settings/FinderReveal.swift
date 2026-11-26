@@ -1,7 +1,8 @@
 import Foundation
 
-/// Finder's habit of opening a window for each device that connects. macOS
-/// keeps it in an undocumented preference of the user's device agent.
+/// Finder's habit of opening a window for each Mac, iPad or iPhone that enters
+/// DFU or recovery mode. macOS keeps it in an undocumented preference of the
+/// user's device agent.
 nonisolated enum FinderReveal {
     private static let domain = "com.apple.AMPDeviceDiscoveryAgent"
     private static let key = "reveal-devices"

@@ -43,10 +43,8 @@ enum BundledAgent {
     }
 }
 
-/// The app among the user's login items. It adds itself on its first launch.
+/// The app among the user's login items, there only when the user adds it.
 enum OpenAtLogin {
-    private static let addedKey = "AddedToLoginItems"
-
     static var isEnabled: Bool {
         SMAppService.mainApp.status == .enabled
     }
@@ -61,12 +59,5 @@ enum OpenAtLogin {
         } catch {
             Log.agent.error("Login item not changed: \(error.localizedDescription, privacy: .public)")
         }
-    }
-
-    /// Open at login from the first launch on, until the user turns it off.
-    static func addOnFirstLaunch() {
-        guard !UserDefaults.standard.bool(forKey: addedKey) else { return }
-        UserDefaults.standard.set(true, forKey: addedKey)
-        set(true)
     }
 }

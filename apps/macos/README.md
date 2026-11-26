@@ -6,7 +6,7 @@ Iasis lives in the menu bar and shows what is on every port of every connected h
 
 Iasis needs macOS 26 or later on a Mac with Apple silicon. Download `Iasis-<version>.zip` from the [releases](https://github.com/hydazz/iasis/releases), open it and move Iasis to Applications.
 
-The first time Iasis opens, it starts its agent, `iasisd`, and adds itself to the apps that open at login. macOS notes that Iasis can run in the background and runs the agent whenever you are logged in, whether or not the app is open. Turn off **Open at Login** in Settings > General to open Iasis yourself. Turning Iasis off under Background App Activity in System Settings > General > Login Items & Extensions stops the agent.
+The first time Iasis opens, it starts its agent, `iasisd`. macOS notes that Iasis can run in the background and runs the agent whenever you are logged in, whether or not the app is open. To have Iasis in the menu bar from login, turn on **Open at Login** in Settings > General. Turning Iasis off under Background App Activity in System Settings > General > Login Items & Extensions stops the agent.
 
 To update, replace Iasis in Applications with the new version and open it. It restarts the agent from the new version.
 
@@ -21,7 +21,7 @@ sudo ln -sf /Applications/Iasis.app/Contents/Helpers/iasis /usr/local/bin/iasis
 
 The cable dims when no hub is connected. A ring over its tail shows work under way, and a red mark means a hub or port needs attention.
 
-The menu groups devices by hub, each under its physical port number with a line on what it is doing. Choose a device for its actions or choose Get Info to open its inspector. The menu shows the hubs as they were when it opened; the window follows them live.
+The menu groups devices by hub, each under its physical port number with a line on what it is doing. Choose a device for its actions or choose Get Info to open its inspector. Status and available actions update while the menu is open. If another device takes the same port, the old submenu’s actions become unavailable. New rows appear when you move off the highlighted item or reopen the menu.
 
 ## Window
 
@@ -68,4 +68,4 @@ mise run //apps/macos:lint      # unused Swift code and property lists
 
 An archive embeds `iasisd`, `iasis` and `iasis-gateway` from `target/release` in `Contents/Helpers`, and the agent's launchd property list, `Config/com.hydaz.Iasis.agent.plist`, in `Contents/Library/LaunchAgents`. Before archiving in Xcode, run `mise run host:build`. They are built for the Mac's own architecture.
 
-The app communicates with `iasisd` over the [agent socket](../crates/api/README.md). Set `TEST_RUNNER_IASIS_LIVE_AGENT=1` when running the tests to check the connection to the local agent.
+The app communicates with `iasisd` over the [agent socket](../../crates/api/README.md). Set `TEST_RUNNER_IASIS_LIVE_AGENT=1` when running the tests to check the connection to the local agent.
