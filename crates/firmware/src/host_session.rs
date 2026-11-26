@@ -86,7 +86,6 @@ mod tests {
 
     fn report(id: u32, restore_ready: bool) -> HostReport {
         HostReport {
-            serial: 0,
             session: HostSession {
                 id,
                 restore_ready,
@@ -183,7 +182,7 @@ mod tests {
         status.ports[1].generation -= 1;
         status.ports[1].restore = Some(RestoreStatus {
             ecid: 1,
-            phase: RestorePhase::Unconfirmed,
+            phase: RestorePhase::Running,
             progress: 0,
         });
         assert!(!session.apply(HostControl::Arm(arm), &status, 14));

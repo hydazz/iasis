@@ -396,10 +396,9 @@ mod tests {
                 assert_eq!(look(job, 0), [6, 0, 6]);
             }
         }
-        // A restore whose end nobody saw holds still.
+        // A restore whose end nobody saw leaves the target's own light.
         job.phase = RestorePhase::Unconfirmed;
-        assert_eq!(look(job, 0), PURPLE);
-        assert_eq!(look(job, 600), PURPLE);
+        assert_eq!(look(job, 0), GREEN);
         job.phase = RestorePhase::Failed;
         assert_eq!(look(job, 0), RED);
         // The host fetching a target's image is restore work too.

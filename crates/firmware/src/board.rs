@@ -10,7 +10,19 @@ use embassy_time::{Duration, Instant};
 const PASSWORD: u32 = 0x5afe_0000;
 static HOST_ALLOWED: AtomicBool = AtomicBool::new(false);
 const HANDOFF: u32 = 0x4941_5302;
+/// Each port's brick and host enables, port 1 first.
 const TARGET_ENABLES: [usize; 10] = [3, 39, 38, 37, 34, 35, 29, 31, 26, 27];
+/// The host enables as masks of the two SIO banks.
+const HOST_ENABLES: [u32; 2] = {
+    let mut masks = [0; 2];
+    let mut port = 0;
+    while port < 5 {
+        let pin = TARGET_ENABLES[port * 2 + 1];
+        masks[pin / 32] |= 1 << (pin % 32);
+        port += 1;
+    }
+    masks
+};
 const RETAINED_PINS: [usize; 3] = [22, 30, 32];
 
 pub struct Handoff {
@@ -89,6 +101,16 @@ impl Controls {
             levels: handoff.levels,
             _orientation: orientation,
             shift: handoff.shift,
+        }
+    }
+
+    /// Remove only the converter requests before resetting the stages.
+    pub fn cut_stages(&mut self) {
+        for &pin in TARGET_ENABLES.iter().step_by(2) {
+            pac::SIO
+                .gpio_out(pin / 32)
+                .value_clr()
+                .write_value(1 << (pin % 32));
         }
     }
 
@@ -214,14 +236,9 @@ pub fn allow_host_requests(allowed: bool) -> bool {
     if allowed || !previous {
         return previous;
     }
-    pac::SIO
-        .gpio_out(0)
-        .value_clr()
-        .write_value((1 << 27) | (1 << 31));
-    pac::SIO
-        .gpio_out(1)
-        .value_clr()
-        .write_value((1 << 3) | (1 << 5) | (1 << 7));
+    for (bank, mask) in HOST_ENABLES.into_iter().enumerate() {
+        pac::SIO.gpio_out(bank).value_clr().write_value(mask);
+    }
     previous
 }
 

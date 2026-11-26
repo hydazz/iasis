@@ -13,7 +13,7 @@ use embedded_graphics::{
     text::{Baseline, Text},
 };
 use heapless::{String, Vec};
-use iasis_pd::{Contract, power::millivolts};
+use iasis_pd::Contract;
 use iasis_protocol::{
     AppleMode, CommandError, CommandResult, Gesture, Link, Port, PortAction, PortError, PortState,
     PortStatus, RestorePhase, Status, Supply, Usb,
@@ -225,7 +225,7 @@ pub fn view(status: &Status, button: &Button, now: u64) -> View {
         view.lines = readings(port);
     } else {
         for (cell, port) in view.cells.iter_mut().zip(&status.ports) {
-            if let Some(mv) = port.vbus_adc.and_then(millivolts)
+            if let Some(mv) = port.vbus_mv.map(u32::from)
                 && port.occupied()
             {
                 if mv >= 9950 {
@@ -428,7 +428,7 @@ fn readings(port: &PortStatus) -> [String<32>; 2] {
         return pair("No target", "");
     }
     let mut lines = pair("", "");
-    if let Some(mv) = port.vbus_adc.and_then(millivolts) {
+    if let Some(mv) = port.vbus_mv {
         write!(lines[0], "VBUS {}.{:02}V", mv / 1000, mv % 1000 / 10).unwrap();
     }
     let link = match port.link {
@@ -467,7 +467,7 @@ fn readings(port: &PortStatus) -> [String<32>; 2] {
 fn supply(status: &Status) -> String<32> {
     let mut line = String::new();
     if status.supply == Supply::Brick {
-        if let Some(mv) = status.bus_voltage_adc.and_then(millivolts) {
+        if let Some(mv) = status.bus_mv {
             write!(line, "{}.{}V  ", mv / 1000, mv % 1000 / 100).unwrap();
         }
         write!(
@@ -804,14 +804,12 @@ mod tests {
         let mut status = Status::default();
         status.ports[0] = contract(20_000, 2250);
         let button = selecting(0);
-        for raw in [None, Some(4096), Some(u16::MAX)] {
-            status.ports[0].vbus_adc = raw;
-            assert_eq!(
-                view(&status, &button, 0).lines,
-                pair("", "PD 20V 2.25A (45W)")
-            );
-        }
-        status.ports[0].vbus_adc = Some(520);
+        status.ports[0].vbus_mv = None;
+        assert_eq!(
+            view(&status, &button, 0).lines,
+            pair("", "PD 20V 2.25A (45W)")
+        );
+        status.ports[0].vbus_mv = Some(5038);
         assert_eq!(
             view(&status, &button, 0).lines,
             pair("VBUS 5.03V", "PD 20V 2.25A (45W)")
@@ -863,7 +861,7 @@ mod tests {
         status.ports[0] = PortStatus {
             state: PortState::Ready,
             enabled: true,
-            vbus_adc: Some(520),
+            vbus_mv: Some(5038),
             supply: Supply::HostPresence,
             ..PortStatus::default()
         };
@@ -1140,7 +1138,7 @@ mod tests {
     fn a_selected_port_names_its_link() {
         let mut status = Status::default();
         status.ports[0] = contract(9000, 3000);
-        status.ports[0].vbus_adc = Some(932);
+        status.ports[0].vbus_mv = Some(9030);
         let button = selecting(0);
         let line = |status: &Status| view(status, &button, 0).lines[0].clone();
         // Unread or without a link, the hub adds nothing.
@@ -1171,7 +1169,7 @@ mod tests {
     fn the_hub_total_includes_a_usb_port_without_a_pd_contract() {
         let mut status = Status {
             supply: Supply::Brick,
-            bus_voltage_adc: Some(2081),
+            bus_mv: Some(20164),
             ch224_current_50ma: Some(94),
             charging_budget_mw: 67_940,
             ..Status::default()
@@ -1183,8 +1181,8 @@ mod tests {
             allocated_mw: iasis_pd::Contract::USB_DEFAULT.cost_mw(),
             ..contract(0, 0)
         };
-        for (port, raw) in [(0, 2068), (1, 930), (3, 520), (4, 520)] {
-            status.ports[port].vbus_adc = Some(raw);
+        for (port, mv) in [(0, 20_038), (1, 9011), (3, 5038), (4, 5038)] {
+            status.ports[port].vbus_mv = Some(mv);
         }
         let button = Button::default();
         assert_eq!(
@@ -1404,9 +1402,8 @@ mod tests {
         }
         let mut status = Status::default();
         for (index, port) in status.ports.iter_mut().enumerate() {
-            port.vbus_adc = Some(520);
             *port = PortStatus {
-                vbus_adc: port.vbus_adc,
+                vbus_mv: Some(5038),
                 ..contract(0, 0)
             };
             port.restore = Some(RestoreStatus {

@@ -2,6 +2,7 @@
 #![no_main]
 
 mod board;
+mod brick;
 mod bus;
 mod hublink;
 mod oled;
@@ -16,6 +17,8 @@ use core::{
     cell::{Cell, RefCell},
     fmt::Write,
 };
+
+use defmt_rtt as _;
 
 use embassy_executor::Spawner;
 use embassy_futures::join::{join, join_array, join3, join5};
@@ -34,7 +37,7 @@ use embassy_time::{Duration, Instant, Timer};
 use embassy_usb::{Builder, Config, msos};
 use embassy_usb_driver::{Endpoint, EndpointIn};
 use iasis_firmware::button::{Button, Edges};
-use iasis_pd::power::{HostLimit, host_limit};
+use iasis_firmware::power::{self, HostLimit, Inputs};
 use iasis_protocol::{self as protocol, Info, PortFaults, Status, Supply};
 
 include!(concat!(env!("OUT_DIR"), "/config.rs"));
@@ -47,6 +50,11 @@ static PICOTOOL_ENTRIES: [embassy_rp::binary_info::EntryAddr; 2] = [
     embassy_rp::binary_info::rp_cargo_version!(),
 ];
 
+unsafe extern "C" {
+    // Defined by memory.x at the descriptor in the linker's build-ID note.
+    static __iasis_build_id: [u8; 20];
+}
+
 const FLASH_BYTES: usize = 2 * 1024 * 1024;
 type SettingsStore =
     iasis_firmware::settings::Store<Flash<'static, peripherals::FLASH, Blocking, FLASH_BYTES>>;
@@ -54,7 +62,7 @@ type SettingsStore =
 /// What the hub measures beside the ports' VBUS.
 #[derive(Clone, Copy, Default)]
 struct Measured {
-    bus_voltage_adc: Option<u16>,
+    bus_mv: Option<u16>,
     thermistor_adc: [Option<u16>; 2],
     host_limiter_fault: bool,
     host_limiter_assertions: u32,
@@ -162,15 +170,11 @@ async fn main(_spawner: Spawner) {
     let mut serial_text = heapless::String::<16>::new();
     write!(serial_text, "{serial:016x}").unwrap();
     let info = Info {
-        serial,
-        firmware_version: FIRMWARE_VERSION,
-        flash_bytes: FLASH_BYTES as u32,
-        capabilities: protocol::CAP_TELEMETRY
-            | protocol::CAP_ROM_UPDATE
-            | protocol::CAP_PORT_CONTROL
-            | protocol::CAP_HOST_POWER
-            | protocol::CAP_BATCH_BUTTON
-            | protocol::CAP_RESTORE_ARM,
+        protocol: protocol::VERSION,
+        firmware: FIRMWARE_VERSION,
+        build: protocol::Build(unsafe { __iasis_build_id }),
+        debug_assertions: cfg!(debug_assertions),
+        name: protocol::HubName::default(),
     };
     let initial = Status {
         settings: settings.borrow().settings,
@@ -200,7 +204,7 @@ async fn main(_spawner: Spawner) {
         ports: &ports,
     };
 
-    let mut config = Config::new(USB_VID, USB_PID);
+    let mut config = Config::new(protocol::DEVELOPMENT_VID, protocol::DEVELOPMENT_PID);
     config.manufacturer = Some("Iasis");
     config.product = Some("Iasis");
     config.serial_number = Some(&serial_text);
@@ -258,6 +262,8 @@ async fn main(_spawner: Spawner) {
         bus,
         controls,
         outputs,
+        inputs: None,
+        brick: brick::Brick::default(),
     });
     let mut index = 0;
     let port_tasks = join_array(pd_interrupts.map(|int| {
@@ -312,7 +318,13 @@ async fn main(_spawner: Spawner) {
                     power: power_faults[index].is_low(),
                     cc: cc_faults[index].is_low(),
                 };
-                ports.sample(index, adc.blocking_read(&mut channels[index]).ok(), pins);
+                ports.sample(
+                    index,
+                    adc.blocking_read(&mut channels[index])
+                        .ok()
+                        .and_then(power::millivolts),
+                    pins,
+                );
             }
             let fault = host_limiter_fault.is_low();
             if fault && !asserted {
@@ -320,7 +332,10 @@ async fn main(_spawner: Spawner) {
             }
             asserted = fault;
             measured.set(Measured {
-                bus_voltage_adc: adc.blocking_read(&mut channels[5]).ok(),
+                bus_mv: adc
+                    .blocking_read(&mut channels[5])
+                    .ok()
+                    .and_then(power::millivolts),
                 thermistor_adc: [
                     adc.blocking_read(&mut channels[6]).ok(),
                     adc.blocking_read(&mut channels[7]).ok(),
@@ -369,6 +384,7 @@ async fn main(_spawner: Spawner) {
         let mut reclaim_due = 0;
         loop {
             if update.get() {
+                defmt::info!("entering the bootloader");
                 // Give the control status stage time to complete before disconnecting.
                 Timer::after_millis(100).await;
                 let mut io = io.lock().await;
@@ -387,26 +403,20 @@ async fn main(_spawner: Spawner) {
                 ports.links(hublink::links(&io).await);
                 links_due = Instant::now().as_millis() + 500;
             }
-            next.ports = ports.statuses();
-            next.bus_voltage_adc = readings.bus_voltage_adc;
+            next.bus_mv = readings.bus_mv;
             next.thermistor_adc = readings.thermistor_adc;
 
             let mut guard = io.lock().await;
             let board = &mut *guard;
+            next.ports = ports.statuses();
+            next.side_power_enabled = board.controls.side_power_enabled();
             if Instant::now().as_millis() >= metadata_due {
-                board.bus.sample(&mut next).await;
+                board.sample(&mut next).await;
                 metadata_due = Instant::now().as_millis() + 50;
             }
-            let brick_power_good = next
-                .expander_inputs
-                .is_some_and(|inputs| inputs & 0x40 == 0);
-            next.brick_input_fault = iasis_pd::power::brick_input_fault(
-                next.expander_inputs
-                    .is_some_and(|inputs| inputs & 0x20 == 0),
-                brick_power_good,
-                next.ch224_status,
-                next.bus_voltage_adc,
-            );
+            let inputs = board.inputs;
+            next.brick_input_fault =
+                power::brick_input_fault(inputs.is_some_and(Inputs::brick_fault), next.bus_mv);
             let physical = upstream.get();
             next.upstream_cc = physical.cc;
             next.upstream_orientation = physical.orientation;
@@ -417,104 +427,107 @@ async fn main(_spawner: Spawner) {
                     .allowance(Instant::now().as_millis())
             };
             next.host_allowance_ma = allowance();
-            let side_power = board.controls.side_power_enabled();
-            let qualified_mv = board.bus.brick_voltage_mv(&next);
-            next.charging_budget_mw = if next.i2c_root_fault || next.brick_input_fault {
-                0
-            } else {
-                qualified_mv.map_or(0, |mv| {
-                    iasis_pd::power::charging_budget_mw(
-                        mv as u16,
-                        next.ch224_current_50ma.unwrap_or(0),
-                        side_power,
-                    )
-                })
-            };
-            let host_tier = iasis_pd::power::presence_limit(
-                next.host_allowance_ma,
-                next.bus_voltage_adc,
-                next.charging_budget_mw,
-            );
-            let brick_ports = (next.charging_budget_mw / iasis_pd::Contract::USB_DEFAULT.cost_mw())
-                .min(protocol::PORT_COUNT as u32) as u8;
-            let previous_supply = next.supply;
-            next.supply = if next.i2c_root_fault
-                || next.brick_input_fault
+            let paths = next.ports.map(|port| port.supply);
+            let qualified_mv = board.brick.voltage_mv(&next, board.bus.faulted());
+            let qualified_mw = qualified_mv.map(|mv| {
+                iasis_pd::power::charging_budget_mw(
+                    mv as u16,
+                    next.ch224_current_50ma.unwrap_or(0),
+                    next.side_power_enabled,
+                )
+            });
+            let isolated = board.controls.shift & outputs::PD_INPUT_OFF != 0;
+            let admission = board.brick.admission_mw;
+            let blocked = next.i2c_root_fault
+                || board.bus.faulted()
                 || board.outputs.is_err()
-                || board.bus.brick_upgrade_pending(&next)
-            {
-                Supply::Off
-            } else if brick_ports > 0 {
-                Supply::Brick
-            } else if host_tier.is_some() {
-                Supply::HostPresence
-            } else {
-                Supply::Off
-            };
-            let host_tier = host_tier.filter(|_| next.supply == Supply::HostPresence);
-            // Switch off direct requests before withdrawing the aggregate rail.
-            if next.supply == Supply::Off || next.supply != previous_supply {
-                for index in 0..protocol::PORT_COUNT {
-                    board.controls.charge(index, false);
-                }
+                || next.bus_mv.is_none()
+                || power::brick_overvoltage(next.bus_mv);
+            let sources = power::sources(&next, isolated, qualified_mw, admission, blocked);
+            let input_mv = qualified_mv.unwrap_or(0) as u16;
+            let demands = ports.demands();
+            let mut allocation = power::allocate(
+                sources.brick_mw,
+                input_mv,
+                sources.presence,
+                programmed.get(),
+                paths,
+                demands,
+            );
+            // On input loss open the converter switches before resetting the stages.
+            let stages = allocation.supply() == Supply::Brick;
+            if !stages && board.controls.shift & outputs::PORT_STAGES_OFF == 0 {
+                board.controls.cut_stages();
             }
-            // During a latch write either the old or the new tier can be live.
-            if let Some(new) = host_tier {
-                if programmed
-                    .get()
-                    .is_none_or(|old| old.upper_ma < new.upper_ma)
-                {
-                    program(Some(new));
-                }
+            if let Some(new) = allocation.tier {
+                program(Some(power::while_latching(programmed.get(), new)));
             } else {
                 board::allow_host_requests(false);
                 program(None);
             }
-            if let Ok(outputs) = &mut board.outputs
-                && outputs
-                    .power_policy(&mut board.bus, &mut board.controls, next.supply, host_tier)
+            let latched = match &mut board.outputs {
+                Ok(outputs) => outputs
+                    .power_policy(
+                        &mut board.bus,
+                        &mut board.controls,
+                        stages,
+                        sources.isolate_input,
+                        allocation.tier,
+                    )
                     .await
-                    .is_err()
+                    .is_ok(),
+                Err(_) => false,
+            };
+            if !latched || board.bus.faulted() {
+                board.controls.cut_stages();
+                allocation = power::allocate(0, 0, None, None, paths, demands);
+            } else if allocation
+                .tier
+                .is_some_and(|tier| !power::allows(allowance(), tier))
             {
-                next.supply = Supply::Off;
-            }
-            let host_tier = host_tier.filter(|tier| {
-                next.supply == Supply::HostPresence
-                    && host_limit(allowance())
-                        .is_some_and(|allowed| tier.upper_ma <= allowed.upper_ma)
-            });
-            if next.supply == Supply::HostPresence && host_tier.is_none() {
-                next.supply = Supply::Off;
-            }
-            program(host_tier);
-            board::allow_host_requests(host_tier.is_some());
-            next.i2c_root_fault |= board.bus.faulted();
-            next.side_power_enabled = side_power;
-            next.shift_outputs_enabled = board.controls.shift_outputs_enabled();
-            drop(guard);
-
-            next.available_ports = match next.supply {
-                Supply::Off => 0,
-                Supply::HostPresence => 5,
-                Supply::Brick => brick_ports,
-            };
-            next.host_limit_ma = host_tier.map_or(0, |tier| tier.upper_ma);
-            let input_mv = qualified_mv.unwrap_or(0) as u16;
-            let demands = ports.demands();
-            let budgets = match next.supply {
-                Supply::Brick => {
-                    iasis_pd::power::allocate(next.charging_budget_mw, input_mv, demands)
+                allocation.tier = None;
+                for share in &mut allocation.shares {
+                    if *share == iasis_pd::power::Grant::Presence {
+                        *share = iasis_pd::power::Grant::Off;
+                    }
                 }
-                Supply::HostPresence => demands.map(|port| u32::from(port.attached)),
-                Supply::Off => [0; protocol::PORT_COUNT],
+            }
+            program(allocation.tier);
+            board::allow_host_requests(allocation.tier.is_some());
+            next.i2c_root_fault |= board.bus.faulted();
+            next.shift_outputs_enabled = board.controls.shift_outputs_enabled();
+            next.supply = allocation.supply();
+            next.charging_budget_mw = allocation.stage_mw;
+            next.available_ports = if allocation.tier.is_some() {
+                protocol::PORT_COUNT as u8
+            } else {
+                iasis_pd::power::capacity(allocation.stage_mw)
             };
-            ports.grant(next.supply, budgets, input_mv, next.brick_source_pdos[0]);
+            next.host_limit_ma = allocation.tier.map_or(0, |tier| tier.upper_ma);
+            if next.supply != published.supply {
+                defmt::info!(
+                    "supply {} with {=u32} mW for stages",
+                    next.supply,
+                    next.charging_budget_mw
+                );
+            }
+            ports.grant(
+                next.supply,
+                allocation.shares,
+                input_mv,
+                board.brick.unconstrained,
+            );
+            drop(guard);
             next.uptime_ms = Instant::now().as_millis();
             oled.tick(&io, &next, &button, next.uptime_ms).await;
             next.i2c_root_fault |= io.lock().await.bus.faulted();
             // Host reports can change the targets during the I²C work above.
             let now = Instant::now().as_millis();
-            next.host = session.active(now);
+            let host = session.active(now);
+            if host.map(|host| host.id) != next.host.map(|host| host.id) {
+                defmt::info!("host session {=?}", host.map(|host| host.id));
+            }
+            next.host = host;
             ports.host(None, next.host.is_some(), now);
             next.ports = ports.statuses();
             let pending = session.take_arm(now);
@@ -522,9 +535,11 @@ async fn main(_spawner: Spawner) {
             for event in events {
                 match event {
                     iasis_firmware::button::Event::Decision(decision) => {
+                        defmt::info!("erase arm {}", decision);
                         next.restore_decision = Some(decision);
                     }
                     iasis_firmware::button::Event::Action(event) => {
+                        defmt::info!("button {} on ports {=u8:#07b}", event.gesture, event.ports);
                         let action = match event.gesture {
                             protocol::Gesture::Dfu => Some(protocol::PortAction::Dfu),
                             protocol::Gesture::Reboot => Some(protocol::PortAction::Reboot),
@@ -535,7 +550,6 @@ async fn main(_spawner: Spawner) {
                                 let i = port.index();
                                 if event.ports & (1 << i) != 0 {
                                     next.ports[i] = ports.command(protocol::PortCommand {
-                                        serial,
                                         port,
                                         generation: event.generations[i],
                                         id: next.ports[i].command_id.wrapping_add(1).max(1),
@@ -597,7 +611,12 @@ async fn main(_spawner: Spawner) {
     .await;
 }
 
+defmt::timestamp!("{=u64:us}", Instant::now().as_micros());
+
 #[panic_handler]
-fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
+fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
+    if let Some(at) = info.location() {
+        defmt::error!("panic at {=str}:{=u32}", at.file(), at.line());
+    }
     board::panic_reset()
 }

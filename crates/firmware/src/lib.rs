@@ -7,6 +7,7 @@ pub mod host_input;
 pub mod host_session;
 pub mod hub;
 pub mod panel;
+pub mod power;
 pub mod request;
 pub mod settings;
 pub mod settle;

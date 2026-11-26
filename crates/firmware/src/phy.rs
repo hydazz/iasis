@@ -83,6 +83,22 @@ const HEALTH: Duration = Duration::from_millis(250);
 /// A controller that has just been set up is first read after this long,
 /// once its comparator shows the line it now measures.
 const FIRST_READ: Duration = Duration::from_millis(5);
+/// INT_N already low as a wait begins was not cleared by the last pass or
+/// was raised again during it. The next pass waits this long after the last,
+/// so a line held low cannot keep the bus busy.
+const REASSERTED: Duration = Duration::from_millis(2);
+
+/// The debug query a reply would answer. The target acknowledges a query
+/// before it replies, and the controller queues that GoodCRC ahead of the
+/// reply, so a late reply to an earlier query is not taken for this one's.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Query {
+    Closed,
+    /// Sent with this message ID; its GoodCRC has not been read.
+    Sent(u8),
+    /// The target's next reply answers the query.
+    Acknowledged,
+}
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum Tx {
@@ -92,6 +108,16 @@ pub enum Tx {
     Unanswered,
     /// The line was busy.
     Collision,
+}
+
+impl Tx {
+    pub fn text(self) -> &'static str {
+        match self {
+            Self::Sent => "sent",
+            Self::Unanswered => "unanswered",
+            Self::Collision => "collided",
+        }
+    }
 }
 
 pub async fn write(bus: &mut Bus, register: u8, value: u8) -> Result<(), PortError> {
@@ -118,7 +144,8 @@ pub struct Phy<'a> {
     hard_reset: Cell<bool>,
     hard_sent: Cell<bool>,
     sent: Cell<Option<Tx>>,
-    /// A frame reached the controller and its sender stopped waiting for it.
+    /// Set from the start of a frame's write until its outcome is known.
+    /// Still set when the next frame begins, its sender was dropped.
     in_flight: Cell<bool>,
     inbox: RefCell<Deque<Packet, 4>>,
     failure: Cell<Option<PortError>>,
@@ -128,10 +155,13 @@ pub struct Phy<'a> {
     resets_sent: Cell<u16>,
     resets_received: Cell<u16>,
     debug_id: Cell<u8>,
-    /// The last vendor message a target sent over a debug SOP.
+    query: Cell<Query>,
+    /// The reply to the open query.
     debug_reply: Cell<Option<Objects>>,
     /// When the controller is read if it raises no interrupt first.
     read_due: Cell<Instant>,
+    /// When INT_N found low as a wait begins is next acted on.
+    reasserted_due: Cell<Instant>,
     /// Each is raised when a service pass changes what its one waiter reads.
     line: Signal<NoopRawMutex, ()>,
     received: Signal<NoopRawMutex, ()>,
@@ -160,8 +190,10 @@ impl<'a> Phy<'a> {
             resets_sent: Cell::new(0),
             resets_received: Cell::new(0),
             debug_id: Cell::new(0),
+            query: Cell::new(Query::Closed),
             debug_reply: Cell::new(None),
             read_due: Cell::new(Instant::MIN),
+            reasserted_due: Cell::new(Instant::MIN),
             line: Signal::new(),
             received: Signal::new(),
             completed: Signal::new(),
@@ -186,6 +218,7 @@ impl<'a> Phy<'a> {
         self.sent.set(None);
         self.in_flight.set(false);
         self.inbox.borrow_mut().clear();
+        self.query.set(Query::Closed);
         self.debug_reply.set(None);
         self.failure.set(None);
     }
@@ -335,6 +368,7 @@ impl<'a> Phy<'a> {
             status0 = bus.register(ADDRESS, STATUS0).await?;
         }
         if a & 0x01 != 0 {
+            defmt::info!("port {=usize} hard reset received", self.channel + 1);
             self.hard_reset.set(true);
             self.resets_received
                 .set(self.resets_received.get().saturating_add(1));
@@ -372,10 +406,16 @@ impl<'a> Phy<'a> {
                 // A revision 2.0 port without vendor messages ignores them.
                 let vendor = header & 0x801f == 15 && body != 0;
                 // Apple debug replies arrive over SOP′ Debug or SOP″ Debug.
-                if matches!(head[0] >> 5, 0b100 | 0b011) && vendor {
+                let debug = matches!(head[0] >> 5, 0b100 | 0b011);
+                let id = ((header >> 9) & 7) as u8;
+                if debug && good_crc && self.query.get() == Query::Sent(id) {
+                    self.query.set(Query::Acknowledged);
+                }
+                if debug && vendor && self.query.get() == Query::Acknowledged {
                     let (words, _) = rest[..body].as_chunks::<4>();
                     let objects = words.iter().map(|word| u32::from_le_bytes(*word));
                     self.debug_reply.set(Some(objects.collect()));
+                    self.query.set(Query::Closed);
                     self.answered.signal(());
                 }
                 if head[0] & 0xe0 == 0xe0 && !good_crc && !vendor {
@@ -394,6 +434,7 @@ impl<'a> Phy<'a> {
         }
         drop(io);
         self.read_due.set(Instant::now() + HEALTH);
+        self.reasserted_due.set(Instant::now() + REASSERTED);
         if line {
             self.line.signal(());
         }
@@ -415,7 +456,13 @@ impl<'a> Phy<'a> {
         other: impl Future<Output = ()>,
     ) -> Result<(), PortError> {
         let due = Timer::at(self.read_due.get());
-        match select3(int.wait_for_low(), due, other).await {
+        let raised = async {
+            if int.is_low() {
+                Timer::at(self.reasserted_due.get()).await;
+            }
+            int.wait_for_low().await;
+        };
+        match select3(raised, due, other).await {
             Either3::Third(()) => Ok(()),
             _ => self.service().await,
         }
@@ -432,9 +479,10 @@ impl<'a> Phy<'a> {
 
     async fn send(&self, sop: [u8; 4], message: &[u8]) -> Result<Tx, PortError> {
         let _transmitter = self.transmitter.lock().await;
-        // A sender dropped mid-frame leaves the controller sending or
-        // retrying it, and its late result would read as this frame's.
-        if self.in_flight.take() {
+        // A sender dropped mid-frame leaves part of it in the FIFO, or the
+        // controller sending or retrying it, and its late result would read
+        // as this frame's.
+        if self.in_flight.get() {
             self.flush().await?;
         }
         let mut frame = Vec::<u8, 40>::new();
@@ -447,13 +495,13 @@ impl<'a> Phy<'a> {
             .map_err(|_| PortError::Protocol)?;
         for _ in 0..3 {
             self.sent.set(None);
+            self.in_flight.set(true);
             let written = {
                 let mut io = self.io.lock().await;
                 io.port(self.channel).await?.write(ADDRESS, &frame).await
             };
             let result = match written {
                 Ok(()) => {
-                    self.in_flight.set(true);
                     let completion = async {
                         loop {
                             if let Some(result) = self.sent.take() {
@@ -465,11 +513,9 @@ impl<'a> Phy<'a> {
                             self.completed.wait().await;
                         }
                     };
-                    let result = with_timeout(Duration::from_millis(20), completion)
+                    with_timeout(Duration::from_millis(20), completion)
                         .await
-                        .unwrap_or(Tx::Unanswered);
-                    self.in_flight.set(false);
-                    result
+                        .unwrap_or(Tx::Unanswered)
                 }
                 Err(PortError::I2c {
                     failure: I2cFailure::NoAcknowledge | I2cFailure::OtherAbort(_),
@@ -477,6 +523,10 @@ impl<'a> Phy<'a> {
                 }) => {
                     // The line was busy. The write stopped before TXON, so
                     // nothing was sent.
+                    defmt::debug!(
+                        "port {=usize} line busy; writing the frame again",
+                        self.channel + 1
+                    );
                     self.retries.set(self.retries.get().saturating_add(1));
                     self.line.signal(());
                     self.flush().await?;
@@ -484,7 +534,14 @@ impl<'a> Phy<'a> {
                 }
                 Err(error) => return Err(error),
             };
-            if result != Tx::Sent {
+            if result == Tx::Sent {
+                self.in_flight.set(false);
+            } else {
+                defmt::debug!(
+                    "port {=usize} frame {=str}",
+                    self.channel + 1,
+                    result.text()
+                );
                 self.flush().await?;
             }
             return Ok(result);
@@ -499,6 +556,7 @@ impl<'a> Phy<'a> {
         write(bus, CONTROL0, TX_FLUSH | self.rp.get()).await?;
         drop(io);
         Timer::after_millis(1).await;
+        self.in_flight.set(false);
         Ok(())
     }
 
@@ -511,7 +569,9 @@ impl<'a> Phy<'a> {
         let bus = io.port(self.channel).await?;
         // Rd reads as open at 3 A Rp until the threshold is raised.
         write(bus, MEASURE, OPEN_THRESHOLD_3A).await?;
-        write(bus, CONTROL0, SINK_TX_OK).await
+        write(bus, CONTROL0, SINK_TX_OK).await?;
+        defmt::info!("port {=usize} SinkTxOK", self.channel + 1);
+        Ok(())
     }
 
     /// Send one Apple debug message over SOP″ Debug.
@@ -526,19 +586,26 @@ impl<'a> Phy<'a> {
     pub async fn ask_debug(&self, objects: &[u32]) -> Result<(Tx, Option<Objects>), PortError> {
         self.debug_reply.set(None);
         self.answered.reset();
-        let sent = self.send_debug(objects).await?;
-        if sent != Tx::Sent {
-            return Ok((sent, None));
-        }
-        let _ = with_timeout(DEBUG_REPLY, self.answered.wait()).await;
-        Ok((sent, self.debug_reply.take()))
+        self.query.set(Query::Sent(self.debug_id.get()));
+        let sent = self.send_debug(objects).await;
+        let reply = if let Ok(Tx::Sent) = sent {
+            let _ = with_timeout(DEBUG_REPLY, self.answered.wait()).await;
+            self.debug_reply.take()
+        } else {
+            None
+        };
+        self.query.set(Query::Closed);
+        Ok((sent?, reply))
     }
 }
 
 /// The PD engine's view of the port.
 pub struct PdPhy<'a, 'p> {
     pub phy: &'a Phy<'p>,
-    pub first_offer_mw: &'a Cell<u32>,
+    /// A list of offers is out to the sink.
+    pub offered: &'a Cell<bool>,
+    /// A transmission went unanswered.
+    pub unanswered: &'a Cell<bool>,
 }
 
 impl Driver for PdPhy<'_, '_> {
@@ -597,8 +664,10 @@ impl Driver for PdPhy<'_, '_> {
             }
         };
         if result.is_err() {
-            // The port's task publishes the released reservation.
-            self.first_offer_mw.set(0);
+            // Nothing reached the sink, which may not speak PD. The port's
+            // task publishes the released reservation.
+            self.offered.set(false);
+            self.unanswered.set(true);
             self.phy.line.signal(());
         }
         result
@@ -609,6 +678,7 @@ impl Driver for PdPhy<'_, '_> {
         self.phy.hard_sent.set(false);
         // The engine also answers a received hard reset with one of its own.
         if !self.phy.answering.take() {
+            defmt::info!("port {=usize} hard reset sent", self.phy.channel + 1);
             self.phy
                 .resets_sent
                 .set(self.phy.resets_sent.get().saturating_add(1));
