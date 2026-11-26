@@ -14,6 +14,7 @@ use std::{
 use anyhow::{Context, Result, ensure};
 use nusb::DeviceInfo;
 use picoboot::{Picoboot, RebootType};
+use picoboot_nusb::UsbDevice;
 
 use crate::{Hub, UsbIds, hubs, inventory::Inventory};
 
@@ -125,7 +126,7 @@ pub fn write(serial: u64, image: &Image, inventory: &Inventory) -> Result<[u16; 
 }
 
 async fn flash(rom: DeviceInfo, image: &Image) -> Result<()> {
-    let mut device = Picoboot::new(rom).await?;
+    let mut device = Picoboot::new(UsbDevice::new(rom).await?)?;
     for (address, bytes) in &image.runs {
         device.flash_erase_and_write(*address, bytes).await?;
     }
