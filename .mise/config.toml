@@ -5,9 +5,9 @@ monorepo_root = true
 # to x86_64-pc-windows-gnu as RestoreKit does.
 python = { version = "3.14.10", os = ["linux", "macos"] }
 rust = { version = "1.100.0", components = "rustfmt,clippy", targets = "thumbv8m.main-none-eabihf" }
-uv = { version = "0.13.9", os = ["linux", "macos"] }
+uv = { version = "0.13.10", os = ["linux", "macos"] }
 ruff = { version = "0.17.6", os = ["linux", "macos"] }
-lefthook = { version = "2.2.2", os = ["linux", "macos"] }
+lefthook = { version = "2.2.3", os = ["linux", "macos"] }
 jactionlint = { version = "v2.6.0", os = ["linux", "macos"] }
 oxfmt = { version = "0.75.0", os = ["linux", "macos"] }
 node = { version = "26.13.1", os = ["linux", "macos"] }
