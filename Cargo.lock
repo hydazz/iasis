@@ -2049,6 +2049,7 @@ dependencies = [
  "oslog",
  "pcap",
  "picoboot",
+ "picoboot-nusb",
  "pktkit",
  "plist",
  "pollster",
@@ -2999,15 +3000,25 @@ checksum = "5be167a7af36ee22fe3115051bc51f6e6c7054c9348e28deb4f49bd6f705a315"
 
 [[package]]
 name = "picoboot"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "240340b0caefa4d6e19fda063c5a0181223d263aac3653448513d3cf4945b21e"
+checksum = "6591432232001a31ed2f82821a89bb3966dfd7c2e18958513aec0b48db9e99fd"
 dependencies = [
  "deku",
  "log",
+ "thiserror",
+]
+
+[[package]]
+name = "picoboot-nusb"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0079293179d2fdeb3458439dad46a70d2a78efda4338728ee7c6c9624ec966df"
+dependencies = [
+ "log",
  "nusb",
+ "picoboot",
  "rustix",
- "serde",
  "thiserror",
 ]
 
