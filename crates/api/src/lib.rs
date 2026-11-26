@@ -3,7 +3,7 @@
 //! bytes it names. `README.md` describes each message for clients in any
 //! language; `fixtures/` holds an example of each, which clients test against.
 
-pub use iasis_protocol::{AppleMode, Hue, Light, Port, RestorePhase};
+pub use iasis_protocol::{AppleMode, Hue, Light, Port, RestorePhase, Status};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -31,13 +31,14 @@ pub enum Request {
         hubs: Vec<Selection>,
         latest: bool,
     },
+    /// Signal the selected targets into DFU, on any number of hubs. Every
+    /// target is checked before any is signalled.
     Dfu {
-        hub: String,
-        port: u8,
+        hubs: Vec<Selection>,
     },
+    /// Signal the selected targets to restart, as `Dfu`.
     Reboot {
-        hub: String,
-        port: u8,
+        hubs: Vec<Selection>,
     },
     Power {
         hub: String,
@@ -101,6 +102,10 @@ pub enum Request {
     },
     /// Reply with every device model the catalog lists.
     Catalog,
+    /// Reply with what the agent reads from a hub and finds on its USB.
+    Diagnostics {
+        hub: String,
+    },
 }
 
 impl Request {
@@ -127,6 +132,7 @@ pub enum Reply {
     Plan(Vec<Planned>),
     /// The supervision identity as a PKCS #12 archive, in base64.
     Supervision(String),
+    Diagnostics(Box<Diagnostics>),
 }
 
 /// The targets selected on one hub, in the session the client saw.
@@ -226,15 +232,15 @@ pub struct State {
     pub missing: Vec<Prerequisite>,
 }
 
-/// Software the host lacks, and what goes without it.
+/// Software the host lacks or must fix, and what goes without it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Prerequisite {
     /// What a port that waits for it calls it.
     pub id: String,
-    /// What to install.
+    /// What to install or fix.
     pub name: String,
-    /// Where to get it.
-    pub url: String,
+    /// Where to get it; none when the reason says what to do.
+    pub url: Option<String>,
     /// What can't be done without it, as a sentence.
     pub reason: String,
 }
@@ -473,7 +479,8 @@ pub struct Image {
     pub path: Option<String>,
     /// Fetched from Apple's catalog, as opposed to added from a file.
     pub fetched: bool,
-    /// A restore is reading it, so `remove` refuses it.
+    /// A restore is reading it; `remove` takes it out once that restore
+    /// ends.
     pub in_use: bool,
 }
 
@@ -518,6 +525,84 @@ pub struct Supervision {
     pub certificate: Option<String>,
     /// Why the host has no usable identity.
     pub problem: Option<String>,
+}
+
+/// What the agent reads from one hub and finds on its USB, for diagnosis.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Diagnostics {
+    /// The hub's status as IasisOS reports it, in the hub protocol's own
+    /// terms, which change with IasisOS.
+    pub status: Status,
+    /// The hub's USB 2 hub function.
+    pub hub: Topology,
+    /// The negotiated rate between the host and the hub.
+    pub upstream_mbps: Option<u16>,
+    pub ports: Vec<PortUsb>,
+}
+
+/// What the host finds on one port's USB, and what the agent makes of it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PortUsb {
+    pub number: u8,
+    pub usb2: Topology,
+    pub superspeed: Companion,
+    /// The devices on the connector. An empty list does not establish that
+    /// nothing is attached.
+    pub devices: Vec<UsbDevice>,
+    /// The agent's reading of the port, as a sentence.
+    pub assessment: String,
+}
+
+/// Where a USB device sits: its bus and the hub ports that lead to it.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Topology {
+    pub bus: String,
+    pub port_chain: Vec<u8>,
+}
+
+/// The SuperSpeed side of a connector.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum Companion {
+    Mapped {
+        topology: Topology,
+    },
+    /// The USB hub's SuperSpeed function is not enumerated, or nothing the
+    /// host reports identifies it.
+    Unavailable,
+    /// The host's evidence disagrees. No SuperSpeed device is assigned.
+    Ambiguous,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Speed {
+    Unknown,
+    Low,
+    Full,
+    High,
+    Super,
+    SuperPlus,
+}
+
+/// A USB device as the host enumerates it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsbDevice {
+    pub topology: Topology,
+    pub vendor_id: u16,
+    pub product_id: u16,
+    pub serial_number: Option<String>,
+    pub product: Option<String>,
+    pub speed: Speed,
+    pub apple: Option<AppleUsb>,
+}
+
+/// What an Apple device's descriptors and identification say of it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppleUsb {
+    pub mode: AppleMode,
+    pub model: Option<String>,
+    pub ecid: Option<String>,
 }
 
 #[cfg(test)]

@@ -20,18 +20,18 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail};
 use iasis_protocol::{
-    AppleMode, DEBUG_USB, DFU_USB, DebugActions, HostControl, HostReport, HostSession, IDENTIFY_MS,
-    Observed, PORT_COUNT, Port, PortAction, PortReport, PortStatus, RestoreAccess, RestoreArm,
-    RestorePhase, RestoreStatus, Status, Usb,
+    AppleMode, CommandError, CommandResult, DEBUG_USB, DFU_USB, DebugActions, HostControl,
+    HostReport, HostSession, IDENTIFY_MS, Observed, PORT_COUNT, Port, PortAction, PortCommand,
+    PortReport, PortStatus, RestoreAccess, RestoreArm, RestorePhase, RestoreStatus, Status, Usb,
 };
 use nusb::{DeviceInfo, transfer::TransferError};
 
 use crate::{
-    Events, Hub, Topology, dfu,
+    Error, Events, Hub, dfu,
     identity::{AppleDevice, models::Models},
     inventory::Inventory,
     restore::{Operation, Progress},
-    topology::{self, Snapshot, UsbDevice},
+    topology::{self, Attachment, Snapshot, UsbDevice},
     watch::Watch,
 };
 
@@ -64,9 +64,140 @@ const DEBUG_USB_ONLY: [u16; 10] = [
     DEBUG_USB, DFU_USB, 0x0206, 0x0306, 0x0106, 0x0105, 0x0303, 0x0803, 0x0809, 0x0103,
 ];
 
-/// Restore jobs by port, each with the attachment it runs on. They outlive a
-/// link, so a job keeps reporting after the hub reconnects.
-pub type Jobs = Arc<Mutex<[Option<PortJob>; PORT_COUNT]>>;
+/// What the host is doing on each of a hub's ports: its restore jobs, each
+/// with the attachment it runs on, and the images they wait for. It outlives
+/// each session, so the next session reports it.
+pub(crate) struct Work {
+    jobs: Mutex<[Option<PortJob>; PORT_COUNT]>,
+    awaiting: Mutex<[Option<Awaiting>; PORT_COUNT]>,
+    /// The hub has not been told of a change to them.
+    unreported: AtomicBool,
+    changes: Arc<Watch>,
+    /// Ports a job holds, from its start to its final result.
+    taken: [AtomicBool; PORT_COUNT],
+    /// Ports whose Debug USB device a tunnel has open.
+    #[cfg(target_os = "linux")]
+    tunnelled: [AtomicBool; PORT_COUNT],
+}
+
+/// A job's hold on its port, until it drops.
+pub(crate) struct Taken {
+    work: Arc<Work>,
+    port: Port,
+}
+
+impl Drop for Taken {
+    fn drop(&mut self) {
+        self.work.taken[self.port.index()].store(false, Ordering::SeqCst);
+    }
+}
+
+/// A tunnel's hold on its port's Debug USB device, until it drops.
+#[cfg(target_os = "linux")]
+pub(crate) struct Tunnelled {
+    work: Arc<Work>,
+    port: Port,
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for Tunnelled {
+    fn drop(&mut self) {
+        self.work.tunnelled[self.port.index()].store(false, Ordering::SeqCst);
+    }
+}
+
+impl Work {
+    pub(crate) fn new(changes: Arc<Watch>) -> Self {
+        Self {
+            jobs: Mutex::default(),
+            awaiting: Mutex::default(),
+            unreported: AtomicBool::new(false),
+            changes,
+            taken: Default::default(),
+            #[cfg(target_os = "linux")]
+            tunnelled: Default::default(),
+        }
+    }
+
+    /// Hold the port for a job, through its relaunches, until the returned
+    /// hold drops. A tunnel opens nothing on a held port, and this waits for
+    /// what one has open to close, so the job's DFU signal and worker never
+    /// meet a tunnel's read of the device.
+    pub(crate) fn take(self: &Arc<Self>, port: Port) -> Taken {
+        self.taken[port.index()].store(true, Ordering::SeqCst);
+        #[cfg(target_os = "linux")]
+        {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while self.tunnelled[port.index()].load(Ordering::SeqCst) {
+                if Instant::now() >= deadline {
+                    log::warn!(
+                        "Port {}: the Debug USB tunnel kept its device",
+                        port.number()
+                    );
+                    break;
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+        }
+        Taken {
+            work: self.clone(),
+            port,
+        }
+    }
+
+    /// A job holds the port.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn taken(&self, port: Port) -> bool {
+        self.taken[port.index()].load(Ordering::SeqCst)
+    }
+
+    /// Open the port's Debug USB device for a tunnel, unless a job holds the
+    /// port. The hold is noted before the job's is read, as a job notes its
+    /// own before it reads this, so one of the two always sees the other.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn tunnel(self: &Arc<Self>, port: Port) -> Option<Tunnelled> {
+        self.tunnelled[port.index()].store(true, Ordering::SeqCst);
+        let held = Tunnelled {
+            work: self.clone(),
+            port,
+        };
+        (!self.taken(port)).then_some(held)
+    }
+
+    /// Set or clear the restore job on a port's attachment.
+    pub(crate) fn job(&self, port: Port, job: Option<PortJob>) {
+        let mut jobs = self.jobs.lock().unwrap();
+        if jobs[port.index()] != job {
+            jobs[port.index()] = job;
+            drop(jobs);
+            self.moved();
+        }
+    }
+
+    /// Say which image a port's restore waits for and how much of it is
+    /// fetched, or that the wait is over.
+    pub(crate) fn awaiting(&self, port: Port, awaiting: Option<Awaiting>) {
+        let mut ports = self.awaiting.lock().unwrap();
+        if ports[port.index()] != awaiting {
+            ports[port.index()] = awaiting;
+            drop(ports);
+            self.moved();
+        }
+    }
+
+    /// A worker restores the port's target, from its start until its
+    /// result is settled.
+    pub(crate) fn restoring(&self, port: Port) -> bool {
+        self.jobs.lock().unwrap()[port.index()]
+            .as_ref()
+            .is_some_and(|job| !finished(&job.status))
+    }
+
+    fn moved(&self) {
+        self.unreported.store(true, Ordering::Relaxed);
+        self.changes.changed();
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PortJob {
@@ -119,25 +250,22 @@ pub(crate) enum Medium {
 fn sharing_target(status: &Status, snapshot: &Snapshot, port: Port) -> Option<u64> {
     let state = &status.ports[port.index()];
     let device = snapshot.target(port)?;
-    if !state.occupied() || device.vendor_id != 0x05ac {
+    if !state.occupied()
+        || state.restoring()
+        || device.vendor_id != 0x05ac
+        || device.is_host()
+        || device.apple.as_ref()?.mode != AppleMode::Normal
+    {
         return None;
     }
     #[cfg(target_os = "macos")]
     {
         // The Mac host only serves an existing public NCM interface.
-        Some(device.macos_attachment?.registry_entry_id)
+        Some(device.attachment.registry())
     }
     #[cfg(target_os = "linux")]
     {
-        // Linux may have to switch a booted device into its network configuration.
-        if state.restoring() || device.apple.as_ref()?.mode != AppleMode::Normal {
-            return None;
-        }
-        topology::linux_usb_id(
-            device.topology.bus.parse().ok()?,
-            device.device_address,
-            &device.topology.port_chain,
-        )
+        device.attachment.id()
     }
 }
 
@@ -190,35 +318,9 @@ impl Observer {
     }
 }
 
-/// One USB enumeration: a target that re-enumerates is asked again.
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct Enumeration {
-    topology: Topology,
-    product_id: u16,
-    serial_number: Option<String>,
-    #[cfg(target_os = "macos")]
-    registry_entry_id: Option<u64>,
-    #[cfg(not(target_os = "macos"))]
-    device_address: u8,
-}
-
-impl From<&UsbDevice> for Enumeration {
-    fn from(device: &UsbDevice) -> Self {
-        Self {
-            topology: device.topology.clone(),
-            product_id: device.product_id,
-            serial_number: device.serial_number.clone(),
-            #[cfg(target_os = "macos")]
-            registry_entry_id: device
-                .macos_attachment
-                .map(|attachment| attachment.registry_entry_id),
-            #[cfg(not(target_os = "macos"))]
-            device_address: device.device_address,
-        }
-    }
-}
-
-type Identified = [Option<(Enumeration, AppleDevice)>; PORT_COUNT];
+/// What identification found, by the enumeration it asked: a target that
+/// re-enumerates is asked again.
+type Identified = [Option<(Attachment, AppleDevice)>; PORT_COUNT];
 
 fn unidentified_usb(snapshot: &Snapshot, port: Port) -> Option<&UsbDevice> {
     snapshot.target(port).filter(|device| {
@@ -365,19 +467,17 @@ fn compose(
 
 struct Shared {
     hub: Hub,
-    engine: crate::restore::RestoreEngine,
     session: u32,
-    jobs: Jobs,
+    work: Arc<Work>,
     models: Arc<Models>,
     inventory: Arc<Inventory>,
     changes: Arc<Watch>,
-    awaiting: Mutex<[Option<Awaiting>; PORT_COUNT]>,
     restore_ready: AtomicBool,
     internet_sharing: AtomicBool,
     alive: AtomicBool,
     stop: AtomicBool,
     next_arm: AtomicU32,
-    /// The hub's copy of the view or the jobs is out of date.
+    /// The hub's copy of the view is out of date.
     unreported: AtomicBool,
     view: Mutex<View>,
     /// What the next report says of each port. The lease reads this and not
@@ -387,6 +487,8 @@ struct Shared {
     /// Advances when a target is named or forgotten.
     identified_version: AtomicU64,
     failure: Mutex<Option<String>>,
+    /// Port commands go one at a time: each takes the next ID of its port.
+    commands: Mutex<()>,
     #[cfg(target_os = "linux")]
     tunnels: crate::tunnel::Tunnels,
 }
@@ -400,7 +502,7 @@ impl Shared {
                 continue;
             };
             if let Some(device) = snapshot.ports[port.index()].target_mut()
-                && Enumeration::from(&*device) == *enumeration
+                && device.attachment == *enumeration
             {
                 device.apple = Some(apple.clone());
             }
@@ -439,10 +541,9 @@ impl Shared {
     /// identification found of each enumeration still there. This walks
     /// the host's USB ports, so it runs apart from the view and the lease.
     fn place(&self) -> Result<Snapshot, topology::Error> {
-        let devices = self.inventory.devices();
-        let snapshot = topology::locate(self.hub.topology(), devices.clone())?;
+        let snapshot = topology::locate(self.hub.topology(), self.inventory.devices())?;
         #[cfg(target_os = "linux")]
-        self.tunnels.follow(&snapshot, &devices);
+        self.tunnels.follow(&snapshot);
         let mut snapshot = self.present(snapshot);
         self.name_identified(&mut snapshot);
         remember_models(&snapshot, &self.models);
@@ -452,7 +553,7 @@ impl Shared {
     /// The connectors while the host's USB tree cannot be placed on them:
     /// empty, so nothing a target was seen as before is reported.
     fn unplaced(&self, error: &topology::Error) -> Snapshot {
-        log::warn!("Hub {:016x}: {error}", self.hub.info().serial);
+        log::warn!("Hub {:016x}: {error}", self.hub.serial());
         Snapshot::vacant(self.hub.topology())
     }
 
@@ -468,7 +569,7 @@ impl Shared {
         };
         let state_moved = was.is_none_or(|was| was.state() != status.state());
         let restarted = status.uptime_ms < view.uptime_ms;
-        let settled = settle(&mut self.jobs.lock().unwrap(), &status, restarted);
+        let settled = settle(&mut self.work.jobs.lock().unwrap(), &status, restarted);
         if restarted {
             drop(view);
             self.fail(anyhow!("the hub restarted"));
@@ -481,8 +582,10 @@ impl Shared {
             if seen[port.index()] != Some((slot.generation, observe(&snapshot, port))) {
                 return RestoreAccess::Unavailable;
             }
-            dfu::assess(self.hub.info().serial, port, &status, &snapshot, None)
-                .restore_access(slot, |mode| self.engine.restores(mode))
+            dfu::assess(self.hub.serial(), port, &status, &snapshot, None)
+                .actions(slot, crate::native::mux::missing_for)
+                .restore
+                .unwrap_or_default()
         });
         let report = (view.observer.stable, view.access);
         let unreported = std::mem::replace(&mut *self.reported.lock().unwrap(), report) != report;
@@ -502,7 +605,6 @@ impl Shared {
     fn send(&self) -> Result<(), Unsent> {
         let (seen, access) = *self.reported.lock().unwrap();
         let report = HostReport {
-            serial: self.hub.info().serial,
             session: HostSession {
                 id: self.session,
                 restore_ready: self.restore_ready.load(Ordering::Relaxed),
@@ -511,8 +613,8 @@ impl Shared {
             ports: compose(
                 &seen,
                 access,
-                &self.jobs.lock().unwrap(),
-                &self.awaiting.lock().unwrap(),
+                &self.work.jobs.lock().unwrap(),
+                &self.work.awaiting.lock().unwrap(),
             ),
         };
         match self.hub.host_report(&report) {
@@ -550,9 +652,12 @@ impl Shared {
         let mut seen = self.changes.count();
         while !self.stop.load(Ordering::Relaxed) {
             let now = Instant::now();
-            let changed = self.unreported.load(Ordering::Relaxed) && now >= sent + REPORT_GAP;
+            let unreported = self.unreported.load(Ordering::Relaxed)
+                || self.work.unreported.load(Ordering::Relaxed);
+            let changed = unreported && now >= sent + REPORT_GAP;
             if changed || now >= sent + HEARTBEAT {
                 self.unreported.store(false, Ordering::Relaxed);
+                self.work.unreported.store(false, Ordering::Relaxed);
                 sent = now;
                 match self.send() {
                     Ok(()) => reached = now,
@@ -566,7 +671,9 @@ impl Shared {
                 }
             }
             let mut until = sent + HEARTBEAT;
-            if self.unreported.load(Ordering::Relaxed) {
+            if self.unreported.load(Ordering::Relaxed)
+                || self.work.unreported.load(Ordering::Relaxed)
+            {
                 until = until.min(sent + REPORT_GAP);
             }
             seen = self.changes.wait(seen, Some(until));
@@ -616,8 +723,8 @@ impl Shared {
     }
 
     /// Read the hub whenever it announces a change. Without its
-    /// announcements, which another client may hold for a moment, the hub
-    /// is read every [`HEALTH`] and they are asked for again.
+    /// announcements the hub is read every [`HEALTH`] and they are asked for
+    /// again.
     fn follow(&self, mut events: Option<Events>) {
         let mut read = Instant::now();
         let mut attached = None;
@@ -660,7 +767,8 @@ impl Shared {
     /// the link is lost or `deadline` arrives.
     fn changed_after(&self, revision: u32, deadline: Instant) {
         let mut seen = self.changes.count();
-        loop {
+        // Nothing reads the hub for a lost link.
+        while self.alive.load(Ordering::Relaxed) {
             let newer = self
                 .view
                 .lock()
@@ -670,13 +778,8 @@ impl Shared {
                 .is_some_and(|(status, _)| {
                     matches!(status.revision.wrapping_sub(revision), 1..0x8000_0000)
                 });
-            let left = deadline.saturating_duration_since(Instant::now());
-            if newer || left.is_zero() {
+            if newer || Instant::now() >= deadline {
                 return;
-            }
-            if !self.alive.load(Ordering::Relaxed) {
-                // Nothing reads the hub for a lost link.
-                return thread::sleep(left.min(crate::UNANNOUNCED));
             }
             seen = self.changes.wait(seen, Some(deadline));
         }
@@ -691,24 +794,33 @@ impl Shared {
             self.inventory.devices(),
         )?);
         let known = self.identified.lock().unwrap().clone();
-        let mut asked: [Option<Enumeration>; PORT_COUNT] = Default::default();
+        let mut asked: [Option<Attachment>; PORT_COUNT] = Default::default();
         let mut mask = 0;
         for port in Port::ALL {
             let index = port.index();
             let target = unidentified_usb(&snapshot, port);
-            let enumeration = target.map(Enumeration::from);
+            let enumeration = target.map(|device| device.attachment.clone());
             let settled = matches!(
                 (&known[index], &enumeration),
                 (Some((seen, apple)), Some(now)) if seen == now && apple.ecid().is_some()
             );
-            // A tunnel names what it presents from its descriptors, and its
-            // Debug USB device is the tunnel's while it is claimed.
+            // A tunnel names what it presents from its descriptors, and on
+            // Linux a Debug USB device is its tunnel's, which reads the
+            // identity of a Mac in DFU behind it, but while a job holds the
+            // port.
             #[cfg(target_os = "linux")]
             let settled = settled
-                || self.tunnels.holds(port)
-                || target.is_some_and(|device| self.tunnels.session(device).is_some());
-            // A restore owns its target's USB.
-            if enumeration.is_some() && !settled && !status.ports[index].restoring() {
+                || target.is_some_and(|device| {
+                    (device.product_id == restorekit::device::KIS_PID && !self.work.taken(port))
+                        || self.tunnels.session(device).is_some()
+                });
+            // A restore owns its target's USB: neither its worker's nor a
+            // restore the hub reports from before is disturbed.
+            if enumeration.is_some()
+                && !settled
+                && !self.work.restoring(port)
+                && !status.ports[index].restoring()
+            {
                 mask |= 1 << index;
             }
             asked[index] = enumeration;
@@ -777,28 +889,26 @@ pub struct Link {
 }
 
 impl Link {
-    /// Take the hub's host session. The hub refuses while another host
-    /// holds it.
+    /// Claim the hub's management interface and take its host session.
+    /// The hub refuses while another host holds it.
     pub(crate) fn open(
         device: &DeviceInfo,
-        jobs: Jobs,
+        work: Arc<Work>,
         models: Arc<Models>,
-        engine: &crate::restore::RestoreEngine,
         inventory: Arc<Inventory>,
     ) -> Result<Self> {
-        let hub = Hub::listen(device)?;
-        let session = (RandomState::new().hash_one(hub.info().serial) as u32).max(1);
+        let hub = Hub::open(device)
+            .context("claiming the hub's management interface; another iasisd may hold it")?;
+        let session = (RandomState::new().hash_one(hub.serial()) as u32).max(1);
         let shared = Arc::new(Shared {
             hub,
-            engine: engine.clone(),
             session,
             #[cfg(target_os = "linux")]
-            tunnels: crate::tunnel::Tunnels::new(inventory.changes().clone(), jobs.clone()),
-            jobs,
+            tunnels: crate::tunnel::Tunnels::new(inventory.changes().clone(), work.clone()),
+            work,
             models,
             changes: inventory.changes().clone(),
             inventory,
-            awaiting: Mutex::default(),
             restore_ready: AtomicBool::new(false),
             internet_sharing: AtomicBool::new(false),
             alive: AtomicBool::new(true),
@@ -810,6 +920,7 @@ impl Link {
             identified: Mutex::default(),
             identified_version: AtomicU64::new(0),
             failure: Mutex::default(),
+            commands: Mutex::default(),
         });
         shared.hub.current()?;
         // Listening starts before the first read, so no change after it is missed.
@@ -817,7 +928,7 @@ impl Link {
         if let Err(error) = &events {
             log::warn!(
                 "Hub {:016x}: reading every {HEALTH:?} without its announcements: {error}",
-                shared.hub.info().serial
+                shared.hub.serial()
             );
         }
         let version = shared.usb_version();
@@ -829,7 +940,7 @@ impl Link {
         match shared.send() {
             Ok(()) => {}
             Err(Unsent::Refused) => {
-                bail!("the hub's host session is taken; another iasisd or restore may hold it")
+                bail!("the hub's host session is taken; another iasisd may hold it")
             }
             Err(Unsent::Unreachable(error)) => return Err(error),
         }
@@ -860,20 +971,10 @@ impl Link {
         &self.shared.changes
     }
 
-    pub(crate) fn inventory(&self) -> &Inventory {
-        &self.shared.inventory
-    }
-
     /// Wait until the hub has been read at a revision after `revision`,
     /// the session is lost or `deadline` arrives.
     pub fn changed_after(&self, revision: u32, deadline: Instant) {
         self.shared.changed_after(revision, deadline);
-    }
-
-    /// Lets a control connection wait on this link's reading of the hub.
-    pub(crate) fn notice(&self) -> crate::Notice {
-        let shared = self.shared.clone();
-        Arc::new(move |revision, deadline| shared.changed_after(revision, deadline))
     }
 
     pub fn hub(&self) -> &Hub {
@@ -959,33 +1060,6 @@ impl Link {
         }
     }
 
-    /// A job is still waiting to reach the hub.
-    pub fn reporting(&self) -> bool {
-        self.shared.jobs.lock().unwrap().iter().any(Option::is_some)
-    }
-
-    /// Set or clear the restore job on a port's attachment.
-    pub fn job(&self, port: Port, job: Option<PortJob>) {
-        let mut jobs = self.shared.jobs.lock().unwrap();
-        if jobs[port.index()] != job {
-            jobs[port.index()] = job;
-            drop(jobs);
-            self.shared.report_soon();
-        }
-    }
-
-    /// Say which image a port's restore waits for and how much of it is
-    /// fetched, or that the wait is over.
-    pub(crate) fn awaiting(&self, port: Port, awaiting: Option<Awaiting>) {
-        let mut ports = self.shared.awaiting.lock().unwrap();
-        if ports[port.index()] != awaiting {
-            ports[port.index()] = awaiting;
-            drop(ports);
-            self.shared.report_soon();
-            self.shared.changes.changed();
-        }
-    }
-
     /// Decide again what each target allows, after the host has gained or
     /// lost something a restore needs.
     pub(crate) fn reassess(&self) {
@@ -995,10 +1069,10 @@ impl Link {
     pub(crate) fn hub_view(&self, store: &crate::images::Store) -> Option<iasis_api::HubView> {
         let view = self.shared.view.lock().unwrap();
         let (status, snapshot) = view.sample.as_ref()?;
-        let mut hub = crate::view::hub(self.hub().info(), status);
+        let mut hub = crate::view::hub(self.hub().serial(), self.hub().info(), status);
         crate::view::describe_devices(
             &mut hub,
-            self.hub().info().serial,
+            self.hub().serial(),
             status,
             snapshot,
             &crate::view::Host {
@@ -1006,8 +1080,8 @@ impl Link {
                 models: &self.shared.models,
             },
         );
-        let jobs = self.shared.jobs.lock().unwrap();
-        let awaiting = self.shared.awaiting.lock().unwrap();
+        let jobs = self.shared.work.jobs.lock().unwrap();
+        let awaiting = self.shared.work.awaiting.lock().unwrap();
         for (index, row) in hub.ports.iter_mut().enumerate() {
             if let Some(job) = &jobs[index] {
                 crate::view::describe_job(row, job);
@@ -1031,8 +1105,8 @@ impl Link {
         let Some((status, _)) = &view.sample else {
             return Vec::new();
         };
-        let jobs = self.shared.jobs.lock().unwrap();
-        let awaiting = self.shared.awaiting.lock().unwrap();
+        let jobs = self.shared.work.jobs.lock().unwrap();
+        let awaiting = self.shared.work.awaiting.lock().unwrap();
         Port::ALL
             .into_iter()
             .filter_map(|port| {
@@ -1076,6 +1150,12 @@ impl Link {
         self.shared.observe()
     }
 
+    /// The hub's status as last read, and the host's USB devices on its
+    /// connectors as last placed, with what identification found of each.
+    pub(crate) fn sample(&self) -> Option<(Status, Snapshot)> {
+        self.shared.view.lock().unwrap().sample.clone()
+    }
+
     /// The hub's status as last read.
     pub fn status(&self) -> Option<Status> {
         self.shared
@@ -1085,6 +1165,66 @@ impl Link {
             .sample
             .as_ref()
             .map(|(status, _)| *status)
+    }
+
+    /// Run a port command on the attachment there now. Enable permits
+    /// attachment; Acknowledged means PD transport only, not DFU.
+    pub fn command(&self, port: Port, action: PortAction) -> Result<CommandResult> {
+        let generation = self.hub().status()?.ports[port.index()].generation;
+        self.command_for_generation(port, generation, action)
+    }
+
+    /// Run a port command on one attachment, and wait for the hub to say
+    /// how it went.
+    pub fn command_for_generation(
+        &self,
+        port: Port,
+        generation: u32,
+        action: PortAction,
+    ) -> Result<CommandResult> {
+        let hub = self.hub();
+        // Enable and disable address the port; other actions one attachment.
+        let attachment = !matches!(action, PortAction::Enable | PortAction::Disable);
+        let _turn = self.shared.commands.lock().unwrap();
+        let before = hub.status()?.ports[port.index()];
+        if attachment && before.generation != generation {
+            return Err(Error::Command(CommandError::StaleAttachment).into());
+        }
+        let command = PortCommand {
+            port,
+            generation,
+            id: before.command_id.wrapping_add(1).max(1),
+            action,
+        };
+        hub.port_command(&command)?;
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let status = hub.status()?;
+            let state = status.ports[port.index()];
+            if state.command_id == command.id {
+                match state.command_result {
+                    CommandResult::Failed(error) => return Err(Error::Command(error).into()),
+                    CommandResult::Complete
+                    | CommandResult::Acknowledged
+                    | CommandResult::Unconfirmed => return Ok(state.command_result),
+                    // A target attaching to the enabled port clears the result.
+                    CommandResult::Idle if action == PortAction::Enable && state.enabled => {
+                        return Ok(CommandResult::Complete);
+                    }
+                    _ => {}
+                }
+            }
+            if attachment && state.generation != generation {
+                return Err(Error::Command(CommandError::StaleAttachment).into());
+            }
+            if Instant::now() >= deadline {
+                return Err(Error::CommandTimeout.into());
+            }
+            if !self.alive() {
+                return Err(self.failure());
+            }
+            self.changed_after(status.revision, deadline);
+        }
     }
 
     /// Ask the hub to confirm an erase of the selected ports. Each arm is
@@ -1139,6 +1279,7 @@ impl Drop for Link {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Topology;
     use crate::{
         identity::{Identity, IdentitySource},
         topology::{Companion, PortDevices, Speed},
@@ -1165,22 +1306,24 @@ mod tests {
     }
 
     fn device(port: Port, vendor: u16, product: u16, ecid: Option<u64>) -> UsbDevice {
-        let serial = ecid.map(|ecid| format!("CPID:8103 ECID:{ecid:016X} IBFL:3C"));
+        let serial = ecid.map(|ecid| format!("CPID:8103 BDID:22 ECID:{ecid:016X} IBFL:3C"));
+        let topology = Topology {
+            bus: "1".into(),
+            port_chain: vec![3, port.number()],
+        };
         UsbDevice {
-            topology: Topology {
-                bus: "1".into(),
-                port_chain: vec![3, port.number()],
-            },
+            #[cfg(target_os = "macos")]
+            attachment: Attachment::default(),
+            #[cfg(not(target_os = "macos"))]
+            attachment: Attachment::presented(&topology, 1),
+            topology,
             vendor_id: vendor,
             product_id: product,
             serial_number: serial.clone(),
             product: None,
             speed: Speed::High,
             apple: AppleDevice::from_usb(vendor, product, 0, None, serial.as_deref()),
-            #[cfg(target_os = "macos")]
-            macos_attachment: None,
-            #[cfg(not(target_os = "macos"))]
-            device_address: 1,
+            info: None,
         }
     }
 
@@ -1239,16 +1382,11 @@ mod tests {
         let store = Store::open(
             dir.path().join("cache"),
             dir.path().join("kept"),
-            Network::default(),
+            Network::new().unwrap(),
             Arc::default(),
         )
         .unwrap();
-        let info = iasis_protocol::Info {
-            serial: 1,
-            firmware_version: [0, 1, 0],
-            flash_bytes: 0,
-            capabilities: 0,
-        };
+        let info = crate::view::tests::info();
         let path = dir.path().join("device-models.json");
         let models = Models::open(path.clone());
         let one = Port::ALL[0];
@@ -1258,10 +1396,10 @@ mod tests {
             let seen = observe(usb, one);
             status.ports[0].observed = Some(seen);
             status.ports[0].ecid = seen.identity(status.ports[0].ecid);
-            let mut hub = crate::view::hub(&info, status);
+            let mut hub = crate::view::hub(1, &info, status);
             crate::view::describe_devices(
                 &mut hub,
-                info.serial,
+                1,
                 status,
                 usb,
                 &crate::view::Host {
@@ -1395,11 +1533,9 @@ mod tests {
             mode: AppleMode::KisDfu,
             identity: Identity::Known {
                 ecid: 9,
-                source: IdentitySource::Kis {
-                    chip: 0x8142,
-                    board: 0x24,
-                },
+                source: IdentitySource::Kis,
             },
+            hardware: Some((0x8142, 0x24)),
         });
         assert!(observe(&usb, two).dfu());
         assert_eq!(observe(&usb, two).ecid, Some(9));

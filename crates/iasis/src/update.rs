@@ -12,11 +12,12 @@ use std::{
 };
 
 use anyhow::{Context, Result, ensure};
+use iasis_protocol::Build;
 use nusb::DeviceInfo;
 use picoboot::{Picoboot, RebootType};
 use picoboot_nusb::UsbDevice;
 
-use crate::{Hub, UsbIds, hubs, inventory::Inventory};
+use crate::{hubs, inventory::Inventory};
 
 /// The hub's application flash. Its last two sectors, above this, hold the
 /// hub's settings (`crates/firmware/memory.x`).
@@ -36,9 +37,22 @@ pub fn bundled() -> Option<&'static [u8]> {
     (!IMAGE.is_empty()).then_some(IMAGE)
 }
 
-/// The version of the IasisOS these tools carry, which is their own.
-pub fn carried() -> Option<&'static str> {
-    bundled().map(|_| env!("CARGO_PKG_VERSION"))
+/// The build of the IasisOS these tools carry. Its version is theirs.
+pub fn carried() -> Option<Build> {
+    static CARRIED: std::sync::OnceLock<Option<Build>> = std::sync::OnceLock::new();
+    *CARRIED.get_or_init(|| Image::parse(bundled()?).ok()?.build())
+}
+
+/// IasisOS's version and build as the tools show them, such as
+/// `0.1.0+cb5e300e`.
+pub fn describe(firmware: [u16; 3], build: &Build) -> String {
+    let [major, minor, patch] = firmware;
+    format!("{major}.{minor}.{patch}+{build}")
+}
+
+/// What the tools carry, described as a hub's IasisOS is.
+pub fn carried_text(build: &Build) -> String {
+    format!("{}+{build}", env!("CARGO_PKG_VERSION"))
 }
 
 /// An IasisOS image: runs of whole flash sectors, each erased and written
@@ -104,25 +118,32 @@ impl Image {
         }
         Ok(Self { runs })
     }
+
+    /// The descriptor of the linker's GNU build-ID note in flash.
+    pub fn build(&self) -> Option<Build> {
+        const NOTE: &[u8] = b"\x04\0\0\0\x14\0\0\0\x03\0\0\0GNU\0";
+        self.runs.iter().find_map(|(_, bytes)| {
+            let offset = bytes
+                .windows(NOTE.len())
+                .position(|window| window == NOTE)?
+                + NOTE.len();
+            Some(Build(bytes.get(offset..offset + 20)?.try_into().ok()?))
+        })
+    }
 }
 
-/// Write `image` to the hub with `serial` and return the IasisOS version it
-/// starts. The hub leaves USB for a few seconds and its ports lose power.
-pub fn write(serial: u64, image: &Image, inventory: &Inventory) -> Result<[u16; 3]> {
+/// Write `image` to the hub with `serial`, once it is in its ROM or on its
+/// way there, and wait for it to return as IasisOS. Its ports lose power.
+pub fn write(serial: u64, image: &Image, inventory: &Inventory) -> Result<()> {
     let _awake = crate::awake::hold(&format!("Updating IasisOS on {serial:016x}"));
-    if let Some(device) = hubs(inventory.devices(), UsbIds::default(), Some(serial)).pop() {
-        Hub::open(&device)
-            .and_then(|hub| hub.enter_bootloader())
-            .context("asking IasisOS to restart into its ROM")?;
-    }
     let rom = arrival(inventory, |devices| rom(devices, serial))
         .context("the hub did not enumerate in its ROM")?;
     pollster::block_on(flash(rom, image))?;
-    let hub = arrival(inventory, |devices| {
-        hubs(devices.to_vec(), UsbIds::default(), Some(serial)).pop()
+    arrival(inventory, |devices| {
+        hubs(devices.to_vec(), Some(serial)).pop()
     })
     .context("the hub did not return to IasisOS")?;
-    Ok(Hub::observe(&hub)?.info().firmware_version)
+    Ok(())
 }
 
 async fn flash(rom: DeviceInfo, image: &Image) -> Result<()> {
@@ -229,6 +250,23 @@ mod tests {
         assert_eq!(first[PAGE * 2], 0xff);
         assert_eq!(first[SECTOR as usize], 0xff);
         assert_eq!(first[SECTOR as usize + 0xf00], 3);
+    }
+
+    #[test]
+    fn an_image_names_its_build() {
+        let mut uf2 = block(0x2000, 0x1000_0000, RP2350_ARM_S, 0);
+        let note = b"\x04\0\0\0\x14\0\0\0\x03\0\0\0GNU\0";
+        uf2[132..148].copy_from_slice(note);
+        uf2[148..168].fill(0xcb);
+        let build = Image::parse(&uf2).unwrap().build().unwrap();
+        assert_eq!(build, Build([0xcb; 20]));
+        assert_eq!(describe([0, 1, 0], &build), "0.1.0+cbcbcbcb");
+        assert_eq!(
+            Image::parse(&block(0x2000, 0x1000_0000, RP2350_ARM_S, 0))
+                .unwrap()
+                .build(),
+            None
+        );
     }
 
     #[test]

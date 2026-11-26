@@ -5,6 +5,10 @@
 //! each message's priority; on Windows the Application event log, under the
 //! source the installer registers. The CLI and a restore worker write to
 //! stderr, the worker's for its agent to read.
+//!
+//! Iasis's own messages are kept from info up, other crates' from warn up: a
+//! dependency's info, such as nusb's for each device it opens, is noise in a
+//! log kept for weeks.
 
 use std::io::Write;
 
@@ -21,8 +25,58 @@ pub fn terminal() {
 }
 
 fn install(logger: Box<dyn Log>) {
-    if log::set_boxed_logger(logger).is_ok() {
+    if log::set_boxed_logger(Box::new(Kept(logger))).is_ok() {
         log::set_max_level(LevelFilter::Info);
+    }
+}
+
+/// A logger that passes on Iasis's messages from info up and other crates'
+/// from warn up.
+struct Kept(Box<dyn Log>);
+
+impl Log for Kept {
+    fn enabled(&self, metadata: &Metadata) -> bool {
+        let floor = if metadata.target().starts_with("iasis") {
+            Level::Info
+        } else {
+            Level::Warn
+        };
+        metadata.level() <= floor && self.0.enabled(metadata)
+    }
+
+    fn log(&self, record: &Record) {
+        if self.enabled(record.metadata()) {
+            self.0.log(record);
+        }
+    }
+
+    fn flush(&self) {
+        self.0.flush();
+    }
+}
+
+const ERROR: &str = "error: ";
+const WARNING: &str = "warning: ";
+
+/// A line [`terminal`] writes for a message at this level.
+fn line(level: Level, text: &std::fmt::Arguments) -> String {
+    match level {
+        Level::Error => format!("{ERROR}{text}\n"),
+        Level::Warn => format!("{WARNING}{text}\n"),
+        _ => format!("{text}\n"),
+    }
+}
+
+/// The level and text of a line another host tool wrote to the stderr this
+/// process reads, as [`terminal`] writes it. A line without a level, such as
+/// one a C library printed, is info.
+pub(crate) fn read(line: &str) -> (Level, &str) {
+    if let Some(text) = line.strip_prefix(ERROR) {
+        (Level::Error, text)
+    } else if let Some(text) = line.strip_prefix(WARNING) {
+        (Level::Warn, text)
+    } else {
+        (Level::Info, line)
     }
 }
 
@@ -43,11 +97,7 @@ impl Log for Terminal {
     }
 
     fn log(&self, record: &Record) {
-        let line = match record.level() {
-            Level::Error => format!("error: {}\n", record.args()),
-            Level::Warn => format!("warning: {}\n", record.args()),
-            _ => format!("{}\n", record.args()),
-        };
+        let line = line(record.level(), record.args());
         let _ = std::io::stderr().lock().write_all(line.as_bytes());
     }
 
@@ -202,4 +252,70 @@ impl Log for System {
     }
 
     fn flush(&self) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use super::*;
+
+    #[derive(Default)]
+    struct Seen(Mutex<Vec<String>>);
+
+    impl Log for Seen {
+        fn enabled(&self, _: &Metadata) -> bool {
+            true
+        }
+
+        fn log(&self, record: &Record) {
+            let seen = format!("{} {} {}", record.level(), record.target(), record.args());
+            self.0.lock().unwrap().push(seen);
+        }
+
+        fn flush(&self) {}
+    }
+
+    #[test]
+    fn the_host_keeps_its_own_info_and_other_crates_warnings() {
+        let seen = std::sync::Arc::new(Seen::default());
+        let kept = Kept(Box::new(seen.clone()));
+        for (level, target) in [
+            (Level::Info, "iasis::restore"),
+            (Level::Info, "iasisd"),
+            (Level::Debug, "iasis::agent"),
+            (Level::Info, "nusb::platform::macos_iokit"),
+            (Level::Warn, "nusb::platform::macos_iokit"),
+            (Level::Error, "restorekit::usbmuxd"),
+        ] {
+            kept.log(
+                &Record::builder()
+                    .level(level)
+                    .target(target)
+                    .args(format_args!("message"))
+                    .build(),
+            );
+        }
+        assert_eq!(
+            *seen.0.lock().unwrap(),
+            [
+                "INFO iasis::restore message",
+                "INFO iasisd message",
+                "WARN nusb::platform::macos_iokit message",
+                "ERROR restorekit::usbmuxd message",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_line_reads_back_at_its_level() {
+        for level in [Level::Error, Level::Warn, Level::Info] {
+            let written = line(level, &format_args!("Could not read data (-256)."));
+            assert_eq!(
+                read(written.trim_end()),
+                (level, "Could not read data (-256).")
+            );
+        }
+        assert_eq!(read("libusb: printed"), (Level::Info, "libusb: printed"));
+    }
 }

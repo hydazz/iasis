@@ -27,8 +27,8 @@ serde = { version = "1.0", default-features = false, features = ["derive"] }
 
 # RestoreKit 0.6.6 with fixes not yet released upstream.
 [patch.crates-io]
-restorekit = { git = "https://github.com/hydazz/restorekit", rev = "73f349ff9694cb6295e8774049269a9550c76bb5" }
-restorekit-sys = { git = "https://github.com/hydazz/restorekit", rev = "73f349ff9694cb6295e8774049269a9550c76bb5" }
+restorekit = { git = "https://github.com/hydazz/restorekit", rev = "0e0bdd5cd228bf0710ece19741bfb5918e3f331f" }
+restorekit-sys = { git = "https://github.com/hydazz/restorekit", rev = "0e0bdd5cd228bf0710ece19741bfb5918e3f331f" }
 
 [profile.release]
 codegen-units = 1

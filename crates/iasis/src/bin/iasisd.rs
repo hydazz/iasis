@@ -18,6 +18,13 @@ struct Arguments {
 }
 
 fn main() -> Result<()> {
+    // The usbmuxd the agent serves would otherwise switch the USB
+    // configuration of booted devices it does not restore.
+    #[cfg(windows)]
+    // SAFETY: no other thread runs yet.
+    unsafe {
+        std::env::set_var("USBMUXD_DEFAULT_DEVICE_MODE", "0")
+    };
     iasis::native::run_if_worker();
     iasis::logging::system();
     let arguments = Arguments::parse();

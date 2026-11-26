@@ -76,11 +76,18 @@ impl Inventory {
         let mut devices = self.devices.lock().unwrap();
         let changed = !same(&devices, &listed);
         *devices = listed;
-        drop(devices);
         if changed {
-            self.version.fetch_add(1, Ordering::Relaxed);
-            self.changes.changed();
+            self.changed(&devices);
         }
+    }
+
+    /// Advance the version for a list that changed. What RestoreKit read of
+    /// a device that left goes with it.
+    fn changed(&self, devices: &HashMap<DeviceId, DeviceInfo>) {
+        let present: Vec<DeviceId> = devices.keys().cloned().collect();
+        restorekit::device::forget_absent(&present);
+        self.version.fetch_add(1, Ordering::Relaxed);
+        self.changes.changed();
     }
 
     /// Advances with every arrival and departure.
@@ -100,22 +107,18 @@ fn follow(mut events: HotplugWatch, inventory: &Weak<Inventory>) {
         let Some(inventory) = inventory.upgrade() else {
             return;
         };
+        let mut devices = inventory.devices.lock().unwrap();
         let changed = match event {
-            Some(HotplugEvent::Connected(device)) => {
-                let mut devices = inventory.devices.lock().unwrap();
-                devices.insert(device.id(), device).is_none()
-            }
-            Some(HotplugEvent::Disconnected(id)) => {
-                inventory.devices.lock().unwrap().remove(&id).is_some()
-            }
+            Some(HotplugEvent::Connected(device)) => devices.insert(device.id(), device).is_none(),
+            Some(HotplugEvent::Disconnected(id)) => devices.remove(&id).is_some(),
             None => {
+                drop(devices);
                 inventory.reconcile();
-                false
+                continue;
             }
         };
         if changed {
-            inventory.version.fetch_add(1, Ordering::Relaxed);
-            inventory.changes.changed();
+            inventory.changed(&devices);
         }
     }
 }

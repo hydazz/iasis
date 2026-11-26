@@ -1,6 +1,6 @@
 # iasis
 
-Iasis is a five-port USB-C hub for restoring Apple devices. It can put Macs into DFU mode without the keyboard sequence. A Mac or Linux host runs the restores. The same ports connect ordinary USB peripherals.
+Iasis is a five-port USB-C hub for restoring Apple devices. It can put Macs into DFU mode without the keyboard sequence. The host runs the restores on macOS, Linux or Windows. The same ports connect ordinary USB peripherals.
 
 The hardware is a prototype.
 
@@ -14,12 +14,14 @@ See the [main board](hardware/boards/iasis/README.md) for fabrication files and 
 
 ## Software
 
-| Part                                    | Role                                       |
-| --------------------------------------- | ------------------------------------------ |
-| [IasisOS](crates/firmware/README.md)    | Firmware on the hub's RP2354               |
-| [`iasisd`](#host-agent)                 | Host agent: follows hubs and runs restores |
-| `iasis`                                 | Command-line control of hubs and the agent |
-| [Iasis for macOS](apps/macos/README.md) | Menu bar app, with the host tools inside   |
+| Part                                                     | Role                                       |
+| -------------------------------------------------------- | ------------------------------------------ |
+| [IasisOS](crates/firmware/README.md)                     | Firmware on the hub's RP2354               |
+| [`iasisd`](#host-agent)                                  | Host agent: follows hubs and runs restores |
+| `iasis`                                                  | Command-line control of hubs and the agent |
+| [Iasis for Linux](crates/iasis/README.md#debian-package) | GTK desktop app in the Debian package      |
+| [Iasis for macOS](apps/macos/README.md)                  | Menu bar app, with the host tools inside   |
+| [Iasis for Windows](apps/windows/README.md)              | Desktop app and notification area controls |
 
 They share one version and are released together.
 
@@ -59,7 +61,7 @@ target/release/iasis --hub "Bench A" dfu 1
 target/release/iasis --hub "Bench A" ports --watch
 ```
 
-`iasis` alone lists every hub and its ports; `iasis watch` keeps the list current. Select a hub by name or by the serial from `iasis list`. Names match without case, can contain spaces and punctuation, and fit the OLED’s 16 printable ASCII characters. If two hubs share a name, select by serial. An empty name clears the label. Use `ports --watch` to see the USB mode, identity and link (none, USB 2 or USB 3) on each port. If a Mac acknowledges the DFU request and then disappears from USB, check the data cable and the Mac’s [DFU socket](https://support.apple.com/en-us/120694). A locked Mac laptop withholds USB data from an accessory it has not allowed until someone unlocks it and allows it ([Apple](https://support.apple.com/en-us/102282)); until then its port shows power and no link, and DFU still works.
+`iasis` alone lists every hub and its ports; `iasis watch` keeps the list current. It works through the [host agent](#host-agent), which must be running. With one hub attached, commands act on it; with several, select one by name or by the serial from `iasis list`. Names match without case, can contain spaces and punctuation, and fit the OLED’s 16 printable ASCII characters. If two hubs share a name, select by serial. An empty name clears the label. Use `ports --watch` to see the USB mode, identity and link (none, USB 2 or USB 3) on each port. If a Mac acknowledges the DFU request and then disappears from USB, check the data cable and the Mac’s [DFU socket](https://support.apple.com/en-us/120694). A locked Mac laptop withholds USB data from an accessory it has not allowed until someone unlocks it and allows it ([Apple](https://support.apple.com/en-us/102282)); until then its port shows power and no link, and DFU still works.
 
 The button selects targets with a tap and acts on them with a hold, with or without an OLED.
 
@@ -98,9 +100,9 @@ While the agent is running:
 - It runs the restores that a hub's button or a client asks for.
 - On Linux and macOS, it can share an internet connection with attached devices over USB.
 
-The status light is green and the OLED shows a USB symbol while a host is attached. One host holds a hub at a time. With the agent running, every `iasis` command except `status` and `ports` goes through it; on Windows those two can't open a hub while the agent holds it. Other clients use its [local socket](crates/api/README.md).
+The status light is green and the OLED shows a USB symbol while a host is attached. One host holds a hub at a time, and on it only the agent opens the hub; `iasis` and the apps are its clients, and other clients use its [local socket](crates/api/README.md). Without the agent, `iasis` says how to start it.
 
-On Linux, the [Debian package](crates/iasis/README.md#debian-package) runs the agent at boot for the person signed in at the computer and members of the `iasis` group. On Windows, the [installer](crates/iasis/README.md#windows-installer) runs it at boot for Administrators and the person signed in at the computer. On macOS, the [menu bar app](apps/macos/README.md) shows the same hubs and ports, sends the same actions and runs the agent it carries while you are logged in. To run your own build in the background, turn Iasis off under Background App Activity in Login Items & Extensions, then prefix the command with `launchctl submit -l local.iasisd --`.
+On Linux, the [Debian package](crates/iasis/README.md#debian-package) runs the agent at boot for the person signed in at the computer and members of the `iasis` group. On Windows, the [installer](crates/iasis/README.md#windows-installer) runs it at boot for Administrators and the person signed in at the computer. On macOS, the [menu bar app](apps/macos/README.md) shows the same hubs and ports, sends the same actions and runs the agent it carries while you are logged in. To run your own build in the background, turn Iasis off under Background App Activity in Login Items & Extensions, then prefix the command with `launchctl submit -l local.iasisd --`. With `IASIS_HOME` set to a directory, the agent keeps its files and socket there, and `iasis` with the same `IASIS_HOME` talks to it.
 
 ### USB Internet Sharing
 
@@ -145,7 +147,7 @@ target/release/iasis images add /path/to/UniversalMac.ipsw
 target/release/iasis images remove UniversalMac_27.2.1_26B131_Restore.ipsw
 ```
 
-An image stays until it is removed. Removing one that is still downloading stops the download. An image added from a file is never taken for an unsigned one, since the catalog may not list it. Downloaded images live in the agent's cache directory, `~/Library/Caches/com.hydaz.Iasis` on macOS and `/var/cache/iasis` on Linux, which the system may clear; the agent then downloads an image again when a restore needs it. Images added from a file live in its state directory, `~/Library/Application Support/com.hydaz.Iasis` on macOS and `/var/lib/iasis` on Linux. On macOS, a release Finder has already downloaded to `~/Library/iTunes` is cloned from there instead, once its SHA-256 matches. `images add` sends the archive to the agent, which keeps it once every member's checksum matches. A Mac image is about 26 GB and an iPad image about 11 GB.
+An image stays until it is removed. Removing one that is still downloading stops the download, and removing one a restore is reading takes it out when that restore ends, unless a restore or `images fetch` asks for its release first. A download goes on while a restore waits for it or after `images fetch`; one that no restore waits for any longer stops. An image added from a file is never taken for an unsigned one, since the catalog may not list it. Downloaded images live in the agent's cache directory, `~/Library/Caches/com.hydaz.Iasis` on macOS and `/var/cache/iasis` on Linux, which the system may clear; the agent then downloads an image again when a restore needs it. Images added from a file live in its state directory, `~/Library/Application Support/com.hydaz.Iasis` on macOS and `/var/lib/iasis` on Linux. On macOS, a release Finder has already downloaded to `~/Library/iTunes` is cloned from there instead, once its SHA-256 matches. `images add` sends the archive to the agent, which keeps it once every member's checksum matches. The agent owns both directories: when it starts, it lists any archive it finds there that it did not, once every member's checksum matches, and deletes one that does not. A Mac image is about 26 GB and an iPad image about 11 GB.
 
 While an image is being fetched for a target, its port pulses purple, the OLED labels it `IMG`, and `iasis` shows the percentage.
 
@@ -157,15 +159,15 @@ Restores are built into the host tools through [RestoreKit](https://github.com/f
 target/release/iasis --serial 0123456789abcdef restore --ports 1,2,3,4,5 --erase
 ```
 
-**`--erase` erases the selected targets.** With the agent running, the request goes to it and the command follows the restore to its end. Without the agent, the command hosts the hub for its own run; there, `--button` confirms the erase on the hub, and `--button` without `--ports` chooses the targets there too. Name an IPSW before the options to restore from that file instead of the newest release.
+**`--erase` erases the selected targets.** The agent runs the restore, and the command follows each port and prints its result as soon as that port ends. The [image store](#images) supplies each target's image.
 
-Iasis starts one restore process for each authorized ECID. A failed restore ends that target’s job. A target that can’t be prepared, such as an iPad waiting for Trust, ends with the reason on its port while the others restore.
+Each target is its own job, and each restore its own process. A job fetches the target's image before it puts the target into DFU or recovery when this host already knows the target's model; otherwise the target waits there for it. A restore that fails while its target is still in DFU or recovery is started again, up to three times. A target that can’t be prepared, such as an iPad waiting for Trust, ends with the reason on its port while the others restore.
 
-The host stays out of idle sleep from a batch's preparation until its last restore ends, while its display can still sleep. On battery, a Windows laptop with Modern Standby drops that hold five minutes after its sleep timeout.
+The host stays out of idle sleep from a target's preparation until its restore ends, while its display can still sleep. On battery, a Windows laptop with Modern Standby drops that hold five minutes after its sleep timeout.
 
-The progress bar follows the whole restore. The host shows the current stage alongside it. Repeated firmware and image transfers can hold the bar at the same percentage until the next milestone. Logs and working files go under `restores/` in the cache directory, or the directory passed to `--logs`. Allow space for an extracted OS image per worker. Iasis matches each image to the target's chip and board IDs, or to its product type when only a model identifier is available. The restore program checks Apple signing.
+A port's percentage follows the whole restore, with the current stage alongside it. Repeated firmware and image transfers can hold it at the same percentage until the next milestone. Logs and working files go under `restores/` in the agent's cache directory. Allow space for an extracted OS image per worker. Iasis matches each image to the target's chip and board IDs, or to its product type when only a model identifier is available. The restore program checks Apple signing.
 
-On macOS 27.3, run this once as the user running Finder to suppress automatic DFU windows. This undocumented preference also affects automatic reveals for other connected Apple devices.
+On macOS 27.3, Finder opens a window for each Mac, iPad or iPhone that enters DFU or recovery mode. To stop it, turn off **Open Finder for DFU and Recovery Devices** in the app's Settings > General, or run this once as the user running Finder. The preference is undocumented.
 
 ```sh
 defaults write com.apple.AMPDeviceDiscoveryAgent reveal-devices -bool false
@@ -183,9 +185,9 @@ To back the identity up or give another host the same one, export it with its pr
 
 #### Button restores
 
-With the agent running, the hub's Restore hold needs nothing else. Tap to select targets, then hold until the status light turns purple and release. Preparation puts the targets into DFU or recovery and fetches any image the agent lacks. Once the erase is ready, the status light blinks purple: hold for three seconds to confirm, or tap to cancel. The agent keeps listening after cancellation and while workers run.
+The hub's Restore hold needs only the agent. Tap to select targets, then hold until the status light turns purple and release. Preparation fetches any image the agent lacks and puts the targets into DFU or recovery. Once every target that could be prepared is ready, the status light blinks purple: hold for three seconds to confirm, or tap to cancel. The agent keeps listening after cancellation and while workers run.
 
-An erase stays ready for 20 seconds. If a long download outlasts your wait, make the Restore hold again once the port is steady blue: the image is in the store by then.
+An erase stays ready for 20 seconds. If it lapses, make the Restore hold again: the images are in the store by then.
 
 #### Example restore times
 
@@ -208,7 +210,7 @@ Use USB 2 as a planning estimate for M1–M3 and USB 3 for M4 or newer Macs with
 
 ### Revive
 
-Revive repairs a device and keeps its data: a Mac gets its firmware and recoveryOS reinstalled, an iPhone or iPad its system. It installs the image a restore would and enters DFU or recovery the same way, through the agent or without it.
+Revive repairs a device and keeps its data: a Mac gets its firmware and recoveryOS reinstalled, an iPhone or iPad its system. It installs the image a restore would and enters DFU or recovery the same way.
 
 ```sh
 target/release/iasis --serial 0123456789abcdef revive --ports 2

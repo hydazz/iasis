@@ -18,7 +18,8 @@ use std::{
 use anyhow::{Context, Result, bail, ensure};
 use base64::Engine;
 use iasis_api::{
-    FirmwareUpdate, HubView, Operation, Planned, Reply, Request, Selection, State, Target,
+    Diagnostics, FirmwareUpdate, HubView, Operation, Planned, Reply, Request, Selection, State,
+    Target,
 };
 use iasis_protocol::{CommandResult, Port, PortAction};
 use nusb::DeviceInfo;
@@ -26,14 +27,13 @@ use secrecy::SecretString;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
-    Hub, UsbIds,
-    batch::{self, Endings, Images, PortWork, Requests, Submission},
+    Hub,
     home::Home,
-    host::{Jobs, Link},
-    hubs,
+    host::{Link, Work},
     identity::models::Models,
     images::{Network, Store},
     inventory::Inventory,
+    job::{self, Endings, Gate, PortWork},
     parse_serial,
     restore::RestoreEngine,
     update, view,
@@ -53,36 +53,37 @@ pub struct Options {
     pub serial: Option<u64>,
 }
 
-/// A hub the agent has seen. Its jobs outlive each session with it.
-#[derive(Default)]
-struct Attendance {
-    jobs: Jobs,
-    requests: Requests,
-    endings: Endings,
+/// A hub the agent has seen: its sessions, one at a time, and the jobs that
+/// outlive them.
+pub(crate) struct Attendance {
+    pub(crate) work: Arc<Work>,
+    pub(crate) endings: Endings,
     link: Mutex<Option<Arc<Link>>>,
-    device: Mutex<Option<DeviceInfo>>,
-    /// Clients' commands take the management interface in turn.
-    turn: Mutex<()>,
     notice: Mutex<Option<String>>,
-    /// The IasisOS version of a hub that runs a build this agent cannot
-    /// talk to.
-    outdated: Mutex<Option<String>>,
+    /// What a hub on another protocol says of itself.
+    outdated: Mutex<Option<iasis_protocol::Info>>,
     present: AtomicBool,
 }
 
 impl Attendance {
-    /// Run one command on the hub's management interface. The session goes
-    /// on beside it, and says when the command has had its effect.
-    fn control<T>(&self, command: impl FnOnce(&Hub) -> Result<T, crate::Error>) -> Result<T> {
-        let _turn = self.turn.lock().unwrap();
-        let device = self.device.lock().unwrap().clone();
-        let hub = Hub::open(&device.context("the hub is not attended")?)
-            .context("another tool is controlling the hub")?;
-        let hub = match &*self.link.lock().unwrap() {
-            Some(link) => hub.notified(link.notice()),
-            None => hub,
-        };
-        Ok(command(&hub)?)
+    fn new(changes: Arc<Watch>) -> Self {
+        Self {
+            work: Arc::new(Work::new(changes)),
+            endings: Endings::default(),
+            link: Mutex::default(),
+            notice: Mutex::default(),
+            outdated: Mutex::default(),
+            present: AtomicBool::new(false),
+        }
+    }
+
+    /// The hub's session, while it lasts.
+    pub(crate) fn link(&self) -> Option<Arc<Link>> {
+        self.link
+            .lock()
+            .unwrap()
+            .clone()
+            .filter(|link| link.alive())
     }
 }
 
@@ -94,21 +95,33 @@ pub struct Agent {
     models: Arc<Models>,
     engine: RestoreEngine,
     hubs: Mutex<BTreeMap<u64, Arc<Attendance>>>,
+    /// Targets are reserved for jobs under this, every hub's at once.
+    reserving: Mutex<()>,
     inventory: Arc<Inventory>,
     /// Advances whenever anything a client is shown, or a worker waits on,
     /// changes.
     changes: Arc<Watch>,
 }
 
+/// The selected targets a hub's status shows ready to restore.
 fn restore_targets(status: &iasis_protocol::Status, selected: &[Target]) -> Result<Vec<Target>> {
+    for target in selected {
+        ensure!(
+            status.gesture_mask(iasis_protocol::Gesture::Restore) & (1 << target.port.index()) != 0,
+            "port {} has no ready target",
+            target.port.number()
+        );
+    }
+    targets(status, selected)
+}
+
+/// The selected targets as a hub's status shows them: each named once, on
+/// the attachment and with the ECID the client saw.
+fn targets(status: &iasis_protocol::Status, selected: &[Target]) -> Result<Vec<Target>> {
     let mut targets: Vec<Target> = Vec::new();
     for target in selected {
         let port = target.port;
         let number = port.number();
-        ensure!(
-            status.gesture_mask(iasis_protocol::Gesture::Restore) & (1 << port.index()) != 0,
-            "port {number} has no ready target"
-        );
         ensure!(
             !targets.iter().any(|other| other.port == port),
             "port {number} is named twice"
@@ -129,60 +142,19 @@ fn restore_targets(status: &iasis_protocol::Status, selected: &[Target]) -> Resu
     Ok(targets)
 }
 
-/// Leave a checked request for the hub's attendant and wait for it to
-/// take it.
-fn submit(
-    hub: &Attendance,
-    session: u32,
-    targets: Vec<Target>,
-    latest: bool,
-    operation: Operation,
-    changes: &Watch,
-) -> Result<Vec<PortWork>> {
-    let (accepted, receipt) = std::sync::mpsc::sync_channel(0);
-    let ports: Vec<Port> = targets.iter().map(|target| target.port).collect();
-    let work = {
-        let mut slot = hub.requests.lock().unwrap();
-        ensure!(slot.is_none(), "the hub is preparing another restore");
-        let work = batch::reserve(&hub.endings, &targets)?;
-        *hub.notice.lock().unwrap() = None;
-        *slot = Some(Submission {
-            session,
-            targets,
-            latest,
-            operation,
-            accepted,
-        });
-        work
-    };
-    changes.changed();
-    // A busy attendant cannot launch a timed-out request. The rendezvous
-    // succeeds only while this client is still waiting for acceptance.
-    let result = receipt.recv_timeout(Duration::from_secs(2));
-    drop(receipt);
-    if !matches!(result, Ok(Ok(()))) {
-        let mut slots = hub.endings.lock().unwrap();
-        for port in ports {
-            slots[port.index()] = None;
-        }
-        changes.changed();
-    }
-    result
-        .context("the hub did not accept the restore request")?
-        .map_err(anyhow::Error::msg)?;
-    Ok(work)
-}
-
 impl Agent {
     pub fn new() -> Result<Arc<Self>> {
         let home = Home::locate()?;
+        // The store and the engine clear what a stopped agent left in their
+        // directories, which must not be a running one's.
+        socket::vacant(&home)?;
         let changes = Arc::<Watch>::default();
         let supervision = Arc::new(crate::supervision::Supervision::open(&home.supervision()));
         Ok(Arc::new(Self {
             store: Store::open(
                 home.cache.join("images"),
                 home.state.join("images"),
-                Network::default(),
+                Network::new()?,
                 changes.clone(),
             )?,
             models: Arc::new(Models::open(home.state.join("device-models.json"))),
@@ -193,6 +165,7 @@ impl Agent {
             ),
             supervision,
             hubs: Mutex::default(),
+            reserving: Mutex::default(),
             sharing: crate::sharing::Sharing::open(
                 home.state.join("usb-sharing.json"),
                 changes.clone(),
@@ -215,10 +188,11 @@ impl Agent {
                     let notice = hub.notice.lock().unwrap().clone();
                     match link.as_ref().and_then(|link| link.hub_view(&self.store)) {
                         Some(mut view) => {
+                            let build = link.as_ref().map(|link| link.hub().info().build);
                             view.update = update::carried()
-                                .filter(|carried| *carried != view.firmware)
+                                .filter(|carried| build.as_ref() != Some(carried))
                                 .map(|carried| FirmwareUpdate {
-                                    version: carried.into(),
+                                    version: update::carried_text(&carried),
                                     required: false,
                                 });
                             let endings = hub.endings.lock().unwrap();
@@ -241,13 +215,14 @@ impl Agent {
                                 format!("{serial:016x}"),
                                 notice.unwrap_or_else(|| "not attended".into()),
                             );
-                            // A hub on another build waits for the one carried here.
-                            if let Some(firmware) = hub.outdated.lock().unwrap().clone()
+                            // A hub on another protocol waits for the build carried here.
+                            if let Some(info) = *hub.outdated.lock().unwrap()
                                 && let Some(carried) = update::carried()
                             {
-                                view.firmware = firmware;
+                                view.name = info.name.as_str().to_owned();
+                                view.firmware = update::describe(info.firmware, &info.build);
                                 view.update = Some(FirmwareUpdate {
-                                    version: carried.into(),
+                                    version: update::carried_text(&carried),
                                     required: true,
                                 });
                                 view.notice = None;
@@ -281,20 +256,15 @@ impl Agent {
             .lock()
             .unwrap()
             .get(&serial)
+            .filter(|hub| hub.present.load(Ordering::Relaxed))
             .cloned()
-            .context("no such hub")?;
-        let link = hub
-            .link
-            .lock()
-            .unwrap()
-            .clone()
-            .filter(|link| link.alive())
-            .context("the hub is not attended")?;
+            .with_context(|| format!("hub {serial:016x} is not attached"))?;
+        let link = hub.link().context("the hub is not attended")?;
         Ok((hub, link))
     }
 
     fn command(&self, serial: &str, port: u8, action: PortAction) -> Result<()> {
-        let (hub, link) = self.hub(serial)?;
+        let (_, link) = self.hub(serial)?;
         let port = Port::try_from(port)
             .ok()
             .context("ports are numbered 1 to 5")?;
@@ -304,7 +274,7 @@ impl Agent {
         if mapping && let Some(status) = link.status() {
             link.presenting(port, status.ports[port.index()].generation);
         }
-        let result = hub.control(|hub| hub.command(port, action))?;
+        let result = link.command(port, action)?;
         // The target's reply shows its pins once it has mapped them.
         ensure!(
             !mapping || result == CommandResult::Complete,
@@ -313,9 +283,86 @@ impl Agent {
         Ok(())
     }
 
-    /// Hand a client's restore request to each hub's attendant. Every
-    /// selection is checked before any hub is asked, so a stale one
-    /// starts nothing.
+    /// Send DFU or a reboot to each selected target, once every one is
+    /// checked against its hub and takes the signal now. A refusal names
+    /// each target that does not.
+    fn signal(&self, selections: &[Selection], action: PortAction) -> Result<()> {
+        ensure!(!selections.is_empty(), "no ports selected");
+        let mut checked: Vec<(Arc<Link>, Vec<Target>)> = Vec::new();
+        for selection in selections {
+            let (_, link, targets) = self.checked(selection, |actions| match action {
+                PortAction::Dfu => actions.dfu,
+                _ => actions.reboot,
+            })?;
+            ensure!(
+                !checked.iter().any(|(other, _)| Arc::ptr_eq(other, &link)),
+                "a hub is named twice"
+            );
+            checked.push((link, targets));
+        }
+        let mut failed = Vec::new();
+        for (link, targets) in checked {
+            for target in targets {
+                if let Err(error) =
+                    link.command_for_generation(target.port, target.generation, action)
+                {
+                    failed.push(format!("Port {}: {error:#}", target.port.number()));
+                }
+            }
+        }
+        ensure!(failed.is_empty(), "{}", failed.join("; "));
+        Ok(())
+    }
+
+    /// A selection checked against its hub as the hub is now: the session,
+    /// each attachment and ECID the client saw, and whether each target
+    /// `takes` what is asked of it. A refusal names each target that does
+    /// not, by its port and device, with the reason.
+    fn checked(
+        &self,
+        selection: &Selection,
+        takes: impl Fn(crate::dfu::Actions) -> Result<(), String>,
+    ) -> Result<(Arc<Attendance>, Arc<Link>, Vec<Target>)> {
+        let (hub, link) = self.hub(&selection.hub)?;
+        ensure!(
+            selection.session == link.session(),
+            "the hub has reconnected"
+        );
+        let (status, snapshot) = link.sample().context("the hub has not been read yet")?;
+        let targets = targets(&status, &selection.targets)?;
+        let host = view::Host {
+            store: &self.store,
+            models: &self.models,
+        };
+        let serial = link.hub().serial();
+        let refusals: Vec<String> = targets
+            .iter()
+            .filter_map(|target| {
+                let port = target.port;
+                let state = &status.ports[port.index()];
+                let actions = crate::dfu::assess(serial, port, &status, &snapshot, None)
+                    .actions(state, crate::native::mux::missing_for);
+                takes(actions).err().map(|reason| {
+                    let name = view::name(state.ecid, snapshot.target(port), &host);
+                    format!(
+                        "{} on port {}: {reason}",
+                        name.as_deref().unwrap_or("The device"),
+                        port.number()
+                    )
+                })
+            })
+            .collect();
+        ensure!(refusals.is_empty(), "{}", refusals.join(" "));
+        Ok((hub, link, targets))
+    }
+
+    /// What the hub reports and what the host finds on its USB, read now.
+    fn diagnostics(&self, serial: &str) -> Result<Diagnostics> {
+        let (_, link) = self.hub(serial)?;
+        let (status, snapshot) = link.observe()?;
+        Ok(view::diagnostics(link.hub().serial(), status, &snapshot))
+    }
+
     /// What the store and the catalog offer each target. A target whose
     /// model this host has not learned has no offer until it is in DFU.
     fn plan(&self, selections: &[Selection]) -> Result<Vec<Planned>> {
@@ -338,6 +385,9 @@ impl Agent {
         Ok(planned)
     }
 
+    /// Start a job for each selected target. Every selection is checked
+    /// against its hub before any target is reserved, so a stale one starts
+    /// nothing.
     fn restore(
         &self,
         selections: &[Selection],
@@ -347,33 +397,88 @@ impl Agent {
         ensure!(!selections.is_empty(), "no ports selected");
         let mut checked = Vec::new();
         for selection in selections {
-            let (hub, link) = self.hub(&selection.hub)?;
+            let (hub, link, _) = self.checked(selection, |actions| actions.restore.map(drop))?;
             ensure!(
                 !checked
                     .iter()
-                    .any(|(other, _, _): &(Arc<Attendance>, _, _)| Arc::ptr_eq(other, &hub)),
+                    .any(|(other, _): &(Arc<Attendance>, _)| Arc::ptr_eq(other, &hub)),
                 "a hub is named twice"
             );
+            // The hub offers a restore once it holds the host's report of it.
             let status = link.status().context("the hub has not been read yet")?;
-            ensure!(
-                selection.session == link.session(),
-                "the hub has reconnected"
-            );
             let targets = restore_targets(&status, &selection.targets)?;
-            checked.push((hub, selection.session, targets));
+            checked.push((hub, targets));
         }
-        let mut work = Vec::new();
-        for (hub, session, targets) in checked {
-            work.extend(submit(
-                &hub,
-                session,
-                targets,
-                latest,
-                operation,
-                &self.changes,
-            )?);
+        self.start_jobs(checked, job::Ask { operation, latest }, None)
+    }
+
+    /// Reserve every target on every hub, or none, and start a job for each.
+    /// A gate puts every launch behind one erase the hub confirms.
+    fn start_jobs(
+        &self,
+        hubs: Vec<(Arc<Attendance>, Vec<Target>)>,
+        ask: job::Ask,
+        gate: Option<Vec<job::Ticket>>,
+    ) -> Result<Vec<PortWork>> {
+        let _reserving = self.reserving.lock().unwrap();
+        let mut reserved: Vec<(Arc<Attendance>, Vec<Target>, Vec<PortWork>)> = Vec::new();
+        for (hub, targets) in hubs {
+            match job::reserve(&hub.endings, &targets) {
+                Ok(works) => reserved.push((hub, targets, works)),
+                Err(error) => {
+                    for (hub, targets, works) in &reserved {
+                        job::release(&hub.endings, targets, works);
+                    }
+                    return Err(error);
+                }
+            }
         }
-        Ok(work)
+        let host = job::Host {
+            engine: self.engine.clone(),
+            store: self.store.clone(),
+            models: self.models.clone(),
+            changes: self.changes.clone(),
+        };
+        let mut tickets = gate.map(Vec::into_iter);
+        let mut all = Vec::new();
+        for (hub, targets, works) in reserved {
+            *hub.notice.lock().unwrap() = None;
+            for (target, work) in targets.into_iter().zip(works) {
+                all.push(work.clone());
+                let ticket = tickets.as_mut().and_then(Iterator::next);
+                job::spawn(host.clone(), hub.clone(), target, ask, work, ticket);
+            }
+        }
+        self.changes.changed();
+        Ok(all)
+    }
+
+    /// Start the jobs a Restore hold on the hub asks for, behind one erase
+    /// the hub confirms once they have reached their launch.
+    fn hold(&self, hub: &Arc<Attendance>, targets: Vec<Target>) -> Result<()> {
+        let (gate, tickets) = Gate::new(targets.len());
+        let ask = job::Ask {
+            operation: Operation::Restore,
+            latest: false,
+        };
+        self.start_jobs(vec![(hub.clone(), targets)], ask, Some(tickets))?;
+        let (confirming, hub) = (gate.clone(), hub.clone());
+        let spawned = thread::Builder::new().name("erase".into()).spawn(move || {
+            let ready = confirming.gathered();
+            let verdict = hub
+                .link()
+                .context("the hub is not attended")
+                .and_then(|link| job::confirm_erase(&link, &ready))
+                .map_err(|error| format!("{error:#}"));
+            if let Err(error) = &verdict {
+                log::warn!("Restore hold: {error}");
+            }
+            confirming.decide(verdict);
+        });
+        if let Err(error) = spawned {
+            gate.decide(Err(format!("confirming the erase: {error}")));
+        }
+        Ok(())
     }
 
     /// Write IasisOS to a hub that is not restoring. The hub leaves USB
@@ -392,14 +497,15 @@ impl Agent {
             )?,
         };
         let serial = parse_serial(serial).map_err(anyhow::Error::msg)?;
-        if let Some(hub) = self.hubs.lock().unwrap().get(&serial) {
-            let status = hub
-                .link
-                .lock()
-                .unwrap()
+        let hub = self.hubs.lock().unwrap().get(&serial).cloned();
+        let link = hub
+            .as_ref()
+            .and_then(|hub| hub.link.lock().unwrap().clone())
+            .filter(|link| link.alive());
+        if let Some(hub) = &hub {
+            let restoring = link
                 .as_ref()
-                .and_then(|link| link.status());
-            let restoring = status
+                .and_then(|link| link.status())
                 .is_some_and(|status| status.ports.iter().any(|port| port.restoring()))
                 || hub
                     .endings
@@ -410,8 +516,19 @@ impl Agent {
                     .any(|work| work.get().is_none());
             ensure!(!restoring, "the hub is restoring");
         }
-        let [major, minor, patch] = update::write(serial, &image, &self.inventory)?;
-        log::info!("Hub {serial:016x}: IasisOS {major}.{minor}.{patch} written");
+        // An attended hub is asked through its session's claim. One on another
+        // build has none, and one in its ROM is not asked at all.
+        let asked = match &link {
+            Some(link) => Some(link.hub().enter_bootloader()),
+            None => crate::hubs(self.inventory.devices(), Some(serial))
+                .pop()
+                .map(|device| Hub::open(&device).and_then(|hub| hub.enter_bootloader())),
+        };
+        if let Some(asked) = asked {
+            asked.context("asking IasisOS to restart into its ROM")?;
+        }
+        update::write(serial, &image, &self.inventory)?;
+        log::info!("Hub {serial:016x}: IasisOS written");
         Ok(())
     }
 
@@ -449,8 +566,8 @@ impl Agent {
             Request::Revive { hubs, latest } => self
                 .restore(&hubs, latest, Operation::Revive)
                 .map(|work| *submitted = work),
-            Request::Dfu { hub, port } => self.command(&hub, port, PortAction::Dfu),
-            Request::Reboot { hub, port } => self.command(&hub, port, PortAction::Reboot),
+            Request::Dfu { hubs } => self.signal(&hubs, PortAction::Dfu),
+            Request::Reboot { hubs } => self.signal(&hubs, PortAction::Reboot),
             Request::Power { hub, port, on } => self.command(
                 &hub,
                 port,
@@ -471,10 +588,10 @@ impl Agent {
             ),
             Request::Brightness { hub, percent } => self
                 .hub(&hub)
-                .and_then(|(hub, _)| hub.control(|hub| hub.brightness(percent))),
+                .and_then(|(_, link)| Ok(link.hub().brightness(percent)?)),
             Request::Rename { hub, name } => self
                 .hub(&hub)
-                .and_then(|(hub, _)| hub.control(|hub| hub.rename(&name))),
+                .and_then(|(_, link)| Ok(link.hub().rename(&name)?)),
             Request::Update { hub, bytes } => self.update(&hub, bytes, payload),
             Request::Download { model, build } => self.store.download(&model, build.as_deref()),
             Request::Import { name, bytes } => self.store.import(&name, payload, bytes).map(|_| ()),
@@ -486,6 +603,12 @@ impl Agent {
                     .decode(pkcs12)
                     .context("the archive is not base64")
                     .and_then(|archive| self.supervision.import(&archive, &password))
+            }
+            Request::Diagnostics { hub } => {
+                return match self.diagnostics(&hub) {
+                    Ok(diagnostics) => Reply::Diagnostics(Box::new(diagnostics)),
+                    Err(error) => Reply::Error(format!("{error:#}")),
+                };
             }
             Request::ExportSupervision { password } => {
                 let password = SecretString::from(password);
@@ -505,34 +628,29 @@ impl Agent {
         }
     }
 
-    /// Hold one hub's host session until the hub or the session is lost.
-    fn attend(&self, device: &DeviceInfo, hub: &Attendance) -> Result<()> {
+    /// Hold one hub's host session until the hub or the session is lost,
+    /// and answer the Restore holds made on it.
+    fn attend(&self, device: &DeviceInfo, hub: &Arc<Attendance>) -> Result<()> {
         let link = Arc::new(Link::open(
             device,
-            hub.jobs.clone(),
+            hub.work.clone(),
             self.models.clone(),
-            &self.engine,
             self.inventory.clone(),
         )?);
-        log::info!("Hub {:016x}: attending", link.hub().info().serial);
-        *hub.device.lock().unwrap() = Some(device.clone());
+        log::info!("Hub {:016x}: attending", link.hub().serial());
         *hub.link.lock().unwrap() = Some(link.clone());
         // Whatever kept an earlier attempt from the hub is over.
         *hub.notice.lock().unwrap() = None;
         *hub.outdated.lock().unwrap() = None;
         self.changes.changed();
         let result = (|| -> Result<()> {
+            link.restore_ready(true)?;
             loop {
-                let outcome = batch::listen(
-                    &link,
-                    device,
-                    &self.engine,
-                    &Images::Store(&self.store),
-                    &hub.requests,
-                    &hub.endings,
-                )?;
-                *hub.notice.lock().unwrap() = outcome;
-                self.changes.changed();
+                let targets = job::next_hold(&link)?;
+                if let Err(error) = self.hold(hub, targets) {
+                    *hub.notice.lock().unwrap() = Some(format!("{error:#}"));
+                    self.changes.changed();
+                }
             }
         })();
         *hub.link.lock().unwrap() = None;
@@ -562,9 +680,7 @@ impl Agent {
                 for (port, generation) in link.unpresented() {
                     link.presenting(port, generation);
                     let number = port.number();
-                    match hub.control(|hub| {
-                        hub.command_for_generation(port, generation, PortAction::MapDebugUsb)
-                    }) {
+                    match link.command_for_generation(port, generation, PortAction::MapDebugUsb) {
                         Ok(result) => log::info!(
                             "Hub {serial:016x}: port {number} Debug USB for its silent target: {result:?}"
                         ),
@@ -582,9 +698,11 @@ impl Agent {
     /// service on Windows, and have each hub decide again what its
     /// targets allow.
     fn follow_prerequisites(&self) {
+        crate::native::mux::probe();
         let mut missing = crate::native::mux::missing();
         loop {
             thread::sleep(PREREQUISITES);
+            crate::native::mux::probe();
             let now = crate::native::mux::missing();
             if now == missing {
                 continue;
@@ -666,10 +784,7 @@ impl Agent {
                     Ok(Err(error)) => (
                         format!("{error:#}"),
                         match error.downcast_ref() {
-                            Some(&crate::Error::Firmware {
-                                version: [major, minor, patch],
-                                ..
-                            }) => Some(format!("{major}.{minor}.{patch}")),
+                            Some(&crate::Error::Firmware(info)) => Some(info),
                             _ => None,
                         },
                     ),
@@ -693,11 +808,14 @@ impl Agent {
                 .values()
                 .map(|hub| hub.present.swap(false, Ordering::Relaxed))
                 .collect();
-            for device in hubs_among(self.inventory.devices(), options.serial) {
+            for device in crate::hubs(self.inventory.devices(), options.serial) {
                 let Some(serial) = device.serial_number().and_then(|s| parse_serial(s).ok()) else {
                     continue;
                 };
-                let hub = hubs.entry(serial).or_default().clone();
+                let hub = hubs
+                    .entry(serial)
+                    .or_insert_with(|| Arc::new(Attendance::new(self.changes.clone())))
+                    .clone();
                 hub.present.store(true, Ordering::Relaxed);
                 if attendants.contains_key(&serial) {
                     continue;
@@ -757,10 +875,6 @@ struct Attendant {
     /// Set as its last act, so the agent's loop never waits on an attendant
     /// that has already said it ended.
     done: Arc<AtomicBool>,
-}
-
-fn hubs_among(devices: Vec<DeviceInfo>, serial: Option<u64>) -> Vec<DeviceInfo> {
-    hubs(devices, UsbIds::default(), serial)
 }
 
 /// Who the agent serves on Linux, decided from each client's credentials as
@@ -905,14 +1019,7 @@ mod socket {
     /// Administrators and whoever is signed in at the computer.
     pub fn serve(agent: Arc<Agent>) -> Result<()> {
         let path = agent.home.socket();
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        ensure!(
-            UnixStream::connect(&path).is_err(),
-            "another agent is already serving {}",
-            path.display()
-        );
+        vacant(&agent.home)?;
         fs::remove_file(&path).ok();
         let listener = UnixListener::bind(&path)
             .with_context(|| format!("listening on {}", path.display()))?;
@@ -939,6 +1046,20 @@ mod socket {
                     });
                 }
             })?;
+        Ok(())
+    }
+
+    /// Fail if another agent serves this home.
+    pub fn vacant(home: &Home) -> Result<()> {
+        let path = home.socket();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        ensure!(
+            UnixStream::connect(&path).is_err(),
+            "another agent is already serving {}",
+            path.display()
+        );
         Ok(())
     }
 
@@ -1062,20 +1183,29 @@ mod socket {
     }
 
     impl Client {
-        /// Connect, or find that no agent is running.
-        pub fn connect(home: &Home) -> Result<Option<Self>> {
+        /// Connect to the running agent, or say how it runs here.
+        pub fn connect(home: &Home) -> Result<Self> {
             let path = home.socket();
             match UnixStream::connect(&path) {
-                Ok(stream) => Ok(Some(Self {
+                Ok(stream) => Ok(Self {
                     reader: BufReader::new(stream),
-                })),
+                }),
                 Err(error)
                     if matches!(
                         error.kind(),
                         std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
                     ) =>
                 {
-                    Ok(None)
+                    let start = if std::env::var_os("IASIS_HOME").is_some() {
+                        "run iasisd with the same IASIS_HOME"
+                    } else if cfg!(target_os = "macos") {
+                        "open the Iasis app, which runs it as a login item"
+                    } else if cfg!(target_os = "linux") {
+                        "start its service with `sudo systemctl start iasisd`"
+                    } else {
+                        "start its service with `sc start iasisd` as an administrator"
+                    };
+                    bail!("iasisd is not running at {}; {start}", path.display())
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
                     if cfg!(windows) {
@@ -1177,14 +1307,14 @@ mod socket {
             generation: 7,
             ecid: None,
         }];
-        let submitted = batch::reserve(&slots, &selection).unwrap();
+        let submitted = job::reserve(&slots, &selection).unwrap();
         let result = iasis_api::Ending {
             operation: Operation::Restore,
             ecid: Some("000000000000002a".into()),
             phase: RestorePhase::Failed,
             message: "Restore worker lost the device".into(),
         };
-        let ended = |ending| batch::Ended {
+        let ended = |ending| job::Ended {
             attachment: None,
             ending,
         };
@@ -1208,7 +1338,7 @@ mod socket {
                         .set(ended(result.clone()))
                         .unwrap();
                     // A later job can finish before the client reads its first result.
-                    let next = batch::reserve(&slots, &selection).unwrap();
+                    let next = job::reserve(&slots, &selection).unwrap();
                     next[0]
                         .set(ended(iasis_api::Ending {
                             phase: RestorePhase::Reported,

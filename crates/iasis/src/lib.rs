@@ -4,13 +4,13 @@
 mod acl;
 pub mod agent;
 mod awake;
-pub mod batch;
 pub mod dfu;
 pub mod home;
 pub mod host;
 pub mod identity;
 pub mod images;
 pub mod inventory;
+pub(crate) mod job;
 pub mod logging;
 pub mod native;
 pub mod progress;
@@ -24,16 +24,9 @@ pub mod update;
 pub mod view;
 pub mod watch;
 
-use std::{
-    sync::{Arc, Mutex},
-    thread,
-    time::{Duration, Instant},
-};
+use std::time::Duration;
 
-use iasis_protocol::{
-    self as protocol, BootloaderRequest, CommandError, CommandResult, Info, Port, PortAction,
-    PortCommand, Status,
-};
+use iasis_protocol::{self as protocol, CommandError, Info, Port, PortCommand, Status};
 use nusb::{
     DeviceInfo, Endpoint, Interface, MaybeFuture,
     transfer::{Buffer, ControlIn, ControlOut, ControlType, In, Interrupt, Recipient},
@@ -41,9 +34,9 @@ use nusb::{
 use serde::{Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
+pub use iasis_api::Topology;
+
 const TIMEOUT: Duration = Duration::from_secs(2);
-/// A client without the hub's announcements looks again this often.
-const UNANNOUNCED: Duration = Duration::from_millis(20);
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -51,18 +44,12 @@ pub enum Error {
     Usb(#[from] nusb::Error),
     #[error("USB transfer: {0}")]
     Transfer(#[from] nusb::transfer::TransferError),
-    #[error("invalid Iasis response: {0:?}")]
-    Protocol(protocol::DecodeError),
+    #[error("invalid Iasis response")]
+    Protocol,
+    #[error("the hub has no Iasis serial number")]
+    Serial,
     #[error("could not encode Iasis request")]
     Encode,
-    #[error("this hub connection is read-only")]
-    ReadOnly,
-    #[error("this request requires exclusive control of the hub")]
-    ExclusiveControlRequired,
-    #[error("hub does not support ROM updates")]
-    UpdateUnsupported,
-    #[error("hub does not support port control")]
-    PortControlUnsupported,
     #[error("port command failed: {0:?}")]
     Command(CommandError),
     #[error("port command result was not observed before the deadline")]
@@ -71,47 +58,18 @@ pub enum Error {
     InvalidSetting(&'static str),
     #[error("settings storage is full; unplug targets briefly, then retry")]
     SettingsFull,
+    /// The hub speaks another protocol. It can still be named and updated.
     #[error("IasisOS on this hub is from another build; update it with `iasis update`")]
-    Firmware {
-        /// The protocol version the hub speaks.
-        hub: u16,
-        /// The IasisOS version the hub runs.
-        version: [u16; 3],
-    },
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct UsbIds {
-    pub vendor: u16,
-    pub product: u16,
-}
-
-impl Default for UsbIds {
-    fn default() -> Self {
-        Self {
-            vendor: protocol::DEVELOPMENT_VID,
-            product: protocol::DEVELOPMENT_PID,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct Topology {
-    pub bus: String,
-    pub port_chain: Vec<u8>,
+    Firmware(Info),
 }
 
 /// The Iasis hubs among `devices`: every one, or the one with `serial`.
-pub fn hubs(
-    devices: impl IntoIterator<Item = DeviceInfo>,
-    ids: UsbIds,
-    serial: Option<u64>,
-) -> Vec<DeviceInfo> {
+pub fn hubs(devices: impl IntoIterator<Item = DeviceInfo>, serial: Option<u64>) -> Vec<DeviceInfo> {
     devices
         .into_iter()
         .filter(|device| {
-            device.vendor_id() == ids.vendor
-                && device.product_id() == ids.product
+            device.vendor_id() == protocol::DEVELOPMENT_VID
+                && device.product_id() == protocol::DEVELOPMENT_PID
                 && device.product_string() == Some("Iasis")
                 && serial.is_none_or(|serial| {
                     device.serial_number().and_then(|s| parse_serial(s).ok()) == Some(serial)
@@ -120,12 +78,7 @@ pub fn hubs(
         .collect()
 }
 
-pub fn discover(ids: UsbIds, serial: Option<u64>) -> Result<Vec<DeviceInfo>, Error> {
-    Ok(hubs(nusb::list_devices().wait()?, ids, serial))
-}
-
-/// The hub's announcements that its status has changed. One client holds
-/// them at a time; any client can read the status they announce.
+/// The hub's announcements that its status has changed.
 pub struct Events {
     endpoint: Endpoint<Interrupt, In>,
     _interface: Interface,
@@ -161,154 +114,41 @@ impl Events {
         let revision = done
             .buffer
             .first_chunk::<{ protocol::EVENT_SIZE }>()
-            .ok_or(Error::Protocol(protocol::DecodeError::Payload))?;
+            .ok_or(Error::Protocol)?;
         Ok(Some(u32::from_le_bytes(*revision)))
     }
 }
 
-/// Waits for the hub's status to move past a revision, until a deadline.
-pub type Notice = Arc<dyn Fn(u32, Instant) + Send + Sync>;
-
+/// A hub's claimed management interface. One process holds it at a time:
+/// the agent, for as long as a host session with the hub lasts.
 #[derive(Clone)]
 pub struct Hub {
     device: nusb::Device,
-    access: Access,
+    interface: Interface,
+    serial: u64,
     info: Info,
-    /// The protocol version the firmware speaks.
-    protocol: u16,
     topology: Topology,
-    notice: Option<Notice>,
-    events: Arc<Mutex<Option<Events>>>,
-}
-
-#[derive(Clone)]
-enum Access {
-    Control(Claimed),
-    Listener(Shared),
-    Observer(Shared),
-}
-
-/// The claimed management interface.
-#[cfg(not(windows))]
-type Claimed = Interface;
-/// What carries a control transfer without the exclusive claim.
-#[cfg(not(windows))]
-type Shared = nusb::Device;
-#[cfg(windows)]
-type Claimed = Arc<winusb::Claim>;
-#[cfg(windows)]
-type Shared = Arc<winusb::Claim>;
-
-#[cfg(not(windows))]
-fn claim(device: &DeviceInfo) -> Result<(nusb::Device, Claimed), Error> {
-    let handle = device.open().wait()?;
-    let interface = handle.claim_interface(protocol::INTERFACE).wait()?;
-    Ok((handle, interface))
-}
-
-#[cfg(not(windows))]
-fn share(device: &DeviceInfo) -> Result<(nusb::Device, Shared), Error> {
-    let handle = device.open().wait()?;
-    Ok((handle.clone(), handle))
-}
-
-// On Windows the shared hub is the claimed one.
-#[cfg(windows)]
-use winusb::{claim, claim as share};
-
-/// WinUSB opens each USB function once per process and has no device-level
-/// control transfers. Every hub this process opens shares one claim of the
-/// management interface, released with the last, so a process that holds the
-/// hub keeps others from it.
-#[cfg(windows)]
-mod winusb {
-    use std::sync::{Arc, Mutex, Weak};
-
-    use iasis_protocol as protocol;
-    use nusb::{
-        DeviceInfo, Interface, MaybeFuture,
-        transfer::{ControlIn, ControlOut, TransferError},
-    };
-
-    use crate::Error;
-
-    pub(crate) struct Claim {
-        device: nusb::Device,
-        interface: Interface,
-    }
-
-    impl Claim {
-        pub(crate) fn control_in(
-            &self,
-            data: ControlIn,
-            timeout: std::time::Duration,
-        ) -> impl MaybeFuture<Output = Result<Vec<u8>, TransferError>> {
-            self.interface.control_in(data, timeout)
-        }
-
-        pub(crate) fn control_out(
-            &self,
-            data: ControlOut,
-            timeout: std::time::Duration,
-        ) -> impl MaybeFuture<Output = Result<(), TransferError>> {
-            self.interface.control_out(data, timeout)
-        }
-    }
-
-    pub(crate) fn claim(device: &DeviceInfo) -> Result<(nusb::Device, Arc<Claim>), Error> {
-        static CLAIMS: Mutex<Vec<(nusb::DeviceId, Weak<Claim>)>> = Mutex::new(Vec::new());
-        let mut claims = CLAIMS.lock().unwrap();
-        claims.retain(|(_, claim)| claim.strong_count() > 0);
-        if let Some(claim) = claims
-            .iter()
-            .find(|(id, _)| *id == device.id())
-            .and_then(|(_, claim)| claim.upgrade())
-        {
-            return Ok((claim.device.clone(), claim));
-        }
-        let handle = device.open().wait()?;
-        let interface = handle.claim_interface(protocol::INTERFACE).wait()?;
-        let claim = Arc::new(Claim {
-            device: handle.clone(),
-            interface,
-        });
-        claims.push((device.id(), Arc::downgrade(&claim)));
-        Ok((handle, claim))
-    }
 }
 
 impl Hub {
-    /// Claim the management interface for power, port commands and firmware updates.
     pub fn open(device: &DeviceInfo) -> Result<Self, Error> {
-        let (handle, claimed) = claim(device)?;
-        Self::connect(device, handle, Access::Control(claimed))
-    }
-
-    /// Read hub status without claiming the management interface.
-    pub fn observe(device: &DeviceInfo) -> Result<Self, Error> {
-        let (handle, shared) = share(device)?;
-        Self::connect(device, handle, Access::Observer(shared))
-    }
-
-    /// Read status and hold the host session alongside direct clients.
-    pub fn listen(device: &DeviceInfo) -> Result<Self, Error> {
-        let (handle, shared) = share(device)?;
-        Self::connect(device, handle, Access::Listener(shared))
-    }
-
-    fn connect(device: &DeviceInfo, handle: nusb::Device, access: Access) -> Result<Self, Error> {
-        let (protocol, info) = read(&access, protocol::GET_INFO)?;
+        let serial = device
+            .serial_number()
+            .and_then(|serial| parse_serial(serial).ok())
+            .ok_or(Error::Serial)?;
+        let handle = device.open().wait()?;
+        let interface = handle.claim_interface(protocol::INTERFACE).wait()?;
+        let info =
+            Info::decode(&read(&interface, protocol::GET_INFO)?).map_err(|_| Error::Protocol)?;
         Ok(Self {
             device: handle,
-            access,
+            interface,
+            serial,
             info,
-            protocol,
             topology: Topology {
                 bus: device.bus_id().to_owned(),
                 port_chain: device.port_chain().to_vec(),
             },
-            notice: None,
-            events: Arc::default(),
         })
     }
 
@@ -318,46 +158,8 @@ impl Hub {
         Events::claim(&self.device)
     }
 
-    /// Learn of status changes from the holder of the hub's announcements.
-    pub fn notified(mut self, notice: Notice) -> Self {
-        self.notice = Some(notice);
-        self
-    }
-
-    /// Start listening before an action whose effect is waited for. The
-    /// announcements are held only while such a wait lasts, so a listener
-    /// that wants them for longer finds them free.
-    fn expect_change(&self) {
-        if self.notice.is_some() {
-            return;
-        }
-        let mut events = self.events.lock().unwrap();
-        match events.as_mut() {
-            Some(events) => events.listen(),
-            None => *events = Events::claim(&self.device).ok(),
-        }
-    }
-
-    /// Wait for a status newer than `revision`, until `deadline`. The
-    /// status may or may not have changed when this returns: without the
-    /// announcements, which another client may hold, the wait is short and
-    /// the caller reads the hub again.
-    fn changed_after(&self, revision: u32, deadline: Instant) {
-        if let Some(notice) = &self.notice {
-            return notice(revision, deadline);
-        }
-        self.expect_change();
-        let left = deadline.saturating_duration_since(Instant::now());
-        let mut events = self.events.lock().unwrap();
-        let announced = events
-            .as_mut()
-            .is_some_and(|events| events.next(left).is_ok());
-        if !announced {
-            // Announcements that failed are claimed afresh by the next wait.
-            *events = None;
-            drop(events);
-            thread::sleep(left.min(UNANNOUNCED));
-        }
+    pub fn serial(&self) -> u64 {
+        self.serial
     }
 
     pub fn info(&self) -> &Info {
@@ -371,19 +173,16 @@ impl Hub {
     /// The hub answers this tool's protocol. A hub that does not can
     /// still be named and sent to its updater.
     pub fn current(&self) -> Result<(), Error> {
-        if self.protocol == protocol::VERSION {
+        if self.info.protocol == protocol::VERSION {
             Ok(())
         } else {
-            Err(Error::Firmware {
-                hub: self.protocol,
-                version: self.info.firmware_version,
-            })
+            Err(Error::Firmware(self.info))
         }
     }
 
     pub fn status(&self) -> Result<Status, Error> {
         self.current()?;
-        Ok(read(&self.access, protocol::GET_STATUS)?.1)
+        decode(&read(&self.interface, protocol::GET_STATUS)?)
     }
 
     pub fn rename(&self, name: &str) -> Result<(), Error> {
@@ -401,13 +200,7 @@ impl Hub {
     }
 
     fn setting(&self, change: protocol::Setting) -> Result<(), Error> {
-        let result = self.write(
-            protocol::SETTINGS,
-            &protocol::SettingsRequest {
-                serial: self.info.serial,
-                change,
-            },
-        );
+        let result = self.write(protocol::SETTINGS, &change);
         if matches!(
             result,
             Err(Error::Transfer(nusb::transfer::TransferError::Stall))
@@ -425,97 +218,29 @@ impl Hub {
     }
 
     pub fn host_control(&self, control: protocol::HostControl) -> Result<(), Error> {
-        self.write(
-            protocol::HOST_CONTROL,
-            &protocol::HostControlRequest {
-                serial: self.info.serial,
-                control,
-            },
-        )
+        self.write(protocol::HOST_CONTROL, &control)
     }
 
-    /// Execute against the observed attachment generation. Enable permits
-    /// attachment; Acknowledged means PD transport only, not DFU.
-    pub fn command(&self, port: Port, action: PortAction) -> Result<CommandResult, Error> {
-        self.command_for_generation(port, self.status()?.ports[port.index()].generation, action)
+    /// Send a port command. Its result shows in a later status.
+    pub(crate) fn port_command(&self, command: &PortCommand) -> Result<(), Error> {
+        self.write(protocol::PORT_COMMAND, command)
     }
 
-    /// Preserve a batch's attachment selection through command submission.
-    pub fn command_for_generation(
-        &self,
-        port: Port,
-        generation: u32,
-        action: PortAction,
-    ) -> Result<CommandResult, Error> {
-        if self.info.capabilities & protocol::CAP_PORT_CONTROL == 0 {
-            return Err(Error::PortControlUnsupported);
-        }
-        // Enable and disable address the port; other actions one attachment.
-        let attachment = !matches!(action, PortAction::Enable | PortAction::Disable);
-        self.expect_change();
-        let before = self.status()?.ports[port.index()];
-        if attachment && before.generation != generation {
-            return Err(Error::Command(CommandError::StaleAttachment));
-        }
-        let command = PortCommand {
-            serial: self.info.serial,
-            port,
-            generation,
-            id: before.command_id.wrapping_add(1).max(1),
-            action,
-        };
-        self.write(protocol::PORT_COMMAND, &command)?;
-        let deadline = Instant::now() + Duration::from_secs(3);
-        loop {
-            let hub = self.status()?;
-            let status = hub.ports[port.index()];
-            if status.command_id == command.id {
-                match status.command_result {
-                    CommandResult::Failed(error) => return Err(Error::Command(error)),
-                    CommandResult::Complete
-                    | CommandResult::Acknowledged
-                    | CommandResult::Unconfirmed => {
-                        return Ok(status.command_result);
-                    }
-                    // A target attaching to the enabled port clears the result.
-                    CommandResult::Idle if action == PortAction::Enable && status.enabled => {
-                        return Ok(CommandResult::Complete);
-                    }
-                    _ => {}
-                }
-            }
-            if attachment && status.generation != generation {
-                return Err(Error::Command(CommandError::StaleAttachment));
-            }
-            if Instant::now() >= deadline {
-                // The announcements go back to whoever listens for longer.
-                *self.events.lock().unwrap() = None;
-                return Err(Error::CommandTimeout);
-            }
-            self.changed_after(hub.revision, deadline);
-        }
-    }
-
-    /// Quiesce target power and request the RP2350 ROM's PICOBOOT interface.
-    /// The accepted transfer is not proof that the ROM subsequently enumerated.
+    /// Quiesce target power and request the RP2350 ROM's PICOBOOT interface,
+    /// whatever protocol the hub speaks. The accepted transfer is not proof
+    /// that the ROM subsequently enumerated.
     pub fn enter_bootloader(&self) -> Result<(), Error> {
-        if self.info.capabilities & protocol::CAP_ROM_UPDATE == 0 {
-            return Err(Error::UpdateUnsupported);
-        }
-        self.write(
-            protocol::ENTER_BOOTLOADER,
-            &BootloaderRequest {
-                serial: self.info.serial,
-            },
-        )
+        self.send(protocol::ENTER_BOOTLOADER, &[])
     }
 
     fn write(&self, request: u8, value: &impl Serialize) -> Result<(), Error> {
-        if request != protocol::ENTER_BOOTLOADER {
-            self.current()?;
-        }
+        self.current()?;
         let mut buffer = [0; protocol::MAX_PACKET];
         let data = protocol::encode(value, &mut buffer).map_err(|_| Error::Encode)?;
+        self.send(request, data)
+    }
+
+    fn send(&self, request: u8, data: &[u8]) -> Result<(), Error> {
         let transfer = ControlOut {
             control_type: ControlType::Vendor,
             recipient: Recipient::Interface,
@@ -524,22 +249,12 @@ impl Hub {
             index: protocol::INTERFACE.into(),
             data,
         };
-        match &self.access {
-            Access::Control(interface) => interface.control_out(transfer, TIMEOUT).wait()?,
-            Access::Listener(shared) => match request {
-                protocol::HOST_REPORT | protocol::HOST_CONTROL => {
-                    shared.control_out(transfer, TIMEOUT).wait()?
-                }
-                _ => return Err(Error::ExclusiveControlRequired),
-            },
-            Access::Observer(_) => return Err(Error::ReadOnly),
-        }
+        self.interface.control_out(transfer, TIMEOUT).wait()?;
         Ok(())
     }
 }
 
-/// Read a frame with the protocol version its sender speaks.
-fn read<T: DeserializeOwned>(access: &Access, request: u8) -> Result<(u16, T), Error> {
+fn read(interface: &Interface, request: u8) -> Result<Vec<u8>, Error> {
     let request = ControlIn {
         control_type: ControlType::Vendor,
         recipient: Recipient::Interface,
@@ -548,17 +263,13 @@ fn read<T: DeserializeOwned>(access: &Access, request: u8) -> Result<(u16, T), E
         index: protocol::INTERFACE.into(),
         length: protocol::MAX_PACKET as u16,
     };
-    let ask = || -> Result<(u16, T), Error> {
-        let data = match access {
-            Access::Control(interface) => interface.control_in(request, TIMEOUT).wait()?,
-            Access::Listener(shared) | Access::Observer(shared) => {
-                shared.control_in(request, TIMEOUT).wait()?
-            }
-        };
-        protocol::decode_any(&data).map_err(Error::Protocol)
-    };
-    // A transfer another process abandoned can cost the next one its reply.
-    ask().or_else(|_| ask())
+    let ask = || interface.control_in(request, TIMEOUT).wait();
+    // A transfer an earlier holder abandoned can cost the next one its reply.
+    Ok(ask().or_else(|_| ask())?)
+}
+
+fn decode<T: DeserializeOwned>(data: &[u8]) -> Result<T, Error> {
+    protocol::decode(data).map_err(|_| Error::Protocol)
 }
 
 pub fn parse_port(value: &str) -> Result<Port, String> {

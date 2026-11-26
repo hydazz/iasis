@@ -6,15 +6,18 @@ use std::{
     io::{self, BufRead, BufReader, Read},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
     thread,
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use iasis_protocol::AppleMode;
+use restorekit::PostRestoreAction;
 
-use crate::{identity::models::DeviceModel, supervision::Supervision, watch::Watch};
+use crate::{
+    identity::models::DeviceModel, native::Record, supervision::Supervision, watch::Watch,
+};
 use serde::{Deserialize, Serialize};
 
 mod integrity;
@@ -23,12 +26,13 @@ mod progress;
 pub use iasis_api::{Operation, Progress};
 use progress::Stages;
 
-pub const MAX_RESTORES: usize = 5;
-
 /// Checked local archive. Apple authorizes the restore when the engine
 /// requests a signing ticket for the connected target.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PreparedIpsw {
+    /// Where the archive is. The image store's index names it by its file
+    /// within the store's own directories, and sets this as it opens them.
+    #[serde(skip)]
     path: PathBuf,
     bytes: u64,
     modified: SystemTime,
@@ -41,35 +45,25 @@ pub struct PreparedIpsw {
 }
 
 impl PreparedIpsw {
-    /// Read every ZIP member to verify its CRC before any device is touched.
-    /// The archive stays in place and can be read by all five workers.
+    /// Read every ZIP member to verify its CRC.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let before_read = SystemTime::now();
-        let (mut ipsw, members) = Self::read(path.as_ref(), true)?;
-        // Someone else owns the file. A write in the same clock tick as its
-        // stamp would not show, so the content is checked again before use.
-        if !ipsw.integrity.stamp.settled_at(before_read) {
-            ipsw.integrity.proof = Some(members);
-        }
-        Ok(ipsw)
+        Self::read(path.as_ref(), true)
     }
 
     /// Describe an archive the image store wrote and checked. The store is
     /// its only writer, so its file stamp stands for that content.
     pub(crate) fn open_stored(path: &Path) -> Result<Self> {
-        Ok(Self::read(path, false)?.0)
+        Self::read(path, false)
     }
 
-    /// The archive and a digest of its member names, sizes and CRCs.
-    fn read(path: &Path, check_members: bool) -> Result<(Self, [u8; 32])> {
-        use sha2::{Digest, Sha256};
-        let path = path.canonicalize().context("opening IPSW path")?;
+    /// The archive, with every member's CRC verified when `check_members`.
+    fn read(path: &Path, check_members: bool) -> Result<Self> {
+        let path = std::path::absolute(path).context("opening IPSW path")?;
         let file = File::open(&path).context("opening IPSW")?;
         let metadata = file.metadata()?;
         ensure!(metadata.is_file(), "IPSW must be a regular file");
         let modified = metadata.modified()?;
         let stamp = FileStamp::read(&metadata)?;
-        let mut members = Sha256::new();
         let mut archive = zip::ZipArchive::new(file).context("reading IPSW ZIP directory")?;
         let mut manifest = None;
         let mut names = HashSet::new();
@@ -79,10 +73,6 @@ impl PreparedIpsw {
                 .name()
                 .context("reading IPSW member name")?
                 .into_owned();
-            members.update((name.len() as u64).to_le_bytes());
-            members.update(name.as_bytes());
-            members.update(entry.size().to_le_bytes());
-            members.update(entry.crc32().to_le_bytes());
             ensure!(names.insert(name.clone()), "duplicate IPSW member: {name}");
             if name == "BuildManifest.plist" {
                 let mut bytes = Vec::new();
@@ -156,23 +146,27 @@ impl PreparedIpsw {
                 erase_hardware.insert((id("ApChipID")?, id("ApBoardID")?));
             }
         }
-        let members: [u8; 32] = members.finalize().into();
         let prepared = Self {
             path,
             bytes: metadata.len(),
             modified,
-            integrity: Integrity::new(stamp),
+            integrity: Integrity { stamp },
             product_version: string("ProductVersion")?,
             build_version: string("ProductBuildVersion")?,
             product_types,
             erase_hardware,
         };
-        prepared.check_stamp()?;
-        Ok((prepared, members))
+        prepared.check_unchanged()?;
+        Ok(prepared)
     }
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Name where the archive is, for one described without its place.
+    pub(crate) fn place(&mut self, path: PathBuf) {
+        self.path = path;
     }
 
     pub fn bytes(&self) -> u64 {
@@ -203,15 +197,8 @@ impl PreparedIpsw {
         (version, &self.build_version)
     }
 
+    /// The file is still the one that was checked.
     pub fn check_unchanged(&self) -> Result<()> {
-        self.check_at(SystemTime::now)
-    }
-
-    fn check_at(&self, now: impl FnOnce() -> SystemTime) -> Result<()> {
-        self.integrity.verify(self, now)
-    }
-
-    fn check_stamp(&self) -> Result<()> {
         let metadata = fs::metadata(&self.path).context("checking prepared IPSW")?;
         let stamp = FileStamp::read(&metadata)?;
         ensure!(
@@ -219,7 +206,7 @@ impl PreparedIpsw {
                 && metadata.len() == self.bytes
                 && metadata.modified()? == self.modified
                 && self.integrity.stamp == stamp,
-            "IPSW changed after preparation; prepare it again"
+            "the IPSW changed after it was checked"
         );
         Ok(())
     }
@@ -250,46 +237,6 @@ fn manifest_id(value: &plist::Value) -> Option<u32> {
     }
 }
 
-/// The chip and board IDs in an ordinary DFU USB serial descriptor.
-pub fn dfu_hardware(serial_descriptor: &str) -> Result<(u32, u32)> {
-    let id = |key| -> Result<u32> {
-        let mut fields = serial_descriptor
-            .split_ascii_whitespace()
-            .filter_map(|token| token.split_once(':'))
-            .filter(|(name, _)| *name == key);
-        let (_, value) = fields
-            .next()
-            .with_context(|| format!("DFU serial has no {key}"))?;
-        ensure!(
-            fields.next().is_none(),
-            "DFU serial has multiple {key} fields"
-        );
-        hex_id(value).with_context(|| format!("invalid hexadecimal {key} in DFU serial"))
-    };
-    let chip = id("CPID")?;
-    ensure!(chip != 0, "invalid zero CPID in DFU serial");
-    Ok((chip, id("BDID")?))
-}
-
-/// Select the one prepared archive that restores this model.
-pub(crate) fn image_for_model<'a>(
-    images: &'a [PreparedIpsw],
-    model: &DeviceModel,
-) -> Result<&'a PreparedIpsw> {
-    let mut matching = images.iter().filter(|image| image.restores(model));
-    let image = matching
-        .next()
-        .with_context(|| format!("no supplied IPSW restores {model}"))?;
-    if let Some(other) = matching.next() {
-        anyhow::bail!(
-            "multiple IPSWs restore {model}: {} and {}",
-            image.path.display(),
-            other.path.display()
-        );
-    }
-    Ok(image)
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RestoreState {
@@ -298,8 +245,7 @@ pub enum RestoreState {
     /// The restore service reported completion and the process exited zero.
     /// This does not prove a booted OS or independently verify erased data.
     RestoreReported,
-    /// Exit zero without a final restore status is not evidence of completion.
-    Unconfirmed,
+    TransportLost,
     Failed,
 }
 
@@ -307,7 +253,7 @@ impl RestoreState {
     pub fn is_terminal(self) -> bool {
         matches!(
             self,
-            Self::RestoreReported | Self::Unconfirmed | Self::Failed
+            Self::RestoreReported | Self::TransportLost | Self::Failed
         )
     }
 }
@@ -323,12 +269,14 @@ pub struct RestoreStatus {
     pub exit_code: Option<i32>,
 }
 
+/// How long a worker's records may lag its exit: what it wrote before it
+/// exited is in the pipe by then.
+const RECORDS_AFTER_EXIT: Duration = Duration::from_secs(2);
+
 /// Restores and revives targets in DFU, over ordinary USB or Apple Debug USB,
 /// each with RestoreKit in a worker process of this executable.
 ///
-/// One engine owns the active ECID set. Clone this engine to submit batches
-/// from multiple callers without starting the same target twice. A batch is
-/// one hub's targets; batches for several hubs run side by side.
+/// One engine owns the active ECID set, so no target runs twice.
 #[derive(Clone)]
 pub struct RestoreEngine {
     /// The executable the workers run.
@@ -342,11 +290,26 @@ pub struct RestoreEngine {
 }
 
 impl RestoreEngine {
+    /// The host's engine, with its workers' directories in `scratch`. A
+    /// directory there outlives its worker only when the agent stopped
+    /// first, and goes now.
     pub fn for_host(
         scratch: impl Into<PathBuf>,
         supervision: Arc<Supervision>,
         changes: Arc<Watch>,
     ) -> Self {
+        let scratch = scratch.into();
+        for entry in fs::read_dir(&scratch).into_iter().flatten().flatten() {
+            let path = entry.path();
+            let removed = if path.is_dir() {
+                fs::remove_dir_all(&path)
+            } else {
+                fs::remove_file(&path)
+            };
+            if let Err(error) = removed {
+                log::warn!("{}: {error}", path.display());
+            }
+        }
         Self {
             supervision,
             changes,
@@ -373,14 +336,6 @@ impl RestoreEngine {
         )
     }
 
-    /// Whether the host restores a target found in this USB mode: one a
-    /// restore starts from, or a running iPhone or iPad it first takes into
-    /// recovery, where the host's usbmuxd reaches running devices.
-    pub fn restores(&self, mode: AppleMode) -> bool {
-        Self::starts_from(mode)
-            || (mode == AppleMode::Normal && crate::native::mux::missing().is_none())
-    }
-
     /// Take a running iPhone or iPad into recovery through the host's
     /// usbmuxd. Since iOS 14.5 this needs the host paired with the device:
     /// by its user's Trust, or as its supervisor with a supervision identity
@@ -391,234 +346,245 @@ impl RestoreEngine {
             .map_err(|error| anyhow::anyhow!("{error}"))
     }
 
-    /// Start a deliberately selected erase batch. The caller must establish
-    /// actual target ECIDs in a mode the engine restores before calling:
-    /// upstream can discard a Port DFU controller's ECID during that mode's
-    /// transition. No device discovery, DFU signalling or consent prompt
-    /// occurs here. Dropping the batch handle does not interrupt an active
-    /// restore.
-    pub fn start_erase(&self, ipsw: &PreparedIpsw, ecids: &[u64]) -> Result<RestoreBatch> {
-        let targets: Vec<_> = ecids
-            .iter()
-            .map(|&ecid| (ipsw, ecid, AppleMode::Dfu))
-            .collect();
-        self.start_selected(&targets, Operation::Restore)
-    }
-
-    /// Check all selected archives and reserve every ECID before starting any
-    /// worker. The caller supplies each verified target's image and the DFU
-    /// it is in. A revive installs from the same image and keeps the data.
-    pub fn start_selected(
+    /// Start a worker that restores or revives the target with this ECID,
+    /// verified in `mode`, from `ipsw`, and leaves it to `after`; `location`
+    /// is its KIS device's where that is its only way in. The worker runs to
+    /// its end whatever becomes of the returned handle.
+    pub fn start(
         &self,
-        targets: &[(&PreparedIpsw, u64, AppleMode)],
+        ipsw: &PreparedIpsw,
+        ecid: u64,
+        mode: AppleMode,
         operation: Operation,
-    ) -> Result<RestoreBatch> {
+        after: PostRestoreAction,
+        location: Option<u32>,
+    ) -> Result<Worker> {
         ensure!(
-            !targets.is_empty() && targets.len() <= MAX_RESTORES,
-            "select between one and five restore targets"
-        );
-        let selected: HashSet<_> = targets.iter().map(|&(_, ecid, _)| ecid).collect();
-        ensure!(
-            !selected.contains(&0),
+            ecid != 0,
             "ECID zero means automatic selection and is not allowed"
         );
-        ensure!(selected.len() == targets.len(), "duplicate restore ECID");
-        // Settle every target's image before any worker starts.
-        for (ipsw, _, mode) in targets {
-            ipsw.check_unchanged()?;
-            ensure!(
-                Self::starts_from(*mode),
-                "RestoreKit does not restore a target in {mode:?}"
-            );
-        }
+        ensure!(
+            Self::starts_from(mode),
+            "RestoreKit does not restore a target in {mode:?}"
+        );
+        ipsw.check_unchanged()?;
         fs::create_dir_all(&self.scratch).context("creating the restore scratch directory")?;
         let scratch = self.scratch.canonicalize()?;
-        let mut active = self.active.lock().unwrap();
+        let directory = tempfile::Builder::new()
+            .prefix(&format!("{ecid:016x}-"))
+            .tempdir_in(&scratch)
+            .context("creating restore worker directory")?;
         ensure!(
-            selected.is_disjoint(&active),
-            "a selected ECID already has an active restore"
+            self.active.lock().unwrap().insert(ecid),
+            "ECID {ecid:016x} already has an active restore"
         );
-        // Make every worker's directory before launching the first target.
-        let mut workers = Vec::new();
-        for &(ipsw, ecid, _) in targets {
-            let directory = tempfile::Builder::new()
-                .prefix(&format!("{ecid:016x}-"))
-                .tempdir_in(&scratch)
-                .context("creating restore worker directory")?;
-            let mut command =
-                crate::native::worker_command(&self.program, operation, ecid, ipsw.path());
-            command
-                .current_dir(directory.path())
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            workers.push((command, ipsw.clone(), ecid, directory));
-        }
-        active.extend(selected);
-        drop(active);
-        let mut statuses = Vec::new();
-        for (command, image, ecid, directory) in workers {
-            let status = Arc::new(Mutex::new(RestoreStatus {
-                operation,
-                ecid,
-                state: RestoreState::Starting,
-                pid: None,
-                progress: Progress::starting(),
-                message: String::new(),
-                exit_code: None,
-            }));
-            let worker_status = Arc::clone(&status);
-            let active = Arc::clone(&self.active);
-            let changes = Arc::clone(&self.changes);
-            let spawn = thread::Builder::new()
-                .name(format!("restore-{ecid:x}"))
-                .spawn(move || {
-                    let _awake = crate::awake::hold(&format!("{operation:?} of {ecid:016x}"));
-                    let result = image
-                        .check_unchanged()
-                        .and_then(|()| run_worker(command, &worker_status, &changes));
-                    if let Err(error) = result {
-                        let mut status = worker_status.lock().unwrap();
-                        status.state = RestoreState::Failed;
-                        status.message = format!("{error:#}");
-                    }
-                    log::info!("{ecid:016x}: {}", worker_status.lock().unwrap().message);
-                    // The worker's scratch is of no use once its job ends.
-                    drop(directory);
-                    active.lock().unwrap().remove(&ecid);
-                    changes.changed();
-                });
-            if let Err(error) = spawn {
-                self.active.lock().unwrap().remove(&ecid);
+        let mut command = crate::native::worker_command(
+            &self.program,
+            operation,
+            after,
+            ecid,
+            ipsw.path(),
+            location,
+        );
+        command.current_dir(directory.path());
+        let status = Arc::new(Mutex::new(RestoreStatus {
+            operation,
+            ecid,
+            state: RestoreState::Starting,
+            pid: None,
+            progress: Progress::starting(),
+            message: String::new(),
+            exit_code: None,
+        }));
+        let worker = Worker(status.clone());
+        let (active, changes) = (self.active.clone(), self.changes.clone());
+        let spawn = thread::Builder::new()
+            .name(format!("restore-{ecid:x}"))
+            .spawn(move || {
+                let _awake = crate::awake::hold(&format!("{operation:?} of {ecid:016x}"));
+                let (state, message) = run_worker(command, &status, &changes)
+                    .unwrap_or_else(|error| (RestoreState::Failed, format!("{error:#}")));
+                log::info!("{ecid:016x}: {message}");
+                // The worker's scratch is of no use once its job ends, and the
+                // target is free for another as its end is told.
+                drop(directory);
+                active.lock().unwrap().remove(&ecid);
                 let mut status = status.lock().unwrap();
-                status.state = RestoreState::Failed;
-                status.message = format!("starting restore worker: {error}");
-            }
-            statuses.push(status);
+                if state == RestoreState::RestoreReported {
+                    status.progress.complete();
+                }
+                (status.state, status.message) = (state, message);
+                drop(status);
+                changes.changed();
+            });
+        if let Err(error) = spawn {
+            self.active.lock().unwrap().remove(&ecid);
+            bail!("starting the restore of {ecid:016x}: {error}");
         }
-        Ok(RestoreBatch { statuses })
+        Ok(worker)
     }
 }
 
-pub struct RestoreBatch {
-    statuses: Vec<Arc<Mutex<RestoreStatus>>>,
-}
+/// One target's worker, as its records and its exit describe it.
+#[derive(Clone)]
+pub struct Worker(Arc<Mutex<RestoreStatus>>);
 
-impl RestoreBatch {
-    pub fn snapshots(&self) -> Vec<RestoreStatus> {
-        self.statuses
-            .iter()
-            .map(|status| status.lock().unwrap().clone())
-            .collect()
-    }
-
-    pub fn is_finished(&self) -> bool {
-        self.statuses
-            .iter()
-            .all(|status| status.lock().unwrap().state.is_terminal())
+impl Worker {
+    pub fn status(&self) -> RestoreStatus {
+        self.0.lock().unwrap().clone()
     }
 }
 
+/// Run a worker to its exit, and say how its job ended. It is in a process
+/// group, or on Windows a job object, that goes with this process, and it
+/// stops when its stdin from this process closes. Its records give the job's
+/// progress and outcome; its stderr goes to the log.
 fn run_worker(
     mut command: Command,
     status: &Arc<Mutex<RestoreStatus>>,
-    changes: &Watch,
-) -> Result<()> {
+    changes: &Arc<Watch>,
+) -> Result<(RestoreState, String)> {
+    use process_wrap::std::*;
+
+    // The multiplexer serves this restore until its worker exits.
+    let lease = crate::native::mux::lease().context("reaching the USB multiplexer")?;
+    command
+        .envs(lease.environment.clone())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let program = command.get_program().to_string_lossy().into_owned();
+    let mut command = CommandWrap::from(command);
+    #[cfg(unix)]
+    command.wrap(ProcessGroup::leader());
+    #[cfg(windows)]
+    command.wrap(JobObject);
+    command.wrap(KillOnDrop);
     let mut child = command
         .spawn()
-        .with_context(|| format!("starting {}", command.get_program().to_string_lossy()))?;
+        .with_context(|| format!("starting {program}"))?;
     {
         let mut status = status.lock().unwrap();
         status.pid = Some(child.id());
         status.state = RestoreState::Running;
     }
     changes.changed();
-    let stdout = child.stdout.take().context("worker stdout missing")?;
-    let stderr = child.stderr.take().context("worker stderr missing")?;
-    let (outcome, stdout_result, stderr_result) = thread::scope(|scope| {
-        let out = scope.spawn(|| drain(stdout, status, true, changes));
-        let err = scope.spawn(|| drain(stderr, status, false, changes));
-        let outcome = child.wait();
-        (outcome, out.join(), err.join())
-    });
-    let outcome = outcome.context("waiting for recovery worker")?;
-    let mut snapshot = status.lock().unwrap();
-    snapshot.exit_code = outcome.code();
-    let stdout_result = stdout_result.map_err(|_| anyhow::anyhow!("stdout reader panicked"))?;
-    let stderr_result = stderr_result.map_err(|_| anyhow::anyhow!("stderr reader panicked"))?;
-    let stdout_result = stdout_result.context("reading worker stdout")?;
-    let stderr_result = stderr_result.context("reading worker stderr")?;
-    let reported = stdout_result || stderr_result;
-    if !outcome.success() {
-        snapshot.state = RestoreState::Failed;
-        snapshot.message = if snapshot.message.is_empty() {
-            format!("The restore worker exited with {outcome}")
-        } else {
-            format!(
-                "The restore worker exited with {outcome}: {}",
-                snapshot.message
-            )
-        };
-    } else if reported {
-        snapshot.state = RestoreState::RestoreReported;
-        snapshot.progress.complete();
-        snapshot.message = "Restore service reported completion".into();
-    } else {
-        snapshot.state = RestoreState::Unconfirmed;
-        snapshot.message =
-            "The restore worker exited successfully without a final result for this device".into();
+    // Held open for the worker's life.
+    let _stdin = child.stdin().take();
+    let stdout = child.stdout().take().context("worker stdout missing")?;
+    let stderr = child.stderr().take().context("worker stderr missing")?;
+    let ecid = status.lock().unwrap().ecid;
+    thread::spawn(move || log_lines(stderr, ecid));
+    let (ended, records) = mpsc::channel();
+    let terminal = Arc::new(Mutex::new(None));
+    {
+        let (status, changes, terminal) = (status.clone(), changes.clone(), terminal.clone());
+        thread::spawn(move || {
+            follow_records(stdout, &status, &changes, &terminal);
+            let _ = ended.send(());
+        });
     }
-    Ok(())
+    let exit = child.wait().context("waiting for the restore worker")?;
+    // A record written before the exit is read before the exit counts.
+    let _ = records.recv_timeout(RECORDS_AFTER_EXIT);
+    status.lock().unwrap().exit_code = exit.code();
+    Ok(match terminal.lock().unwrap().take() {
+        Some(Record::Finished) if exit.success() => (
+            RestoreState::RestoreReported,
+            "Restore service reported completion".into(),
+        ),
+        Some(Record::Failed {
+            summary,
+            tail,
+            retryable,
+        }) => {
+            if tail != summary {
+                log::warn!("{ecid:016x}: {tail}");
+            }
+            (
+                if retryable {
+                    RestoreState::TransportLost
+                } else {
+                    RestoreState::Failed
+                },
+                summary,
+            )
+        }
+        _ => (
+            RestoreState::Failed,
+            format!(
+                "The restore worker stopped without a result ({exit}); the device's state is unknown"
+            ),
+        ),
+    })
 }
 
-/// Drain a worker's stream to its end, so a full pipe cannot stall a
-/// restore. Stdout carries the worker's records; each line on stderr goes
-/// to the log under the target's ECID, and the last is the restore's message.
-fn drain(
+/// Apply a worker's records to its job as they come, keeping the one that
+/// ends it.
+fn follow_records(
     input: impl Read,
     status: &Mutex<RestoreStatus>,
-    stdout: bool,
     changes: &Watch,
-) -> io::Result<bool> {
+    terminal: &Mutex<Option<Record>>,
+) {
     let ecid = status.lock().unwrap().ecid;
-    let mut input = BufReader::new(input);
-    let mut line = Vec::new();
-    let mut reported = false;
-    loop {
-        line.clear();
-        if input.read_until(b'\n', &mut line)? == 0 {
-            break;
-        }
-        let text = String::from_utf8_lossy(&line);
-        let text = text.trim();
-        if !stdout && !text.is_empty() {
-            log::info!("{ecid:016x}: {text}");
-        }
-        let mut status = status.lock().unwrap();
-        let before = (status.progress.clone(), status.message.clone());
-        if stdout {
-            reported |= text == crate::native::COMPLETE;
-            if let Some(fields) = text.strip_prefix(crate::native::STEP) {
-                status.progress.worker_step(fields);
+    for line in BufReader::new(input).lines() {
+        let Ok(line) = line else {
+            return;
+        };
+        let record = match serde_json::from_str::<Record>(&line) {
+            Ok(record) => record,
+            Err(error) => {
+                log::warn!("{ecid:016x}: unreadable worker record {line:?}: {error}");
+                continue;
             }
-        } else if !text.is_empty() {
-            status.message = text.chars().take(512).collect();
-        }
-        let moved = (&status.progress, &status.message) != (&before.0, &before.1);
-        drop(status);
-        if moved {
-            changes.changed();
+        };
+        match record {
+            Record::Step { step, progress } => {
+                let mut status = status.lock().unwrap();
+                let before = status.progress.clone();
+                status.progress.worker_step(step, progress);
+                let moved = status.progress != before;
+                drop(status);
+                if moved {
+                    changes.changed();
+                }
+            }
+            Record::Obliteration { status, detail } => {
+                log::info!("{ecid:016x}: obliteration {status}: {detail}");
+            }
+            Record::Finished | Record::Failed { .. } => {
+                *terminal.lock().unwrap() = Some(record);
+            }
         }
     }
-    Ok(reported)
+}
+
+/// Send each line of a worker's stderr to the log under its target's ECID,
+/// at the level the worker logged it at.
+fn log_lines(input: impl Read, ecid: u64) {
+    let mut input = BufReader::new(input);
+    let mut line = Vec::new();
+    while input
+        .read_until(b'\n', &mut line)
+        .is_ok_and(|read| read > 0)
+    {
+        let text = String::from_utf8_lossy(&line);
+        let text = text.trim();
+        if !text.is_empty() {
+            let (level, text) = crate::logging::read(text);
+            log::log!(level, "{ecid:016x}: {text}");
+        }
+        line.clear();
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     #[cfg(unix)]
-    use std::time::Instant;
-    use std::{io::Write, time::Duration};
+    use std::time::{Duration, Instant};
     use zip::{ZipWriter, write::SimpleFileOptions};
 
     const MANIFEST: &str = r#"<?xml version="1.0"?><plist version="1.0"><dict>
@@ -666,58 +632,6 @@ mod tests {
         zip.start_file("payload.dmg", options).unwrap();
         zip.write_all(b"fixture payload").unwrap();
         zip.finish().unwrap();
-    }
-
-    #[test]
-    fn an_archive_used_in_place_rejects_changed_content_with_the_same_file_stamp() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("local.ipsw");
-        archive(&path, Some(MANIFEST));
-        let mut bytes = fs::read(&path).unwrap();
-        let mut image = PreparedIpsw::open(&path).unwrap();
-        let offset = bytes
-            .windows(15)
-            .position(|value| value == b"fixture payload")
-            .unwrap();
-        bytes[offset] ^= 1;
-        fs::write(&path, bytes).unwrap();
-        File::options()
-            .write(true)
-            .open(&path)
-            .unwrap()
-            .set_modified(image.modified)
-            .unwrap();
-
-        // Model ZFS assigning both writes the same ctime on any test filesystem.
-        image.integrity.stamp = FileStamp::read(&fs::metadata(&path).unwrap()).unwrap();
-        image.check_stamp().unwrap();
-        assert!(image.check_unchanged().is_err());
-    }
-
-    #[test]
-    fn workers_share_only_a_settled_content_check_and_still_check_the_file_stamp() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("local.ipsw");
-        archive(&path, Some(MANIFEST));
-        let first = PreparedIpsw::open(&path).unwrap();
-        let mut second = first.clone();
-        let proof = &mut second.integrity.proof;
-        assert!(proof.is_some());
-        *proof = Some([0; 32]);
-        first.check_at(|| SystemTime::UNIX_EPOCH).unwrap();
-        assert!(second.check_unchanged().is_err());
-        first
-            .check_at(|| SystemTime::now() + Duration::from_secs(3))
-            .unwrap();
-        second.check_unchanged().unwrap();
-
-        File::options()
-            .write(true)
-            .open(&path)
-            .unwrap()
-            .set_modified(SystemTime::UNIX_EPOCH)
-            .unwrap();
-        assert!(second.check_unchanged().is_err());
     }
 
     #[test]
@@ -775,24 +689,9 @@ mod tests {
             prepare("matching.ipsw", MANIFEST),
         ];
         let model = DeviceModel::of(None, Some((0x8103, 0x22)));
-        assert_eq!(
-            image_for_model(&images, &model).unwrap().path(),
-            images[4].path()
-        );
-        assert!(image_for_model(&images[..4], &model).is_err());
-        assert_eq!(
-            image_for_model(&images, &DeviceModel::of(None, Some((0x8103, 0))))
-                .unwrap()
-                .path(),
-            images[3].path()
-        );
-        assert!(
-            image_for_model(
-                &[images[4].clone(), prepare("other-build.ipsw", MANIFEST)],
-                &model
-            )
-            .is_err()
-        );
+        let restoring: Vec<_> = images.iter().map(|image| image.restores(&model)).collect();
+        assert_eq!(restoring, [false, false, false, false, true]);
+        assert!(images[3].restores(&DeviceModel::of(None, Some((0x8103, 0)))));
         // A mode that gives no chip and board is matched by product type.
         let kind = images[4].product_types[0].clone();
         assert!(images[4].restores(&DeviceModel::of(Some(&kind), None)));
@@ -800,47 +699,47 @@ mod tests {
         assert!(!images[4].restores(&DeviceModel::of(None, None)));
         // Chip and board decide where both are known.
         assert!(!images[4].restores(&DeviceModel::of(Some(&kind), Some((0x8027, 0x22)))));
-        assert_eq!(
-            dfu_hardware("CPID:8103 CPRV:11 BDID:22 ECID:001234567890ABCD").unwrap(),
-            (0x8103, 0x22)
-        );
-        for invalid in [
-            "",
-            "XCPID:8103 BDID:22",
-            "CPID:8103 XBDID:22",
-            "CPID:8103 CPID:8103 BDID:22",
-            "CPID:8103 BDID:22 BDID:22",
-            "CPID:+8103 BDID:22",
-            "CPID:0 BDID:22",
-            "CPID:8103 BDID:22x",
-            "CPID:8103 BDID:100000022",
-        ] {
-            assert!(dfu_hardware(invalid).is_err(), "{invalid}");
-        }
     }
 
     #[test]
-    fn a_worker_is_given_its_operation_one_ecid_and_its_image() {
-        for (operation, verb) in [(Operation::Restore, "erase"), (Operation::Revive, "revive")] {
+    fn a_worker_is_given_its_operation_one_ecid_its_image_its_ending_and_a_kis_location() {
+        for (operation, verb, after, ending, location) in [
+            (
+                Operation::Restore,
+                "erase",
+                PostRestoreAction::Shutdown,
+                "shutdown",
+                None,
+            ),
+            (
+                Operation::Revive,
+                "revive",
+                PostRestoreAction::Reboot,
+                "reboot",
+                Some(0x0012_0000),
+            ),
+        ] {
             let command = crate::native::worker_command(
                 Path::new("iasisd"),
                 operation,
+                after,
                 0x123456789abcdef,
                 Path::new("/shared/Apple IPSW.ipsw"),
+                location,
             );
             let args: Vec<_> = command
                 .get_args()
                 .map(|s| s.to_string_lossy().into_owned())
                 .collect();
-            assert_eq!(
-                args,
-                [
-                    "worker",
-                    verb,
-                    "0123456789abcdef",
-                    "/shared/Apple IPSW.ipsw"
-                ]
-            );
+            let mut expected = vec![
+                "worker",
+                verb,
+                "0123456789abcdef",
+                "/shared/Apple IPSW.ipsw",
+                ending,
+            ];
+            expected.extend(location.map(|_| "00120000"));
+            assert_eq!(args, expected);
         }
     }
 
@@ -849,10 +748,10 @@ mod tests {
         executable_named(temp, "process-fixture", body)
     }
 
+    #[cfg(unix)]
     /// Write an executable script. A child writes it: Linux refuses to run a
     /// file that is open for writing, and another test's fork would inherit
     /// such a descriptor from this process until it execs.
-    #[cfg(unix)]
     fn executable_named(temp: &Path, name: &str, body: &str) -> PathBuf {
         let path = temp.join(name);
         let mut writer = Command::new("sh")
@@ -868,15 +767,22 @@ mod tests {
         path
     }
 
+    /// Wait for a worker's end.
     #[cfg(unix)]
-    fn finish(batch: &RestoreBatch) -> Vec<RestoreStatus> {
+    fn finish(worker: &Worker) -> RestoreStatus {
         let deadline = Instant::now() + Duration::from_secs(15);
-        while !batch.is_finished() {
+        loop {
+            let status = worker.status();
+            if status.state.is_terminal() {
+                return status;
+            }
             assert!(Instant::now() < deadline, "restore process test timed out");
             thread::sleep(Duration::from_millis(10));
         }
-        batch.snapshots()
     }
+
+    #[cfg(unix)]
+    const FINISHED: &str = r#"{"record":"finished"}"#;
 
     #[test]
     #[cfg(unix)]
@@ -887,39 +793,52 @@ mod tests {
         let ipsw = PreparedIpsw::open(&path).unwrap();
         let program = executable(
             temp.path(),
-            r#"printf '%s\n' "$2" > "../operation-$3"; echo IASIS_RESTORE_COMPLETE"#,
+            &format!(r#"printf '%s\n' "$2" > "../operation-$3"; echo '{FINISHED}'"#),
         );
         let scratch = temp.path().join("scratch");
         let engine = native(program, &scratch);
-        for (mode, restores) in [
-            (AppleMode::Dfu, true),
-            (AppleMode::KisDfu, true),
-            (AppleMode::Kis, false),
-            (AppleMode::Recovery, true),
-            (AppleMode::PortDfu, false),
-            // Through recovery, which the host enters first.
-            (AppleMode::Normal, true),
-        ] {
-            assert_eq!(engine.restores(mode), restores, "{mode:?}");
-        }
         assert!(
             engine
-                .start_selected(&[(&ipsw, 0x31, AppleMode::Normal)], Operation::Revive)
+                .start(
+                    &ipsw,
+                    0x31,
+                    AppleMode::Normal,
+                    Operation::Revive,
+                    PostRestoreAction::Reboot,
+                    None
+                )
+                .is_err()
+        );
+        assert!(
+            engine
+                .start(
+                    &ipsw,
+                    0,
+                    AppleMode::Dfu,
+                    Operation::Restore,
+                    PostRestoreAction::Reboot,
+                    None
+                )
                 .is_err()
         );
         for (ecid, operation, verb) in [
             (0x31, Operation::Restore, "erase"),
             (0x32, Operation::Revive, "revive"),
         ] {
-            let targets = [(&ipsw, ecid, AppleMode::KisDfu)];
-            let jobs = finish(&engine.start_selected(&targets, operation).unwrap());
-            assert_eq!(
-                jobs[0].state,
-                RestoreState::RestoreReported,
-                "{}",
-                jobs[0].message
+            let job = finish(
+                &engine
+                    .start(
+                        &ipsw,
+                        ecid,
+                        AppleMode::KisDfu,
+                        operation,
+                        PostRestoreAction::Reboot,
+                        None,
+                    )
+                    .unwrap(),
             );
-            assert_eq!(jobs[0].operation, operation);
+            assert_eq!(job.state, RestoreState::RestoreReported, "{}", job.message);
+            assert_eq!(job.operation, operation);
             assert_eq!(
                 fs::read_to_string(scratch.join(format!("operation-{ecid:016x}"))).unwrap(),
                 format!("{verb}\n")
@@ -930,7 +849,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn mixed_batch_checks_all_images_before_start_and_passes_each_worker_its_image() {
+    fn a_changed_image_starts_nothing_and_each_worker_gets_its_image() {
         let temp = tempfile::tempdir().unwrap();
         let prepare = |name| {
             let path = temp.path().join(name);
@@ -941,24 +860,38 @@ mod tests {
         let changed = prepare("two.ipsw");
         let program = executable(
             temp.path(),
-            r#"printf '%s\n' "$3" "$4" > "../selection-$3""#,
+            &format!(r#"printf '%s\n' "$3" "$4" > "../selection-$3"; echo '{FINISHED}'"#),
         );
         let scratch = temp.path().join("scratch");
         let engine = native(program, &scratch);
         fs::remove_file(changed.path()).unwrap();
         assert!(
             engine
-                .start_selected(
-                    &[(&first, 1, AppleMode::Dfu), (&changed, 2, AppleMode::Dfu)],
-                    Operation::Restore
+                .start(
+                    &changed,
+                    2,
+                    AppleMode::Dfu,
+                    Operation::Restore,
+                    PostRestoreAction::Reboot,
+                    None
                 )
                 .is_err()
         );
         assert!(!scratch.exists());
         let second = prepare("two.ipsw");
-        let targets = [(&first, 1, AppleMode::Dfu), (&second, 2, AppleMode::Dfu)];
-        let statuses = finish(&engine.start_selected(&targets, Operation::Restore).unwrap());
-        for ((ipsw, ecid, _), status) in targets.iter().zip(statuses) {
+        for (ipsw, ecid) in [(&first, 1), (&second, 2)] {
+            let status = finish(
+                &engine
+                    .start(
+                        ipsw,
+                        ecid,
+                        AppleMode::Dfu,
+                        Operation::Restore,
+                        PostRestoreAction::Reboot,
+                        None,
+                    )
+                    .unwrap(),
+            );
             assert_eq!(status.exit_code, Some(0), "{}", status.message);
             assert_eq!(
                 fs::read_to_string(scratch.join(format!("selection-{ecid:016x}"))).unwrap(),
@@ -976,7 +909,8 @@ mod tests {
         let ipsw = PreparedIpsw::open(&path).unwrap();
         let program = executable(
             temp.path(),
-            r#"
+            &format!(
+                r#"
 ecid="$3"
 root="$(dirname "$PWD")"
 touch "$root/ready-$ecid"
@@ -988,20 +922,33 @@ while :; do
     [ "$attempt" -lt 500 ] || exit 9
     sleep 0.01
 done
-printf 'IASIS_STEP 2 0.500000\n'
+printf '%s\n' '{{"record":"step","step":2,"progress":0.5}}'
 dd if=/dev/zero bs=1024 count=128 >&2 2>/dev/null
 printf '\nworker stderr drained\n' >&2
-printf 'IASIS_RESTORE_COMPLETE\n'
-"#,
+printf '%s\n' '{FINISHED}'
+"#
+            ),
         );
         let scratch = temp.path().join("scratch");
         let engine = native(program, &scratch);
-        let first = engine.start_erase(&ipsw, &[1]).unwrap();
-        assert!(engine.start_erase(&ipsw, &[1]).is_err());
-        assert!(engine.start_erase(&ipsw, &[2, 3, 4, 5, 6, 7]).is_err());
-        let rest = engine.start_erase(&ipsw, &[2, 3, 4, 5]).unwrap();
-        let statuses: Vec<_> = finish(&first).into_iter().chain(finish(&rest)).collect();
-        for status in statuses {
+        let start = |ecid| {
+            engine.start(
+                &ipsw,
+                ecid,
+                AppleMode::Dfu,
+                Operation::Restore,
+                PostRestoreAction::Reboot,
+                None,
+            )
+        };
+        let first = start(1).unwrap();
+        assert!(start(1).is_err());
+        let workers: Vec<_> = [first]
+            .into_iter()
+            .chain((2..=5).map(|ecid| start(ecid).unwrap()))
+            .collect();
+        for worker in &workers {
+            let status = finish(worker);
             assert_eq!(
                 status.state,
                 RestoreState::RestoreReported,
@@ -1020,26 +967,54 @@ printf 'IASIS_RESTORE_COMPLETE\n'
 
     #[test]
     #[cfg(unix)]
-    fn native_completion_requires_the_stdout_record_and_successful_exit() {
+    fn a_job_ends_with_its_workers_terminal_record_and_exit() {
         let temp = tempfile::tempdir().unwrap();
         let program = executable(
             temp.path(),
-            r#"
-printf 'IASIS_STEP 2 0.5\nIASIS_STEP 7 1.0\n'
+            &format!(
+                r#"
+printf '%s\n' '{{"record":"step","step":2,"progress":0.5}}' '{{"record":"step","step":7,"progress":1.0}}'
 case "$1" in
-    confirmed) echo IASIS_RESTORE_COMPLETE ;;
-    diagnostic) echo IASIS_RESTORE_COMPLETE >&2 ;;
-    failed) echo IASIS_RESTORE_COMPLETE; exit 1 ;;
+    confirmed) echo '{FINISHED}' ;;
+    diagnostic) echo '{FINISHED}' >&2 ;;
+    exit) echo '{FINISHED}'; exit 1 ;;
+    failed) echo '{{"record":"failed","summary":"Unable to discover device mode","tail":"restore failed","retryable":false}}'; exit 1 ;;
+    dropped) echo '{{"record":"failed","summary":"USB disconnected","tail":"USB disconnected","retryable":true}}'; exit 1 ;;
+    silent) exit 0 ;;
 esac
-"#,
+"#
+            ),
         );
-        for (arg, expected, percent) in [
-            ("confirmed", RestoreState::RestoreReported, 100),
-            ("diagnostic", RestoreState::Unconfirmed, 45),
-            ("failed", RestoreState::Failed, 45),
+        for (arg, expected, percent, message) in [
+            (
+                "confirmed",
+                RestoreState::RestoreReported,
+                45,
+                "Restore service reported completion",
+            ),
+            ("diagnostic", RestoreState::Failed, 45, "without a result"),
+            ("exit", RestoreState::Failed, 45, "without a result"),
+            (
+                "dropped",
+                RestoreState::TransportLost,
+                45,
+                "USB disconnected",
+            ),
+            (
+                "failed",
+                RestoreState::Failed,
+                45,
+                "Unable to discover device mode",
+            ),
+            (
+                "silent",
+                RestoreState::Failed,
+                45,
+                "the device's state is unknown",
+            ),
         ] {
             let mut cmd = Command::new(&program);
-            cmd.arg(arg).stdout(Stdio::piped()).stderr(Stdio::piped());
+            cmd.arg(arg);
             let status = Arc::new(Mutex::new(RestoreStatus {
                 operation: Operation::Restore,
                 ecid: 1,
@@ -1049,48 +1024,60 @@ esac
                 message: String::new(),
                 exit_code: None,
             }));
-            run_worker(cmd, &status, &Watch::default()).unwrap();
-            let status = status.lock().unwrap();
-            assert_eq!(status.state, expected);
-            assert_eq!(status.progress.percent, percent);
+            let (state, said) = run_worker(cmd, &status, &Arc::default()).unwrap();
+            assert_eq!(state, expected, "{arg}");
+            assert_eq!(status.lock().unwrap().progress.percent, percent, "{arg}");
+            assert!(said.contains(message), "{arg}: {said}");
         }
     }
 
     #[test]
     #[cfg(unix)]
-    fn zero_exit_requires_final_status_and_failure_preserves_exit_code() {
+    fn a_worker_that_cannot_start_fails_its_own_job() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("shared.ipsw");
         archive(&path, Some(MANIFEST));
         let ipsw = PreparedIpsw::open(&path).unwrap();
-        let program = executable(
-            temp.path(),
-            r#"
-case "$3" in
-    0000000000000001) printf 'IASIS_STEP 7 1.0\nDONE\n'; exit 0 ;;
-    0000000000000002) printf 'IASIS_RESTORE_COMPLETE\n'; printf 'device failed\n' >&2; exit 7 ;;
-esac
-"#,
-        );
-        let engine = native(program, temp.path().join("scratch"));
-        let statuses = finish(&engine.start_erase(&ipsw, &[1, 2]).unwrap());
-        assert_eq!(statuses[0].state, RestoreState::Unconfirmed);
-        assert_eq!(statuses[0].exit_code, Some(0));
-        assert!(statuses[0].progress.percent < 100);
-        assert_eq!(statuses[1].state, RestoreState::Failed);
-        assert_eq!(statuses[1].exit_code, Some(7));
-        assert!(statuses[1].progress.percent < 100);
-        for ecids in [&[][..], &[0], &[1, 1], &[1, 2, 3, 4, 5, 6]] {
-            assert!(engine.start_erase(&ipsw, ecids).is_err());
-        }
         let plain = temp.path().join("not-executable");
         fs::write(&plain, "").unwrap();
-        // A worker that cannot start fails its own job.
         for program in [temp.path().join("missing"), plain] {
             let engine = native(program, temp.path().join("scratch"));
-            let status = finish(&engine.start_erase(&ipsw, &[1]).unwrap());
-            assert_eq!(status[0].state, RestoreState::Failed);
-            assert_eq!(status[0].pid, None);
+            let status = finish(
+                &engine
+                    .start(
+                        &ipsw,
+                        1,
+                        AppleMode::Dfu,
+                        Operation::Restore,
+                        PostRestoreAction::Reboot,
+                        None,
+                    )
+                    .unwrap(),
+            );
+            assert_eq!(status.state, RestoreState::Failed);
+            assert_eq!(status.pid, None);
         }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_job_ends_at_its_workers_exit_while_another_process_holds_its_output() {
+        let temp = tempfile::tempdir().unwrap();
+        // A child of the worker keeps the worker's stdout open, as a
+        // multiplexer it started would.
+        let program = executable(temp.path(), &format!("echo '{FINISHED}'; sleep 30 &"));
+        let status = Arc::new(Mutex::new(RestoreStatus {
+            operation: Operation::Restore,
+            ecid: 1,
+            state: RestoreState::Starting,
+            pid: None,
+            progress: Progress::starting(),
+            message: String::new(),
+            exit_code: None,
+        }));
+        let started = Instant::now();
+        let (state, _) = run_worker(Command::new(&program), &status, &Arc::default()).unwrap();
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert_eq!(state, RestoreState::RestoreReported);
     }
 }

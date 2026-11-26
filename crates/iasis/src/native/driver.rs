@@ -2,7 +2,8 @@
 //! mode Windows gives it Apple's driver, which libusb cannot open, and only
 //! an administrator can bind WinUSB in its place. The agent's own account is
 //! not one, so the `iasis-winusb` service, as LocalSystem, runs RestoreKit's
-//! watcher while the usbmuxd the host tools serve for a restore runs.
+//! watcher while the agent serves usbmuxd for a restore, and only then: while
+//! Apple's usbmuxd runs, restores go through it and Apple's drivers.
 
 use std::{
     error::Error,
@@ -14,42 +15,22 @@ use std::{
 };
 
 use restorekit::{
-    driver::{RestoreWatcherGuard, run_restore_mode_watch_worker, spawn_restore_mode_watcher},
+    driver::run_restore_mode_watch_worker,
     usbmuxd::{MuxPort, mux_port},
 };
 use windows_service::{
     define_windows_service,
     service::{
-        ServiceAccess, ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState,
-        ServiceStatus, ServiceType,
+        ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
+        ServiceType,
     },
     service_control_handler::{self, ServiceControlHandlerResult},
     service_dispatcher,
-    service_manager::{ServiceManager, ServiceManagerAccess},
 };
 
 const NAME: &str = "iasis-winusb";
-/// The host tools, either of which serves usbmuxd for its restores.
-const TOOLS: [&str; 2] = ["iasis.exe", "iasisd.exe"];
-
-/// WinUSB on Macs in restore mode while this lives: nothing to hold while
-/// the service runs, and otherwise RestoreKit's watcher, in this process
-/// when it is elevated and else in an elevated copy, which asks for consent.
-pub(crate) fn bind() -> Result<Option<RestoreWatcherGuard>, &'static str> {
-    if service_runs() {
-        return Ok(None);
-    }
-    spawn_restore_mode_watcher()
-        .map(Some)
-        .ok_or("cannot bind WinUSB to Macs in restore mode: elevation was refused")
-}
-
-fn service_runs() -> bool {
-    ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
-        .and_then(|manager| manager.open_service(NAME, ServiceAccess::QUERY_STATUS))
-        .and_then(|service| service.query_status())
-        .is_ok_and(|status| status.current_state == ServiceState::Running)
-}
+/// The agent, which serves usbmuxd for its restores.
+const AGENT: &str = "iasisd.exe";
 
 define_windows_service!(entry, run);
 
@@ -97,29 +78,42 @@ fn run(_: Vec<OsString>) {
     report(ServiceState::Stopped);
 }
 
-/// Whenever one of the host tools holds usbmuxd's port, run RestoreKit's
-/// watcher with that process as its owner, so it stops with the usbmuxd.
+/// While the agent serves usbmuxd for a restore, run RestoreKit's watcher
+/// with the agent as its owner, so it stops with the agent; once anything
+/// else holds the port, Apple's usbmuxd included, or nothing does, stop it,
+/// and bind nothing.
 fn watch() {
     let liveness = std::env::temp_dir().join("iasis-winusb.live");
+    // A watcher only runs while this file exists.
+    let _ = fs::remove_file(&liveness);
     let mut watcher: Option<JoinHandle<()>> = None;
     loop {
-        if watcher.as_ref().is_none_or(JoinHandle::is_finished)
-            && let MuxPort::Other {
+        let agent = match mux_port() {
+            MuxPort::Other {
                 pid,
                 name: Some(name),
-            } = mux_port()
-            && TOOLS.iter().any(|tool| name.eq_ignore_ascii_case(tool))
-        {
-            match fs::write(&liveness, pid.to_string()) {
+            } if name.eq_ignore_ascii_case(AGENT) => Some(pid),
+            _ => None,
+        };
+        let running = watcher
+            .as_ref()
+            .is_some_and(|watcher| !watcher.is_finished());
+        match agent {
+            Some(pid) if !running => match fs::write(&liveness, pid.to_string()) {
                 Ok(()) => {
-                    log::info!("binding WinUSB to Macs in restore mode for {name} ({pid})");
+                    log::info!("binding WinUSB to Macs in restore mode for {AGENT} ({pid})");
                     let liveness = liveness.clone();
                     watcher = Some(thread::spawn(move || {
                         run_restore_mode_watch_worker(&liveness)
                     }));
                 }
                 Err(error) => log::error!("{}: {error}", liveness.display()),
+            },
+            None if running => {
+                log::info!("no longer binding WinUSB: {AGENT} serves no usbmuxd");
+                let _ = fs::remove_file(&liveness);
             }
+            _ => {}
         }
         thread::sleep(Duration::from_secs(1));
     }

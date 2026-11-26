@@ -2,18 +2,18 @@
 //! shows them to clients.
 
 use iasis_api::{
-    HubView, Job, Operation, Pool, PortPower, PortView, PowerSource, SignalProgress, Supply, Usb,
-    UsbLink,
+    AppleUsb, Diagnostics, HubView, Job, Operation, Pool, PortPower, PortUsb, PortView,
+    PowerSource, SignalProgress, Supply, Usb, UsbDevice, UsbLink,
 };
 use iasis_protocol::{Info, Link, Port, PortAction, PortState, PortStatus, RestorePhase, Status};
 
 use crate::{
-    batch::Ended,
-    dfu::{self, Signal},
+    dfu,
     host::{PortJob, observe},
     identity::models::{DeviceModel, Models},
     images::Store,
-    topology::Snapshot,
+    job::Ended,
+    topology::{self, Snapshot, UsbDevice as Device},
 };
 
 /// A new attachment is shown as being identified for this long.
@@ -27,15 +27,13 @@ pub(crate) struct Host<'a> {
 }
 
 /// The hub as its status shows it, before its host adds what it sees.
-pub fn hub(info: &Info, status: &Status) -> HubView {
-    let [major, minor, patch] = info.firmware_version;
-    let ready = status.ready_mask();
+pub fn hub(serial: u64, info: &Info, status: &Status) -> HubView {
     let restore = status.gesture_mask(iasis_protocol::Gesture::Restore);
     HubView {
-        serial: format!("{:016x}", info.serial),
+        serial: format!("{serial:016x}"),
         name: status.settings.name.as_str().to_owned(),
         session: status.host.map(|host| host.id),
-        firmware: format!("{major}.{minor}.{patch}"),
+        firmware: crate::update::describe(info.firmware, &info.build),
         update: None,
         upstream_mbps: None,
         supply: match status.supply {
@@ -53,7 +51,6 @@ pub fn hub(info: &Info, status: &Status) -> HubView {
         ports: Port::ALL
             .map(|port| {
                 let state = &status.ports[port.index()];
-                let available = ready & (1 << port.index()) != 0;
                 PortView {
                     number: port.number(),
                     generation: state.generation,
@@ -84,18 +81,14 @@ pub fn hub(info: &Info, status: &Status) -> HubView {
                     },
                     power: port_power(state),
                     allocated_mw: state.allocated_mw,
-                    short: state.supply == iasis_protocol::Supply::Brick
-                        && state.occupied()
-                        && state.contract_mv > 0
-                        && state.pd_request.is_some_and(|request| {
-                            iasis_pd::limited_by_offers(&state.pd_source_pdos, request)
-                        }),
+                    short: state.short(),
                     fault: state
                         .error
                         .map(|error| error.text().to_owned())
                         .or_else(|| (state.state == PortState::Fault).then(|| "Port fault".into())),
-                    dfu: available && state.offers(PortAction::Dfu),
-                    reboot: available && state.offers(PortAction::Reboot),
+                    // What the host finds on the port decides these.
+                    dfu: false,
+                    reboot: false,
                     restore: restore & (1 << port.index()) != 0,
                     enabled: state.enabled,
                     job: state.restore.map(|job| Job {
@@ -122,12 +115,13 @@ pub(crate) fn describe_devices(
     snapshot: &Snapshot,
     host: &Host,
 ) {
-    let Host { store, models } = *host;
     view.upstream_mbps = snapshot.upstream_mbps;
     for (port, row) in Port::ALL.into_iter().zip(&mut view.ports) {
-        let assessment = dfu::assess(serial, port, status, snapshot, None);
-        row.dfu = assessment.signal == Signal::Available;
         let slot = &status.ports[port.index()];
+        let actions = dfu::assess(serial, port, status, snapshot, None)
+            .actions(slot, crate::native::mux::missing_for);
+        row.dfu = actions.dfu.is_ok();
+        row.reboot = actions.reboot.is_ok();
         if !row.occupied {
             continue;
         }
@@ -143,10 +137,9 @@ pub(crate) fn describe_devices(
         // A different USB target can arrive before the hub echoes the report.
         let ecid = seen.identity(slot.ecid).filter(|id| Some(*id) == slot.ecid);
         row.ecid = ecid.map(|id| format!("{id:016x}"));
-        // A running iPhone or iPad that the host would take into recovery
-        // but for what it lacks.
-        if agreed && assessment.signal == Signal::Recoverable && assessment.ecid.is_some() {
-            row.needs = crate::native::mux::missing().map(|prerequisite| prerequisite.id);
+        // A target the host would restore but for what it lacks.
+        if agreed {
+            row.needs = actions.needs.map(|prerequisite| prerequisite.id);
         }
         let live = snapshot.target(port).filter(|_| agreed);
         if row.link.is_none() && agreed && seen.usb != iasis_protocol::Usb::Absent {
@@ -157,14 +150,21 @@ pub(crate) fn describe_devices(
                 _ => UsbLink::Usb,
             });
         }
-        row.device = ecid.and_then(|ecid| models.name(ecid, store)).or_else(|| {
-            let device = live?;
-            // An Apple target's product string names its mode.
-            DeviceModel::read(device)
-                .name(store)
-                .or_else(|| device.product.clone().filter(|_| device.apple.is_none()))
-        });
+        row.device = name(ecid, live, host);
     }
+}
+
+/// A target's name: its model, by what this host noted for its ECID or what
+/// its USB says, or the product string of a device that is not Apple's.
+pub(crate) fn name(ecid: Option<u64>, live: Option<&Device>, host: &Host) -> Option<String> {
+    let Host { store, models } = *host;
+    ecid.and_then(|ecid| models.name(ecid, store)).or_else(|| {
+        let device = live?;
+        // An Apple target's product string names its mode.
+        DeviceModel::read(device)
+            .name(store)
+            .or_else(|| device.product.clone().filter(|_| device.apple.is_none()))
+    })
 }
 
 /// USB enumeration and a first identity read can take several seconds.
@@ -232,6 +232,55 @@ pub fn port_usb(port: &PortStatus) -> Option<Usb> {
     })
 }
 
+/// The hub's status and what the host finds on each port's USB, with the
+/// agent's reading of each port.
+pub(crate) fn diagnostics(serial: u64, status: Status, snapshot: &Snapshot) -> Diagnostics {
+    let ports = snapshot
+        .ports
+        .iter()
+        .map(|slot| PortUsb {
+            number: slot.port.number(),
+            usb2: slot.usb2.clone(),
+            superspeed: slot.superspeed.clone(),
+            devices: slot.devices.iter().map(usb_device).collect(),
+            assessment: {
+                let assessment = dfu::assess(serial, slot.port, &status, snapshot, None);
+                let actions = assessment.actions(
+                    &status.ports[slot.port.index()],
+                    crate::native::mux::missing_for,
+                );
+                // What the host lacks is not the hub's or the target's to say.
+                match actions.needs {
+                    Some(needs) => format!("{} {}", assessment.describe(), needs.reason),
+                    None => assessment.describe(),
+                }
+            },
+        })
+        .collect();
+    Diagnostics {
+        status,
+        hub: snapshot.hub.clone(),
+        upstream_mbps: snapshot.upstream_mbps,
+        ports,
+    }
+}
+
+fn usb_device(device: &topology::UsbDevice) -> UsbDevice {
+    UsbDevice {
+        topology: device.topology.clone(),
+        vendor_id: device.vendor_id,
+        product_id: device.product_id,
+        serial_number: device.serial_number.clone(),
+        product: device.product.clone(),
+        speed: device.speed,
+        apple: device.apple.as_ref().map(|apple| AppleUsb {
+            mode: apple.mode,
+            model: apple.model.clone(),
+            ecid: apple.ecid().map(|ecid| format!("{ecid:016x}")),
+        }),
+    }
+}
+
 /// The port's negotiated PD operating point, or its default USB allowance.
 /// What a port gives its target. Host power charges nothing: its 0 mA
 /// contract only carries Apple signalling.
@@ -246,26 +295,26 @@ fn port_power(port: &PortStatus) -> Option<PortPower> {
             milliamps: port.contract_ma,
         });
     }
-    let usb = iasis_pd::Contract::USB_DEFAULT;
     (port.allocated_mw > 0).then_some(PortPower {
         source: PowerSource::Usb,
-        millivolts: usb.millivolts,
-        milliamps: usb.operating_ma,
+        millivolts: 5000,
+        milliamps: iasis_protocol::USB_DEFAULT_MA,
     })
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use iasis_api::{Ending, Progress};
     use iasis_protocol::{Observed, RestoreStatus};
 
-    fn info() -> Info {
+    pub(crate) fn info() -> Info {
         Info {
-            serial: 1,
-            firmware_version: [0, 1, 0],
-            flash_bytes: 0,
-            capabilities: 0,
+            protocol: iasis_protocol::VERSION,
+            firmware: [0, 1, 0],
+            build: iasis_protocol::Build([0; 20]),
+            debug_assertions: false,
+            name: iasis_protocol::HubName::default(),
         }
     }
 
@@ -274,7 +323,7 @@ mod tests {
         let mut port = PortStatus {
             state: PortState::Ready,
             supply: iasis_protocol::Supply::Brick,
-            allocated_mw: iasis_pd::Contract::USB_DEFAULT.cost_mw(),
+            allocated_mw: 4815,
             ..PortStatus::default()
         };
         assert_eq!(
@@ -327,7 +376,7 @@ mod tests {
         let mut status = Status::default();
         status.ports[0].state = PortState::Fault;
         assert_eq!(
-            hub(&info(), &status).ports[0].fault.as_deref(),
+            hub(1, &info(), &status).ports[0].fault.as_deref(),
             Some("Port fault")
         );
     }
@@ -337,7 +386,7 @@ mod tests {
         let mut status = Status::default();
         status.ports[0].state = PortState::Ready;
         status.ports[0].enabled = true;
-        let mut row = hub(&info(), &status).ports.remove(0);
+        let mut row = hub(1, &info(), &status).ports.remove(0);
         identify_for(&mut row, 0);
         assert!(row.identifying);
         row.link = Some(UsbLink::Usb3);
@@ -370,7 +419,7 @@ mod tests {
                 message: "the device declined to trust this computer".into(),
             },
         };
-        let mut row = hub(&info(), &status).ports.remove(0);
+        let mut row = hub(1, &info(), &status).ports.remove(0);
         row.ecid = ecid.clone();
         attach_result(&mut row, Some(8), &outcome);
         assert!(row.result.is_none());
@@ -378,7 +427,7 @@ mod tests {
         assert!(row.result.is_some());
         // The same device, unplugged and plugged back in.
         status.ports[0].generation += 1;
-        let mut replugged = hub(&info(), &status).ports.remove(0);
+        let mut replugged = hub(1, &info(), &status).ports.remove(0);
         replugged.ecid = ecid;
         attach_result(&mut replugged, Some(9), &outcome);
         assert!(replugged.result.is_none());
@@ -405,7 +454,7 @@ mod tests {
             },
         };
         status.ports[0].restore = Some(job.status);
-        let mut view = hub(&info(), &status);
+        let mut view = hub(1, &info(), &status);
         let port = &mut view.ports[0];
         assert_eq!(port.job.unwrap().phase, RestorePhase::Running);
         assert_eq!(port.stage, None);
@@ -418,7 +467,7 @@ mod tests {
         assert_eq!(port.stage, Some(stage("Sending Filesystem", 23)));
         assert_eq!(port.job.unwrap().phase, RestorePhase::Running);
 
-        let mut next = hub(&info(), &status);
+        let mut next = hub(1, &info(), &status);
         next.ports[0].generation += 1;
         describe_job(&mut next.ports[0], &job);
         assert!(next.ports[0].stage.is_none());

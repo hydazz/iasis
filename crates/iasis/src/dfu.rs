@@ -1,5 +1,6 @@
 //! DFU observations for one physical connector and one attachment generation.
 
+use iasis_api::Prerequisite;
 use iasis_protocol::{
     CommandResult, DebugActions, Port, PortAction, PortError, PortState, PortStatus, RestoreAccess,
     Status, Supply,
@@ -37,6 +38,7 @@ pub enum Signal {
     NotDfuPort,
     Ambiguous,
     DifferentDevice,
+    HostComputer,
 }
 
 impl Signal {
@@ -66,6 +68,7 @@ impl Signal {
             Self::Ambiguous => {
                 "Multiple USB devices, a hub or conflicting identities prevent target selection."
             }
+            Self::HostComputer => "This port is connected to the computer running Iasis.",
             Self::DifferentDevice => "USB device connected. Apple DFU signalling is unavailable.",
         }
     }
@@ -147,6 +150,9 @@ pub struct Assessment {
     pub usb_mode: Option<AppleMode>,
     pub ecid: Option<u64>,
     pub signal: Signal,
+    /// The hub takes a command for the port now.
+    #[serde(skip)]
+    ready: bool,
     pub port_state: PortState,
     pub port_error: Option<PortError>,
     pub transport_result: Option<CommandResult>,
@@ -155,31 +161,91 @@ pub struct Assessment {
 }
 
 impl Assessment {
-    pub(crate) fn restore_access(
+    /// What can be done with the target now, by what its port takes and
+    /// what the host lacks to restore a target from each mode.
+    pub(crate) fn actions(
         &self,
         port: &PortStatus,
-        supports: impl Fn(AppleMode) -> bool,
-    ) -> RestoreAccess {
-        match self.signal {
-            Signal::AlreadyDfu if self.ecid.is_some() && self.usb_mode.is_some_and(&supports) => {
-                RestoreAccess::InDfu
+        missing: impl Fn(AppleMode) -> Option<Prerequisite>,
+    ) -> Actions {
+        let refused = |signal: Signal| Err(self.reason(signal));
+        let hub = dfu_signal(port);
+        // A target not in DFU whose port the hub would signal: one ready for
+        // it, one in recovery, and a restore OS that a finished or failed
+        // restore left on an idle port.
+        let wants_dfu = match self.signal {
+            Signal::Available | Signal::AlreadyRecovery | Signal::Recoverable => true,
+            Signal::Restoring => self.usb_mode == Some(AppleMode::Restored) && !port.restoring(),
+            _ => false,
+        };
+        let dfu = if !wants_dfu {
+            refused(self.signal)
+        } else if hub != Signal::Available {
+            refused(hub)
+        } else if !self.ready {
+            refused(Signal::Settling)
+        } else {
+            Ok(())
+        };
+        let reboot = match self.signal {
+            Signal::Restoring if port.restoring() => refused(Signal::Restoring),
+            signal @ (Signal::HostComputer
+            | Signal::Fault
+            | Signal::Disabled
+            | Signal::NoAttachment
+            | Signal::NoTargetPower
+            | Signal::WaitingPower
+            | Signal::Busy
+            | Signal::Settling
+            | Signal::NoPdContract) => refused(signal),
+            _ if port.debug_actions == DebugActions::Pending || !self.ready => {
+                refused(Signal::Settling)
             }
-            Signal::Available => RestoreAccess::EnterDfu,
-            // A finished restore can leave its USB service on an otherwise idle port.
-            Signal::Restoring
-                if self.usb_mode == Some(AppleMode::Restored)
-                    && !port.restoring()
-                    && port.offers(PortAction::Dfu) =>
-            {
-                RestoreAccess::EnterDfu
+            _ if !port.offers(PortAction::Reboot) => {
+                Err("The target takes no reboot signal on this connection.".into())
             }
-            Signal::AlreadyRecovery if self.ecid.is_some() && supports(AppleMode::Recovery) => {
-                RestoreAccess::InRecovery
+            _ => Ok(()),
+        };
+        // How a restore starts, and the mode the host restores it from.
+        // A target the hub can signal starts from DFU: one a failed restore
+        // left in recovery, past its iBEC, is not restored from there.
+        let path = match self.signal {
+            Signal::AlreadyDfu if self.ecid.is_some() => Ok((
+                RestoreAccess::InDfu,
+                self.usb_mode.unwrap_or(AppleMode::Dfu),
+            )),
+            _ if wants_dfu && hub == Signal::Available => {
+                Ok((RestoreAccess::EnterDfu, AppleMode::Dfu))
             }
-            Signal::Recoverable if self.ecid.is_some() && supports(AppleMode::Normal) => {
-                RestoreAccess::EnterRecovery
+            Signal::AlreadyRecovery if self.ecid.is_some() => {
+                Ok((RestoreAccess::InRecovery, AppleMode::Recovery))
             }
-            _ => RestoreAccess::Unavailable,
+            Signal::Recoverable if self.ecid.is_some() => {
+                Ok((RestoreAccess::EnterRecovery, AppleMode::Normal))
+            }
+            Signal::AlreadyDfu | Signal::AlreadyRecovery | Signal::Recoverable => {
+                Err("The target's ECID is not known yet.".into())
+            }
+            signal => Err(self.reason(signal)),
+        };
+        let needs = path.as_ref().ok().and_then(|&(_, mode)| missing(mode));
+        let restore = match (path, &needs) {
+            (Ok(_), Some(needs)) => Err(needs.reason.clone()),
+            (path, _) => path.map(|(access, _)| access),
+        };
+        Actions {
+            dfu,
+            reboot,
+            restore,
+            needs,
+        }
+    }
+
+    /// Why `signal` stops an action, with the fault the port names.
+    fn reason(&self, signal: Signal) -> String {
+        match (signal, self.port_error) {
+            (Signal::Fault, Some(error)) => format!("Port fault ({error:?})."),
+            _ => signal.description().into(),
         }
     }
 
@@ -216,10 +282,7 @@ impl Assessment {
         }
         match (self.signal, self.outcome) {
             (Signal::AlreadyDfu, _) | (Signal::Available | Signal::PortDfu, Some(_)) => {}
-            (Signal::Fault, _) if let Some(error) = self.port_error => {
-                parts.push(format!("Port fault ({error:?})."));
-            }
-            _ => parts.push(self.signal.description().into()),
+            _ => parts.push(self.reason(self.signal)),
         }
         if let Some(outcome) = self.outcome {
             if outcome == Outcome::Dfu {
@@ -232,6 +295,19 @@ impl Assessment {
         }
         parts.join(" ")
     }
+}
+
+/// What can be done with a port's target now: the one answer the view, the
+/// jobs and the agent's commands take. Each action is offered, or refused
+/// with the reason.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Actions {
+    pub dfu: Result<(), String>,
+    pub reboot: Result<(), String>,
+    /// How a restore starts.
+    pub restore: Result<RestoreAccess, String>,
+    /// What the host lacks to restore the target, when that refuses it.
+    pub needs: Option<Prerequisite>,
 }
 
 pub struct Attempt {
@@ -286,6 +362,26 @@ fn is_mac(device: &UsbDevice) -> bool {
     device.product.as_deref().is_some_and(mac_name)
 }
 
+/// Whether the hub can send DFU to the port's target, by its attachment and
+/// the debug actions the target lists; why not where it cannot.
+fn dfu_signal(p: &PortStatus) -> Signal {
+    if p.state != PortState::Contract {
+        Signal::NoPdContract
+    } else if p.debug_actions == DebugActions::Pending {
+        Signal::Settling
+    } else if p.debug_actions == DebugActions::Silent {
+        Signal::NoDebug
+    } else if !p.offers(PortAction::Dfu) {
+        if p.dfu_on_another_port() {
+            Signal::NotDfuPort
+        } else {
+            Signal::NotOffered
+        }
+    } else {
+        Signal::Available
+    }
+}
+
 pub fn job_in_progress(p: &PortStatus) -> bool {
     p.restoring()
 }
@@ -305,7 +401,9 @@ pub fn assess(
     let usb_mode = apple.map(|a| a.mode);
     let ecid = apple.and_then(|a| a.ecid());
     let duplicates = ecid.is_some_and(|id| snapshot.ecid_elsewhere(port, id));
-    let signal = if (!devices.is_empty() && single.is_none()) || duplicates {
+    let signal = if single.is_some_and(UsbDevice::is_host) {
+        Signal::HostComputer
+    } else if (!devices.is_empty() && single.is_none()) || duplicates {
         Signal::Ambiguous
     } else if job_in_progress(p) || usb_mode == Some(AppleMode::Restored) {
         Signal::Restoring
@@ -343,21 +441,7 @@ pub fn assess(
         Signal::Busy
     } else if !matches!(p.state, PortState::Ready | PortState::Contract)
         || p.orientation.is_none()
-        || !match p.supply {
-            Supply::HostPresence => iasis_pd::power::safe_presence(p.vbus_adc),
-            Supply::Brick => {
-                let rail = if p.contract_mv == 0 {
-                    5000
-                } else {
-                    p.contract_mv
-                };
-                let (low, high) = iasis_pd::voltage_window(rail);
-                p.vbus_adc
-                    .and_then(iasis_pd::power::millivolts)
-                    .is_some_and(|mv| (u32::from(low)..=u32::from(high)).contains(&mv))
-            }
-            Supply::Off => false,
-        }
+        || !p.vbus_ok
     {
         Signal::Settling
     } else if single.is_some() && apple.is_none() {
@@ -368,20 +452,8 @@ pub fn assess(
         && (p.state != PortState::Contract || p.debug_actions == DebugActions::Silent)
     {
         Signal::Recoverable
-    } else if p.state != PortState::Contract {
-        Signal::NoPdContract
-    } else if p.debug_actions == DebugActions::Pending {
-        Signal::Settling
-    } else if p.debug_actions == DebugActions::Silent {
-        Signal::NoDebug
-    } else if !p.offers(PortAction::Dfu) {
-        if p.dfu_on_another_port() {
-            Signal::NotDfuPort
-        } else {
-            Signal::NotOffered
-        }
     } else {
-        Signal::Available
+        dfu_signal(p)
     };
     let outcome = attempt.map(|attempt| {
         if status.uptime_ms < attempt.uptime_ms {
@@ -457,6 +529,7 @@ pub fn assess(
         usb_mode,
         ecid,
         signal,
+        ready: status.ready_mask() & (1 << port.index()) != 0,
         port_state: p.state,
         port_error: p.error,
         transport_result: attempt.map(|a| a.result),
@@ -509,7 +582,7 @@ mod tests {
                 0x0606, 0x0106, 0x0105, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             ]),
             supply: Supply::Brick,
-            vbus_adc: Some(530),
+            vbus_ok: true,
             orientation: Some(Orientation::Cc1),
             faults: Some(PortFaults {
                 power: false,
@@ -527,10 +600,8 @@ mod tests {
             serial_number: None,
             product: None,
             speed: Speed::High,
-            #[cfg(target_os = "macos")]
-            macos_attachment: None,
-            #[cfg(not(target_os = "macos"))]
-            device_address: 1,
+            attachment: crate::topology::Attachment::default(),
+            info: None,
             apple: Some(AppleDevice {
                 model: None,
                 mode,
@@ -538,6 +609,7 @@ mod tests {
                     ecid,
                     source: IdentitySource::UsbSerial,
                 }),
+                hardware: None,
             }),
         }
     }
@@ -546,6 +618,47 @@ mod tests {
     }
     fn sent(st: &Status, s: &Snapshot, result: CommandResult) -> Attempt {
         Attempt::new(8, P, &report(st, s, None), s, result)
+    }
+    fn lacking() -> Prerequisite {
+        Prerequisite {
+            id: "usbmuxd".into(),
+            name: "usbmuxd".into(),
+            url: None,
+            reason: "Restart usbmuxd.".into(),
+        }
+    }
+    /// How a restore starts where the host restores from the modes it
+    /// `supports`.
+    fn access(
+        seen: &Assessment,
+        port: &PortStatus,
+        supports: impl Fn(AppleMode) -> bool,
+    ) -> RestoreAccess {
+        seen.actions(port, |mode| (!supports(mode)).then(lacking))
+            .restore
+            .unwrap_or_default()
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_mac_running_the_agent_cannot_be_its_own_target() {
+        let Some(serial) = crate::topology::host_serial() else {
+            return;
+        };
+        let mut snapshot = snapshot();
+        let mut mac = apple(AppleMode::Normal, 0x1905, Some(42));
+        mac.serial_number = Some(serial.into());
+        snapshot.ports[0].devices.push(mac);
+        let status = status();
+        let seen = report(&status, &snapshot, None);
+        assert_eq!(seen.signal, Signal::HostComputer);
+        let actions = seen.actions(&status.ports[0], |_| None);
+        assert!(actions.dfu.is_err() && actions.reboot.is_err() && actions.restore.is_err());
+        snapshot.ports[0].devices[0].serial_number = Some(format!("{serial}-other"));
+        assert_ne!(
+            report(&status, &snapshot, None).signal,
+            Signal::HostComputer
+        );
     }
 
     #[test]
@@ -569,7 +682,7 @@ mod tests {
             (Some(AppleMode::Restored), Some(0x1234))
         );
         assert_eq!(
-            seen.restore_access(&st.ports[0], |_| true),
+            access(&seen, &st.ports[0], |_| true),
             RestoreAccess::EnterDfu
         );
 
@@ -615,14 +728,14 @@ mod tests {
         }
         // A Mac in recovery, by its chip and board, restores from DFU.
         let mut mac = apple(AppleMode::Recovery, 0x1281, Some(42));
-        mac.serial_number = Some("CPID:8103 CPRV:11 CPFM:03 SCEP:01 BDID:26 ECID:000000000000002A IBFL:3C SRTG:[iBoot-1234]".into());
+        mac.apple.as_mut().unwrap().hardware = Some((0x8103, 0x26));
         s.ports[0].devices = vec![mac];
         assert_eq!(report(&st, &s, None).signal, Signal::Available);
         // A target behind Debug USB whose mode is unknown, running or asleep,
         // is restored from the DFU the hub sends.
         s.ports[0].devices = vec![apple(AppleMode::Kis, 0x1881, None)];
         assert_eq!(
-            report(&st, &s, None).restore_access(&st.ports[0], |_| true),
+            access(&report(&st, &s, None), &st.ports[0], |_| true),
             RestoreAccess::EnterDfu
         );
     }
@@ -651,7 +764,7 @@ mod tests {
             report(&st, &s, Some(&attempt)).outcome,
             Some(Outcome::CheckMacAfterReattach)
         );
-        st.ports[0].vbus_adc = Some(10);
+        st.ports[0].vbus_ok = false;
         assert_eq!(
             report(&st, &s, Some(&attempt)).outcome,
             Some(Outcome::AttachmentChanged)
@@ -804,7 +917,7 @@ mod tests {
         ] {
             usb.ports[0].devices = vec![apple(mode, 0x1227, ecid)];
             assert_eq!(
-                report(&st, &usb, None).restore_access(&st.ports[0], |_| supports),
+                access(&report(&st, &usb, None), &st.ports[0], |_| supports),
                 expected
             );
         }
@@ -860,12 +973,12 @@ mod tests {
         let running = report(&st, &usb, None);
         assert_eq!(running.signal, Signal::Recoverable);
         assert_eq!(
-            running.restore_access(&st.ports[0], |_| true),
+            access(&running, &st.ports[0], |_| true),
             RestoreAccess::EnterRecovery
         );
         // Where the host's usbmuxd cannot reach a running device.
         assert_eq!(
-            running.restore_access(&st.ports[0], |mode| mode != AppleMode::Normal),
+            access(&running, &st.ports[0], |mode| mode != AppleMode::Normal),
             RestoreAccess::Unavailable
         );
         // The same iPad in recovery.
@@ -873,12 +986,85 @@ mod tests {
         let recovery = report(&st, &usb, None);
         assert_eq!(recovery.signal, Signal::AlreadyRecovery);
         assert_eq!(
-            recovery.restore_access(&st.ports[0], |_| true),
+            access(&recovery, &st.ports[0], |_| true),
             RestoreAccess::InRecovery
+        );
+        // A target in recovery whose port takes DFU goes to DFU, Mac or not.
+        let mut signallable = st;
+        signallable.ports[0].debug_actions = status().ports[0].debug_actions;
+        assert_eq!(
+            access(
+                &report(&signallable, &usb, None),
+                &signallable.ports[0],
+                |_| true
+            ),
+            RestoreAccess::EnterDfu
         );
         // A running Mac takes the DFU path.
         usb.ports[0].devices = vec![apple(AppleMode::Normal, 0x1905, Some(42))];
         usb.ports[0].devices[0].apple.as_mut().unwrap().model = Some("Mac15,8".to_owned());
         assert_ne!(report(&st, &usb, None).signal, Signal::Recoverable);
+    }
+
+    #[test]
+    fn one_answer_says_what_each_target_takes_and_why_not() {
+        let mut st = status();
+        st.ports[0].restore = None;
+        let mut usb = snapshot();
+        let none = |_| None;
+        // A restore OS a failed restore left on an idle port takes DFU too.
+        usb.ports[0].devices = vec![apple(AppleMode::Restored, 0x12ac, Some(42))];
+        let left = report(&st, &usb, None).actions(&st.ports[0], none);
+        assert_eq!(left.dfu, Ok(()));
+        assert_eq!(left.restore, Ok(RestoreAccess::EnterDfu));
+        // Not while the hub reports a restore on it.
+        st.ports[0].restore = Some(iasis_protocol::RestoreStatus {
+            ecid: 42,
+            phase: iasis_protocol::RestorePhase::Running,
+            progress: 10,
+        });
+        let running = report(&st, &usb, None).actions(&st.ports[0], none);
+        assert!(running.dfu.is_err() && running.reboot.is_err() && running.restore.is_err());
+        st.ports[0].restore = None;
+
+        // A Lightning iPhone: no DFU or reboot signal, a restore through
+        // recovery, and, where the host lacks what that needs, the reason.
+        st.ports[0].debug_actions = DebugActions::Silent;
+        usb.ports[0].devices = vec![apple(AppleMode::Normal, 0x12a8, Some(42))];
+        let iphone = report(&st, &usb, None).actions(&st.ports[0], none);
+        assert_eq!(iphone.dfu, Err(Signal::NoDebug.description().into()));
+        assert_eq!(
+            iphone.reboot,
+            Err("The target takes no reboot signal on this connection.".into())
+        );
+        assert_eq!(iphone.restore, Ok(RestoreAccess::EnterRecovery));
+        assert_eq!(iphone.needs, None);
+        let lacks = |mode| (mode == AppleMode::Normal).then(lacking);
+        let without = report(&st, &usb, None).actions(&st.ports[0], lacks);
+        assert_eq!(without.restore, Err("Restart usbmuxd.".into()));
+        assert_eq!(without.needs, Some(lacking()));
+
+        // A target in DFU, where the host's usbmuxd stalls for every mode.
+        st.ports[0].debug_actions = status().ports[0].debug_actions;
+        usb.ports[0].devices = vec![apple(AppleMode::Dfu, 0x1227, Some(42))];
+        let dfu = report(&st, &usb, None).actions(&st.ports[0], |_| Some(lacking()));
+        assert_eq!(dfu.dfu, Err(Signal::AlreadyDfu.description().into()));
+        assert_eq!(dfu.reboot, Ok(()));
+        assert_eq!(dfu.needs, Some(lacking()));
+        assert!(dfu.restore.is_err());
+
+        // A renegotiating contract holds commands back, not the restore.
+        usb.ports[0].devices.clear();
+        st.ports[0].pd_transition = true;
+        let renegotiating = report(&st, &usb, None).actions(&st.ports[0], none);
+        assert_eq!(
+            renegotiating.dfu,
+            Err(Signal::Settling.description().into())
+        );
+        assert_eq!(
+            renegotiating.reboot,
+            Err(Signal::Settling.description().into())
+        );
+        assert_eq!(renegotiating.restore, Ok(RestoreAccess::EnterDfu));
     }
 }
