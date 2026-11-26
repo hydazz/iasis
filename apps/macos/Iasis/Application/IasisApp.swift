@@ -24,7 +24,6 @@ struct IasisApp: App {
         }
         .defaultSize(width: 720, height: 520)
         .defaultLaunchBehavior(.suppressed)
-        .restorationBehavior(.disabled)
         .commands {
             FileCommands(model: model)
             InspectorCommands()
@@ -38,7 +37,6 @@ struct IasisApp: App {
         }
         .windowResizability(.contentSize)
         .defaultLaunchBehavior(.suppressed)
-        .restorationBehavior(.disabled)
 
         Settings {
             SettingsView(model: model)
