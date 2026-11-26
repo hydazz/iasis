@@ -1,5 +1,5 @@
-//! Open at Login: an XDG autostart entry in the user's configuration, made
-//! on the app's first launch and switched in Preferences.
+//! Open at Login: an XDG autostart entry in the user's configuration,
+//! switched in Preferences.
 
 use std::{fs, io, path::PathBuf};
 
@@ -9,11 +9,6 @@ fn entry() -> PathBuf {
     glib::user_config_dir()
         .join("autostart")
         .join(format!("{}.desktop", crate::APP_ID))
-}
-
-/// Where the app's first launch is recorded.
-fn launched() -> PathBuf {
-    glib::user_config_dir().join("iasis").join("launched")
 }
 
 pub fn enabled() -> bool {
@@ -38,19 +33,4 @@ pub fn set(on: bool) -> io::Result<()> {
             program = program.display(),
         ),
     )
-}
-
-/// On the first launch, open at login from then on.
-pub fn first_launch() {
-    let launched = launched();
-    if launched.exists() {
-        return;
-    }
-    if let Err(error) = set(true) {
-        eprintln!("Open at Login: {error}");
-    }
-    if let Some(parent) = launched.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let _ = fs::write(&launched, "");
 }

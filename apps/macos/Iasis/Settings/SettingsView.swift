@@ -24,8 +24,8 @@ struct SettingsView: View {
 /// What applies to the app and its agent, whichever hubs are connected.
 private struct GeneralSettings: View {
     let model: AgentModel
-    @State private var opensAtLogin = OpenAtLogin.isEnabled
-    @State private var revealsDevices = FinderReveal.isEnabled
+    @State private var opensAtLogin = false
+    @State private var revealsDevices = true
 
     var body: some View {
         Form {
@@ -34,7 +34,7 @@ private struct GeneralSettings: View {
                     opensAtLogin
                 } set: { opens in
                     OpenAtLogin.set(opens)
-                    opensAtLogin = OpenAtLogin.isEnabled
+                    readSystemSettings()
                 })
             }
             Section {
@@ -51,16 +51,29 @@ private struct GeneralSettings: View {
             }
             SupervisionSection(model: model)
             Section {
-                Toggle("Open Finder for DFU Devices", isOn: $revealsDevices)
+                Toggle("Open Finder for DFU and Recovery Devices", isOn: Binding {
+                    revealsDevices
+                } set: { reveals in
+                    FinderReveal.set(reveals)
+                    readSystemSettings()
+                })
             } footer: {
-                Text("Finder opens a window for each device that enters DFU. This is an undocumented macOS setting, and turning it off also stops Finder opening for other Apple devices.")
+                Text("Finder opens a window for each Mac, iPad or iPhone that enters DFU or recovery mode. This is an undocumented macOS setting.")
             }
         }
         .formStyle(.grouped)
         .fixedSize(horizontal: false, vertical: true)
-        .onChange(of: revealsDevices) { _, reveals in
-            FinderReveal.set(reveals)
+        .onAppear(perform: readSystemSettings)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            readSystemSettings()
         }
+    }
+
+    /// Both settings live outside the app, where System Settings and
+    /// `defaults` change them too.
+    private func readSystemSettings() {
+        opensAtLogin = OpenAtLogin.isEnabled
+        revealsDevices = FinderReveal.isEnabled
     }
 }
 
@@ -126,12 +139,6 @@ private struct SupervisionSection: View {
         ) { _ in }
         .fileImporter(isPresented: $choosingFile, allowedContentTypes: [.pkcs12]) { result in
             guard case let .success(file) = result else { return }
-            let scoped = file.startAccessingSecurityScopedResource()
-            defer {
-                if scoped {
-                    file.stopAccessingSecurityScopedResource()
-                }
-            }
             if let archive = try? Data(contentsOf: file) {
                 sheet = .import(archive)
             }

@@ -18,6 +18,8 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
   </PropertyGroup>
   <ItemGroup>
+    <Content Include="..\..\..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\..\crates\iasis\NOTICES.txt" Link="NOTICES.txt" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\Iasis.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>

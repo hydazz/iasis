@@ -29,8 +29,8 @@ enum MenuBarStatus: String, CaseIterable {
 
     private func makeImage() -> NSImage {
         let icon = NSImage(resource: .menuBar)
+        let badge = badgeSymbol
         let image = NSImage(size: icon.size, flipped: true) { bounds in
-            guard let context = NSGraphicsContext.current?.cgContext else { return false }
             icon.draw(
                 in: bounds,
                 from: .zero,
@@ -39,43 +39,50 @@ enum MenuBarStatus: String, CaseIterable {
                 respectFlipped: true,
                 hints: nil
             )
-            guard self == .busy || self == .fault else { return true }
-            let badge = CGRect(x: 10.5, y: 6.5, width: 8.5, height: 8.5)
+            guard let badge, let context = NSGraphicsContext.current?.cgContext else { return true }
+            let corner = CGRect(x: 10.5, y: 6.5, width: 8.5, height: 8.5)
+            // A gap sets the badge apart from the icon.
             context.setBlendMode(.clear)
-            context.fillEllipse(in: badge.insetBy(dx: -1, dy: -1))
+            context.fillEllipse(in: corner.insetBy(dx: -1, dy: -1))
             context.setBlendMode(.normal)
-            if self == .busy {
-                guard let mark = NSImage(systemSymbolName: ActivityMark.turning, accessibilityDescription: nil)?
-                    .withSymbolConfiguration(.init(pointSize: 8, weight: .bold))
-                else { return true }
-                mark.draw(
-                    in: CGRect(
-                        x: badge.midX - mark.size.width / 2,
-                        y: badge.midY - mark.size.height / 2,
-                        width: mark.size.width,
-                        height: mark.size.height
-                    ),
-                    from: .zero,
-                    operation: .sourceOver,
-                    fraction: 1,
-                    respectFlipped: true,
-                    hints: nil
-                )
-            } else {
-                context.setBlendMode(.sourceAtop)
+            if self == .fault {
+                // A coloured badge makes the image no template, so the icon
+                // takes the menu bar's text colour here.
+                context.setBlendMode(.sourceIn)
                 context.setFillColor(NSColor.labelColor.cgColor)
                 context.fill(bounds)
                 context.setBlendMode(.normal)
-                context.setFillColor(NSColor.systemRed.cgColor)
-                context.fillEllipse(in: badge)
-                context.setFillColor(NSColor.white.cgColor)
-                context.fill(CGRect(x: badge.midX - 0.75, y: 8, width: 1.5, height: 3.5))
-                context.fillEllipse(in: CGRect(x: badge.midX - 0.75, y: 12.25, width: 1.5, height: 1.5))
             }
+            badge.draw(
+                in: corner,
+                from: .zero,
+                operation: .sourceOver,
+                fraction: 1,
+                respectFlipped: true,
+                hints: nil
+            )
             return true
         }
         image.isTemplate = self != .fault
         image.accessibilityDescription = rawValue
         return image
+    }
+
+    /// The symbol in the icon's corner: work under way, or something that
+    /// needs attention.
+    private var badgeSymbol: NSImage? {
+        switch self {
+        case .offline, .ready:
+            nil
+        case .busy:
+            NSImage(systemSymbolName: ActivityMark.turning, accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: 8, weight: .bold))
+        case .fault:
+            NSImage(systemSymbolName: "exclamationmark.circle.fill", accessibilityDescription: nil)?
+                .withSymbolConfiguration(
+                    NSImage.SymbolConfiguration(pointSize: 8, weight: .bold)
+                        .applying(.init(paletteColors: [.white, .systemRed]))
+                )
+        }
     }
 }

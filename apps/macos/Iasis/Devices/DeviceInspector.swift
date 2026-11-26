@@ -19,7 +19,7 @@ struct DeviceInspector: View {
                     }
                     if let needs = device.needs {
                         Label(needs.reason, systemImage: "exclamationmark.triangle")
-                        if let url = URL(string: needs.url) {
+                        if let url = needs.url.flatMap(URL.init(string:)) {
                             Link("Get \(needs.name)", destination: url)
                         }
                     }

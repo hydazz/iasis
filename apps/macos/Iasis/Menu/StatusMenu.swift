@@ -1,100 +1,273 @@
-import SwiftUI
+import AppKit
+import Observation
 
-/// The menu bar item's menu: each hub's devices with their actions, the
-/// download under way and the app's commands.
-///
-/// It reads the agent only through `menuSnapshot`, which holds while a menu
-/// is open, because SwiftUI resets the row under the pointer and closes its
-/// submenu whenever an open menu's content or label updates. An open menu
-/// shows the hubs as they stood when it opened, so its actions reach a
-/// device only while the port still holds the attachment it showed.
-struct StatusMenu: View {
-    let browser: DeviceBrowser
-    @Environment(\.openWindow) private var openWindow
+/// AppKit keeps a highlighted submenu open when its items change in place.
+final class StatusMenu: NSObject, NSMenuDelegate {
+    let menu = NSMenu()
+    private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    private let browser: DeviceBrowser
+    private let showDevices: () -> Void
+    private let showSettings: () -> Void
+    private var tracking = false
+    private var updateHubs: [String: (HubDevices?, Bool) -> Void] = [:]
+    private let empty = NSMenuItem()
+    private let downloadDivider = NSMenuItem.separator()
+    private let download = NSMenuItem()
 
-    var body: some View {
-        let model = browser.model
-        if let snapshot = model.menuSnapshot {
-            if snapshot.hubs.isEmpty {
-                Text("No Hubs Connected")
+    init(browser: DeviceBrowser, showDevices: @escaping () -> Void, showSettings: @escaping () -> Void) {
+        self.browser = browser
+        self.showDevices = showDevices
+        self.showSettings = showSettings
+        super.init()
+        menu.autoenablesItems = false
+        menu.delegate = self
+        empty.isEnabled = false
+        download.image = NSImage(systemSymbolName: DeviceSymbol.download, accessibilityDescription: nil)
+        download.isEnabled = false
+        item.menu = menu
+        observe()
+    }
+
+    private func observe() {
+        withObservationTracking {
+            let state = browser.model.state
+            _ = browser.model.updating
+            let status = MenuBarStatus(state)
+            if item.button?.image !== status.image {
+                item.button?.image = status.image
+                item.button?.setAccessibilityLabel(status.rawValue)
             }
-            ForEach(snapshot.hubDevices) { hub in
-                Section(hub.title) {
-                    let devices = hub.devices.filter(\.isSelectable)
-                    if let notice = hub.hub.notice {
-                        Label(notice, systemImage: "exclamationmark.triangle")
-                    } else if hub.hub.update?.required == true {
-                        Button("Update IasisOS", systemImage: DeviceSymbol.download) {
-                            model.updateFirmware(of: hub.hub.serial)
-                        }
-                        .disabled(model.updating.contains(hub.hub.serial))
-                    } else if devices.isEmpty {
-                        Text("No Devices")
-                    }
-                    ForEach(devices) { device in
-                        Menu {
-                            Button("Get Info", systemImage: "info.circle") {
-                                browser.selection = [device.id]
-                                browser.showsInspector = true
-                                showDevices()
-                            }
-                            Divider()
-                            DeviceActionButtons(actions: DeviceActions([device])) { requests in
-                                ifAttached(device) { model.perform(requests) }
-                            } restore: { confirmation in
-                                ifAttached(device) {
-                                    showDevices()
-                                    browser.confirm(confirmation)
-                                }
-                            }
-                        } label: {
-                            Label(device.shortName, systemImage: "\(device.port.number).circle")
-                            if let status = device.menuSubtitle {
-                                Text(status)
-                            }
-                        }
-                    }
-                }
+            if tracking {
+                refresh(state)
             }
-            if let fetch = snapshot.images.fetch {
-                Divider()
-                // A line of status, not a command.
-                Button {} label: {
-                    Label("Downloading \(snapshot.images.fetching?.title ?? "Image")", systemImage: DeviceSymbol.download)
-                    Text("\(fetch.percent)%")
-                }
-                .disabled(true)
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.observe() }
+        }
+    }
+
+    private func refresh(_ state: AgentState?) {
+        let groups = state?.hubDevices ?? []
+        // AppKit can move a highlight to another command if rows appear or disappear.
+        let canChangeRows = !tracking || menu.highlightedItem == nil
+        if canChangeRows {
+            empty.isHidden = !groups.isEmpty
+            for group in groups where updateHubs[group.id] == nil {
+                addHub(group)
             }
+        }
+        empty.title = state == nil ? "Agent Not Running" : groups.isEmpty ? "No Hubs Connected" : "Hubs Connected"
+        for (serial, update) in updateHubs {
+            update(groups.first { $0.id == serial }, canChangeRows)
+        }
+        let fetch = state?.images.fetch
+        if canChangeRows {
+            download.isHidden = fetch == nil
+            downloadDivider.isHidden = fetch == nil
+        }
+        if let fetch {
+            download.title = "Downloading \(state?.images.fetching?.title ?? "Image")"
+            download.subtitle = "\(fetch.percent)%"
         } else {
-            Text("Agent Not Running")
+            download.title = "No Download in Progress"
+            download.subtitle = nil
         }
-        Divider()
-        Button("Open Iasis", action: showDevices)
-        SettingsLink().labelStyle(.titleOnly)
-        Divider()
-        Button("Quit") { NSApp.terminate(nil) }
     }
 
-    private func showDevices() {
-        openWindow(id: DevicesView.windowID)
-        NSApp.activate()
+    func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
+        guard item == nil, tracking else { return }
+        Task { @MainActor [weak self] in
+            guard let self, tracking, menu.highlightedItem == nil else { return }
+            refresh(browser.model.state)
+        }
     }
 
-    private func ifAttached(_ device: Device, _ action: () -> Void) {
-        guard browser.model.state?.devices.contains(where: device.sameAttachment(as:)) == true else {
-            NSSound.beep()
-            return
+    func menuWillOpen(_: NSMenu) {
+        tracking = true
+    }
+
+    func menuDidClose(_: NSMenu) {
+        tracking = false
+    }
+
+    func menuNeedsUpdate(_: NSMenu) {
+        guard !tracking else { return }
+        menu.removeAllItems()
+        updateHubs.removeAll()
+        menu.addItem(empty)
+        menu.addItem(downloadDivider)
+        menu.addItem(download)
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Open Iasis", action: #selector(openDevices), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",").target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "").target = NSApp
+        refresh(browser.model.state)
+    }
+
+    private func addHub(_ group: HubDevices) {
+        let model = browser.model
+        let serial = group.id
+        let header = NSMenuItem.sectionHeader(title: group.title)
+        menu.insertItem(header, at: menu.index(of: downloadDivider))
+        let message = NSMenuItem(title: "", action: #selector(updateFirmware), keyEquivalent: "")
+        message.target = self
+        message.representedObject = serial
+        menu.insertItem(message, at: menu.index(of: downloadDivider))
+        var rows: [Int: DeviceMenu] = [:]
+        updateHubs[serial] = { [menu, browser, showDevices] live, canChangeRows in
+            if let live {
+                header.title = live.title
+            }
+            let devices = live?.devices.filter(\.isSelectable) ?? []
+            if canChangeRows {
+                header.isHidden = live == nil
+                message.isHidden = live == nil || (live?.hub.notice == nil && live?.hub.update?.required != true && !devices.isEmpty)
+            }
+            if let notice = live?.hub.notice {
+                message.isEnabled = false
+                message.title = notice
+                message.image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil)
+            } else if live?.hub.update?.required == true {
+                message.title = "Update IasisOS"
+                message.image = NSImage(systemSymbolName: DeviceSymbol.download, accessibilityDescription: nil)
+                message.isEnabled = !model.updating.contains(serial)
+            } else {
+                message.isEnabled = false
+                message.title = live == nil ? "Hub Disconnected" : devices.isEmpty ? "No Devices" : "Devices Connected"
+                message.image = nil
+            }
+            for (port, row) in rows {
+                row.update(devices.first { $0.port.number == port })
+                if row.disconnected, canChangeRows {
+                    menu.removeItem(row.item)
+                    rows.removeValue(forKey: port)
+                }
+            }
+            guard canChangeRows else { return }
+            var previous = message
+            for device in devices {
+                if let row = rows[device.port.number] {
+                    previous = row.item
+                } else {
+                    let row = DeviceMenu(device: device, browser: browser, showDevices: showDevices)
+                    menu.insertItem(row.item, at: menu.index(of: previous) + 1)
+                    rows[device.port.number] = row
+                    previous = row.item
+                }
+            }
         }
-        action()
+    }
+
+    @objc private func updateFirmware(_ item: NSMenuItem) {
+        guard let serial = item.representedObject as? String,
+              let hub = browser.model.state?.hubs.first(where: { $0.serial == serial }),
+              hub.notice == nil, hub.update?.required == true
+        else { return }
+        browser.model.updateFirmware(of: serial)
+    }
+
+    @objc private func openDevices() {
+        showDevices()
+    }
+
+    @objc private func openSettings() {
+        showSettings()
+    }
+}
+
+private final class DeviceMenu: NSObject {
+    let item = NSMenuItem()
+    private let id: Device.ID
+    private let browser: DeviceBrowser
+    private let showDevices: () -> Void
+    private var shown: Device?
+    var disconnected: Bool {
+        shown == nil
+    }
+
+    private let info = NSMenuItem.command("Get Info", symbol: "info.circle")
+    private let dfu = NSMenuItem.command("Enter DFU", symbol: DeviceSymbol.dfu)
+    private let restart = NSMenuItem.command("Restart", symbol: DeviceSymbol.restart)
+    private let revive = NSMenuItem.command("Revive", symbol: DeviceSymbol.revive)
+    private let restore = NSMenuItem.command("Restore…", symbol: DeviceSymbol.restore)
+
+    init(device: Device, browser: DeviceBrowser, showDevices: @escaping () -> Void) {
+        id = device.id
+        shown = device
+        self.browser = browser
+        self.showDevices = showDevices
+        super.init()
+        item.image = NSImage(systemSymbolName: "\(device.port.number).circle", accessibilityDescription: nil)
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        for command in [info, .separator(), dfu, restart, .separator(), revive, restore] {
+            if !command.isSeparatorItem {
+                command.target = self
+                command.action = #selector(chooseDeviceAction)
+            }
+            submenu.addItem(command)
+        }
+        item.submenu = submenu
+        update(device)
+    }
+
+    private func attachment(_ device: Device?) -> Device? {
+        guard let shown, let device, device.isSelectable, shown.session == device.session,
+              shown.port.generation == device.port.generation,
+              shown.port.ecid == nil || shown.port.ecid == device.port.ecid
+        else { return nil }
+        return device
+    }
+
+    func update(_ device: Device?) {
+        shown = attachment(device)
+        if let shown {
+            item.title = shown.shortName
+            item.subtitle = shown.menuSubtitle
+        } else {
+            item.subtitle = "Disconnected"
+        }
+        let actions = shown.map { DeviceActions([$0]) } ?? DeviceActions()
+        info.isEnabled = shown != nil
+        dfu.isEnabled = !actions.dfu.isEmpty
+        restart.isEnabled = !actions.restart.isEmpty
+        revive.isEnabled = actions.revive != nil
+        restore.isEnabled = actions.restore != nil
+    }
+
+    @objc private func chooseDeviceAction(_ command: NSMenuItem) {
+        guard let live = attachment(browser.model.state?.devices.first { $0.id == id }) else { return }
+        let actions = DeviceActions([live])
+        switch command {
+        case info:
+            browser.selection = [id]
+            browser.showsInspector = true
+            showDevices()
+        case dfu: browser.model.perform(actions.dfu)
+        case restart: browser.model.perform(actions.restart)
+        case revive:
+            if let request = actions.revive {
+                browser.model.perform([request])
+            }
+        case restore:
+            if let confirmation = actions.restore {
+                showDevices()
+                browser.confirm(confirmation)
+            }
+        default: break
+        }
+    }
+}
+
+private extension NSMenuItem {
+    static func command(_ title: String, symbol: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        return item
     }
 }
 
 extension Device {
-    func sameAttachment(as live: Device) -> Bool {
-        id == live.id && session == live.session && port.generation == live.port.generation &&
-            (port.ecid == nil || port.ecid == live.port.ecid) && live.isSelectable
-    }
-
     var menuSubtitle: String? {
         let text = activity.text
         if !text.isEmpty {

@@ -4,9 +4,21 @@ import SwiftUI
 /// Iasis lives in the menu bar. While one of its windows is open it is also
 /// an ordinary app, with a Dock icon and a menu bar of its own.
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    /// Opens the app's windows; the menu bar item supplies it.
-    var openWindow: OpenWindowAction?
+    private var openWindow: OpenWindowAction?
+    private var statusMenu: StatusMenu?
     private var observers: [any NSObjectProtocol] = []
+
+    func installStatusMenu(browser: DeviceBrowser, openWindow: OpenWindowAction, openSettings: OpenSettingsAction) {
+        self.openWindow = openWindow
+        guard statusMenu == nil else { return }
+        statusMenu = StatusMenu(browser: browser) {
+            openWindow(id: DevicesView.windowID)
+            NSApp.activate()
+        } showSettings: {
+            openSettings()
+            NSApp.activate()
+        }
+    }
 
     func applicationDidFinishLaunching(_: Notification) {
         for name in [NSWindow.didBecomeKeyNotification, NSWindow.willCloseNotification] {
@@ -25,7 +37,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { Self.followWindows() }
         if BundledAgent.isBundled {
             BundledAgent.register()
-            OpenAtLogin.addOnFirstLaunch()
         }
     }
 
@@ -35,15 +46,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Opening the app again, from Finder or the Dock, shows its window.
     func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows _: Bool) -> Bool {
-        if !Self.hasOpenWindow {
-            openWindow?(id: DevicesView.windowID)
-            NSApp.activate()
-        }
+        guard !Self.hasOpenWindow else { return true }
+        openWindow?(id: DevicesView.windowID)
+        NSApp.activate()
         return false
     }
 
     private static var hasOpenWindow: Bool {
-        NSApp.windows.contains { $0.isVisible && $0.styleMask.contains(.titled) }
+        NSApp.windows.contains { ($0.isVisible || $0.isMiniaturized) && $0.styleMask.contains(.titled) }
     }
 
     private static func followWindows() {

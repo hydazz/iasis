@@ -7,8 +7,9 @@ using Xunit;
 
 namespace Iasis.Tests;
 
-/// The agent's example of every message, from `crates/api/fixtures`, reads
-/// and writes back unchanged.
+/// The agent's example of every message, from `crates/api/fixtures`: the app
+/// reads each state and reply without losing a member, and writes each
+/// request as the example has it.
 public class ContractTests
 {
     [Fact]
@@ -18,7 +19,16 @@ public class ContractTests
     public void EveryRequestRoundTrips() => RoundTrip("requests.json", AgentJson.Default.IReadOnlyListRequest);
 
     [Fact]
-    public void EveryReplyRoundTrips() => RoundTrip("replies.json", AgentJson.Default.IReadOnlyListReply);
+    public void EveryReplyReadsWhole()
+    {
+        foreach (var example in JsonNode.Parse(File.ReadAllText(Fixture("replies.json")))!.AsArray())
+        {
+            var reply = JsonSerializer.Deserialize(example!.ToJsonString(), AgentJson.Default.Reply)!;
+            Assert.True(
+                JsonNode.DeepEquals(WithoutNulls(example.DeepClone()), WithoutNulls(Written(reply))),
+                $"{example.ToJsonString()} read as {reply}");
+        }
+    }
 
     [Fact]
     public void AnUploadSaysHowManyBytesFollow()
@@ -36,6 +46,19 @@ public class ContractTests
             JsonNode.DeepEquals(WithoutNulls(JsonNode.Parse(json)), WithoutNulls(JsonNode.Parse(encoded))),
             $"{name} changed on the way through:\n{encoded}");
     }
+
+    /// A reply as the agent writes it, from what the app read.
+    private static JsonNode? Written(Reply reply) => reply switch
+    {
+        OkReply => JsonValue.Create("ok"),
+        ErrorReply error => new JsonObject { ["error"] = error.Message },
+        StateReply state => new JsonObject { ["state"] = JsonSerializer.SerializeToNode(state.State, AgentJson.Default.AgentState) },
+        CatalogReply catalog => new JsonObject { ["catalog"] = JsonSerializer.SerializeToNode(catalog.Models, AgentJson.Default.IReadOnlyListCatalogModel) },
+        ReleasesReply releases => new JsonObject { ["releases"] = JsonSerializer.SerializeToNode(releases.Releases, AgentJson.Default.IReadOnlyListRelease) },
+        PlanReply plan => new JsonObject { ["plan"] = JsonSerializer.SerializeToNode(plan.Planned, AgentJson.Default.IReadOnlyListPlanned) },
+        SupervisionReply supervision => new JsonObject { ["supervision"] = supervision.Pkcs12 },
+        _ => throw new ArgumentException($"no example for {reply}"),
+    };
 
     private static string Fixture(string name, [CallerFilePath] string here = "") =>
         Path.Combine(Path.GetDirectoryName(here)!, "..", "..", "..", "crates", "api", "fixtures", name);

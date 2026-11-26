@@ -196,15 +196,15 @@ struct DeviceTests {
         var state = try Fixtures.state
         let hub = "a0e012192cdfdb67"
         let all = DeviceActions(state.devices.filter(\.isSelectable))
-        #expect(all.dfu == [.dfu(hub: hub, port: 4)])
-        #expect(all.restart == [.reboot(hub: hub, port: 2), .reboot(hub: hub, port: 4)])
+        let mac = RestoreTarget(port: 2, generation: 2, ecid: "001a79d10e6bc01c")
+        let other = RestoreTarget(port: 4, generation: 4, ecid: "0002250e3c04c01e")
+        #expect(all.dfu == [.dfu(hubs: [RestoreSelection(hub: hub, session: 77, targets: [other])])])
+        #expect(all.restart == [.reboot(hubs: [RestoreSelection(hub: hub, session: 77, targets: [mac, other])])])
         #expect(all.revive == nil)
 
         state.hubs[0].ports[1].restore = true
-        let mac = DeviceActions([state.devices[1]])
-        let target = RestoreTarget(port: 2, generation: 2, ecid: "001a79d10e6bc01c")
-        let selection = RestoreSelection(hub: hub, session: 77, targets: [target])
-        #expect(mac.revive == .revive(hubs: [selection], latest: false))
+        let one = DeviceActions([state.devices[1]])
+        #expect(one.revive == .revive(hubs: [RestoreSelection(hub: hub, session: 77, targets: [mac])], latest: false))
     }
 
     @Test func hubsWithOneNameAreToldApart() throws {

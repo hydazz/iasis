@@ -6,25 +6,24 @@ using System.Text.Json;
 namespace Iasis.Agent;
 
 /// The agent's socket: the state it streams, and one connection per request.
-public static class AgentClient
+public sealed class AgentClient(string socketPath)
 {
     /// Where the Windows service listens.
-    public static readonly string SocketPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-        "Iasis",
-        "cache",
-        "agent.sock");
+    public static AgentClient Local { get; } = new(Path.Combine(
+        Environment.GetEnvironmentVariable("IASIS_HOME") ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Iasis", "cache"),
+        "agent.sock"));
 
     private static readonly byte[] EndOfLine = "\n"u8.ToArray();
 
-    private static async Task<Stream> Connect(CancellationToken token)
+    private async Task<NetworkStream> Connect(CancellationToken token)
     {
         var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             timeout.CancelAfter(TimeSpan.FromSeconds(2));
-            await socket.ConnectAsync(new UnixDomainSocketEndPoint(SocketPath), timeout.Token);
+            await socket.ConnectAsync(new UnixDomainSocketEndPoint(socketPath), timeout.Token);
             return new NetworkStream(socket, ownsSocket: true);
         }
         catch (SocketException error) when (error.SocketErrorCode == SocketError.AccessDenied)
@@ -49,21 +48,59 @@ public static class AgentClient
     private static Reply Decode(string line) =>
         JsonSerializer.Deserialize(line, AgentJson.Default.Reply) ?? throw new JsonException("an empty reply");
 
-    /// Ask the agent once.
-    public static async Task<Reply> Ask(Request request, CancellationToken token = default)
+    private static async Task<Reply> ReadReply(StreamReader reader, CancellationToken token)
     {
+        var reply = Decode(await reader.ReadLineAsync(token) ?? throw new IOException("The Iasis service closed the connection."));
+        return reply is ErrorReply error ? throw new AgentRefusedException(error.Message) : reply;
+    }
+
+    /// An optional file follows its request as bytes on the same connection.
+    public async Task<Reply> Ask(Request request, CancellationToken token = default, FileStream? file = null)
+    {
+        if ((file?.Length ?? 0) != request.Payload())
+        {
+            throw new IOException("The file size changed before the transfer.");
+        }
         await using var stream = await Connect(token);
         await Send(stream, request, token);
         using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
-        return Decode(await reader.ReadLineAsync(token) ?? throw new IOException("The agent closed the connection."));
+        if (file is not null)
+        {
+            try
+            {
+                await file.CopyToAsync(stream, token);
+            }
+            catch (IOException)
+            {
+                // A refused upload can carry the agent's reason before the socket closes.
+                try
+                {
+                    stream.Socket.Shutdown(SocketShutdown.Send);
+                    await ReadReply(reader, token);
+                }
+                catch (SocketException) { }
+                catch (IOException) { }
+                throw;
+            }
+        }
+        return await ReadReply(reader, token);
     }
 
-    /// The agent's state now and each time it changes, until the connection ends.
-    public static async IAsyncEnumerable<AgentState> Watch([EnumeratorCancellation] CancellationToken token = default)
+    /// A submitted job's outcomes are only present on its own connection.
+    public async IAsyncEnumerable<AgentState> Watch(
+        [EnumeratorCancellation] CancellationToken token = default, Request? submitted = null)
     {
         await using var stream = await Connect(token);
-        await Send(stream, new WatchRequest(), token);
         using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
+        if (submitted is not null)
+        {
+            await Send(stream, submitted, token);
+            if (await ReadReply(reader, token) is not OkReply)
+            {
+                throw new InvalidDataException("The Iasis service did not accept the request.");
+            }
+        }
+        await Send(stream, new WatchRequest(), token);
         while (await reader.ReadLineAsync(token) is { } line)
         {
             switch (Decode(line))
@@ -73,6 +110,8 @@ public static class AgentClient
                     break;
                 case ErrorReply error:
                     throw new AgentRefusedException(error.Message);
+                default:
+                    throw new InvalidDataException("The Iasis service returned an unexpected reply.");
             }
         }
     }

@@ -134,11 +134,7 @@ impl PortRow {
                         )
                     },
                 );
-            self.power.set_icon_name(Some(if port.short {
-                "battery-caution-symbolic"
-            } else {
-                "ac-adapter-symbolic"
-            }));
+            self.power.set_icon_name(Some(POWER));
             set_class(&self.power, "warning", port.short);
             self.power.set_tooltip_text(Some(&if port.short {
                 format!("{reading}. The device reports insufficient power.")
@@ -214,6 +210,10 @@ pub fn set_class(widget: &impl IsA<gtk::Widget>, class: &str, on: bool) {
 
 /// Work under way whose end is unknown, turned by the `turning` class.
 pub const TURNING: &str = "view-refresh-symbolic";
+
+/// Power on a port; with the `warning` class, power its device reports as
+/// insufficient.
+pub const POWER: &str = "com.hydaz.Iasis-zap-symbolic";
 
 /// What a port is doing or how it ended, as one mark. Work with a known
 /// fraction is a ring drawn that far round; without one, an arrow turns.

@@ -1,7 +1,7 @@
 import Foundation
 
 /// A request to the agent: one JSON object with an `op`.
-nonisolated enum AgentRequest: Codable, Equatable {
+nonisolated enum AgentRequest: Encodable, Equatable {
     case state
     case watch
     /// What a restore would install on each target.
@@ -12,8 +12,10 @@ nonisolated enum AgentRequest: Codable, Equatable {
     /// Repairs the targets from the images a restore would install and keeps
     /// their data.
     case revive(hubs: [RestoreSelection], latest: Bool)
-    case dfu(hub: String, port: Int)
-    case reboot(hub: String, port: Int)
+    /// Signals the targets into DFU. The agent checks every one first.
+    case dfu(hubs: [RestoreSelection])
+    /// Signals the targets to restart, as `dfu`.
+    case reboot(hubs: [RestoreSelection])
     case power(hub: String, port: Int, on: Bool)
     case debugUsb(hub: String, port: Int, on: Bool)
     case rename(hub: String, name: String)
@@ -34,6 +36,8 @@ nonisolated enum AgentRequest: Codable, Equatable {
     case importImage(name: String, bytes: Int64)
     case remove(image: String)
     case catalog
+    /// What the agent reads from a hub and finds on its USB.
+    case diagnostics(hub: String)
 
     /// The bytes that follow the request on the connection.
     var payload: Int64 {
@@ -48,36 +52,11 @@ nonisolated enum AgentRequest: Codable, Equatable {
         case op, hub, hubs, port, name, on, percent, bytes, model, build, enabled, image, latest, pkcs12, password
     }
 
-    init(from decoder: any Decoder) throws {
-        let fields = try decoder.container(keyedBy: CodingKeys.self)
-        func field<T: Decodable>(_ key: CodingKeys) throws -> T {
-            try fields.decode(T.self, forKey: key)
-        }
-        let op: String = try field(.op)
-        switch op {
-        case "state": self = .state
-        case "watch": self = .watch
-        case "plan": self = try .plan(hubs: field(.hubs))
-        case "restore": self = try .restore(hubs: field(.hubs), latest: field(.latest))
-        case "revive": self = try .revive(hubs: field(.hubs), latest: field(.latest))
-        case "dfu": self = try .dfu(hub: field(.hub), port: field(.port))
-        case "reboot": self = try .reboot(hub: field(.hub), port: field(.port))
-        case "power": self = try .power(hub: field(.hub), port: field(.port), on: field(.on))
-        case "debug_usb": self = try .debugUsb(hub: field(.hub), port: field(.port), on: field(.on))
-        case "rename": self = try .rename(hub: field(.hub), name: field(.name))
-        case "brightness": self = try .brightness(hub: field(.hub), percent: field(.percent))
-        case "update": self = try .update(hub: field(.hub), bytes: fields.decodeIfPresent(Int64.self, forKey: .bytes))
-        case "sharing": self = try .sharing(enabled: field(.enabled))
-        case "import_supervision": self = try .importSupervision(pkcs12: field(.pkcs12), password: field(.password))
-        case "export_supervision": self = try .exportSupervision(password: field(.password))
-        case "download": self = try .download(model: field(.model), build: fields.decodeIfPresent(String.self, forKey: .build))
-        case "releases": self = try .releases(model: field(.model))
-        case "import": self = try .importImage(name: field(.name), bytes: field(.bytes))
-        case "remove": self = try .remove(image: field(.image))
-        case "catalog": self = .catalog
-        default:
-            throw DecodingError.dataCorruptedError(forKey: .op, in: fields, debugDescription: "unknown op \(op)")
-        }
+    /// The request as the line the agent reads.
+    func line() throws -> Data {
+        var line = try JSONEncoder().encode(self)
+        line.append(0x0A)
+        return line
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -98,14 +77,12 @@ nonisolated enum AgentRequest: Codable, Equatable {
             try fields.encode("revive", forKey: .op)
             try fields.encode(hubs, forKey: .hubs)
             try fields.encode(latest, forKey: .latest)
-        case let .dfu(hub, port):
+        case let .dfu(hubs):
             try fields.encode("dfu", forKey: .op)
-            try fields.encode(hub, forKey: .hub)
-            try fields.encode(port, forKey: .port)
-        case let .reboot(hub, port):
+            try fields.encode(hubs, forKey: .hubs)
+        case let .reboot(hubs):
             try fields.encode("reboot", forKey: .op)
-            try fields.encode(hub, forKey: .hub)
-            try fields.encode(port, forKey: .port)
+            try fields.encode(hubs, forKey: .hubs)
         case let .power(hub, port, on):
             try fields.encode("power", forKey: .op)
             try fields.encode(hub, forKey: .hub)
@@ -154,13 +131,16 @@ nonisolated enum AgentRequest: Codable, Equatable {
             try fields.encode(image, forKey: .image)
         case .catalog:
             try fields.encode("catalog", forKey: .op)
+        case let .diagnostics(hub):
+            try fields.encode("diagnostics", forKey: .op)
+            try fields.encode(hub, forKey: .hub)
         }
     }
 }
 
 /// The agent's answer: `"ok"`, `{"error": …}`, `{"state": …}`,
 /// `{"catalog": …}`, `{"releases": …}`, `{"plan": …}` or `{"supervision": …}`.
-nonisolated enum AgentReply: Codable, Equatable {
+nonisolated enum AgentReply: Decodable, Equatable {
     case ok
     case error(String)
     case state(AgentState)
@@ -171,6 +151,13 @@ nonisolated enum AgentReply: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case error, state, catalog, releases, plan, supervision
+    }
+
+    /// One line of the agent's answer.
+    init(line: Data) throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        self = try decoder.decode(Self.self, from: line)
     }
 
     init(from decoder: any Decoder) throws {
@@ -193,35 +180,17 @@ nonisolated enum AgentReply: Codable, Equatable {
             self = .ok
         }
     }
-
-    func encode(to encoder: any Encoder) throws {
-        if case .ok = self {
-            var value = encoder.singleValueContainer()
-            try value.encode("ok")
-            return
-        }
-        var fields = encoder.container(keyedBy: CodingKeys.self)
-        switch self {
-        case .ok: break
-        case let .error(message): try fields.encode(message, forKey: .error)
-        case let .state(state): try fields.encode(state, forKey: .state)
-        case let .catalog(models): try fields.encode(models, forKey: .catalog)
-        case let .releases(releases): try fields.encode(releases, forKey: .releases)
-        case let .plan(planned): try fields.encode(planned, forKey: .plan)
-        case let .supervision(identity): try fields.encode(identity, forKey: .supervision)
-        }
-    }
 }
 
 /// The targets selected on one hub, in the session the user saw.
-nonisolated struct RestoreSelection: Codable, Equatable {
+nonisolated struct RestoreSelection: Encodable, Equatable {
     let hub: String
     let session: UInt32
     var targets: [RestoreTarget]
 }
 
 /// One attachment, and the device on it when it is identified.
-nonisolated struct RestoreTarget: Codable, Equatable {
+nonisolated struct RestoreTarget: Encodable, Equatable {
     let port: Int
     let generation: UInt32
     var ecid: String?

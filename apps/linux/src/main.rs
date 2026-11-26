@@ -125,8 +125,6 @@ impl Shell {
         let has_tray = false;
         // With a tray the app outlives its window.
         window.window.set_hide_on_close(has_tray);
-        #[cfg(target_os = "linux")]
-        login::first_launch();
         let shell = Rc::new(Self {
             app: app.clone(),
             window,

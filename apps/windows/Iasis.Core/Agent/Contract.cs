@@ -117,7 +117,7 @@ public sealed record SharingPort(string Hub, int Port, bool Active, string? Prob
 public sealed record Supervision(string? Name, string? Certificate, string? Problem);
 
 /// Software the host lacks, and what goes without it.
-public sealed record Prerequisite(string Id, string Name, string Url, string Reason);
+public sealed record Prerequisite(string Id, string Name, string? Url, string Reason);
 
 /// The targets selected on one hub, in the session the client saw.
 public sealed record Selection(string Hub, uint Session, IReadOnlyList<Target> Targets);
@@ -186,6 +186,7 @@ public sealed class SnakeCaseEnum<T>() : JsonStringEnumConverter<T>(JsonNamingPo
 [JsonDerivedType(typeof(ImportRequest), "import")]
 [JsonDerivedType(typeof(RemoveRequest), "remove")]
 [JsonDerivedType(typeof(CatalogRequest), "catalog")]
+[JsonDerivedType(typeof(DiagnosticsRequest), "diagnostics")]
 public abstract record Request
 {
     /// The bytes that follow the request on the connection.
@@ -197,8 +198,8 @@ public sealed record WatchRequest : Request;
 public sealed record PlanRequest(IReadOnlyList<Selection> Hubs) : Request;
 public sealed record RestoreRequest(IReadOnlyList<Selection> Hubs, bool Latest) : Request;
 public sealed record ReviveRequest(IReadOnlyList<Selection> Hubs, bool Latest) : Request;
-public sealed record DfuRequest(string Hub, int Port) : Request;
-public sealed record RebootRequest(string Hub, int Port) : Request;
+public sealed record DfuRequest(IReadOnlyList<Selection> Hubs) : Request;
+public sealed record RebootRequest(IReadOnlyList<Selection> Hubs) : Request;
 public sealed record PowerRequest(string Hub, int Port, bool On) : Request;
 public sealed record DebugUsbRequest(string Hub, int Port, bool On) : Request;
 public sealed record RenameRequest(string Hub, string Name) : Request;
@@ -224,6 +225,7 @@ public sealed record ImportRequest(string Name, long Bytes) : Request
 
 public sealed record RemoveRequest(string Image) : Request;
 public sealed record CatalogRequest : Request;
+public sealed record DiagnosticsRequest(string Hub) : Request;
 
 /// A reply: `"ok"`, or an object whose one member names what it carries.
 [JsonConverter(typeof(ReplyConverter))]
@@ -269,41 +271,9 @@ public sealed class ReplyConverter : JsonConverter<Reply>
     private static T Read<T>(ref Utf8JsonReader reader, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> info) =>
         JsonSerializer.Deserialize(ref reader, info) ?? throw new JsonException("an empty reply");
 
-    public override void Write(Utf8JsonWriter writer, Reply value, JsonSerializerOptions options)
-    {
-        if (value is OkReply)
-        {
-            writer.WriteStringValue("ok");
-            return;
-        }
-        writer.WriteStartObject();
-        switch (value)
-        {
-            case ErrorReply error:
-                writer.WriteString("error", error.Message);
-                break;
-            case StateReply state:
-                writer.WritePropertyName("state");
-                JsonSerializer.Serialize(writer, state.State, AgentJson.Default.AgentState);
-                break;
-            case CatalogReply catalog:
-                writer.WritePropertyName("catalog");
-                JsonSerializer.Serialize(writer, catalog.Models, AgentJson.Default.IReadOnlyListCatalogModel);
-                break;
-            case ReleasesReply releases:
-                writer.WritePropertyName("releases");
-                JsonSerializer.Serialize(writer, releases.Releases, AgentJson.Default.IReadOnlyListRelease);
-                break;
-            case PlanReply plan:
-                writer.WritePropertyName("plan");
-                JsonSerializer.Serialize(writer, plan.Planned, AgentJson.Default.IReadOnlyListPlanned);
-                break;
-            case SupervisionReply supervision:
-                writer.WriteString("supervision", supervision.Pkcs12);
-                break;
-        }
-        writer.WriteEndObject();
-    }
+    /// The app only reads replies.
+    public override void Write(Utf8JsonWriter writer, Reply value, JsonSerializerOptions options) =>
+        throw new NotSupportedException("the app only reads replies");
 }
 
 [JsonSourceGenerationOptions(
@@ -314,7 +284,6 @@ public sealed class ReplyConverter : JsonConverter<Reply>
 [JsonSerializable(typeof(Request))]
 [JsonSerializable(typeof(Reply))]
 [JsonSerializable(typeof(IReadOnlyList<Request>))]
-[JsonSerializable(typeof(IReadOnlyList<Reply>))]
 [JsonSerializable(typeof(IReadOnlyList<CatalogModel>))]
 [JsonSerializable(typeof(IReadOnlyList<Release>))]
 [JsonSerializable(typeof(IReadOnlyList<Planned>))]

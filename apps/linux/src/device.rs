@@ -450,22 +450,8 @@ pub struct Actions {
 impl Actions {
     pub fn new(devices: &[Device]) -> Self {
         let mut actions = Self {
-            dfu: devices
-                .iter()
-                .filter(|device| device.port.dfu)
-                .map(|device| Request::Dfu {
-                    hub: device.serial.clone(),
-                    port: device.port.number,
-                })
-                .collect(),
-            restart: devices
-                .iter()
-                .filter(|device| device.port.reboot)
-                .map(|device| Request::Reboot {
-                    hub: device.serial.clone(),
-                    port: device.port.number,
-                })
-                .collect(),
+            dfu: signal(devices, |port| port.dfu, |hubs| Request::Dfu { hubs }),
+            restart: signal(devices, |port| port.reboot, |hubs| Request::Reboot { hubs }),
             ..Self::default()
         };
         actions.restore = RestoreConfirmation::new(devices);
@@ -475,6 +461,41 @@ impl Actions {
         });
         actions
     }
+}
+
+/// One request for the devices whose port `takes` it, or none.
+fn signal(
+    devices: &[Device],
+    takes: impl Fn(&PortView) -> bool,
+    request: impl Fn(Vec<Selection>) -> Request,
+) -> Vec<Request> {
+    let devices: Vec<Device> = devices
+        .iter()
+        .filter(|device| takes(&device.port))
+        .cloned()
+        .collect();
+    match selections(&devices) {
+        Some(hubs) if !hubs.is_empty() => vec![request(hubs)],
+        _ => Vec::new(),
+    }
+}
+
+/// The devices' attachments by hub, as the agent checks them before it acts
+/// on them; none when a device's hub has no session.
+fn selections(devices: &[Device]) -> Option<Vec<Selection>> {
+    let mut hubs: Vec<Selection> = Vec::new();
+    for device in devices {
+        let session = device.session?;
+        match hubs.iter_mut().find(|hub| hub.hub == device.serial) {
+            Some(hub) => hub.targets.push(device.target()),
+            None => hubs.push(Selection {
+                hub: device.serial.clone(),
+                session,
+                targets: vec![device.target()],
+            }),
+        }
+    }
+    Some(hubs)
 }
 
 /// An erase the user is asked to confirm: the attachments as shown, on any
@@ -496,24 +517,13 @@ pub struct Choice {
 impl RestoreConfirmation {
     pub fn new(devices: &[Device]) -> Option<Self> {
         if devices.is_empty()
-            || !devices.iter().all(|device| {
-                device.port.occupied && device.port.restore && device.session.is_some()
-            })
+            || !devices
+                .iter()
+                .all(|device| device.port.occupied && device.port.restore)
         {
             return None;
         }
-        let mut hubs: Vec<Selection> = Vec::new();
-        for device in devices {
-            let session = device.session?;
-            match hubs.iter_mut().find(|hub| hub.hub == device.serial) {
-                Some(hub) => hub.targets.push(device.target()),
-                None => hubs.push(Selection {
-                    hub: device.serial.clone(),
-                    session,
-                    targets: vec![device.target()],
-                }),
-            }
-        }
+        let hubs = selections(devices)?;
         Some(Self {
             devices: devices.to_vec(),
             hubs,

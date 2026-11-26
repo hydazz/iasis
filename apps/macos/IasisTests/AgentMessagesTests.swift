@@ -65,7 +65,10 @@ struct AgentMessagesTests {
             .revive(hubs: [.init(hub: "a0e0", session: 77, targets: [.init(port: 2, generation: 4)])], latest: false),
             #"{"hubs":[{"hub":"a0e0","session":77,"targets":[{"generation":4,"port":2}]}],"latest":false,"op":"revive"}"#
         ),
-        (.dfu(hub: "a0e0", port: 2), #"{"hub":"a0e0","op":"dfu","port":2}"#),
+        (
+            .dfu(hubs: [.init(hub: "a0e0", session: 77, targets: [.init(port: 2, generation: 4)])]),
+            #"{"hubs":[{"hub":"a0e0","session":77,"targets":[{"generation":4,"port":2}]}],"op":"dfu"}"#
+        ),
         (.power(hub: "a0e0", port: 1, on: false), #"{"hub":"a0e0","on":false,"op":"power","port":1}"#),
         (.sharing(enabled: true), #"{"enabled":true,"op":"sharing"}"#),
         (.sharing(enabled: false), #"{"enabled":false,"op":"sharing"}"#),

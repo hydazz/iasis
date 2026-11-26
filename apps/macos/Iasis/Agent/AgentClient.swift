@@ -49,7 +49,7 @@ nonisolated struct AgentClient: AgentService {
         let watching = Task {
             do {
                 for try await line in try lines(answering: .watch) {
-                    if case let .state(state) = try reply(in: line) {
+                    if case let .state(state) = try AgentReply(line: line) {
                         continuation.yield(state)
                     }
                 }
@@ -119,8 +119,7 @@ nonisolated struct AgentClient: AgentService {
         // than end the app.
         var on: Int32 = 1
         setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
-        var message = try JSONEncoder().encode(request)
-        message.append(0x0A)
+        let message = try request.line()
         var sent: Int64 = 0
         if write(message, to: descriptor) {
             while sent < request.payload, let chunk = try file.read(upToCount: 1 << 20), !chunk.isEmpty {
@@ -139,7 +138,7 @@ nonisolated struct AgentClient: AgentService {
         guard !line.isEmpty else {
             throw AgentError.unavailable
         }
-        let answer = try reply(in: line)
+        let answer = try AgentReply(line: line)
         if case .error = answer {
             return answer
         }
@@ -164,7 +163,7 @@ nonisolated struct AgentClient: AgentService {
 
     private func answer(to request: AgentRequest) async throws -> AgentReply {
         for try await line in try lines(answering: request) {
-            let reply = try reply(in: line)
+            let reply = try AgentReply(line: line)
             if case let .error(reason) = reply {
                 throw AgentError.refused(reason)
             }
@@ -173,19 +172,12 @@ nonisolated struct AgentClient: AgentService {
         throw AgentError.unavailable
     }
 
-    private func reply(in line: Data) throws -> AgentReply {
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        return try decoder.decode(AgentReply.self, from: line)
-    }
-
     /// Send a request and deliver each line of the answer as it arrives, on a
     /// thread of its own: a read waits for as long as the agent has nothing
     /// to say. `FileHandle.bytes` holds lines back until its buffer fills.
     private func lines(answering request: AgentRequest) throws -> AsyncThrowingStream<Data, any Error> {
         let descriptor = try connect()
-        var message = try JSONEncoder().encode(request)
-        message.append(0x0A)
+        let message = try request.line()
         guard write(message, to: descriptor) else {
             close(descriptor)
             throw AgentError.unavailable

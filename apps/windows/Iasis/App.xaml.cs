@@ -1,13 +1,12 @@
 using CommunityToolkit.Mvvm.Input;
 using H.NotifyIcon;
+using Iasis.Agent;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace Iasis;
 
-/// Iasis lives in the notification area; its window opens from there and
-/// closes back to it. A login start (`--background`) shows the icon alone.
 public partial class App : Application
 {
     private MainWindow? window;
@@ -18,27 +17,64 @@ public partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         window = new MainWindow();
-        var menu = new MenuFlyout();
-        menu.Items.Add(new MenuFlyoutItem { Text = "Open Iasis", Command = new RelayCommand(Show) });
-        menu.Items.Add(new MenuFlyoutSeparator());
-        menu.Items.Add(new MenuFlyoutItem { Text = "Quit Iasis", Command = new RelayCommand(Quit) });
         tray = new TaskbarIcon
         {
             ToolTipText = "Iasis",
             IconSource = new BitmapImage(new Uri("ms-appx:///Assets/Iasis.ico")),
-            LeftClickCommand = new RelayCommand(Show),
+            LeftClickCommand = new RelayCommand(() => window.Open()),
             NoLeftClickDelay = true,
             ContextMenuMode = ContextMenuMode.PopupMenu,
-            ContextFlyout = menu,
         };
+        window.StateChanged += UpdateMenu;
+        UpdateMenu();
         tray.ForceCreate();
-        if (!Environment.GetCommandLineArgs().Contains("--background"))
-        {
-            Show();
-        }
+        if (!Environment.GetCommandLineArgs().Contains("--background")) window.Open();
     }
 
-    private void Show() => window?.Activate();
+    private void UpdateMenu()
+    {
+        if (window is not { } main || tray is null) return;
+        var menu = new MenuFlyout();
+        foreach (var hub in main.State?.Hubs ?? [])
+        {
+            var section = new MenuFlyoutSubItem { Text = string.IsNullOrEmpty(hub.Name) ? hub.Serial : $"{hub.Name} ({hub.Serial})" };
+            foreach (var d in main.Devices.Where(d => d.Hub.Serial == hub.Serial && d.Port.Occupied))
+            {
+                var target = new MenuFlyoutSubItem { Text = $"{d.Port.Number}. {d.Name}" + (d.Status.Length > 0 ? $" · {d.Status}" : "") };
+                AddAction("Enter DFU", DeviceAction.Dfu);
+                AddAction("Restart", DeviceAction.Restart);
+                AddAction("Revive", DeviceAction.Revive);
+                AddAction("Restore…", DeviceAction.Restore);
+                section.Items.Add(target);
+
+                void AddAction(string title, DeviceAction action)
+                {
+                    target.Items.Add(new MenuFlyoutItem
+                    {
+                        Text = title,
+                        IsEnabled = DeviceActionTargets.For([d], action) is not null,
+                        Command = new RelayCommand(() =>
+                        {
+                            main.Open();
+                            main.Act(action, [d]);
+                        }),
+                    });
+                }
+            }
+            if (section.Items.Count == 0) section.Items.Add(new MenuFlyoutItem { Text = hub.Notice ?? "No devices", IsEnabled = false });
+            menu.Items.Add(section);
+        }
+        if (main.State?.Images.Fetch is { } fetch)
+        {
+            var percent = fetch.Bytes == 0 ? "" : $" · {100.0 * fetch.Done / fetch.Bytes:0}%";
+            menu.Items.Add(new MenuFlyoutItem { Text = $"Downloading {fetch.Id}{percent}", IsEnabled = false });
+        }
+        if (menu.Items.Count > 0) menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(new MenuFlyoutItem { Text = "Open Iasis", Command = new RelayCommand(() => main.Open()) });
+        menu.Items.Add(new MenuFlyoutItem { Text = "Settings", Command = new RelayCommand(() => main.Open(settings: true)) });
+        menu.Items.Add(new MenuFlyoutItem { Text = "Quit Iasis", Command = new RelayCommand(Quit) });
+        tray.ContextFlyout = menu;
+    }
 
     private void Quit()
     {
