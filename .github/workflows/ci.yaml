@@ -9,6 +9,7 @@ on:
   pull_request:
     branches:
       - main
+  merge_group:
   workflow_dispatch:
 
 concurrency:
@@ -27,8 +28,68 @@ env:
   MISE_TASK_RUN_AUTO_INSTALL: "false"
 
 jobs:
+  changes:
+    name: Changes
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    # A manual run checks everything.
+    outputs:
+      linux: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.linux == 'true' }}
+      macos: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.macos == 'true' }}
+      windows: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.windows == 'true' }}
+      firmware: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.firmware == 'true' }}
+      hardware: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.hardware == 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The host tools carry IasisOS, so the firmware's crates reach every
+      # platform through the host filter.
+      - name: Filter changes
+        id: filter
+        if: github.event_name != 'workflow_dispatch'
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            host: &host
+              - Cargo.toml
+              - Cargo.lock
+              - crates/**
+              - .mise/**
+              - .github/workflows/ci.yaml
+            linux:
+              - *host
+              - apps/linux/**
+            macos:
+              - *host
+              - apps/macos/**
+            windows:
+              - *host
+              - apps/windows/**
+            firmware:
+              - Cargo.toml
+              - Cargo.lock
+              - crates/firmware/**
+              - crates/pd/**
+              - crates/protocol/**
+              - .mise/**
+              - .github/workflows/ci.yaml
+            hardware:
+              - pyproject.toml
+              - uv.lock
+              - hardware/**
+              - .mise/**
+              - .github/workflows/ci.yaml
+
   linux:
     name: Linux
+    needs: changes
+    if: needs.changes.outputs.linux == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     permissions:
@@ -53,16 +114,13 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
-      - name: Check Rust formatting
-        run: mise run rust:fmt-check
-
       - name: Lint host software
         run: mise run host:lint
 
       - name: Test host software
         run: mise run host:test
 
-      - name: Build host
+      - name: Build host software
         run: mise run host:build
 
       - name: Lint Linux app
@@ -71,19 +129,12 @@ jobs:
       - name: Test Linux app
         run: mise run //apps/linux:test
 
-      - name: Smoke-test Linux app
-        run: mise run //apps/linux:smoke
-
-      - name: Check firmware
-        run: |
-          mise run firmware:lint
-          mise run firmware:test
-          mise run firmware:uf2
-
   macos:
-    name: macOS host
+    name: macOS
+    needs: changes
+    if: needs.changes.outputs.macos == 'true'
     runs-on: xcode-27
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
@@ -101,10 +152,13 @@ jobs:
         run: mise bootstrap packages apply --yes
 
       - name: Install tools
-        run: mise install --locked rust github:raspberrypi/pico-sdk-tools
+        run: mise -C apps/macos install --locked rust github:raspberrypi/pico-sdk-tools periphery swiftformat
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Show Xcode version
+        run: xcodebuild -version
 
       - name: Lint host software
         run: mise run host:lint
@@ -112,11 +166,22 @@ jobs:
       - name: Test host software
         run: mise run host:test
 
-      - name: Build host
+      - name: Build host software
         run: mise run host:build
+
+      - name: Check app formatting
+        run: mise run //apps/macos:fmt-check
+
+      - name: Lint app
+        run: mise run //apps/macos:lint
+
+      - name: Test app
+        run: mise run //apps/macos:test
 
   windows:
     name: Windows
+    needs: changes
+    if: needs.changes.outputs.windows == 'true'
     runs-on: windows-2025
     timeout-minutes: 60
     permissions:
@@ -138,25 +203,37 @@ jobs:
       - name: Setup Mise
         uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
-          working_directory: apps/windows
+          install: false
 
+      - name: Install tools
+        run: mise -C apps/windows install --locked rust github:raspberrypi/pico-sdk-tools dotnet
+
+      # The runner's own MSYS2, which the bootstrap task installs packages into.
       - name: Setup MSYS2
         uses: msys2/setup-msys2@3c51bf698df1e37b2261f53cb67797b97761185c # v2.34.0
         with:
           msystem: MINGW64
-          update: false
+          release: false
+          update: true
           path-type: inherit
-          install: >-
-            base-devel autoconf automake libtool autoconf-archive gettext-devel pkgconf perl
-            mingw-w64-x86_64-gcc mingw-w64-x86_64-pkgconf mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-nasm
+
+      - name: Install MSYS2 packages
+        run: mise run bootstrap
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
+      - name: Lint host software
+        shell: msys2 {0}
+        run: mise run host:lint
+
+      - name: Test host software
+        shell: msys2 {0}
+        run: mise run host:test
+
       - name: Build host software
         shell: msys2 {0}
-        run: mise run host:build-windows
+        run: mise run host:build
 
       - name: Lint Windows app
         run: mise run //apps/windows:lint
@@ -167,9 +244,11 @@ jobs:
       - name: Build Windows app
         run: mise run //apps/windows:build
 
-  app:
-    name: App
-    runs-on: xcode-27
+  firmware:
+    name: Firmware
+    needs: changes
+    if: needs.changes.outputs.firmware == 'true'
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -182,22 +261,24 @@ jobs:
       - name: Setup Mise
         uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
-          install_args: --locked periphery swiftformat
+          install_args: --locked rust github:raspberrypi/pico-sdk-tools
 
-      - name: Show Xcode version
-        run: xcodebuild -version
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
-      - name: Check app formatting
-        run: mise run //apps/macos:fmt-check
+      - name: Lint firmware
+        run: mise run firmware:lint
 
-      - name: Lint app
-        run: mise run //apps/macos:lint
+      - name: Test firmware
+        run: mise run firmware:test
 
-      - name: Test app
-        run: mise run //apps/macos:test
+      - name: Build IasisOS
+        run: mise run firmware:build
 
   hardware:
     name: Hardware
+    needs: changes
+    if: needs.changes.outputs.hardware == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     container:
@@ -221,21 +302,13 @@ jobs:
       - name: Setup Mise
         uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
-          install_args: --locked jactionlint python uv ruff node npm:pyright
-
-      - name: Lint workflows
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: jactionlint --online --shellcheck= --format github
-
-      - name: Check Python formatting
-        run: mise run python:fmt-check
+          install_args: --locked python uv ruff node npm:pyright
 
       - name: Lint Python
-        run: mise run python:lint
+        run: mise run //hardware:lint
 
-      - name: Run Python tests
-        run: mise run python:test
+      - name: Test Python
+        run: mise run //hardware:test
 
       - name: Lint schematics and boards
         run: mise run //hardware/boards/...:lint
@@ -259,20 +332,66 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  format:
+    name: Formatting
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Mise
+        uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+        with:
+          install_args: --locked rust ruff node oxfmt
+
+      - name: Check formatting
+        run: mise run fmt-check
+
+  workflow-lint:
+    name: Workflow Lint
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Mise
+        uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+        with:
+          install_args: --locked jactionlint
+
+      - name: Lint workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: jactionlint --online --shellcheck= --format github
+
   status:
     if: ${{ !cancelled() }}
     name: Build Success
     needs:
-      - app
-      - hardware
+      - changes
       - linux
       - macos
       - windows
+      - firmware
+      - hardware
+      - format
+      - workflow-lint
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions: {}
     steps:
+      # A job the changes left out is skipped, not failed.
       - name: Check results
         env:
           RESULTS: ${{ toJSON(needs) }}
-        run: jq -e 'all(.[]; .result == "success")' <<<"$RESULTS"
+        run: jq -e 'all(.[]; .result == "success" or .result == "skipped")' <<<"$RESULTS"

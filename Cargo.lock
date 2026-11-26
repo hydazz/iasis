@@ -2090,6 +2090,7 @@ dependencies = [
  "ksni",
  "libadwaita",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

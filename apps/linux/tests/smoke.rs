@@ -1,10 +1,9 @@
 //! Start the app on a display against an agent socket that serves the
 //! contract's example state, and check that it reads the state and keeps
-//! running without GTK warnings. `mise run //apps/linux:smoke` provides a
+//! running without GTK warnings. `mise run //apps/linux:test` provides a
 //! virtual display and a session bus.
 
 use std::{
-    fs,
     io::{BufRead, BufReader, Read, Write},
     os::unix::net::UnixListener,
     process::{Command, Stdio},
@@ -14,9 +13,8 @@ use std::{
 };
 
 fn main() {
-    let home = std::env::temp_dir().join(format!("iasis-smoke-{}", std::process::id()));
-    fs::create_dir_all(&home).unwrap();
-    let listener = UnixListener::bind(home.join("agent.sock")).unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let listener = UnixListener::bind(home.path().join("agent.sock")).unwrap();
     let state: serde_json::Value =
         serde_json::from_str(include_str!("../../../crates/api/fixtures/state.json")).unwrap();
     let frame = format!("{}\n", serde_json::json!({ "state": state }));
@@ -43,8 +41,8 @@ fn main() {
     });
 
     let mut app = Command::new(env!("CARGO_BIN_EXE_iasis-desktop"))
-        .env("IASIS_HOME", &home)
-        .env("XDG_CONFIG_HOME", home.join("config"))
+        .env("IASIS_HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join("config"))
         // A virtual display has no accessibility bus to connect to.
         .env("GTK_A11Y", "none")
         .stderr(Stdio::piped())
@@ -58,7 +56,6 @@ fn main() {
     let _ = app.wait();
     let mut log = String::new();
     app.stderr.take().unwrap().read_to_string(&mut log).unwrap();
-    fs::remove_dir_all(&home).unwrap();
     eprint!("{log}");
     assert!(read.is_ok(), "the app never watched the agent");
     assert!(running, "the app quit");
