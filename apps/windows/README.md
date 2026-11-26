@@ -16,7 +16,7 @@ Under **Settings**, choose a hub to rename it, adjust its lights or install the 
 
 ## Build
 
-Build the [Windows host tools](../../crates/iasis/README.md#windows-installer) first to include them in the installer and tools archive. Run these tasks from the repository root on Windows:
+Build the [Windows host tools](../../crates/iasis/README.md#windows-installer) first so the installer can include them. Run these tasks from the repository root on Windows:
 
 ```powershell
 mise run //apps/windows:test
@@ -24,4 +24,4 @@ mise run //apps/windows:build
 mise run //apps/windows:package
 ```
 
-The MSI and `iasis-<version>-windows-x64.zip` are in `apps/windows/build`. The zip contains the standalone CLI and agent.
+The installer is written to `apps/windows/build/Iasis-<version>-x64.msi`.
