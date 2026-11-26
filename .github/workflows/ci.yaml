@@ -27,8 +27,66 @@ env:
   MISE_TASK_RUN_AUTO_INSTALL: "false"
 
 jobs:
+  changes:
+    name: Changes
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    # A manual run checks everything.
+    outputs:
+      linux: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.linux == 'true' }}
+      macos: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.macos == 'true' }}
+      windows: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.windows == 'true' }}
+      firmware: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.firmware == 'true' }}
+      hardware: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.hardware == 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The host tools carry IasisOS, so the firmware's crates reach every
+      # platform through the host filter.
+      - name: Filter changes
+        id: filter
+        if: github.event_name != 'workflow_dispatch'
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            host: &host
+              - Cargo.toml
+              - Cargo.lock
+              - crates/**
+              - .mise/**
+              - .github/workflows/ci.yaml
+            linux:
+              - *host
+            macos:
+              - *host
+              - apps/macos/**
+            windows:
+              - *host
+            firmware:
+              - Cargo.toml
+              - Cargo.lock
+              - crates/firmware/**
+              - crates/pd/**
+              - crates/protocol/**
+              - .mise/**
+              - .github/workflows/ci.yaml
+            hardware:
+              - pyproject.toml
+              - uv.lock
+              - hardware/**
+              - .mise/**
+              - .github/workflows/ci.yaml
+
   linux:
     name: Linux
+    needs: changes
+    if: needs.changes.outputs.linux == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     permissions:
@@ -64,6 +122,8 @@ jobs:
 
   macos:
     name: macOS
+    needs: changes
+    if: needs.changes.outputs.macos == 'true'
     runs-on: xcode-27
     timeout-minutes: 45
     permissions:
@@ -111,6 +171,8 @@ jobs:
 
   windows:
     name: Windows
+    needs: changes
+    if: needs.changes.outputs.windows == 'true'
     runs-on: windows-2025
     timeout-minutes: 60
     permissions:
@@ -166,6 +228,8 @@ jobs:
 
   firmware:
     name: Firmware
+    needs: changes
+    if: needs.changes.outputs.firmware == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
@@ -195,6 +259,8 @@ jobs:
 
   hardware:
     name: Hardware
+    needs: changes
+    if: needs.changes.outputs.hardware == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     container:
@@ -294,6 +360,7 @@ jobs:
     if: ${{ !cancelled() }}
     name: Build Success
     needs:
+      - changes
       - linux
       - macos
       - windows
@@ -305,7 +372,8 @@ jobs:
     timeout-minutes: 5
     permissions: {}
     steps:
+      # A job the changes left out is skipped, not failed.
       - name: Check results
         env:
           RESULTS: ${{ toJSON(needs) }}
-        run: jq -e 'all(.[]; .result == "success")' <<<"$RESULTS"
+        run: jq -e 'all(.[]; .result == "success" or .result == "skipped")' <<<"$RESULTS"
