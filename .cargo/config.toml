@@ -1,6 +1,10 @@
-[target.thumbv8m.main-none-eabihf]
-rustflags = ["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x"]
+[target."thumbv8m.main-none-eabihf"]
+rustflags = ["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x", "-C", "link-arg=-Tdefmt.x"]
 
 [env]
+# The firmware's trace: `info` and above unless DEFMT_LOG is set, in a ring
+# a probe can read while the hub runs.
+DEFMT_LOG = "info"
+DEFMT_RTT_BUFFER_SIZE = "4096"
 # The macOS gateway links the system libpcap, not one pkg-config finds.
 LIBPCAP_NO_PKG_CONFIG = "1"

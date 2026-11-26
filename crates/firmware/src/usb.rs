@@ -13,7 +13,7 @@ use embassy_usb_driver::{
     ControlPipe, Driver, EndpointAddress, EndpointAllocError, EndpointError, EndpointType,
 };
 pub use iasis_firmware::host_session::Session;
-use iasis_protocol::{self as protocol, BootloaderRequest, Info, PortCommand, Status};
+use iasis_protocol::{self as protocol, Info, PortCommand, Status};
 
 /// A packet of a control transfer the host has not moved in this time has
 /// been abandoned. A live host moves each within a frame or two, and a
@@ -140,6 +140,7 @@ impl<P: ControlPipe> ControlPipe for Pipe<P> {
 }
 
 pub struct Management<'a> {
+    /// Its name is the one in the settings.
     pub info: Info,
     pub status: &'a Cell<Status>,
     pub update: &'a Cell<bool>,
@@ -194,7 +195,13 @@ impl Handler for Management<'_> {
         }
         let result = match request.request {
             // A tool of any protocol version can name the hub.
-            protocol::GET_INFO => protocol::encode(&self.info, buffer),
+            protocol::GET_INFO => protocol::encode(
+                &Info {
+                    name: self.settings.borrow().settings.name,
+                    ..self.info
+                },
+                buffer,
+            ),
             _ if request.value != protocol::VERSION => return Some(InResponse::Rejected),
             protocol::GET_STATUS => {
                 let mut status = self.status.get();
@@ -204,11 +211,9 @@ impl Handler for Management<'_> {
                 let now = embassy_time::Instant::now().as_millis();
                 status.host = self.session.active(now);
                 let session = status.host.map(|host| host.id);
-                status.restore_decision = status.restore_decision.filter(|decision| {
-                    let (protocol::RestoreDecision::Confirmed(arm)
-                    | protocol::RestoreDecision::Cancelled(arm)) = decision;
-                    Some(arm.session) == session && now < arm.expires
-                });
+                status.restore_decision = status
+                    .restore_decision
+                    .filter(|decision| Some(decision.arm().session) == session);
                 protocol::encode(&status, buffer)
             }
             _ => return Some(InResponse::Rejected),
@@ -229,22 +234,15 @@ impl Handler for Management<'_> {
         match request.request {
             // A tool of any protocol version can update the hub.
             protocol::ENTER_BOOTLOADER if self.command.get().is_none() => {
-                match protocol::decode_any::<BootloaderRequest>(data) {
-                    Ok((_, command)) if command.serial == self.info.serial => {
-                        self.session.disconnect();
-                        self.update.set(true);
-                        Some(OutResponse::Accepted)
-                    }
-                    _ => Some(OutResponse::Rejected),
-                }
+                self.session.disconnect();
+                self.update.set(true);
+                Some(OutResponse::Accepted)
             }
             _ if request.value != protocol::VERSION => Some(OutResponse::Rejected),
             protocol::HOST_REPORT if self.configured.get() && !self.suspended.get() => {
                 let accepted = protocol::decode::<protocol::HostReport>(data).is_ok_and(|report| {
                     let now = embassy_time::Instant::now().as_millis();
-                    if report.serial != self.info.serial
-                        || !self.session.report(report.session, now)
-                    {
+                    if !self.session.report(report.session, now) {
                         return false;
                     }
                     self.ports.host(Some(report), true, now);
@@ -258,13 +256,12 @@ impl Handler for Management<'_> {
             }
             protocol::HOST_CONTROL if self.configured.get() && !self.suspended.get() => {
                 let accepted =
-                    protocol::decode::<protocol::HostControlRequest>(data).is_ok_and(|req| {
-                        req.serial == self.info.serial
-                            && self.session.apply(
-                                req.control,
-                                &self.status.get(),
-                                embassy_time::Instant::now().as_millis(),
-                            )
+                    protocol::decode::<protocol::HostControl>(data).is_ok_and(|control| {
+                        self.session.apply(
+                            control,
+                            &self.status.get(),
+                            embassy_time::Instant::now().as_millis(),
+                        )
                     });
                 Some(if accepted {
                     OutResponse::Accepted
@@ -272,11 +269,8 @@ impl Handler for Management<'_> {
                     OutResponse::Rejected
                 })
             }
-            protocol::SETTINGS => match protocol::decode::<protocol::SettingsRequest>(data) {
-                Ok(request)
-                    if request.serial == self.info.serial
-                        && self.settings.borrow_mut().save(request.change) =>
-                {
+            protocol::SETTINGS => match protocol::decode::<protocol::Setting>(data) {
+                Ok(change) if self.settings.borrow_mut().save(change) => {
                     Some(OutResponse::Accepted)
                 }
                 _ => Some(OutResponse::Rejected),
@@ -284,8 +278,7 @@ impl Handler for Management<'_> {
             protocol::PORT_COMMAND if self.command.get().is_none() => {
                 match protocol::decode::<PortCommand>(data) {
                     Ok(command)
-                        if command.serial == self.info.serial
-                            && command.id != 0
+                        if command.id != 0
                             && self.status.get().ports[command.port.index()].command_result
                                 != protocol::CommandResult::Pending =>
                     {

@@ -136,17 +136,30 @@ impl Button {
     }
 
     /// Called after sampling the GPIO so a press already underway cannot confirm.
-    fn arm(&mut self, arm: RestoreArm, status: &Status, now: u64) -> bool {
-        if self.session != Some(arm.session) || now >= arm.expires || !arm.prepared(status) {
-            return false;
-        }
+    fn arm(&mut self, arm: RestoreArm) {
         if self.armed == Some(arm) {
-            return true;
+            return;
         }
         self.armed = Some(arm);
         self.consumed |= self.raw || self.pressed;
         self.notice = None;
-        true
+    }
+
+    /// Why `arm` can no longer be confirmed, and the notice that says so.
+    fn ended(
+        &self,
+        arm: RestoreArm,
+        status: &Status,
+        now: u64,
+    ) -> Option<(RestoreDecision, &'static str)> {
+        if self.session != Some(arm.session) {
+            Some((RestoreDecision::Cancelled(arm), "Host disconnected"))
+        } else if now >= arm.expires {
+            Some((RestoreDecision::Expired(arm), "Restore arm expired"))
+        } else {
+            arm.changed(status)
+                .map(|port| (RestoreDecision::Changed { arm, port }, "Target changed"))
+        }
     }
 
     pub fn sample(
@@ -167,22 +180,13 @@ impl Button {
             self.session = session;
         }
         let mut decision = None;
-        if let Some(arm) = self.armed {
-            let reason = if session != Some(arm.session) {
-                Some("Host disconnected")
-            } else if now >= arm.expires {
-                Some("Restore arm expired")
-            } else if !arm.prepared(status) {
-                Some("Target changed")
-            } else {
-                None
-            };
-            if let Some(reason) = reason {
-                self.armed = None;
-                self.consumed |= busy;
-                self.tell(reason, now);
-                decision = Some(Event::Decision(RestoreDecision::Cancelled(arm)));
-            }
+        if let Some(arm) = self.armed
+            && let Some((ended, reason)) = self.ended(arm, status, now)
+        {
+            self.armed = None;
+            self.consumed |= busy;
+            self.tell(reason, now);
+            decision = Some(Event::Decision(ended));
         }
 
         // An emptied port keeps the selection for a replacement target, so an
@@ -228,11 +232,14 @@ impl Button {
         self.generations = generations;
         self.targets = targets;
 
-        if let Some(arm) = pending_arm
-            && !self.arm(arm, status, now)
-        {
-            self.consumed |= busy;
-            decision = Some(Event::Decision(RestoreDecision::Cancelled(arm)));
+        if let Some(arm) = pending_arm {
+            match self.ended(arm, status, now) {
+                Some((ended, _)) => {
+                    self.consumed |= busy;
+                    decision = Some(Event::Decision(ended));
+                }
+                None => self.arm(arm),
+            }
         }
 
         // A release can be the first sample past the threshold. Count up to
@@ -575,7 +582,7 @@ mod tests {
         for (i, phase) in [
             RestorePhase::Preparing,
             RestorePhase::Running,
-            RestorePhase::Unconfirmed,
+            RestorePhase::Preparing,
         ]
         .into_iter()
         .enumerate()
@@ -727,29 +734,30 @@ mod tests {
     }
 
     #[test]
-    fn a_tap_expiry_replacement_or_session_loss_cancels_the_exact_arm() {
+    fn a_tap_expiry_replacement_or_session_loss_ends_the_exact_arm_with_its_reason() {
         for cause in 0..4 {
             let mut r = Rig::new(0b11111);
             let arm = r.prepare();
             r.pending = Some(arm);
             r.sample(false, 1);
             r.press();
-            let result = match cause {
-                0 => r.release(),
-                1 => r.sample(true, 21_000),
+            let (result, ended) = match cause {
+                0 => (r.release(), RestoreDecision::Cancelled(arm)),
+                1 => (r.sample(true, 21_000), RestoreDecision::Expired(arm)),
                 2 => {
                     r.status.ports[2].generation += 1;
-                    r.sample(true, CONFIRM_MS)
+                    let port = Port::ALL[2];
+                    (
+                        r.sample(true, CONFIRM_MS),
+                        RestoreDecision::Changed { arm, port },
+                    )
                 }
                 _ => {
                     r.session = None;
-                    r.sample(true, CONFIRM_MS)
+                    (r.sample(true, CONFIRM_MS), RestoreDecision::Cancelled(arm))
                 }
             };
-            assert_eq!(
-                result,
-                Some(Event::Decision(RestoreDecision::Cancelled(arm)))
-            );
+            assert_eq!(result, Some(Event::Decision(ended)));
             if cause != 0 {
                 assert_eq!(r.release(), None);
             }

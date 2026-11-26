@@ -5,17 +5,56 @@
 //! step.
 
 use embedded_graphics::{
-    image::{Image, ImageDrawableExt},
+    image::{Image, ImageDrawableExt, ImageRaw},
     pixelcolor::BinaryColor,
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
 };
-use tinybmp::Bmp;
 
 pub const FRAME_MS: u64 = 100;
 
 /// The face with its eyes open, then blinking, above six sparkle frames.
-const SHEET: &[u8] = include_bytes!("egg.bmp");
+/// `#` is a lit pixel.
+const ART: [&str; HEIGHT] = [
+    "..##############################....##############################..",
+    ".################################..################################.",
+    "####################################################################",
+    "####################################################################",
+    "########..##############..##########################################",
+    "########..######..######..########################..################",
+    "########..######..######..################..######..######..########",
+    "########..######..######..################..######..######..########",
+    "########..######..######..################..######..######..########",
+    "################..################################..################",
+    "################..################################..################",
+    "################..################################..################",
+    "################..################################..################",
+    "################..################################..################",
+    "################..################################..################",
+    "################..################################..################",
+    "##############....##############################....################",
+    "##############....##############################....################",
+    "####################################################################",
+    "########....##########....################....##########....########",
+    "########....##########....################....##########....########",
+    "###########............######################............###########",
+    "###########............######################............###########",
+    "####################################################################",
+    ".################################..################################.",
+    "..##############################....##############################..",
+    "........................#......#......#.............................",
+    ".................#......#....#...#..................................",
+    "..........#......#..................................................",
+    "...#.....###...##.##.##.#.###.....##.....#..........................",
+    "..........#......#..................................................",
+    ".................#......#....#...#..................................",
+    "........................#......#......#.............................",
+];
+const WIDTH: usize = 68;
+const HEIGHT: usize = 33;
+const STRIDE: usize = WIDTH.div_ceil(8);
+const PIXELS: [u8; STRIDE * HEIGHT] = pack(ART);
+const SHEET: ImageRaw<BinaryColor> = ImageRaw::new(&PIXELS, WIDTH as u32);
 const FACE: Size = Size::new(34, 26);
 const SPARKLE: Size = Size::new(7, 7);
 const FACE_AT: Point = Point::new(47, 19);
@@ -47,9 +86,8 @@ pub fn draw<D: DrawTarget<Color = BinaryColor>>(
     target: &mut D,
     frame: u64,
 ) -> Result<(), D::Error> {
-    let sheet = Bmp::<BinaryColor>::from_slice(SHEET).unwrap();
     let sprite = |target: &mut D, cell: Point, size: Size, at: Point| {
-        Image::new(&sheet.sub_image(&Rectangle::new(cell, size)), at).draw(target)
+        Image::new(&SHEET.sub_image(&Rectangle::new(cell, size)), at).draw(target)
     };
     target.clear(BinaryColor::Off)?;
     for (start, row, speed, phase) in STARS {
@@ -109,6 +147,25 @@ pub fn lights(frame: u64) -> [[u8; 3]; 6] {
     })
 }
 
+/// One bit a pixel, most significant first, each row whole bytes.
+const fn pack(art: [&str; HEIGHT]) -> [u8; STRIDE * HEIGHT] {
+    let mut pixels = [0; STRIDE * HEIGHT];
+    let mut y = 0;
+    while y < HEIGHT {
+        let row = art[y].as_bytes();
+        assert!(row.len() == WIDTH);
+        let mut x = 0;
+        while x < WIDTH {
+            if row[x] == b'#' {
+                pixels[y * STRIDE + x / 8] |= 0x80 >> (x % 8);
+            }
+            x += 1;
+        }
+        y += 1;
+    }
+    pixels
+}
+
 fn fill<D: DrawTarget<Color = BinaryColor>>(
     target: &mut D,
     x: i32,
@@ -155,7 +212,7 @@ mod tests {
 
     #[test]
     fn the_face_stays_whole_in_the_middle_of_the_screen_and_only_bobs() {
-        let sheet = Bmp::<BinaryColor>::from_slice(SHEET).unwrap();
+        let sheet = SHEET;
         assert_eq!(sheet.size(), Size::new(2 * FACE.width, FACE.height + 7));
         assert_eq!(FACE_AT.x as u32 * 2 + FACE.width, 128);
         assert_eq!(FACE_AT.y as u32 * 2 + FACE.height, 64);

@@ -2,7 +2,10 @@
 
 use usbpd::{
     PowerRole,
-    protocol_layer::message::header::{DataMessageType, Header, MessageType},
+    protocol_layer::message::{
+        data::source_capabilities::{FixedSupply, PowerDataObject, parse_raw_pdo},
+        header::{DataMessageType, Header, MessageType},
+    },
 };
 
 const MAX_OBJECTS: usize = 7;
@@ -19,12 +22,9 @@ pub struct Gear {
 }
 
 impl Gear {
-    fn from_fixed_pdo(pdo: u32) -> Option<Self> {
-        if pdo >> 30 != 0 {
-            return None;
-        }
-        let mv = ((pdo >> 10) & 0x3ff) * 50;
-        let ma = (pdo & 0x3ff) * 10;
+    fn from_fixed(supply: FixedSupply) -> Option<Self> {
+        let mv = u32::from(supply.raw_voltage()) * 50;
+        let ma = u32::from(supply.raw_max_current()) * 10;
         if !(50..=5000).contains(&ma) {
             return None;
         }
@@ -45,8 +45,8 @@ impl Gear {
         // This ADC is on the protected bus. The input cable may drop 750 mV
         // and the board's modeled 60 mΩ path carries the contract current.
         let board_drop_mv = (u32::from(self.current_50ma) * 50 * 60).div_ceil(1000);
-        let low = (source.start() - 750 - board_drop_mv).max(7000);
-        let high = (*source.end()).min(*supply_window(crate::power::MAX_BRICK_MV).end());
+        let low = (source.start() - 750 - board_drop_mv).max(u32::from(MIN_BUS_MV));
+        let high = (*source.end()).min(*supply_window(MAX_BRICK_MV).end());
         (low..=high)
             .contains(&measured_mv)
             .then(|| u32::from(self.pdo_mv) * 95 / 100)
@@ -66,6 +66,11 @@ fn in_range(nominal: u16, measured: u32) -> bool {
     (nominal * 95 / 100..=nominal * 105 / 100).contains(&measured)
 }
 
+/// Maximum nominal voltage on the Rev A charging input.
+pub const MAX_BRICK_MV: u16 = 20_000;
+/// Lowest protected bus voltage used to qualify any charging gear.
+pub const MIN_BUS_MV: u16 = 7000;
+
 /// Input voltages of a fixed supply at `nominal_mv`: 5% regulation, and 0.5 V
 /// beyond it while the supply answers a load step (USB PD vSrcNew, vSrcValid).
 /// A port lowering its output returns charge to the input, which the supply
@@ -76,8 +81,11 @@ pub fn supply_window(nominal_mv: u16) -> core::ops::RangeInclusive<u32> {
 }
 
 pub struct Capabilities {
+    /// The objects as the brick sent them, for the hub's status.
     pub pdos: [u32; MAX_OBJECTS],
     gears: [Option<Gear>; FIXED_MV.len()],
+    /// The brick's 5 V supply declares unconstrained power.
+    pub unconstrained: bool,
 }
 
 impl Capabilities {
@@ -97,14 +105,38 @@ impl Capabilities {
             .zip(bytes[2..].as_chunks::<4>().0)
         {
             *dest = u32::from_le_bytes(*bytes);
-            if let Some(gear) = Gear::from_fixed_pdo(*dest) {
+            if let PowerDataObject::FixedSupply(supply) = parse_raw_pdo(*dest)
+                && let Some(gear) = Gear::from_fixed(supply)
+            {
                 // A selector cannot distinguish two PDOs for the same gear.
                 if gears[usize::from(gear.selector)].replace(gear).is_some() {
                     return None;
                 }
             }
         }
-        (Gear::from_fixed_pdo(pdos[0])?.selector == 0).then_some(Self { pdos, gears })
+        // A source's first object is its 5 V fixed supply.
+        let PowerDataObject::FixedSupply(first) = parse_raw_pdo(pdos[0]) else {
+            return None;
+        };
+        (Gear::from_fixed(first)?.selector == 0).then_some(Self {
+            pdos,
+            gears,
+            unconstrained: first.unconstrained_power(),
+        })
+    }
+
+    /// While the input switch is open the bus ADC cannot identify a gear.
+    /// Any supported fixed gear that could power the logic mux must cover
+    /// its presence load. A 5 V input cannot turn on the bus switch.
+    pub fn presence_budget_mw(&self, current: u8) -> Option<u32> {
+        let mut budget = None;
+        for gear in self.gears[1..].iter().flatten() {
+            let ma = gear.current_50ma(current)?;
+            let mv = u32::from(gear.pdo_mv) * 95 / 100;
+            let mw = crate::power::charging_budget_mw(mv as u16, ma, false);
+            budget = Some(budget.unwrap_or(u32::MAX).min(mw));
+        }
+        budget
     }
 
     pub fn best(&self) -> Option<Gear> {
@@ -144,8 +176,12 @@ impl Selection {
             .is_some_and(|t| now_ms - t < SPR_TRANSITION_MS)
     }
 
+    pub fn retry_due(&self, now_ms: u64) -> bool {
+        self.issued_ms.is_none_or(|t| now_ms - t >= 1000)
+    }
+
     fn request(&mut self, selector: u8, now_ms: u64, unloaded: bool) -> Action {
-        if !unloaded || self.issued_ms.is_some_and(|t| now_ms - t < 1000) {
+        if !unloaded || !self.retry_due(now_ms) {
             return Action::Wait;
         }
         // A failed I²C write may still have reached the CH224Q.
@@ -161,7 +197,7 @@ impl Selection {
     pub fn select(
         &mut self,
         caps: &Capabilities,
-        measured_mv: u32,
+        measured_mv: Option<u32>,
         now_ms: u64,
         unloaded: bool,
     ) -> Action {
@@ -172,11 +208,14 @@ impl Selection {
             .iter()
             .flatten()
             .copied()
-            .filter(|g| g.budget_mv(measured_mv).is_some());
+            .filter(|g| measured_mv.and_then(|mv| g.budget_mv(mv)).is_some());
         // The same voltage may fit two gears once cable drop and supply
         // transients are included. It cannot establish which one is active.
         let observed = possible.next().filter(|_| possible.next().is_none());
-        if unloaded && (self.requested_mv != best.nominal_mv() || observed != Some(best)) {
+        if unloaded
+            && (self.requested_mv != best.nominal_mv()
+                || (measured_mv.is_some() && observed != Some(best)))
+        {
             return self.request(best.selector, now_ms, unloaded);
         }
         if self.settling(now_ms) {
@@ -225,6 +264,7 @@ mod tests {
             3 << 30,
         ]);
         let caps = Capabilities::decode(&src).unwrap();
+        assert!(!caps.unconstrained);
         let gear = caps.best().unwrap();
         assert_eq!(gear.nominal_mv(), 20_000);
         assert_eq!(gear.budget_mv(20_280), Some(19_285));
@@ -246,6 +286,29 @@ mod tests {
                 .unwrap()
                 .nominal_mv(),
             15_000
+        );
+    }
+
+    #[test]
+    fn the_isolated_input_can_negotiate_but_only_the_adc_can_qualify_a_stage() {
+        let caps = Capabilities::decode(&registers(&[
+            pdo(5000, 3000),
+            pdo(9000, 3000),
+            pdo(15_000, 2000),
+            pdo(20_000, 1500),
+        ]))
+        .unwrap();
+        let mut selection = Selection::default();
+        assert_eq!(selection.select(&caps, None, 0, true), Action::Request(4));
+        assert_eq!(selection.select(&caps, None, 600, true), Action::Wait);
+        assert_eq!(
+            caps.presence_budget_mw(30),
+            Some(crate::power::charging_budget_mw(8550, 30, false))
+        );
+        assert_eq!(caps.presence_budget_mw(0), None);
+        assert_eq!(
+            selection.select(&caps, Some(20_100), 650, false),
+            Action::Confirm(caps.best().unwrap())
         );
     }
 
@@ -275,11 +338,20 @@ mod tests {
         ]))
         .unwrap();
         let mut selection = Selection::default();
-        assert_eq!(selection.select(&caps, 13_000, 0, false), Action::Wait);
-        assert_eq!(selection.select(&caps, 12_000, 1, true), Action::Request(3));
-        assert_eq!(selection.select(&caps, 13_000, 600, false), Action::Wait);
         assert_eq!(
-            selection.select(&caps, 13_200, 601, false),
+            selection.select(&caps, Some(13_000), 0, false),
+            Action::Wait
+        );
+        assert_eq!(
+            selection.select(&caps, Some(12_000), 1, true),
+            Action::Request(3)
+        );
+        assert_eq!(
+            selection.select(&caps, Some(13_000), 600, false),
+            Action::Wait
+        );
+        assert_eq!(
+            selection.select(&caps, Some(13_200), 601, false),
             Action::Confirm(caps.best().unwrap())
         );
     }
@@ -293,20 +365,29 @@ mod tests {
         ]))
         .unwrap();
         let mut selection = Selection::default();
-        let Action::Confirm(gear) = selection.select(&caps, 8900, 0, false) else {
+        let Action::Confirm(gear) = selection.select(&caps, Some(8900), 0, false) else {
             panic!()
         };
         assert_eq!(gear.nominal_mv(), 9000);
-        assert_eq!(selection.select(&caps, 8900, 1, true), Action::Request(4));
-        assert_eq!(selection.select(&caps, 20_200, 150, true), Action::Wait);
-        assert_eq!(selection.select(&caps, 8900, 700, true), Action::Wait);
-        assert_eq!(selection.select(&caps, 8900, 1001, false), Action::Wait);
         assert_eq!(
-            selection.select(&caps, 8900, 1002, true),
+            selection.select(&caps, Some(8900), 1, true),
             Action::Request(4)
         );
         assert_eq!(
-            selection.select(&caps, 20_280, 1552, true),
+            selection.select(&caps, Some(20_200), 150, true),
+            Action::Wait
+        );
+        assert_eq!(selection.select(&caps, Some(8900), 700, true), Action::Wait);
+        assert_eq!(
+            selection.select(&caps, Some(8900), 1001, false),
+            Action::Wait
+        );
+        assert_eq!(
+            selection.select(&caps, Some(8900), 1002, true),
+            Action::Request(4)
+        );
+        assert_eq!(
+            selection.select(&caps, Some(20_280), 1552, true),
             Action::Confirm(caps.best().unwrap())
         );
         assert_eq!(selection.recover_epr(3000, false), Action::Wait);
@@ -316,25 +397,30 @@ mod tests {
 
     #[test]
     fn disconnect_and_reconnect_reselect_without_resetting_the_board() {
-        let caps = Capabilities::decode(&registers(&[pdo(5000, 3000), pdo(9000, 3000)])).unwrap();
+        let caps = Capabilities::decode(&registers(&[pdo(5000, 3000) | 1 << 27, pdo(9000, 3000)]))
+            .unwrap();
+        assert!(caps.unconstrained);
         let mut selection = Selection::default();
-        assert_eq!(selection.select(&caps, 8900, 0, true), Action::Request(1));
+        assert_eq!(
+            selection.select(&caps, Some(8900), 0, true),
+            Action::Request(1)
+        );
         assert!(selection.settling(549));
         assert!(!selection.settling(550));
         assert_eq!(
-            selection.select(&caps, 8900, 550, true),
+            selection.select(&caps, Some(8900), 550, true),
             Action::Confirm(caps.best().unwrap())
         );
         selection.forget_request();
         assert_eq!(selection.requested_mv(), 0);
         let caps = Capabilities::decode(&registers(&[pdo(5000, 3000), pdo(12_000, 1500)])).unwrap();
-        assert_eq!(selection.select(&caps, 8900, 900, true), Action::Wait);
+        assert_eq!(selection.select(&caps, Some(8900), 900, true), Action::Wait);
         assert_eq!(
-            selection.select(&caps, 8900, 1000, true),
+            selection.select(&caps, Some(8900), 1000, true),
             Action::Request(2)
         );
         assert_eq!(
-            selection.select(&caps, 12_040, 1550, true),
+            selection.select(&caps, Some(12_040), 1550, true),
             Action::Confirm(caps.best().unwrap())
         );
     }

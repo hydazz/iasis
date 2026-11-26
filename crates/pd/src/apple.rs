@@ -76,6 +76,50 @@ pub fn actions(reply: &[u32]) -> Option<[u16; MAX_ACTIONS]> {
     Some(list)
 }
 
+/// What a port has learned by asking for a target's action list.
+///
+/// A target can answer with an empty list and a full one later, so an empty
+/// list spends an ask and the port asks again while asks remain. A busy line
+/// spends none: the query never went out.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Discovery {
+    /// `left` asks remain; `empty` once the target has answered with an
+    /// empty list.
+    Asking { left: u8, empty: bool },
+    /// The target's actions, or an empty list after the last ask.
+    Listed([u16; MAX_ACTIONS]),
+    /// No answer to any ask.
+    Silent,
+}
+
+impl Discovery {
+    /// Asks before a target that has not answered counts as silent.
+    pub const ASKS: u8 = 3;
+    pub const START: Self = Self::Asking {
+        left: Self::ASKS,
+        empty: false,
+    };
+
+    /// Take one ask's outcome: whether the query went out, and the target's
+    /// recognised Action List reply to it.
+    pub fn take(self, sent: bool, reply: Option<[u16; MAX_ACTIONS]>) -> Self {
+        let Self::Asking { left, empty } = self else {
+            return self;
+        };
+        match reply {
+            Some(list) if list[0] != 0 => return Self::Listed(list),
+            None if !sent => return self,
+            _ => {}
+        }
+        let empty = empty || reply.is_some();
+        match left - 1 {
+            0 if empty => Self::Listed([0; MAX_ACTIONS]),
+            0 => Self::Silent,
+            left => Self::Asking { left, empty },
+        }
+    }
+}
+
 /// Header and data objects of one debug message, without SOP or CRC.
 pub fn message(id: u8, objects: &[u32]) -> Vec<u8, 14> {
     const VENDOR_DEFINED: u8 = 15;
@@ -153,5 +197,40 @@ mod tests {
         assert_eq!(actions(&[0x05ac_8050]), Some([0; MAX_ACTIONS]));
         assert_eq!(actions(&[0x05ac_8052, 0x0106_0000]), None);
         assert_eq!(actions(&[]), None);
+    }
+
+    #[test]
+    fn an_empty_list_is_asked_again_until_the_last_ask() {
+        const EMPTY: [u16; MAX_ACTIONS] = [0; MAX_ACTIONS];
+        let mut list = EMPTY;
+        list[..2].copy_from_slice(&[0x0106, 0x0105]);
+
+        let first = Discovery::START.take(true, Some(EMPTY));
+        assert_eq!(
+            first,
+            Discovery::Asking {
+                left: 2,
+                empty: true
+            }
+        );
+        assert_eq!(first.take(true, Some(list)), Discovery::Listed(list));
+
+        let last = (0..3).fold(Discovery::START, |d, _| d.take(true, Some(EMPTY)));
+        assert_eq!(last, Discovery::Listed(EMPTY));
+        // An empty list stays the answer when later asks go unanswered.
+        let quiet = first.take(true, None).take(true, None);
+        assert_eq!(quiet, Discovery::Listed(EMPTY));
+    }
+
+    #[test]
+    fn a_target_that_never_answers_is_silent_and_a_busy_line_is_no_ask() {
+        let busy = (0..5).fold(Discovery::START, |d, _| d.take(false, None));
+        assert_eq!(busy, Discovery::START);
+        let unanswered = (0..3).fold(Discovery::START, |d, _| d.take(true, None));
+        assert_eq!(unanswered, Discovery::Silent);
+        assert_eq!(
+            unanswered.take(true, Some([1; MAX_ACTIONS])),
+            Discovery::Silent
+        );
     }
 }

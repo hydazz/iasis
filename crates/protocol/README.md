@@ -6,28 +6,29 @@
 
 Messages use vendor control transfers on endpoint zero, addressed to interface 0. On macOS and Linux, clients can read identity and status and hold the host session without claiming the interface. Clients claim interface 0 before issuing a port command, changing a hub setting or host power allowance, or requesting a firmware update.
 
-| Field                    | Value                                                     |
-| ------------------------ | --------------------------------------------------------- |
-| Request type / recipient | Vendor / interface                                        |
-| `wIndex`                 | `0`                                                       |
-| `wValue`                 | Protocol version, `20`                                    |
-| Maximum payload          | 1408 bytes                                                |
-| Payload header           | ASCII `IASI`, then a little-endian `u16` protocol version |
-| Payload body             | Postcard-encoded message                                  |
+| Field                    | Value                             |
+| ------------------------ | --------------------------------- |
+| Request type / recipient | Vendor / interface                |
+| `wIndex`                 | `0`                               |
+| `wValue`                 | The sender's protocol version     |
+| Maximum payload          | 1408 bytes                        |
+| Payload                  | The bare postcard-encoded message |
 
-| Request | Direction     | Message                                                        |
-| ------- | ------------- | -------------------------------------------------------------- |
-| `1`     | Device → host | `Info`: hub serial, firmware version, flash size, capabilities |
-| `2`     | Device → host | `Status`: the hub's state and its latest readings              |
-| `3`     | Host → device | `BootloaderRequest`: hub serial                                |
-| `4`     | Host → device | `PortCommand`: serial, port, generation, request ID, action    |
-| `6`     | Host → device | `HostReport`: serial, session and the host's view of each port |
-| `7`     | Host → device | `HostControlRequest`: serial and a restore arm or session end  |
-| `8`     | Host → device | `SettingsRequest`: serial and a name or brightness change      |
+| Request | Direction     | Message                                                              |
+| ------- | ------------- | -------------------------------------------------------------------- |
+| `1`     | Device → host | `Info`: protocol version, firmware version, build and the hub's name |
+| `2`     | Device → host | `Status`: the hub's state and its latest readings                    |
+| `3`     | Host → device | Enter the bootloader; no payload                                     |
+| `4`     | Host → device | `PortCommand`: port, generation, request ID, action                  |
+| `6`     | Host → device | `HostReport`: session and the host's view of each port               |
+| `7`     | Host → device | `HostControl`: a restore arm or session end                          |
+| `8`     | Host → device | `Setting`: a name or brightness change                               |
 
-The decoder rejects unknown versions, invalid ports, incomplete messages and trailing bytes. Wire changes require a protocol version bump, independently of the Cargo package version.
+The hub's serial is its USB serial number, the RP2354's chip ID.
 
-`Info` and `BootloaderRequest` keep one layout, and the hub answers them whatever version `wValue` and the payload header carry. The `Info` header gives the version the firmware speaks, so a tool built for another version can still name the hub and send it to its updater.
+`VERSION` is a hash of every message's postcard schema and a revision string that is bumped by hand when a message changes meaning with its fields unchanged. The hub refuses a request whose `wValue` is another version. The decoder rejects invalid ports, incomplete messages and trailing bytes.
+
+Requests 1 and 3 work across versions, so a tool can name a hub and update it whatever it speaks. The hub answers request 1 for any `wValue`. `Info` only grows at its end, and a reader ignores bytes after the fields it knows. Its `build` is the linked image’s 20-byte GNU build ID. The UF2 carries the same ELF note in flash.
 
 ### Change announcements
 
@@ -37,13 +38,13 @@ One client claims interface 1 at a time, normally the host that holds the sessio
 
 ## Commands and status
 
-Ports are numbered 1–5 and appear in that order in status. ADC readings are raw counts; absent readings use `None`. `uptime_ms` is when the status was composed.
+Ports are numbered 1–5 and appear in that order in status. `vbus_mv` and `bus_mv` are millivolts through the board's dividers, not calibrated; thermistor readings are raw ADC counts; absent readings use `None`. `vbus_ok` says the hub judges VBUS to be where the attachment's supply and contract should hold it. `demand` is what the sink's last accepted request on brick power says: `Satisfied`, `AtLimit` (it takes all its port can offer), `Shortfall` (it takes all of its largest offer while the charging pool holds the port's offers lower) or `Unknown`; `PortStatus::short` is a `Shortfall` on an occupied port. `uptime_ms` is when the status was composed.
 
-`revision` advances, wrapping, whenever the status changes in anything but a reading: `uptime_ms`, the connector, input and thermistor ADC counts and the upstream CC levels do not advance it. The latest button event stays in the status with its ID until the next one replaces it, and a restore decision until its arm expires, so a client that reads after several revisions still finds them.
+`revision` advances, wrapping, whenever the status changes in anything but a reading: `uptime_ms`, the connector and input voltages, the thermistor counts and the upstream CC levels do not advance it. The latest button event stays in the status with its ID until the next one replaces it, and so does a restore decision, so a client that reads after several revisions still finds them.
 
-Status reports the brick’s source PDOs, requested voltage and qualified input current. The charging budget is in milliwatts. Each port reports the source PDOs it offers, the accepted request, contract voltage (mV) and agreed operating current (mA).
+Status reports the brick’s source PDOs, requested voltage and qualified input current. The hub’s `supply` gives the preferred path for a new target. Each port’s `supply` gives its own path. The charging budget is the milliwatts available to the charging stages after reserving any shared presence tier. `host_limit_ma` gives the programmed upper bound for that tier. Each port reports the source PDOs it offers, the accepted request, contract voltage (mV) and agreed operating current (mA).
 
-After a trip the port reports its `error` and `fault_sample` until an attachment next becomes ready, a held-off port sees its target unplugged or a supply change ends its hold, or the port is enabled again. The sample records the uptime of the trip, port state, connector ADC, local fault pins, and active and pending contracts. Each contract includes voltage, operating current and current limit. A missing contract is `None`.
+After a trip the port reports its `error` and `fault_sample` until an attachment next becomes ready, a held-off port sees its target unplugged or a supply change ends its hold, or the port is enabled again. The sample records the uptime of the trip, port state, connector voltage, local fault pins, and active and pending contracts. Each contract includes voltage, operating current and current limit. A missing contract is `None`.
 
 `recoveries` counts trips since boot. `pd_write_retries` counts PD frames the port controller refused on a busy line and firmware wrote again. `hard_resets_sent` and `hard_resets_received` count PD hard resets by their sender; each removes VBUS from the target for about a second. `requests_rejected` counts requests the port answered with Reject.
 
@@ -64,7 +65,7 @@ Send a `PortCommand` with a nonzero request ID. USB acceptance queues the comman
 | Debug USB complete        | The target's reply shows Debug USB on its primary USB 2 pair, or off its pins               |
 | Bootloader accepted       | ROM reboot queued; use picotool to detect the updater                                       |
 
-`SettingsRequest` changes one field in `Status.settings`. A name holds up to 16 printable ASCII characters, with spaces allowed inside. An empty name clears it. Brightness ranges from 10 to 100 percent and defaults to 50. The hub acknowledges a change after saving it to flash. A full settings store rejects changes and sets `Status.settings_full`. Unplug the targets and retry once this flag clears.
+`Setting` changes one field in `Status.settings`. A name holds up to 16 printable ASCII characters, with spaces allowed inside. An empty name clears it. Brightness ranges from 10 to 100 percent and defaults to 50. The hub acknowledges a change after saving it to flash. A full settings store rejects changes and sets `Status.settings_full`. Unplug the targets and retry once this flag clears.
 
 ## Host session and reports
 
@@ -86,7 +87,7 @@ Each report replaces the last. A port entry carries the attachment generation it
 
 A DFU request older than 15 seconds is unverified: sent, and seen by no host.
 
-A port entry can also carry the host's restore job for that attachment: a nonzero ECID, a phase and overall progress from 0–100. The host reserves 100 for a reported completion. Detach clears it; five seconds without a report that carries it changes an active job to `Unconfirmed`. A port with an active or unconfirmed job refuses DFU and reboot commands with `Busy`.
+A port entry can also carry the host's restore job for that attachment: a nonzero ECID, a phase and overall progress from 0–100. The host reserves 100 for a reported completion. The session's entry for the attachment owns the job: an entry without one clears it. Detach clears it too, and five seconds without a report that carries it changes a `Preparing` or `Running` job to `Unconfirmed`, a result whose outcome is unknown. A port with a `Preparing` or `Running` job refuses DFU and reboot commands with `Busy`; after any other phase the port's light and actions follow the target on it.
 
 `fetch` in a port entry is the percentage of that target's restore image the host has fetched, while it is fetching one. Status returns it on the port for as long as reports carry it.
 
@@ -96,6 +97,6 @@ A port entry can also carry the host's restore job for that attachment: a nonzer
 
 Local DFU and reboot events carry the selected physical port mask and attachment generations. The session must report `restore_ready` to offer Restore. Each generation-bound port report carries `restore_access`: the host can signal DFU on this connector, sees the identified device in a DFU mode its restore engine supports, recognizes a Mac on a connector without DFU USB, or has no restore path. Only the first two offer Restore. Holding to Restore sends a preparation request for the selected targets to that session. The host prepares the image and targets before issuing a restore arm.
 
-A restore arm identifies the session, operation, target mask, attachment generations and deadline in hub uptime. Arm IDs rise within a session and each is issued once. The arm expires within 20 seconds. A fresh three-second hold confirms the arm once. A tap cancels. USB reset, host-session loss and attachment changes invalidate pending confirmation. The host checks the confirmed identifiers, target ECIDs and current attachments before launching workers.
+A restore arm identifies the session, operation, target mask, attachment generations and deadline in hub uptime. Arm IDs rise within a session and each is issued once. The arm expires within 20 seconds. A fresh three-second hold confirms the arm once. A tap cancels. USB reset, host-session loss and attachment changes invalidate pending confirmation. `Status.restore_decision` says how the session's last arm ended, with the arm: `Confirmed`, `Cancelled` (a tap, or the session ending), `Expired`, or `Changed` with the port whose target is no longer the armed one in DFU or recovery. It stays until the next ending replaces it. The host checks the confirmed identifiers, target ECIDs and current attachments before launching workers.
 
 `RestoreReported` means the restore program reported success and exited zero. It is not a post-restore boot check.

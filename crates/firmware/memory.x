@@ -23,6 +23,13 @@ _stext = ALIGN(ADDR(.start_block) + SIZEOF(.start_block), ALIGNOF(.text));
 /* The name and version picotool reads, found through .boot_info. */
 SECTIONS
 {
+  .note.gnu.build-id : ALIGN(4)
+  {
+    KEEP(*(.note.gnu.build-id))
+  } > FLASH
+  /* ELF note header and padded GNU name precede the SHA-1 descriptor. */
+  __iasis_build_id = ADDR(.note.gnu.build-id) + 16;
+
   .bi_entries : ALIGN(4)
   {
     __bi_entries_start = .;
@@ -44,3 +51,4 @@ SECTIONS
 PROVIDE(start_to_end = __end_block_addr - __start_block_addr);
 PROVIDE(end_to_start = __start_block_addr - __end_block_addr);
 ASSERT(__start_block_addr - ORIGIN(FLASH) < 4096, "RP2350 image definition must be in the first 4 KiB");
+ASSERT(SIZEOF(.note.gnu.build-id) == 36, "expected a GNU SHA-1 build ID");

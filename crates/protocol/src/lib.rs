@@ -1,9 +1,40 @@
 #![no_std]
 
+//! The hub's USB management protocol.
+//!
+//! `GET_INFO` and `ENTER_BOOTLOADER` work across protocol versions, so a
+//! tool can name a hub and update its firmware whatever it speaks: `Info`
+//! only grows at its end and the bootloader request carries nothing. Every
+//! other request carries the sender's `VERSION` in `wValue`, and the hub
+//! refuses one that differs. Messages are bare postcard.
+
+use postcard_schema::{
+    Schema,
+    key::Key,
+    schema::{DataModelType, NamedType},
+};
 use serde::{Deserialize, Serialize};
 
 pub const PORT_COUNT: usize = 5;
-pub const VERSION: u16 = 26;
+/// Bump when a message changes meaning with its fields unchanged: units,
+/// timing or cancellation rules. Field changes alter `VERSION` by themselves.
+const REVISION: &str = "iasis/1";
+/// The protocol version: a hash of every message's schema and `REVISION`.
+pub const VERSION: u16 = {
+    let key = Key::for_path::<Messages>(REVISION).to_bytes();
+    u16::from_le_bytes([
+        key[0] ^ key[2] ^ key[4] ^ key[6],
+        key[1] ^ key[3] ^ key[5] ^ key[7],
+    ])
+};
+/// Every message exchanged after `GET_INFO`.
+type Messages = (
+    Status,
+    HostReport,
+    HostControl,
+    PortCommand,
+    Setting,
+);
 pub const MAX_PACKET: usize = 1408;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
@@ -34,19 +65,17 @@ pub const REQUEST_MS: u64 = 15_000;
 pub const DEVELOPMENT_VID: u16 = 0x1209;
 pub const DEVELOPMENT_PID: u16 = 0x0001;
 
-pub const CAP_TELEMETRY: u32 = 1;
-pub const CAP_ROM_UPDATE: u32 = 1 << 1;
-pub const CAP_PORT_CONTROL: u32 = 1 << 2;
-pub const CAP_HOST_POWER: u32 = 1 << 3;
-pub const CAP_BATCH_BUTTON: u32 = 1 << 4;
-pub const CAP_RESTORE_ARM: u32 = 1 << 5;
-
-const MAGIC: [u8; 4] = *b"IASI";
-const HEADER_SIZE: usize = 6;
-
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "u8", into = "u8")]
 pub struct Port(u8);
+
+impl Schema for Port {
+    const SCHEMA: &'static NamedType = &NamedType {
+        name: "Port",
+        ty: &DataModelType::U8,
+    };
+}
 
 impl Port {
     pub const ALL: [Self; PORT_COUNT] = [Self(1), Self(2), Self(3), Self(4), Self(5)];
@@ -77,40 +106,76 @@ impl From<Port> for u8 {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+/// What a hub says about itself to a tool of any protocol version. Fields
+/// are only ever added at the end; a reader ignores ones it does not know.
+/// The hub's serial is its USB serial number.
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub struct Info {
-    pub serial: u64,
-    pub firmware_version: [u16; 3],
-    pub flash_bytes: u32,
-    pub capabilities: u32,
+    /// The protocol the hub speaks.
+    pub protocol: u16,
+    pub firmware: [u16; 3],
+    pub build: Build,
+    /// Whether Rust debug assertions are enabled in this image.
+    pub debug_assertions: bool,
+    pub name: HubName,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+impl Info {
+    pub fn decode(data: &[u8]) -> Result<Self, Malformed> {
+        postcard::take_from_bytes(data)
+            .map(|(info, _)| info)
+            .map_err(|_| Malformed)
+    }
+}
+
+/// The GNU build ID of the linked IasisOS image.
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
+pub struct Build(pub [u8; 20]);
+
+impl core::fmt::Display for Build {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        for byte in &self.0[..4] {
+            write!(f, "{byte:02x}")?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub struct PortFaults {
     pub power: bool,
     pub cc: bool,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub struct FaultSample {
     pub uptime_ms: u64,
     pub state: PortState,
-    pub vbus_adc: Option<u16>,
+    pub vbus_mv: Option<u16>,
     pub faults: Option<PortFaults>,
     pub contract: Option<FaultContract>,
     pub target: Option<FaultContract>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub struct FaultContract {
     pub millivolts: u16,
     pub operating_ma: u16,
     pub limit_ma: u16,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub struct PortStatus {
-    pub vbus_adc: Option<u16>,
+    /// The connector's VBUS, from the board's divider. Not calibrated.
+    pub vbus_mv: Option<u16>,
+    /// VBUS is where the attachment's supply and contract should hold it.
+    pub vbus_ok: bool,
     pub faults: Option<PortFaults>,
     pub fusb_device_id: Option<u8>,
     pub enabled: bool,
@@ -131,6 +196,8 @@ pub struct PortStatus {
     pub contract_mv: u16,
     pub contract_ma: u16,
     pub pd_transition: bool,
+    /// What the sink's last accepted request says of the power it is offered.
+    pub demand: Demand,
     pub fault_sample: Option<FaultSample>,
     /// Attachments ended by a fault since boot, recovered or latched.
     pub recoveries: u16,
@@ -160,8 +227,30 @@ pub struct PortStatus {
     pub fetch: Option<u8>,
 }
 
+/// What a powered port gives a target without a PD contract: 5 V at this
+/// current.
+pub const USB_DEFAULT_MA: u16 = 900;
+
+/// What a sink's last accepted request says of the power it is offered.
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Schema)]
+pub enum Demand {
+    /// No accepted request on brick power.
+    #[default]
+    Unknown,
+    /// It asks for less than its offer allows.
+    Satisfied,
+    /// It asks for all its offer allows, or more, and the port already
+    /// offers it all it can.
+    AtLimit,
+    /// It asks for all of the largest offer, or more, while the charging
+    /// pool holds the port's offers below what the port could give.
+    Shortfall,
+}
+
 /// USB mode of an Apple device.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 #[serde(rename_all = "snake_case")]
 pub enum AppleMode {
     Dfu,
@@ -175,7 +264,8 @@ pub enum AppleMode {
 }
 
 /// What a host finds on a port's USB.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 #[serde(rename_all = "snake_case")]
 pub enum Usb {
     /// Nothing enumerates: no data path, or a target that has not started USB.
@@ -189,7 +279,8 @@ pub enum Usb {
 
 /// A host's view of one attachment. Only a host sees a target's USB mode; the
 /// hub cannot tell DFU from a running system.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub struct Observed {
     pub usb: Usb,
     pub ecid: Option<u64>,
@@ -216,7 +307,8 @@ impl Observed {
 
 /// A DFU or reboot the hub sent. The target's acknowledgement does not
 /// establish the result.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub struct Request {
     pub action: PortAction,
     /// Hub uptime when the request went out.
@@ -231,7 +323,8 @@ impl Request {
 }
 
 /// The USB link reported by the downstream hub port.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub enum Link {
     Down,
     Usb2,
@@ -244,7 +337,8 @@ pub const MAX_ACTIONS: usize = 12;
 /// A target's answer to the Apple debug Get Action List query, asked once a
 /// contract has settled. Each port of a target answers for itself: on a Mac
 /// only the DFU port lists DFU and reboot.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub enum DebugActions {
     /// Not asked yet.
     #[default]
@@ -256,7 +350,8 @@ pub enum DebugActions {
 }
 
 /// The colour of a port's light.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 #[serde(rename_all = "snake_case")]
 pub enum Hue {
     Off,
@@ -271,7 +366,8 @@ pub enum Hue {
 /// What a port's light shows: the hue is what the port holds, a pulse is
 /// work under way or a result awaited, and a steady light holds until
 /// someone acts.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub struct Light {
     pub hue: Hue,
     pub pulse: bool,
@@ -323,14 +419,14 @@ impl PortStatus {
         if !self.occupied() {
             return light(Hue::Off, false);
         }
-        if let Some(job) = self.restore {
-            return match job.phase {
-                RestorePhase::Preparing | RestorePhase::Running => light(Hue::Purple, true),
-                // Nobody is driving it and nobody knows how it ended.
-                RestorePhase::Unconfirmed => light(Hue::Purple, false),
-                RestorePhase::Reported => light(Hue::Green, false),
-                RestorePhase::Failed => light(Hue::Red, false),
-            };
+        match self.restore.map(|job| job.phase) {
+            Some(RestorePhase::Preparing | RestorePhase::Running) => {
+                return light(Hue::Purple, true);
+            }
+            Some(RestorePhase::Reported) => return light(Hue::Green, false),
+            Some(RestorePhase::Failed) => return light(Hue::Red, false),
+            // How it ended is unknown; the target on the port decides.
+            Some(RestorePhase::Unconfirmed) | None => {}
         }
         if self.fetch.is_some() {
             return light(Hue::Purple, true);
@@ -439,14 +535,16 @@ impl PortStatus {
         ) && self.restore_target_seen()
     }
 
-    /// A restore is under way or its outcome is unknown.
+    /// A restore is under way.
     pub fn restoring(&self) -> bool {
-        self.restore.is_some_and(|job| {
-            matches!(
-                job.phase,
-                RestorePhase::Preparing | RestorePhase::Running | RestorePhase::Unconfirmed
-            )
-        })
+        self.restore
+            .is_some_and(|job| matches!(job.phase, RestorePhase::Preparing | RestorePhase::Running))
+    }
+
+    /// The target would take more power than the charging pool lets its
+    /// port offer.
+    pub fn short(&self) -> bool {
+        self.occupied() && self.demand == Demand::Shortfall
     }
 
     pub fn latch_fault(&mut self, error: PortError, sample: FaultSample) {
@@ -457,14 +555,16 @@ impl PortStatus {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub enum Gesture {
     Dfu,
     Reboot,
     Restore,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub struct ButtonEvent {
     pub id: u32,
     pub session: Option<u32>,
@@ -473,7 +573,8 @@ pub struct ButtonEvent {
     pub generations: [u32; PORT_COUNT],
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub struct RestoreArm {
     pub session: u32,
     pub id: u32,
@@ -484,32 +585,55 @@ pub struct RestoreArm {
 }
 
 impl RestoreArm {
+    /// Every armed target is where it was armed, ready to restore.
     pub fn prepared(&self, status: &Status) -> bool {
-        self.matches_targets(status)
-            && Port::ALL.into_iter().all(|p| {
-                self.ports & (1 << p.index()) == 0 || status.ports[p.index()].in_restorable_mode()
-            })
+        self.ports != 0 && self.changed(status).is_none()
     }
 
-    pub fn matches_targets(&self, status: &Status) -> bool {
-        self.ports != 0
-            && self.ports & status.ready_mask() == self.ports
-            && Port::ALL.into_iter().all(|p| {
-                self.ports & (1 << p.index()) == 0
-                    || self.generations[p.index()] == status.ports[p.index()].generation
-            })
+    /// The first armed port whose target is no longer the armed one ready to
+    /// restore: another attachment, a port that does not hold it, or a
+    /// target out of DFU or recovery. A target renegotiating its contract,
+    /// as one does a few seconds into DFU, is still the target.
+    pub fn changed(&self, status: &Status) -> Option<Port> {
+        let held = status.held_mask();
+        Port::ALL.into_iter().find(|p| {
+            let i = p.index();
+            let port = &status.ports[i];
+            self.ports & (1 << i) != 0
+                && (held & (1 << i) == 0
+                    || self.generations[i] != port.generation
+                    || !port.in_restorable_mode())
+        })
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+/// How an arm ended, with the arm it ends.
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub enum RestoreDecision {
+    /// A hold confirmed it.
     Confirmed(RestoreArm),
+    /// A tap cancelled it, or its session ended.
     Cancelled(RestoreArm),
+    /// Its deadline passed before a hold.
+    Expired(RestoreArm),
+    /// The target on `port` is no longer the armed one ready to restore.
+    Changed { arm: RestoreArm, port: Port },
+}
+
+impl RestoreDecision {
+    pub fn arm(&self) -> RestoreArm {
+        match *self {
+            Self::Confirmed(arm) | Self::Cancelled(arm) | Self::Expired(arm) => arm,
+            Self::Changed { arm, .. } => arm,
+        }
+    }
 }
 
 /// The host attached to a hub. One host at a time holds the session; its
 /// reports renew it.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub struct HostSession {
     pub id: u32,
     /// The host can prepare a restore when the button asks for one.
@@ -519,7 +643,8 @@ pub struct HostSession {
 }
 
 /// How the session's host can prepare this attachment for restore.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub enum RestoreAccess {
     #[default]
     Unavailable,
@@ -532,7 +657,8 @@ pub enum RestoreAccess {
 }
 
 /// A host's view of one port, bound to the attachment it describes.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub struct PortReport {
     pub generation: u32,
     pub observed: Observed,
@@ -544,37 +670,35 @@ pub struct PortReport {
 
 /// Everything a host knows about the hub's targets. The first report of a
 /// new session takes the hub; later ones renew it and replace the last.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub struct HostReport {
-    pub serial: u64,
     pub session: HostSession,
     pub ports: [Option<PortReport>; PORT_COUNT],
 }
 
 /// What the session's host asks beyond its reports: an erase to confirm on
 /// the hub, or to give the hub up.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub enum HostControl {
     Arm(RestoreArm),
     End(u32),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct HostControlRequest {
-    pub serial: u64,
-    pub control: HostControl,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub enum RestorePhase {
     Preparing,
     Running,
     Reported,
+    /// Reports stopped while it ran: a result whose outcome is unknown.
     Unconfirmed,
     Failed,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub struct RestoreStatus {
     pub ecid: u64,
     pub phase: RestorePhase,
@@ -582,7 +706,8 @@ pub struct RestoreStatus {
     pub progress: u8,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub enum Supply {
     #[default]
     Off,
@@ -593,6 +718,20 @@ pub enum Supply {
 /// A display name that fits the hub's OLED. Empty selects the factory name.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct HubName([u8; HUB_NAME_MAX]);
+
+#[cfg(feature = "defmt")]
+impl defmt::Format for HubName {
+    fn format(&self, f: defmt::Formatter<'_>) {
+        defmt::write!(f, "{=str}", self.as_str());
+    }
+}
+
+impl Schema for HubName {
+    const SCHEMA: &'static NamedType = &NamedType {
+        name: "HubName",
+        ty: &DataModelType::String,
+    };
+}
 
 impl HubName {
     pub fn new(name: &str) -> Result<Self, &'static str> {
@@ -640,7 +779,8 @@ impl<'de> Deserialize<'de> for HubName {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub struct Settings {
     pub name: HubName,
     pub brightness: u8,
@@ -655,19 +795,15 @@ impl Default for Settings {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub enum Setting {
     Name(HubName),
     Brightness(u8),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct SettingsRequest {
-    pub serial: u64,
-    pub change: Setting,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub enum PortState {
     #[default]
     Disabled,
@@ -681,13 +817,15 @@ pub enum PortState {
     Fault,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub enum Orientation {
     Cc1,
     Cc2,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub enum PortError {
     I2c {
         address: u8,
@@ -745,7 +883,8 @@ impl PortError {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub enum I2cOperation {
     Read { register: u8 },
     Write { register: Option<u8> },
@@ -753,7 +892,8 @@ pub enum I2cOperation {
     DisplayWrite { control: u8 },
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub enum I2cFailure {
     NoAcknowledge,
     ArbitrationLoss,
@@ -763,7 +903,8 @@ pub enum I2cFailure {
     Timeout,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub enum PortAction {
     Enable,
     Disable,
@@ -793,7 +934,8 @@ impl PortAction {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub enum CommandError {
     StaleAttachment,
     NotReady,
@@ -804,7 +946,8 @@ pub enum CommandError {
     Unsupported,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub enum CommandResult {
     #[default]
     Idle,
@@ -817,16 +960,17 @@ pub enum CommandResult {
     Failed(CommandError),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub struct PortCommand {
-    pub serial: u64,
     pub port: Port,
     pub generation: u32,
     pub id: u32,
     pub action: PortAction,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Schema)]
 pub struct Status {
     pub uptime_ms: u64,
     /// Advances when the status changes in anything but a measurement.
@@ -845,16 +989,15 @@ pub struct Status {
     /// Assertions of that output seen in the 1 ms readings since boot.
     pub host_limiter_assertions: u32,
     pub ports: [PortStatus; PORT_COUNT],
-    pub bus_voltage_adc: Option<u16>,
+    /// The board's input bus, from its divider. Not calibrated.
+    pub bus_mv: Option<u16>,
     pub thermistor_adc: [Option<u16>; 2],
-    pub expander_inputs: Option<u8>,
     pub upstream_fusb_device_id: Option<u8>,
     pub upstream_cc: Option<[u8; 2]>,
     pub upstream_orientation: Option<Orientation>,
     pub upstream_error: Option<PortError>,
     pub host_allowance_ma: u16,
     pub host_limit_ma: u16,
-    pub ch224_status: Option<u8>,
     pub ch224_current_50ma: Option<u8>,
     pub brick_source_pdos: [u32; 7],
     pub brick_requested_mv: u16,
@@ -882,11 +1025,11 @@ impl Status {
     pub fn state(mut self) -> Self {
         self.uptime_ms = 0;
         self.revision = 0;
-        self.bus_voltage_adc = None;
+        self.bus_mv = None;
         self.thermistor_adc = [None; 2];
         self.upstream_cc = None;
         for port in &mut self.ports {
-            port.vbus_adc = None;
+            port.vbus_mv = None;
         }
         self
     }
@@ -938,6 +1081,19 @@ impl Status {
 
     /// Stable powered attachments available for an operation.
     pub fn ready_mask(&self) -> u8 {
+        let mut mask = self.held_mask();
+        for (i, port) in self.ports.iter().enumerate() {
+            if port.pd_transition || port.command_result == CommandResult::Pending {
+                mask &= !(1 << i);
+            }
+        }
+        mask
+    }
+
+    /// Powered attachments that hold their target, through a contract
+    /// renegotiated on the same attachment and a command under way: what an
+    /// armed erase needs to stay armed.
+    pub fn held_mask(&self) -> u8 {
         if self.i2c_root_fault || self.brick_input_fault {
             return 0;
         }
@@ -945,9 +1101,7 @@ impl Status {
         for (i, port) in self.ports.iter().enumerate() {
             if matches!(port.state, PortState::Ready | PortState::Contract)
                 && port.faults.is_none_or(|f| !f.power && !f.cc)
-                && !port.pd_transition
                 && port.error.is_none()
-                && port.command_result != CommandResult::Pending
                 && !port.restoring()
             {
                 mask |= 1 << i;
@@ -957,49 +1111,23 @@ impl Status {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct BootloaderRequest {
-    pub serial: u64,
-}
+/// A message that does not decode as the type it should be.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Malformed;
 
-#[derive(Debug, Eq, PartialEq)]
-pub enum DecodeError {
-    Header,
-    Version(u16),
-    Payload,
-}
-
-pub fn encode<'a, T: Serialize>(
-    value: &T,
-    buffer: &'a mut [u8],
-) -> Result<&'a [u8], postcard::Error> {
-    if buffer.len() < HEADER_SIZE || buffer.len() > MAX_PACKET {
-        return Err(postcard::Error::SerializeBufferFull);
-    }
-    buffer[..4].copy_from_slice(&MAGIC);
-    buffer[4..6].copy_from_slice(&VERSION.to_le_bytes());
-    let length = postcard::to_slice(value, &mut buffer[HEADER_SIZE..])?.len();
-    Ok(&buffer[..HEADER_SIZE + length])
-}
-
-pub fn decode<'a, T: Deserialize<'a>>(data: &'a [u8]) -> Result<T, DecodeError> {
-    match decode_any(data)? {
-        (VERSION, value) => Ok(value),
-        (version, _) => Err(DecodeError::Version(version)),
+pub fn encode<'a, T: Serialize>(value: &T, buffer: &'a mut [u8]) -> Result<&'a [u8], Malformed> {
+    let end = buffer.len().min(MAX_PACKET);
+    match postcard::to_slice(value, &mut buffer[..end]) {
+        Ok(data) => Ok(data),
+        Err(_) => Err(Malformed),
     }
 }
 
-/// Decode a frame from a sender of any protocol version, with that version.
-/// `Info` and `BootloaderRequest` keep one layout so that a tool can name and
-/// update a hub whose firmware speaks another version.
-pub fn decode_any<'a, T: Deserialize<'a>>(data: &'a [u8]) -> Result<(u16, T), DecodeError> {
-    if data.len() < HEADER_SIZE || data.len() > MAX_PACKET || data[..4] != MAGIC {
-        return Err(DecodeError::Header);
-    }
-    let version = u16::from_le_bytes([data[4], data[5]]);
-    match postcard::take_from_bytes(&data[HEADER_SIZE..]) {
-        Ok((value, [])) => Ok((version, value)),
-        _ => Err(DecodeError::Payload),
+/// Decode a whole message.
+pub fn decode<'a, T: Deserialize<'a>>(data: &'a [u8]) -> Result<T, Malformed> {
+    match postcard::take_from_bytes(data) {
+        Ok((value, [])) => Ok(value),
+        _ => Err(Malformed),
     }
 }
 
@@ -1042,7 +1170,7 @@ mod tests {
         let sample = FaultSample {
             uptime_ms: 1058,
             state: PortState::Contract,
-            vbus_adc: Some(454),
+            vbus_mv: Some(4398),
             ..FaultSample::default()
         };
         port.latch_fault(trip, sample);
@@ -1057,10 +1185,10 @@ mod tests {
         let state = status.state();
         status.uptime_ms = 9;
         status.revision = 4;
-        status.bus_voltage_adc = Some(1);
+        status.bus_mv = Some(1);
         status.thermistor_adc = [Some(2), None];
         status.upstream_cc = Some([1, 0]);
-        status.ports[3].vbus_adc = Some(7);
+        status.ports[3].vbus_mv = Some(7);
         assert_eq!(status.state(), state);
         status.ports[3].generation = 1;
         assert_ne!(status.state(), state);
@@ -1093,7 +1221,8 @@ mod tests {
             host_limiter_fault: true,
             host_limiter_assertions: u32::MAX,
             ports: [PortStatus {
-                vbus_adc: Some(u16::MAX),
+                vbus_mv: Some(u16::MAX),
+                vbus_ok: true,
                 faults: Some(PortFaults {
                     power: true,
                     cc: true,
@@ -1114,9 +1243,10 @@ mod tests {
                 contract_mv: u16::MAX,
                 contract_ma: u16::MAX,
                 pd_transition: true,
+                demand: Demand::Shortfall,
                 fault_sample: Some(FaultSample {
                     state: PortState::Contract,
-                    vbus_adc: Some(u16::MAX),
+                    vbus_mv: Some(u16::MAX),
                     uptime_ms: u64::MAX,
                     faults: Some(PortFaults {
                         power: true,
@@ -1149,16 +1279,14 @@ mod tests {
                 }),
                 fetch: Some(u8::MAX),
             }; PORT_COUNT],
-            bus_voltage_adc: Some(u16::MAX),
+            bus_mv: Some(u16::MAX),
             thermistor_adc: [Some(u16::MAX); 2],
-            expander_inputs: Some(u8::MAX),
             upstream_fusb_device_id: Some(u8::MAX),
             upstream_cc: Some([u8::MAX; 2]),
             upstream_orientation: Some(Orientation::Cc2),
             upstream_error: Some(error),
             host_allowance_ma: u16::MAX,
             host_limit_ma: u16::MAX,
-            ch224_status: Some(u8::MAX),
             ch224_current_50ma: Some(u8::MAX),
             brick_source_pdos: [u32::MAX; 7],
             brick_requested_mv: u16::MAX,
@@ -1205,7 +1333,6 @@ mod tests {
     #[test]
     fn largest_host_report_fits_one_control_transfer() {
         let report = HostReport {
-            serial: u64::MAX,
             session: HostSession {
                 id: u32::MAX,
                 restore_ready: true,
@@ -1228,6 +1355,54 @@ mod tests {
         };
         let mut buffer = [0; MAX_PACKET];
         assert_eq!(decode(encode(&report, &mut buffer).unwrap()), Ok(report));
+    }
+
+    #[test]
+    fn an_arm_holds_through_a_renegotiation_and_ends_with_its_attachment() {
+        let mut status = Status::default();
+        let port = &mut status.ports[2];
+        port.state = PortState::Contract;
+        port.generation = 13;
+        port.restore_access = RestoreAccess::InDfu;
+        port.ecid = Some(42);
+        port.observed = Some(Observed {
+            usb: Usb::Apple(AppleMode::Dfu),
+            ecid: Some(42),
+        });
+        let arm = RestoreArm {
+            session: 7,
+            id: 1,
+            ports: 1 << 2,
+            generations: [0, 0, 13, 0, 0],
+            expires: 20_000,
+        };
+        assert!(arm.prepared(&status));
+        // DFU renegotiates the contract a few seconds in: the port is not
+        // ready for a command, and still holds the armed target.
+        status.ports[2].pd_transition = true;
+        status.ports[2].state = PortState::Ready;
+        status.ports[2].command_result = CommandResult::Pending;
+        assert_eq!(status.ready_mask() & (1 << 2), 0);
+        assert!(arm.prepared(&status));
+        // A new attachment, a fault, a detach or leaving DFU ends it there.
+        let mut moved = status;
+        moved.ports[2].generation = 14;
+        let mut fault = status;
+        fault.ports[2].faults = Some(PortFaults {
+            power: true,
+            cc: false,
+        });
+        let mut gone = status;
+        gone.ports[2].state = PortState::Discharging;
+        let mut left = status;
+        left.ports[2].observed = Some(Observed {
+            usb: Usb::Apple(AppleMode::Normal),
+            ecid: Some(42),
+        });
+        for changed in [moved, fault, gone, left] {
+            assert!(!arm.prepared(&changed));
+            assert_eq!(arm.changed(&changed), Some(Port::ALL[2]));
+        }
     }
 
     #[test]
@@ -1338,35 +1513,37 @@ mod tests {
     }
 
     #[test]
-    fn identity_frame_and_version_are_explicit() {
+    fn info_keeps_its_layout_and_skips_fields_added_later() {
         let info = Info {
-            serial: 1,
-            firmware_version: [0, 1, 0],
-            flash_bytes: 2_097_152,
-            capabilities: 3,
+            protocol: 0x1234,
+            firmware: [0, 1, 0],
+            build: Build([0xab; 20]),
+            debug_assertions: false,
+            name: HubName::new("Desk").unwrap(),
         };
         let mut buffer = [0; MAX_PACKET];
-        let packet = encode(&info, &mut buffer).unwrap();
-        let [low, high] = VERSION.to_le_bytes();
-        assert_eq!(
-            packet,
-            &[
-                b'I', b'A', b'S', b'I', low, high, 1, 0, 1, 0, 128, 128, 128, 1, 3
-            ]
-        );
-        let length = packet.len();
-        assert_eq!(
-            decode::<Info>(&buffer[..length + 1]),
-            Err(DecodeError::Payload)
-        );
-        buffer[4] = 1;
-        assert_eq!(
-            decode::<Info>(&buffer[..length]),
-            Err(DecodeError::Version(1))
-        );
-        // The identity frame reads the same from any version.
-        assert_eq!(decode_any::<Info>(&buffer[..length]), Ok((1, info)));
-        buffer[0] = 0;
-        assert_eq!(decode::<Info>(&buffer[..length]), Err(DecodeError::Header));
+        let length = encode(&info, &mut buffer).unwrap().len();
+        let mut expected = [0xab; 31];
+        expected[..5].copy_from_slice(&[0xb4, 0x24, 0, 1, 0]);
+        expected[25..].copy_from_slice(&[0, 4, b'D', b'e', b's', b'k']);
+        assert_eq!(&buffer[..length], &expected);
+        // A later hub's Info reads the same to this tool.
+        buffer[length] = 7;
+        assert_eq!(Info::decode(&buffer[..length + 1]), Ok(info));
+        assert_eq!(decode::<Info>(&buffer[..length + 1]), Err(Malformed));
+        assert_eq!(Info::decode(&buffer[..length - 1]), Err(Malformed));
+        let mut text = Text([0; 32], 0);
+        core::fmt::write(&mut text, format_args!("{}", info.build)).unwrap();
+        assert_eq!(&text.0[..text.1], b"abababab");
+    }
+
+    struct Text([u8; 32], usize);
+
+    impl core::fmt::Write for Text {
+        fn write_str(&mut self, text: &str) -> core::fmt::Result {
+            self.0[self.1..self.1 + text.len()].copy_from_slice(text.as_bytes());
+            self.1 += text.len();
+            Ok(())
+        }
     }
 }

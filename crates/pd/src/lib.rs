@@ -10,9 +10,10 @@ pub mod apple;
 pub mod brick;
 pub mod power;
 mod source;
+pub mod strikes;
 
 pub use source::{
-    Contract, RequestError, capabilities, fixed_contract, fixed_offers, host_offers,
-    limited_by_offers, max_port_cost_mw, nominal_limit_ma, select_offers, valid_window,
-    voltage_window, wants_more, write_current,
+    Contract, Funding, Offers, Refusal, RequestError, advertisement, evaluate, fixed_contract,
+    fixed_offers, host_offers, max_port_cost_mw, nominal_limit_ma, valid_window, voltage_window,
+    write_current,
 };

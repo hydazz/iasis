@@ -1,6 +1,6 @@
 //! The upstream FUSB302 measures one CC pin continuously once a cable is oriented.
 
-use iasis_pd::power::{HostLimit, host_limit};
+use crate::power::{HostLimit, host_limit};
 
 pub const VBUS_OK: u8 = 0x80;
 pub const ACTIVITY: u8 = 0x40;

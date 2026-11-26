@@ -12,15 +12,14 @@ test = false
 bench = false
 
 [dependencies]
-crc32fast = { version = "1", default-features = false }
+crc = "3"
 embedded-storage = "0.3"
-postcard.workspace = true
+postcard = { workspace = true, features = ["use-crc"] }
 iasis-protocol.workspace = true
 iasis-pd.workspace = true
 embedded-graphics = "0.8"
 heapless = "0.9"
 embassy-usb-driver = "0.2"
-tinybmp = "0.7"
 
 [target.'cfg(not(target_arch = "arm"))'.dev-dependencies]
 ssd1306 = "0.10"
@@ -46,5 +45,9 @@ embassy-usb = { version = "0.6", default-features = false }
 smart-leds = "0.4"
 ssd1306 = { version = "0.10", features = ["async"] }
 display-interface = "0.5"
-usbpd = "3"
+usbpd = { version = "3", features = ["defmt"] }
 usbpd-traits = "2"
+defmt = "1"
+# A probe attached to a running hub must not stall it.
+defmt-rtt = { version = "1", features = ["disable-blocking-mode"] }
+iasis-protocol = { workspace = true, features = ["defmt"] }

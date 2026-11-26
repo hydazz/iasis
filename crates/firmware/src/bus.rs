@@ -7,13 +7,10 @@ use embassy_rp::{
 };
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use embassy_time::{Duration, Instant, Timer, with_timeout};
-use iasis_pd::{
-    brick::{Action, Capabilities, Gear, Selection},
-    power,
-};
-use iasis_protocol::{I2cFailure, I2cOperation, PortError, RestorePhase, Status, Supply};
+use iasis_firmware::power::Inputs;
+use iasis_protocol::{I2cFailure, I2cOperation, PortError, Status};
 
-use crate::{board::Controls, outputs::Outputs};
+use crate::{board::Controls, brick::Brick, outputs::Outputs};
 
 /// Everything reached through the management I²C bus. One lock orders the
 /// root expander, its shift registers and the muxed port branches.
@@ -21,6 +18,9 @@ pub struct Io {
     pub bus: Bus,
     pub controls: Controls,
     pub outputs: Result<Outputs, PortError>,
+    /// The root expander's inputs, read with the status.
+    pub inputs: Option<Inputs>,
+    pub brick: Brick,
 }
 
 pub type SharedIo = Mutex<NoopRawMutex, Io>;
@@ -40,6 +40,39 @@ impl Io {
             .await
     }
 
+    /// Read the root expander, the upstream port controller and the brick
+    /// into the status.
+    pub async fn sample(&mut self, status: &mut Status) {
+        let bus = &mut self.bus;
+        let before = self.inputs.take();
+        self.brick.forget(status);
+        status.upstream_fusb_device_id = None;
+        let mut contract = None;
+        status.i2c_root_fault = bus.select(None).await.is_err();
+        if !status.i2c_root_fault {
+            self.inputs = bus.register(0x20, 0).await.ok().map(Inputs);
+            if self.inputs != before {
+                defmt::info!("expander inputs {=?}", self.inputs.map(|inputs| inputs.0));
+            }
+            status.i2c_root_fault |= self.inputs.is_none();
+            if bus.select(Some(5)).await.is_ok() {
+                status.upstream_fusb_device_id = bus.register(0x22, 1).await.ok();
+            }
+            // Channel 6 is the hub's boot/configuration interface.
+            let isolated = self.controls.shift & crate::outputs::PD_INPUT_OFF != 0;
+            contract = self.brick.sample(bus, status, self.inputs, isolated).await;
+            status.i2c_root_fault |= bus.select(None).await.is_err();
+        }
+        status.i2c_timeouts = bus.timeouts;
+        status.i2c_recoveries = bus.recoveries;
+        status.i2c_isolated = bus.isolated;
+        status.i2c_root_fault |= bus.faulted();
+        status.brick_requested_mv = self.brick.requested_mv();
+        if let Some(contract) = contract.filter(|_| !status.i2c_root_fault) {
+            self.brick.confirm(contract, status);
+        }
+    }
+
     pub async fn high_voltage(&mut self, index: usize, high: bool) -> Result<(), PortError> {
         self.outputs
             .as_mut()
@@ -49,12 +82,31 @@ impl Io {
     }
 }
 
+/// A transfer that has not finished on the bus by then is stuck.
+const TRANSFER: Duration = Duration::from_millis(20);
+/// Commands already in the controller's FIFO reach their STOP within this.
+const SETTLE: Duration = Duration::from_millis(1);
+
+/// What the controller needs before its next transfer. Each repair is
+/// repeatable, so one that is itself dropped runs again in full.
+#[derive(Clone, Copy)]
+enum Controller {
+    Ready,
+    /// A transfer was dropped before it finished; `read` if it was reading.
+    Abandoned {
+        read: bool,
+    },
+    /// A transfer timed out. The mux and controller need a hardware reset.
+    Stuck,
+}
+
 pub struct Bus {
     i2c: Option<I2c<'static, I2C0, Async>>,
     peripheral: Peri<'static, I2C0>,
     scl: Peri<'static, PIN_25>,
     sda: Peri<'static, PIN_24>,
-    reset: Output<'static>,
+    mux_reset: Output<'static>,
+    controller: Controller,
     stopped: Option<PortError>,
     timeouts: u32,
     recoveries: u32,
@@ -62,9 +114,6 @@ pub struct Bus {
     exposed: u8,
     /// Mux mask known to be in effect; unknown after a failed select or reset.
     selected: Option<u8>,
-    brick: Selection,
-    gear: Option<Gear>,
-    preferred_gear: Option<Gear>,
 }
 
 impl Bus {
@@ -79,24 +128,24 @@ impl Bus {
             peripheral,
             scl,
             sda,
-            reset: Output::new(reset, Level::Low),
+            mux_reset: Output::new(reset, Level::Low),
+            controller: Controller::Ready,
             stopped: None,
             timeouts: 0,
             recoveries: 0,
             isolated: 0,
             exposed: 0,
             selected: None,
-            brick: Selection::default(),
-            gear: None,
-            preferred_gear: None,
         };
         Timer::after_micros(10).await;
         bus.restart();
-        bus.reset.set_high();
+        bus.mux_reset.set_high();
         Timer::after_micros(10).await;
         bus
     }
 
+    /// Recreate the driver, which resets the controller: its FIFOs, abort
+    /// and stop flags and interrupt mask.
     fn restart(&mut self) {
         self.i2c = None;
         let mut config = Config::default();
@@ -129,30 +178,62 @@ impl Bus {
         }
     }
 
+    /// Finish what an earlier transfer left, then refuse transfers if the
+    /// root bus is stopped.
+    async fn prepare(&mut self) -> Result<(), PortError> {
+        match self.controller {
+            Controller::Ready => {}
+            Controller::Abandoned { read } => {
+                // A caller stopped waiting, which says nothing about the
+                // channel. The mux keeps its selection: `select` marks it
+                // unknown before writing it.
+                defmt::debug!(
+                    "I2C settling a dropped {=str}",
+                    if read { "read" } else { "write" }
+                );
+                settle(read).await;
+                self.restart();
+                self.controller = Controller::Ready;
+            }
+            Controller::Stuck => self.reset().await,
+        }
+        self.stopped.map_or(Ok(()), Err)
+    }
+
+    /// A transfer timed out: the exposed channels are quarantined and the
+    /// bus stops until a reset shows the root free.
     async fn timeout(&mut self, error: PortError) {
+        defmt::warn!("I2C timeout {}; isolating {=u8:#04x}", error, self.exposed);
         self.timeouts = self.timeouts.saturating_add(1);
         self.selected = None;
         self.isolated |= self.exposed;
         self.stopped = Some(error);
-        pac::I2C0
-            .ic_intr_mask()
-            .write_value(pac::i2c::regs::IcIntrMask(0));
-        pac::I2C0.ic_enable().write(|w| w.set_enable(false));
-        self.reset.set_low();
-        Timer::after_micros(10).await;
+        self.controller = Controller::Stuck;
+        self.reset().await;
+    }
+
+    /// Reset the mux, which deselects every branch, and the controller, then
+    /// check the root with an empty selection.
+    async fn reset(&mut self) {
+        self.mux_reset.set_low();
         self.restart();
-        self.reset.set_high();
+        Timer::after_micros(10).await;
+        self.mux_reset.set_high();
         Timer::after_micros(10).await;
         self.exposed = 0;
-        let result = with_timeout(
-            Duration::from_millis(20),
+        self.selected = None;
+        let probe = with_timeout(
+            TRANSFER,
             self.i2c.as_mut().unwrap().write_async(0x70u8, [0]),
         )
         .await;
-        if matches!(result, Ok(Ok(()))) {
-            self.stopped = None;
+        if matches!(probe, Ok(Ok(()))) && self.stopped.take().is_some() {
             self.recoveries = self.recoveries.saturating_add(1);
+            defmt::info!("I2C root recovered");
+        } else if self.stopped.is_some() {
+            defmt::error!("I2C root stopped");
         }
+        self.controller = Controller::Ready;
     }
 
     pub async fn select(&mut self, channel: Option<u8>) -> Result<(), PortError> {
@@ -162,7 +243,8 @@ impl Bus {
         {
             return Err(PortError::Isolated { channel });
         }
-        if self.selected == Some(bits) && !self.faulted() {
+        self.prepare().await?;
+        if self.selected == Some(bits) {
             return Ok(());
         }
         self.selected = None;
@@ -188,44 +270,49 @@ impl Bus {
         Ok(())
     }
 
-    pub async fn write(&mut self, address: u8, bytes: &[u8]) -> Result<(), PortError> {
-        if let Some(error) = self.stopped {
-            return Err(error);
+    /// Run one transfer. The controller is marked abandoned while it runs, so
+    /// a caller dropped mid-transfer leaves the next operation to settle it.
+    async fn transfer(
+        &mut self,
+        address: u8,
+        operation: I2cOperation,
+        read: bool,
+        mut run: impl AsyncFnMut(&mut I2c<'static, I2C0, Async>) -> Result<(), Error>,
+    ) -> Result<(), PortError> {
+        self.prepare().await?;
+        for attempt in 0..2 {
+            self.controller = Controller::Abandoned { read };
+            let done = with_timeout(TRANSFER, run(self.i2c.as_mut().unwrap())).await;
+            let Ok(result) = done else {
+                let error = self.error(address, operation, I2cFailure::Timeout);
+                self.timeout(error).await;
+                // Expander register writes are idempotent. Retrying the
+                // same clock/latch level cannot create a second edge.
+                if address != 0x20 || self.faulted() {
+                    return Err(error);
+                }
+                if attempt == 1 {
+                    self.stopped = Some(error);
+                    return Err(error);
+                }
+                continue;
+            };
+            self.controller = Controller::Ready;
+            return result.map_err(|e| self.error(address, operation, failure(e)));
         }
+        unreachable!()
+    }
+
+    pub async fn write(&mut self, address: u8, bytes: &[u8]) -> Result<(), PortError> {
         let operation = match (address, bytes.first().copied()) {
             (0x70, Some(mask)) => I2cOperation::Select { mask },
             (0x3c | 0x3d, Some(control)) => I2cOperation::DisplayWrite { control },
             (_, register) => I2cOperation::Write { register },
         };
-        for attempt in 0..2 {
-            match with_timeout(
-                Duration::from_millis(20),
-                self.i2c
-                    .as_mut()
-                    .unwrap()
-                    .write_async(address, bytes.iter().copied()),
-            )
-            .await
-            {
-                Ok(result) => {
-                    return result.map_err(|e| self.error(address, operation, failure(e)));
-                }
-                Err(_) => {
-                    let error = self.error(address, operation, I2cFailure::Timeout);
-                    self.timeout(error).await;
-                    // Expander register writes are idempotent. Retrying the
-                    // same clock/latch level cannot create a second edge.
-                    if address != 0x20 || self.faulted() {
-                        return Err(error);
-                    }
-                    if attempt == 1 {
-                        self.stopped = Some(error);
-                        return Err(error);
-                    }
-                }
-            }
-        }
-        unreachable!()
+        self.transfer(address, operation, false, async |i2c| {
+            i2c.write_async(address, bytes.iter().copied()).await
+        })
+        .await
     }
 
     pub async fn read(
@@ -244,40 +331,14 @@ impl Bus {
         pointer: &[u8],
         bytes: &mut [u8],
     ) -> Result<(), PortError> {
-        if let Some(error) = self.stopped {
-            return Err(error);
-        }
         let operation = I2cOperation::Read {
             register: pointer[0],
         };
-        for attempt in 0..2 {
-            match with_timeout(
-                Duration::from_millis(20),
-                self.i2c.as_mut().unwrap().write_read_async(
-                    address,
-                    pointer.iter().copied(),
-                    bytes,
-                ),
-            )
-            .await
-            {
-                Ok(result) => {
-                    return result.map_err(|e| self.error(address, operation, failure(e)));
-                }
-                Err(_) => {
-                    let error = self.error(address, operation, I2cFailure::Timeout);
-                    self.timeout(error).await;
-                    if address != 0x20 || self.faulted() {
-                        return Err(error);
-                    }
-                    if attempt == 1 {
-                        self.stopped = Some(error);
-                        return Err(error);
-                    }
-                }
-            }
-        }
-        unreachable!()
+        self.transfer(address, operation, true, async |i2c| {
+            i2c.write_read_async(address, pointer.iter().copied(), bytes)
+                .await
+        })
+        .await
     }
 
     pub async fn register(&mut self, address: u8, register: u8) -> Result<u8, PortError> {
@@ -285,117 +346,42 @@ impl Bus {
         self.read(address, register, &mut bytes).await?;
         Ok(bytes[0])
     }
-
-    pub fn brick_voltage_mv(&self, status: &Status) -> Option<u32> {
-        if self.faulted() || status.i2c_root_fault || status.brick_input_fault {
-            return None;
-        }
-        status.ch224_current_50ma?;
-        self.gear?
-            .budget_mv(status.bus_voltage_adc.and_then(power::millivolts)?)
-    }
-
-    pub fn brick_upgrade_pending(&self, status: &Status) -> bool {
-        self.brick.settling(Instant::now().as_millis())
-            || (self.brick_voltage_mv(status).is_some()
-                && self.gear != self.preferred_gear
-                && !status.side_power_enabled
-                && status
-                    .ports
-                    .iter()
-                    .all(|p| p.supply != Supply::Brick && !restoring(p)))
-    }
-
-    async fn sample_brick(&mut self, status: &mut Status) -> Option<(Gear, u8)> {
-        let inputs = status.expander_inputs?;
-        let mv = status.bus_voltage_adc.and_then(power::millivolts)?;
-        let pg = inputs & 0x40 == 0;
-        let overvoltage = power::brick_overvoltage(status.bus_voltage_adc);
-        let now = Instant::now().as_millis();
-        if !pg && mv < 5000 && !self.brick.settling(now) {
-            self.brick.forget_request();
-        }
-        // The rear controller is unpowered when only the host is attached.
-        if !pg && !overvoltage {
-            return None;
-        }
-        self.select(Some(7)).await.ok()?;
-        let pd = self.register(0x22, 0x09).await.ok()?;
-        status.ch224_status = Some(pd);
-        if pd & 0x18 == 0 || inputs & 0x20 == 0 {
-            return None;
-        }
-        let unloaded = !status.side_power_enabled
-            && status
-                .ports
-                .iter()
-                .all(|p| p.supply == Supply::Off && power::safe_zero(p.vbus_adc) && !restoring(p));
-        let action = if overvoltage || pd & 0x10 != 0 {
-            // EPR Source_Capabilities has a different layout. Leave EPR before
-            // interpreting 0x60 as an SPR Source_Capabilities message.
-            self.brick.recover_epr(now, unloaded)
-        } else {
-            let mut bytes = [0; 30];
-            self.read(0x22, 0x60, &mut bytes).await.ok()?;
-            let caps = Capabilities::decode(&bytes)?;
-            status.brick_source_pdos = caps.pdos;
-            self.preferred_gear = caps.best();
-            self.brick.select(&caps, mv, now, unloaded)
-        };
-        match action {
-            Action::Request(selector) => {
-                if self.write(0x22, &[0x0a, selector]).await.is_err() {
-                    self.brick.forget_request();
-                }
-                None
-            }
-            Action::Confirm(gear) => {
-                let current = gear.current_50ma(self.register(0x22, 0x50).await.ok()?)?;
-                Some((gear, current))
-            }
-            Action::Wait => None,
-        }
-    }
-
-    pub async fn sample(&mut self, status: &mut Status) {
-        status.expander_inputs = None;
-        status.upstream_fusb_device_id = None;
-        status.ch224_status = None;
-        status.ch224_current_50ma = None;
-        status.brick_source_pdos = [0; 7];
-        self.gear = None;
-        self.preferred_gear = None;
-        let mut contract = None;
-        status.i2c_root_fault = self.select(None).await.is_err();
-        if !status.i2c_root_fault {
-            status.expander_inputs = self.register(0x20, 0).await.ok();
-            status.i2c_root_fault |= status.expander_inputs.is_none();
-            if self.select(Some(5)).await.is_ok() {
-                status.upstream_fusb_device_id = self.register(0x22, 1).await.ok();
-            }
-            // Channel 6 is the hub's boot/configuration interface.
-            contract = self.sample_brick(status).await;
-            status.i2c_root_fault |= self.select(None).await.is_err();
-        }
-        status.i2c_timeouts = self.timeouts;
-        status.i2c_recoveries = self.recoveries;
-        status.i2c_isolated = self.isolated;
-        status.i2c_root_fault |= self.faulted();
-        status.brick_requested_mv = self.brick.requested_mv();
-        if let Some((gear, current)) = contract.filter(|_| !status.i2c_root_fault) {
-            self.gear = Some(gear);
-            status.ch224_current_50ma = Some(current);
-        }
-    }
 }
 
-fn restoring(port: &iasis_protocol::PortStatus) -> bool {
-    port.restore.is_some_and(|job| {
-        matches!(
-            job.phase,
-            RestorePhase::Preparing | RestorePhase::Running | RestorePhase::Unconfirmed
-        )
-    })
+/// Let a dropped transfer end on the bus. Commands already in the FIFO run
+/// to their STOP. A transfer longer than the FIFO, dropped between refills,
+/// holds SCL low for commands that will not come, and the controller cannot
+/// be disabled until that transfer ends: a read ends with one more byte,
+/// not acknowledged, and a write with an abort. A bus still busy after that
+/// times out on its next transfer.
+async fn settle(read: bool) {
+    let i2c = pac::I2C0;
+    i2c.ic_intr_mask()
+        .write_value(pac::i2c::regs::IcIntrMask(0));
+    if idle(SETTLE).await {
+        return;
+    }
+    if read {
+        i2c.ic_data_cmd().write(|w| {
+            w.set_cmd(true);
+            w.set_stop(true);
+        });
+    } else {
+        i2c.ic_enable().modify(|w| w.set_abort(true));
+    }
+    idle(SETTLE).await;
+}
+
+/// Wait up to `limit` for the controller to leave the bus.
+async fn idle(limit: Duration) -> bool {
+    let deadline = Instant::now() + limit;
+    while pac::I2C0.ic_status().read().mst_activity() {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        Timer::after_micros(20).await;
+    }
+    true
 }
 
 fn failure(error: Error) -> I2cFailure {

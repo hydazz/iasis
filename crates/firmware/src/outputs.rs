@@ -1,12 +1,13 @@
 use embassy_time::Timer;
-use iasis_protocol::{PortError, Supply};
+use iasis_protocol::PortError;
 
 use crate::{board::Controls, bus::Bus};
 
 // Bits 0..7 are U1181 QA..QH, 8..15 U1182 QA..QH. U1181 QH is HOST_EXT;
 // U1182 QA and QE..QH discharge ports 1..5, QB..QD control the host current limit.
 const HOST_EXT: u16 = 1 << 7;
-const PORT_STAGES_OFF: u16 = 1 << 6;
+pub const PD_INPUT_OFF: u16 = 1 << 5;
+pub const PORT_STAGES_OFF: u16 = 1 << 6;
 const HOST_TARGET_EN: u16 = 1 << 11;
 const HOST_LIMIT_MASK: u16 = 3 << 9;
 const DISCHARGE: [u16; 5] = [1 << 8, 1 << 12, 1 << 13, 1 << 14, 1 << 15];
@@ -21,20 +22,31 @@ impl Outputs {
         &mut self,
         bus: &mut Bus,
         controls: &mut Controls,
-        supply: Supply,
-        tier: Option<iasis_pd::power::HostLimit>,
+        stages: bool,
+        isolate_input: bool,
+        tier: Option<iasis_firmware::power::HostLimit>,
     ) -> Result<(), PortError> {
         // Keep the host eFuse inputs biased even when only the charging path
         // is used: OUT may be at most 21 V above IN. Per-port requests enforce
         // the host allowance; withdrawing it must not discharge this rail.
         let bits = tier.map_or(0, |tier| u16::from(tier.bits) << 9);
-        let inhibit = if supply == Supply::Brick {
-            0
-        } else {
-            PORT_STAGES_OFF
-        };
-        let value =
-            (controls.shift & !(HOST_LIMIT_MASK | PORT_STAGES_OFF)) | bits | HOST_TARGET_EN | inhibit;
+        let inhibit = if stages { 0 } else { PORT_STAGES_OFF };
+        let value = (controls.shift & !(HOST_LIMIT_MASK | PORT_STAGES_OFF | PD_INPUT_OFF))
+            | bits
+            | HOST_TARGET_EN
+            | inhibit
+            | if isolate_input { PD_INPUT_OFF } else { 0 };
+        if (controls.shift ^ value) & PD_INPUT_OFF != 0 && bits != controls.shift & HOST_LIMIT_MASK {
+            // Isolate before raising the tier, and set a funded tier before
+            // admitting the brick. Both intermediate words keep stages reset.
+            let isolated_bits = if isolate_input {
+                controls.shift & HOST_LIMIT_MASK
+            } else {
+                bits
+            };
+            let isolated = (value & !HOST_LIMIT_MASK) | isolated_bits | PD_INPUT_OFF | PORT_STAGES_OFF;
+            self.latch(bus, controls, isolated).await?;
+        }
         let releasing_stages =
             (!self.shift_known || controls.shift & PORT_STAGES_OFF != 0) && inhibit == 0;
         self.latch(bus, controls, value).await?;
