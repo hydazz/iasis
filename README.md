@@ -161,7 +161,7 @@ target/release/iasis --serial 0123456789abcdef restore --ports 1,2,3,4,5 --erase
 
 Each target is its own job, and each restore its own process. A job fetches the target's image before it puts the target into DFU or recovery when this host already knows the target's model; otherwise the target waits there for it. A restore that fails while its target is still in DFU or recovery is started again, up to three times. A target that can’t be prepared, such as an iPad waiting for Trust, ends with the reason on its port while the others restore.
 
-Erased Macs restart into Setup Assistant. To leave them powered off, enable **Shut down Macs after erasing** in the app’s settings or run `iasis post-restore --mac shutdown`. Use `--mac restart` to restore the default. Revived devices always restart.
+Erased Macs restart into Setup Assistant. To leave them powered off, enable shutdown after erasing in the app’s settings or run `iasis post-restore --mac shutdown`. Use `--mac restart` to restore the default. Revived devices always restart.
 
 For iPhones and iPads, right-click the selection and choose **Advance Setup…**. Choose language and region, Automated Device Enrollment, or both. Iasis checks the whole selection before acting. If Setup Assistant has already accepted the requested language and region, a combined request proceeds to enrollment.
 
@@ -179,7 +179,7 @@ The device inspector shows the requested steps and keeps each outcome. During in
 
 Logs and working files go under `restores/` in the agent's cache directory. Allow space for an extracted OS image per worker. Iasis matches each image to the target's chip and board IDs, or to its product type when only a model identifier is available. The restore program checks Apple signing.
 
-On macOS 27.3, Finder opens a window for each Mac, iPad or iPhone that enters DFU or recovery mode. To stop it, turn off **Open Finder for DFU and Recovery Devices** in the app's Settings > General, or run this once as the user running Finder. The preference is undocumented.
+On macOS 27.3, Finder opens a window for each Mac, iPad or iPhone that enters DFU or recovery mode. To stop it, turn off **Open Finder for DFU and Recovery** in the app's Settings > General, or run this once as the user running Finder. The preference is undocumented.
 
 ```sh
 defaults write com.apple.AMPDeviceDiscoveryAgent reveal-devices -bool false
@@ -191,7 +191,7 @@ To restore the default behaviour, run `defaults delete com.apple.AMPDeviceDiscov
 
 An iPhone or iPad whose enrollment profile lists the agent's supervision certificate pairs with the host without asking for Trust, so its restores through recovery need no one at the device. Other devices still ask.
 
-The agent makes its identity when it first starts. Export the certificate with Export… in the identity's ⋯ menu, in the Mac app's Settings, or with `iasis supervision certificate Iasis.cer`, and add it to the devices' Automated Device Enrollment profile as a supervising host certificate. In Intune that is Sync with computers, Allow Apple Configurator by certificate, in the enrollment program token's profile. A device takes the certificate when it enrolls, so an enrolled one needs one erase, with a Trust tap, and enrollment again first.
+The agent makes its identity when it first starts. Export the certificate with Export… in the identity's ⋯ menu, in the Mac app's Settings > Restore, or with `iasis supervision certificate Iasis.cer`, and add it to the devices' Automated Device Enrollment profile as a supervising host certificate. In Intune that is Sync with computers, Allow Apple Configurator by certificate, in the enrollment program token's profile. A device takes the certificate when it enrolls, so an enrolled one needs one erase, with a Trust tap, and enrollment again first.
 
 To back the identity up or give another host the same one, export it with its private key in a password-protected PKCS #12 archive, with Export… in the Mac app or `iasis supervision export Iasis.p12`, and import it with Import… or `iasis supervision import Iasis.p12`. The agent keeps it as `supervision.pem` in its state directory, open to the agent's account alone: mode 600 in a 700 directory on macOS (`~/Library/Application Support/com.hydaz.Iasis`) and Linux (`/var/lib/iasis`), and on Windows an access list of the agent's account and Administrators. Anyone holding the identity can pair with every device that lists its certificate.
 
