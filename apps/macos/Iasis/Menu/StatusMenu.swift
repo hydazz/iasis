@@ -118,7 +118,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             if let live {
                 header.title = live.title
             }
-            let devices = live?.devices.filter(\.isSelectable) ?? []
+            let devices = live?.devices.filter(\.appearsInStatusMenu) ?? []
             if canChangeRows {
                 header.isHidden = live == nil
                 message.isHidden = live == nil || (live?.hub.notice == nil && live?.hub.update?.required != true && !devices.isEmpty)
@@ -212,7 +212,7 @@ private final class DeviceMenu: NSObject {
     }
 
     private func attachment(_ device: Device?) -> Device? {
-        guard let shown, let device, device.isSelectable, shown.session == device.session,
+        guard let shown, let device, device.appearsInStatusMenu, shown.session == device.session,
               shown.port.generation == device.port.generation,
               shown.port.ecid == nil || shown.port.ecid == device.port.ecid
         else { return nil }
@@ -268,6 +268,10 @@ private extension NSMenuItem {
 }
 
 extension Device {
+    var appearsInStatusMenu: Bool {
+        port.occupied || !port.enabled || run?.inProgress == true
+    }
+
     var menuSubtitle: String? {
         let text = activity.text
         if !text.isEmpty {
