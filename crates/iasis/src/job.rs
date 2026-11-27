@@ -544,7 +544,6 @@ impl Job {
                             self.hub
                                 .work
                                 .job(self.port, Some(self.preparing(tracker.ecid)));
-                            let location = crate::native::kis_location(&snapshot, self.port, mode);
                             let worker = self.host.engine.start(
                                 image,
                                 tracker.ecid,
@@ -555,7 +554,6 @@ impl Job {
                                     self.host.post_restore.shutdown_macs,
                                     &image.product_types,
                                 ),
-                                location,
                             );
                             if worker.is_err() {
                                 self.hub.work.job(self.port, None);

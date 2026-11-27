@@ -348,9 +348,8 @@ impl RestoreEngine {
     }
 
     /// Start a worker that restores or revives the target with this ECID,
-    /// verified in `mode`, from `ipsw`, and leaves it to `after`; `location`
-    /// is its KIS device's where that is its only way in. The worker runs to
-    /// its end whatever becomes of the returned handle.
+    /// verified in `mode`, from `ipsw`, and leaves it to `after`. The worker
+    /// runs to its end whatever becomes of the returned handle.
     pub fn start(
         &self,
         ipsw: &PreparedIpsw,
@@ -358,7 +357,6 @@ impl RestoreEngine {
         mode: AppleMode,
         operation: Operation,
         after: PostRestoreAction,
-        location: Option<u32>,
     ) -> Result<Worker> {
         ensure!(
             ecid != 0,
@@ -379,14 +377,8 @@ impl RestoreEngine {
             self.active.lock().unwrap().insert(ecid),
             "ECID {ecid:016x} already has an active restore"
         );
-        let mut command = crate::native::worker_command(
-            &self.program,
-            operation,
-            after,
-            ecid,
-            ipsw.path(),
-            location,
-        );
+        let mut command =
+            crate::native::worker_command(&self.program, operation, after, ecid, ipsw.path());
         command.current_dir(directory.path());
         let status = Arc::new(Mutex::new(RestoreStatus {
             operation,
@@ -448,9 +440,8 @@ fn run_worker(
     use process_wrap::std::*;
 
     // The multiplexer serves this restore until its worker exits.
-    let lease = crate::native::mux::lease().context("reaching the USB multiplexer")?;
+    let _mux = crate::native::mux::lease(&mut command).context("reaching the USB multiplexer")?;
     command
-        .envs(lease.environment.clone())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -700,21 +691,19 @@ mod tests {
     }
 
     #[test]
-    fn a_worker_is_given_its_operation_one_ecid_its_image_its_ending_and_a_kis_location() {
-        for (operation, verb, after, ending, location) in [
+    fn a_worker_is_given_its_operation_one_ecid_its_image_and_its_ending() {
+        for (operation, verb, after, ending) in [
             (
                 Operation::Restore,
                 "erase",
                 PostRestoreAction::Shutdown,
                 "shutdown",
-                None,
             ),
             (
                 Operation::Revive,
                 "revive",
                 PostRestoreAction::Reboot,
                 "reboot",
-                Some(0x0012_0000),
             ),
         ] {
             let command = crate::native::worker_command(
@@ -723,20 +712,18 @@ mod tests {
                 after,
                 0x123456789abcdef,
                 Path::new("/shared/Apple IPSW.ipsw"),
-                location,
             );
             let args: Vec<_> = command
                 .get_args()
                 .map(|s| s.to_string_lossy().into_owned())
                 .collect();
-            let mut expected = vec![
+            let expected = [
                 "worker",
                 verb,
                 "0123456789abcdef",
                 "/shared/Apple IPSW.ipsw",
                 ending,
             ];
-            expected.extend(location.map(|_| "00120000"));
             assert_eq!(args, expected);
         }
     }
@@ -803,7 +790,6 @@ mod tests {
                     AppleMode::Normal,
                     Operation::Revive,
                     PostRestoreAction::Reboot,
-                    None
                 )
                 .is_err()
         );
@@ -815,7 +801,6 @@ mod tests {
                     AppleMode::Dfu,
                     Operation::Restore,
                     PostRestoreAction::Reboot,
-                    None
                 )
                 .is_err()
         );
@@ -831,7 +816,6 @@ mod tests {
                         AppleMode::KisDfu,
                         operation,
                         PostRestoreAction::Reboot,
-                        None,
                     )
                     .unwrap(),
             );
@@ -871,7 +855,6 @@ mod tests {
                     AppleMode::Dfu,
                     Operation::Restore,
                     PostRestoreAction::Reboot,
-                    None
                 )
                 .is_err()
         );
@@ -886,7 +869,6 @@ mod tests {
                         AppleMode::Dfu,
                         Operation::Restore,
                         PostRestoreAction::Reboot,
-                        None,
                     )
                     .unwrap(),
             );
@@ -936,7 +918,6 @@ printf '%s\n' '{FINISHED}'
                 AppleMode::Dfu,
                 Operation::Restore,
                 PostRestoreAction::Reboot,
-                None,
             )
         };
         let first = start(1).unwrap();
@@ -1048,7 +1029,6 @@ esac
                         AppleMode::Dfu,
                         Operation::Restore,
                         PostRestoreAction::Reboot,
-                        None,
                     )
                     .unwrap(),
             );

@@ -6,30 +6,16 @@
 //! runs, so it runs only while a restore needs it and Apple's does not run.
 //! Booted devices need Apple's drivers and usbmuxd.
 
-use std::io;
+use std::{io, process::Command};
 
-use restorekit::usbmuxd::{MuxPort, mux_port};
+use restorekit::usbmuxd::{DriverBinding, MuxPort, UsbmuxdGuard, mux_port};
 
 use super::Lease;
 
-const ADDRESS: &str = "127.0.0.1:27015";
-
-pub(crate) fn lease() -> io::Result<Lease> {
-    // RestoreKit uses Apple's usbmuxd itself.
-    if mux_port() == MuxPort::Apple {
-        return Ok(Lease {
-            environment: Vec::new(),
-            _served: None,
-        });
-    }
-    Ok(Lease {
-        environment: vec![
-            ("USBMUXD_SOCKET_ADDRESS", ADDRESS.into()),
-            // The restore uses this multiplexer instead of starting its own.
-            ("RESTOREKIT_SHARED_USBMUXD", "1".into()),
-        ],
-        _served: Some(super::served::serve(ADDRESS)?),
-    })
+pub(crate) fn lease(command: &mut Command) -> io::Result<Lease> {
+    let server = UsbmuxdGuard::for_worker(command, DriverBinding::External, &mut |_| {})
+        .map_err(io::Error::other)?;
+    Ok(Lease { _server: server })
 }
 
 /// Apple's usbmuxd while it does not run: only it reaches a running iPhone
