@@ -11,7 +11,8 @@ use std::{
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use iasis_api::{
-    CatalogModel, Fetch, HubView, Image, Images, Release, Reply, Request, State, Supervision,
+    CatalogModel, Fetch, HubView, Image, Images, Release, Reply, Request, SetupLanguage, State,
+    Supervision,
 };
 
 use crate::{
@@ -21,10 +22,35 @@ use crate::{
     window::Window,
 };
 
+pub fn desktop_setup_language() -> SetupLanguage {
+    let language = glib::language_names()
+        .first()
+        .map(ToString::to_string)
+        .unwrap_or_default();
+    let locale = ["LC_ALL", "LC_TIME", "LANG"]
+        .iter()
+        .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()))
+        .unwrap_or_default();
+    let base = |value: &str| {
+        value
+            .split(['.', '@'])
+            .next()
+            .unwrap_or_default()
+            .to_owned()
+    };
+    SetupLanguage {
+        language: base(&language).replace('_', "-"),
+        locale: base(&locale),
+    }
+}
+
 pub struct Preferences {
     pub dialog: adw::PreferencesDialog,
     window: Weak<Window>,
     sharing: adw::SwitchRow,
+    shutdown_macs: adw::SwitchRow,
+    setup_language: adw::SwitchRow,
+    try_enrollment: adw::SwitchRow,
     supervision_row: adw::ActionRow,
     export: gio::SimpleAction,
     supervision: RefCell<Supervision>,
@@ -91,6 +117,21 @@ impl Preferences {
             .build();
         sharing_group.add(&sharing);
         general.add(&sharing_group);
+        let restore_group = adw::PreferencesGroup::builder()
+            .title("After Erasing")
+            .build();
+        let shutdown_macs = adw::SwitchRow::builder().title("Shut down Macs").build();
+        restore_group.add(&shutdown_macs);
+        let setup_language = adw::SwitchRow::builder()
+            .title("Set language and region on iPhones and iPads")
+            .build();
+        restore_group.add(&setup_language);
+        let try_enrollment = adw::SwitchRow::builder()
+            .title("Try enrollment after erasing")
+            .subtitle("Activate iPhones and iPads and request their assigned enrollment profile. You may need to sign in or continue past “Partially Set Up” on the device.")
+            .build();
+        restore_group.add(&try_enrollment);
+        general.add(&restore_group);
         let supervision_group = adw::PreferencesGroup::builder()
             .title("Supervision Identity")
             .description("Supervised iPhones and iPads whose enrollment profile lists this certificate as a supervising host pair with this computer without asking for Trust.")
@@ -181,6 +222,9 @@ impl Preferences {
             dialog,
             window: Rc::downgrade(window),
             sharing,
+            shutdown_macs,
+            setup_language,
+            try_enrollment,
             supervision_row,
             export: gio::SimpleAction::new("export-identity", None),
             supervision: RefCell::default(),
@@ -197,6 +241,35 @@ impl Preferences {
             store: RefCell::default(),
         });
 
+        let weak = Rc::downgrade(&this);
+        this.setup_language.connect_active_notify(move |row| {
+            if let Some(this) = weak.upgrade()
+                && !this.showing.get()
+            {
+                let settings = row.is_active().then(desktop_setup_language);
+                this.perform(Request::SetupLanguage { settings });
+            }
+        });
+        let weak = Rc::downgrade(&this);
+        this.try_enrollment.connect_active_notify(move |row| {
+            if let Some(this) = weak.upgrade()
+                && !this.showing.get()
+            {
+                this.perform(Request::EnrollmentAfterErase {
+                    enabled: row.is_active(),
+                });
+            }
+        });
+        let weak = Rc::downgrade(&this);
+        this.shutdown_macs.connect_active_notify(move |row| {
+            if let Some(this) = weak.upgrade()
+                && !this.showing.get()
+            {
+                this.perform(Request::ShutdownMacs {
+                    enabled: row.is_active(),
+                });
+            }
+        });
         let weak = Rc::downgrade(&this);
         this.sharing.connect_active_notify(move |row| {
             if let Some(this) = weak.upgrade()
@@ -290,6 +363,17 @@ impl Preferences {
     /// Show the agent's latest state.
     pub fn update(self: &Rc<Self>, state: &State) {
         self.showing.set(true);
+        self.shutdown_macs
+            .set_active(state.post_restore.shutdown_macs);
+        self.try_enrollment
+            .set_active(state.post_restore.try_enrollment);
+        let region = state.post_restore.setup_language.as_ref();
+        self.setup_language.set_active(region.is_some());
+        self.setup_language.set_subtitle(
+            &region
+                .map(|s| format!("{}, {}", s.language, s.locale))
+                .unwrap_or_default(),
+        );
         self.sharing.set_active(state.sharing.enabled);
         self.sharing.set_subtitle(&glib::markup_escape_text(
             state
@@ -320,11 +404,16 @@ impl Preferences {
         self.show_images();
     }
 
-    fn perform(&self, request: Request) {
-        let window = self.window.clone();
+    fn perform(self: &Rc<Self>, request: Request) {
+        let dialog = Rc::downgrade(self);
         glib::spawn_future_local(async move {
-            if let (Err(message), Some(window)) = (agent::perform(request).await, window.upgrade())
+            if let Err(message) = agent::perform(request).await
+                && let Some(dialog) = dialog.upgrade()
+                && let Some(window) = dialog.window.upgrade()
             {
+                if let Some(state) = window.state() {
+                    dialog.update(&state);
+                }
                 window.toast(&message);
             }
         });

@@ -13,6 +13,7 @@ pub mod inventory;
 pub(crate) mod job;
 pub mod logging;
 pub mod native;
+mod post_restore;
 pub mod progress;
 pub mod restore;
 pub mod sharing;

@@ -88,6 +88,50 @@
     ]
   },
   {
+    "op": "advance_setup",
+    "hubs": [
+      {
+        "hub": "817a23bd502453b4",
+        "session": 3,
+        "targets": [
+          {
+            "port": 2,
+            "generation": 7,
+            "ecid": "0002250e3c04c01e"
+          }
+        ]
+      }
+    ],
+    "settings": {
+      "language": "en-AU",
+      "locale": "en_AU"
+    },
+    "dep": false,
+    "check_only": true
+  },
+  {
+    "op": "advance_setup",
+    "hubs": [
+      {
+        "hub": "817a23bd502453b4",
+        "session": 3,
+        "targets": [
+          {
+            "port": 2,
+            "generation": 7,
+            "ecid": "0002250e3c04c01e"
+          }
+        ]
+      }
+    ],
+    "settings": {
+      "language": "en-AU",
+      "locale": "en_AU"
+    },
+    "dep": false,
+    "check_only": false
+  },
+  {
     "op": "power",
     "hub": "817a23bd502453b4",
     "port": 2,
@@ -113,6 +157,21 @@
     "op": "update",
     "hub": "817a23bd502453b4",
     "bytes": 518144
+  },
+  {
+    "op": "shutdown_macs",
+    "enabled": true
+  },
+  {
+    "op": "setup_language",
+    "settings": {
+      "language": "en-AU",
+      "locale": "en_AU"
+    }
+  },
+  {
+    "op": "setup_language",
+    "settings": null
   },
   {
     "op": "sharing",
@@ -151,5 +210,50 @@
   {
     "op": "diagnostics",
     "hub": "817a23bd502453b4"
+  },
+  {
+    "op": "advance_setup",
+    "hubs": [
+      {
+        "hub": "817a23bd502453b4",
+        "session": 3,
+        "targets": [
+          {
+            "port": 2,
+            "generation": 7,
+            "ecid": "0002250e3c04c01e"
+          }
+        ]
+      }
+    ],
+    "settings": null,
+    "dep": true,
+    "check_only": true
+  },
+  {
+    "op": "advance_setup",
+    "hubs": [
+      {
+        "hub": "817a23bd502453b4",
+        "session": 3,
+        "targets": [
+          {
+            "port": 2,
+            "generation": 7,
+            "ecid": "0002250e3c04c01e"
+          }
+        ]
+      }
+    ],
+    "settings": {
+      "language": "en-AU",
+      "locale": "en_AU"
+    },
+    "dep": true,
+    "check_only": false
+  },
+  {
+    "op": "enrollment_after_erase",
+    "enabled": true
   }
 ]

@@ -45,18 +45,18 @@ public partial class App : Application
                 AddAction("Restart", DeviceAction.Restart);
                 AddAction("Revive", DeviceAction.Revive);
                 AddAction("Restore…", DeviceAction.Restore);
-                section.Items.Add(target);
+                section.Items.Add(target.Items.Count == 0 ? new MenuFlyoutItem { Text = target.Text, IsEnabled = false } : target);
 
                 void AddAction(string title, DeviceAction action)
                 {
+                    if (DeviceActionTargets.For([d], action) is null) return;
                     target.Items.Add(new MenuFlyoutItem
                     {
                         Text = title,
-                        IsEnabled = DeviceActionTargets.For([d], action) is not null,
                         Command = new RelayCommand(() =>
                         {
                             main.Open();
-                            main.Act(action, [d]);
+                            main.Act(action, d);
                         }),
                     });
                 }

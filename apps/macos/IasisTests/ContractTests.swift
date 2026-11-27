@@ -41,11 +41,16 @@ struct ContractTests {
             .revive(hubs: selection, latest: false),
             .dfu(hubs: selection),
             .reboot(hubs: selection),
+            .advanceSetup(hubs: selection, settings: .init(language: "en-AU", locale: "en_AU"), dep: false, checkOnly: true),
+            .advanceSetup(hubs: selection, settings: .init(language: "en-AU", locale: "en_AU"), dep: false, checkOnly: false),
             .power(hub: hub, port: 2, on: true),
             .debugUsb(hub: hub, port: 1, on: true),
             .rename(hub: hub, name: "Bench A"),
             .brightness(hub: hub, percent: 50),
             .update(hub: hub, bytes: 518_144),
+            .shutdownMacs(enabled: true),
+            .setupLanguage(.init(language: "en-AU", locale: "en_AU")),
+            .setupLanguage(nil),
             .sharing(enabled: true),
             .importSupervision(pkcs12: identity, password: "correct horse"),
             .exportSupervision(password: "correct horse"),
@@ -55,6 +60,9 @@ struct ContractTests {
             .remove(image: "26B131-UniversalMac_27.2.1_26B131_Restore.ipsw"),
             .catalog,
             .diagnostics(hub: hub),
+            .advanceSetup(hubs: selection, settings: nil, dep: true, checkOnly: true),
+            .advanceSetup(hubs: selection, settings: .init(language: "en-AU", locale: "en_AU"), dep: true, checkOnly: false),
+            .enrollmentAfterErase(enabled: true),
         ]
         let lines = try requests.map { try $0.line() }
         let sent = Data("[".utf8) + lines.joined(separator: Data(",".utf8)) + Data("]".utf8)

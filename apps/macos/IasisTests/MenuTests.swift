@@ -6,11 +6,10 @@ import Testing
 struct MenuTests {
     @Test func deviceCommandsUseTheSelectedPort() async throws {
         let state = try Fixtures.state
-        let agent = FakeAgent(reports: [state])
-        let model = AgentModel(agent: agent)
-        let menu = NSHostingMenu(rootView: DeviceActionButtons(actions: DeviceActions([state.devices[1]])) {
-            model.perform($0)
-        } restore: { _ in })
+        let (model, agent) = try await started(state)
+        let browser = DeviceBrowser(model: model)
+        browser.selection = [state.devices[1].id]
+        let menu = NSHostingMenu(rootView: DeviceActionButtons(browser: browser))
         menu.update()
         let restart = menu.indexOfItem(withTitle: "Restart")
         try #require(restart >= 0)
@@ -19,6 +18,118 @@ struct MenuTests {
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(await agent.received == [.reboot(hubs: [RestoreSelection(hub: "a0e012192cdfdb67", session: 77, targets: [RestoreTarget(port: 2, generation: 2, ecid: "001a79d10e6bc01c")])])])
+    }
+
+    @Test func contextMenuShowsOnlyActionsSharedByTheWholeSelection() async throws {
+        let state = try Fixtures.state
+        let (model, _) = try await started(state)
+        let browser = DeviceBrowser(model: model)
+        let ids = Set([state.devices[1].id, state.devices[3].id])
+        let menu = NSHostingMenu(rootView: DeviceActionButtons(browser: browser, contextSelection: ids, checksOnOpen: true))
+        menu.update()
+        #expect(menu.items.filter { !$0.isSeparatorItem }.map(\.title) == ["Restart"])
+        browser.selection = ids.union([state.devices[0].id])
+        #expect(browser.actions == DeviceActions())
+    }
+
+    @Test func oneMenuCheckOpensSetupForThePinnedSelection() async throws {
+        var state = try Fixtures.state
+        state.hubs[0].ports[1].device = nil
+        state.hubs[0].ports[1].mode = .normal
+        state.hubs[0].ports[3].device = "iPhone 16"
+        state.hubs[0].ports[3].mode = .normal
+        let (model, agent) = try await started(state)
+        let browser = DeviceBrowser(model: model)
+        let pair = [state.devices[1], state.devices[3]]
+        let hubs = try #require(pair.selections)
+        let general = AgentRequest.advanceSetup(hubs: hubs, settings: nil, dep: false, checkOnly: true)
+        browser.selection = Set(pair.map(\.id))
+        let menu = DeviceRowMenu(browser: browser, id: pair[0].id).menu()
+        menu.update()
+        try await waitUntil { menu.item(withTitle: "Advance Setup…") != nil }
+        #expect(await agent.received == [general])
+
+        state.hubs[0].ports[3].light.dim.toggle()
+        await agent.publish(state)
+        try await waitUntil { model.state == state }
+        menu.update()
+        #expect(await agent.received == [general])
+        menu.performActionForItem(at: menu.indexOfItem(withTitle: "Advance Setup…"))
+        let draft = try #require(browser.advancing)
+        #expect(draft.setLanguage && !draft.enroll)
+        #expect(draft.language == .current)
+        #expect(await agent.received == [general])
+        let original = try #require(draft.action(in: browser))
+        await draft.check.refresh(original, model: model)
+        #expect(draft.check.accepts(original))
+
+        state.hubs[0].ports[1].ecid = "0000000000000123"
+        let replacement = try #require([state.devices[1], state.devices[3]].selections)
+        let refusal = AgentRequest.advanceSetup(hubs: replacement, settings: nil, dep: false, checkOnly: true)
+        await agent.refuse(refusal)
+        await agent.publish(state)
+        try await waitUntil { await agent.received.contains(refusal) && menu.item(withTitle: "Advance Setup…") == nil }
+        #expect(draft.action(in: browser) == nil)
+        await browser.advance(draft)
+        #expect(await !agent.received.contains(.advanceSetup(hubs: hubs, settings: .current, dep: false, checkOnly: false)))
+
+        state.hubs[0].ports[3].job = .init(operation: .restore, phase: .running)
+        await agent.publish(state)
+        try await waitUntil { model.state == state }
+        #expect(browser.selectedSetup == nil)
+    }
+
+    @Test func setupChecksAndSendsOnlyTheChoicesInTheSheet() async throws {
+        var state = try Fixtures.state
+        state.hubs[0].ports[3].mode = .normal
+        let language = AgentState.SetupLanguage(language: "de-DE", locale: "de_DE")
+        state.postRestore.setupLanguage = language
+        state.postRestore.tryEnrollment = true
+        let (model, agent) = try await started(state)
+        let browser = DeviceBrowser(model: model)
+        let devices = [state.devices[3]]
+        let targets = try #require(SetupAction.menuCheck(for: devices))
+        let ids = Set(devices.map(\.id))
+        browser.chooseSetup(for: ids, checked: targets)
+        let draft = try #require(browser.advancing)
+        #expect(draft.language == language && draft.setLanguage && draft.enroll)
+        let both = try #require(draft.action(in: browser))
+        let reason = "Hub Repair Bench, Port 4: the selected region is unavailable."
+        await agent.refuse(.advanceSetup(hubs: targets.hubs, settings: language, dep: true, checkOnly: true), reason: reason)
+
+        let window = NSWindow(contentViewController: NSHostingController(rootView: SetupSheet(browser: browser, draft: draft)))
+        defer { window.orderOut(nil) }
+        window.setFrameOrigin(NSPoint(x: -2000, y: -2000))
+        window.orderBack(nil)
+        try await waitUntil { draft.check.checked == both }
+        #expect(!draft.check.accepts(both) && draft.check.refusal == reason)
+        await browser.advance(draft)
+        #expect(await !agent.received.contains(.advanceSetup(hubs: targets.hubs, settings: language, dep: true, checkOnly: false)))
+
+        draft.setLanguage = false
+        draft.enroll = false
+        #expect(draft.action(in: browser) == nil)
+        draft.enroll = true
+        let chosen = try #require(draft.action(in: browser))
+        try await waitUntil { draft.check.accepts(chosen) }
+        #expect(await agent.received.contains(.advanceSetup(hubs: targets.hubs, settings: nil, dep: true, checkOnly: true)))
+        let signIn = "Hub Repair Bench, Port 4: the device requires sign-in to enroll."
+        let enrollment = AgentRequest.advanceSetup(hubs: targets.hubs, settings: nil, dep: true, checkOnly: false)
+        await agent.refuse(enrollment, reason: signIn)
+        await browser.advance(draft)
+        #expect(await agent.received.contains(enrollment))
+        #expect(browser.advancing === draft && draft.submissionError == signIn)
+
+        draft.setLanguage = true
+        draft.enroll = false
+        let languageOnly = try #require(draft.action(in: browser))
+        try await waitUntil { draft.check.accepts(languageOnly) }
+        #expect(draft.submissionError == nil)
+        await browser.advance(draft)
+        #expect(browser.advancing == nil)
+        #expect(await agent.received.contains(.advanceSetup(hubs: targets.hubs, settings: language, dep: false, checkOnly: false)))
+        #expect(model.state?.postRestore == state.postRestore)
+        #expect(await !agent.received.contains(.setupLanguage(nil)))
     }
 
     @Test func theHubMenuUpdatesAHubThatRunsAnotherIasisOS() async throws {

@@ -9,6 +9,7 @@ mod lights;
 mod login;
 mod preferences;
 mod row;
+mod setup;
 #[cfg(target_os = "linux")]
 mod tray;
 mod window;

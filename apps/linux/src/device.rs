@@ -4,7 +4,7 @@
 
 use iasis_api::{
     AppleMode, HubView, Offer, Operation, Planned, Port, PortPower, PortView, PowerSource,
-    Prerequisite, Release, Request, RestorePhase, Selection, SharingPort, SignalProgress, State,
+    Prerequisite, Release, Request, RequestProgress, RestorePhase, Selection, SharingPort, State,
     Target, UsbLink,
 };
 
@@ -144,7 +144,9 @@ impl Device {
         if port.awaiting.is_some() {
             return Activity::new("Waiting for image", Mark::Working(None));
         }
-        if let Some(job) = &port.job {
+        if let Some(job) = &port.job
+            && matches!(job.phase, RestorePhase::Preparing | RestorePhase::Running)
+        {
             return match &port.stage {
                 Some(stage) => Activity::new(
                     format!("{} {}%", operation_running(job.operation), stage.percent),
@@ -154,22 +156,38 @@ impl Device {
             };
         }
         match port.request {
-            Some(SignalProgress::EnteringDfu) => {
+            Some(RequestProgress::SettingLanguage) => {
+                return Activity::new("Setting language and region", Mark::Working(None));
+            }
+            Some(RequestProgress::Enrolling) => {
+                return Activity::new("Trying enrollment", Mark::Working(None));
+            }
+            Some(RequestProgress::EnteringDfu) => {
                 return Activity::new("Entering DFU", Mark::Working(None));
             }
-            Some(SignalProgress::Restarting) => {
+            Some(RequestProgress::Restarting) => {
                 return Activity::new("Restarting", Mark::Working(None));
             }
-            Some(SignalProgress::DfuUnconfirmed) => {
+            Some(RequestProgress::DfuUnconfirmed) => {
                 return Activity::new("DFU not confirmed", Mark::Uncertain);
             }
             None => {}
+        }
+        if port
+            .result
+            .as_ref()
+            .is_some_and(|result| result.setup_error.is_some())
+        {
+            return Activity::new("Restored, setup incomplete", Mark::Caution);
         }
         if port.waiting_for_power {
             return Activity::new("Waiting for power", Mark::Caution);
         }
         if let Some(result) = &port.result {
             return Activity::phase(result.phase, result.operation);
+        }
+        if let Some(job) = &port.job {
+            return Activity::phase(job.phase, job.operation);
         }
         match port.mode {
             Some(AppleMode::Dfu | AppleMode::KisDfu) => Activity::new("DFU", Mark::None),
@@ -220,18 +238,29 @@ impl Device {
             return Some(status);
         }
         if let Some(request) = port.request {
-            let icon = if request == SignalProgress::Restarting {
-                RESTART_ICON
-            } else {
-                DFU_ICON
+            let icon = match request {
+                RequestProgress::Enrolling => "network-server-symbolic",
+                RequestProgress::SettingLanguage => "preferences-desktop-locale-symbolic",
+                RequestProgress::Restarting => RESTART_ICON,
+                RequestProgress::EnteringDfu | RequestProgress::DfuUnconfirmed => DFU_ICON,
             };
             return Some(OperationStatus::new(&activity.text, icon, activity.mark));
         }
         if let Some(result) = &port.result {
-            let ending = Activity::phase(result.phase, result.operation);
+            let ending = if result.setup_error.is_some() {
+                activity
+            } else {
+                Activity::phase(result.phase, result.operation)
+            };
             let mut status =
                 OperationStatus::new(&ending.text, operation_icon(result.operation), ending.mark);
-            status.detail = Some(result.message.clone());
+            status.detail = Some(
+                result
+                    .setup_error
+                    .as_ref()
+                    .unwrap_or(&result.message)
+                    .clone(),
+            );
             return Some(status);
         }
         port.job.map(|job| {
@@ -438,45 +467,58 @@ pub enum StepState {
     Pending,
 }
 
-/// DFU and restart target eligible devices. Restore and revive require the whole selection.
+/// Actions available to the whole selection.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Actions {
     pub dfu: Vec<Request>,
     pub restart: Vec<Request>,
+    pub setup_targets: Option<Vec<Selection>>,
     pub revive: Option<Request>,
     pub restore: Option<RestoreConfirmation>,
 }
 
 impl Actions {
     pub fn new(devices: &[Device]) -> Self {
-        let mut actions = Self {
-            dfu: signal(devices, |port| port.dfu, |hubs| Request::Dfu { hubs }),
-            restart: signal(devices, |port| port.reboot, |hubs| Request::Reboot { hubs }),
-            ..Self::default()
+        let mut actions = Self::default();
+        if devices.is_empty() {
+            return actions;
+        }
+        let Some(hubs) = selections(devices) else {
+            return actions;
         };
-        actions.restore = RestoreConfirmation::new(devices);
-        actions.revive = actions.restore.as_ref().map(|restore| Request::Revive {
-            hubs: restore.hubs.clone(),
-            latest: false,
-        });
+        let all = |takes: fn(&PortView) -> bool| devices.iter().all(|device| takes(&device.port));
+        if all(|port| port.dfu) {
+            actions.dfu.push(Request::Dfu { hubs: hubs.clone() });
+        }
+        if all(|port| port.reboot) {
+            actions.restart.push(Request::Reboot { hubs: hubs.clone() });
+        }
+        if all(|port| {
+            port.occupied
+                && port.enabled
+                && port.mode == Some(AppleMode::Normal)
+                && port.ecid.is_some()
+                && port.fault.is_none()
+                && port.request.is_none()
+                && port.awaiting.is_none()
+                && !port.job.is_some_and(|job| {
+                    matches!(job.phase, RestorePhase::Preparing | RestorePhase::Running)
+                })
+        }) {
+            actions.setup_targets = Some(hubs.clone());
+        }
+        if all(|port| port.occupied && port.restore) {
+            actions.revive = Some(Request::Revive {
+                hubs: hubs.clone(),
+                latest: false,
+            });
+            actions.restore = Some(RestoreConfirmation {
+                devices: devices.to_vec(),
+                hubs,
+                planned: Vec::new(),
+            });
+        }
         actions
-    }
-}
-
-/// One request for the devices whose port `takes` it, or none.
-fn signal(
-    devices: &[Device],
-    takes: impl Fn(&PortView) -> bool,
-    request: impl Fn(Vec<Selection>) -> Request,
-) -> Vec<Request> {
-    let devices: Vec<Device> = devices
-        .iter()
-        .filter(|device| takes(&device.port))
-        .cloned()
-        .collect();
-    match selections(&devices) {
-        Some(hubs) if !hubs.is_empty() => vec![request(hubs)],
-        _ => Vec::new(),
     }
 }
 
@@ -515,22 +557,6 @@ pub struct Choice {
 }
 
 impl RestoreConfirmation {
-    pub fn new(devices: &[Device]) -> Option<Self> {
-        if devices.is_empty()
-            || !devices
-                .iter()
-                .all(|device| device.port.occupied && device.port.restore)
-        {
-            return None;
-        }
-        let hubs = selections(devices)?;
-        Some(Self {
-            devices: devices.to_vec(),
-            hubs,
-            planned: Vec::new(),
-        })
-    }
-
     pub fn heading(&self) -> String {
         let subject = match self.devices.as_slice() {
             [device] => device.short_name(),
@@ -763,9 +789,34 @@ mod tests {
     }
 
     #[test]
+    fn enrollment_progress_follows_the_erase() {
+        let mut port = port(1);
+        port.job = Some(Job {
+            operation: Operation::Restore,
+            phase: RestorePhase::Reported,
+        });
+        port.result = Some(iasis_api::Ending {
+            operation: Operation::Restore,
+            phase: RestorePhase::Reported,
+            ecid: port.ecid.clone(),
+            message: "Restore finished".into(),
+            setup_error: Some("Sign in on the device".into()),
+        });
+        let mut device = device(port);
+        assert_eq!(
+            device.operation().unwrap().title,
+            "Restored, setup incomplete"
+        );
+        device.port.request = Some(RequestProgress::Enrolling);
+        let progress = device.operation().unwrap();
+        assert_eq!(progress.title, "Trying enrollment");
+        assert_eq!(progress.mark, Mark::Working(None));
+    }
+
+    #[test]
     fn a_restore_asks_only_when_a_downloaded_image_is_older() {
         let devices = [device(port(1)), device(port(3))];
-        let mut confirmation = RestoreConfirmation::new(&devices).unwrap();
+        let mut confirmation = Actions::new(&devices).restore.unwrap();
         assert_eq!(confirmation.hubs.len(), 1);
         assert_eq!(confirmation.hubs[0].targets.len(), 2);
         assert_eq!(confirmation.choices().len(), 1);
@@ -790,6 +841,67 @@ mod tests {
             .map(|choice| choice.label)
             .collect();
         assert_eq!(labels, ["Download macOS 27.2", "Use macOS 27.1"]);
+    }
+
+    #[test]
+    fn mixed_groups_only_offer_actions_every_selected_port_takes() {
+        let mut off = port(2);
+        off.enabled = false;
+        off.dfu = false;
+        off.reboot = false;
+        off.restore = false;
+        let actions = Actions::new(&[device(port(1)), device(off)]);
+        assert_eq!(actions, Actions::default());
+    }
+
+    #[test]
+    fn group_actions_include_attachments_on_every_selected_hub() {
+        let mut first = device(port(1));
+        first.port.mode = Some(AppleMode::Normal);
+        let mut other = first.clone();
+        other.serial = "other".into();
+        other.session = Some(10);
+        other.port.generation += 1;
+        other.port.ecid = Some("0123456789abcdef".into());
+        let devices = [first, other];
+        let expected = devices
+            .iter()
+            .map(|device| Selection {
+                hub: device.serial.clone(),
+                session: device.session.unwrap(),
+                targets: vec![device.target()],
+            })
+            .collect::<Vec<_>>();
+        let actions = Actions::new(&devices);
+        assert_eq!(actions.setup_targets.as_ref(), Some(&expected));
+        assert_eq!(
+            actions.dfu,
+            [Request::Dfu {
+                hubs: expected.clone()
+            }]
+        );
+        assert_eq!(
+            actions.restart,
+            [Request::Reboot {
+                hubs: expected.clone()
+            }]
+        );
+        assert_eq!(
+            actions.revive,
+            Some(Request::Revive {
+                hubs: expected.clone(),
+                latest: false
+            })
+        );
+        assert_eq!(actions.restore.unwrap().hubs, expected);
+
+        let [first, mut other] = devices;
+        other.port.mode = Some(AppleMode::Dfu);
+        other.port.reboot = false;
+        let actions = Actions::new(&[first, other]);
+        assert!(actions.setup_targets.is_none());
+        assert!(actions.restart.is_empty());
+        assert_eq!(actions.dfu, [Request::Dfu { hubs: expected }]);
     }
 
     #[test]

@@ -16,7 +16,7 @@ use iasis::{
 };
 use iasis_api::{
     AppleUsb, Companion, Diagnostics, HubView, Job, Operation, PortPower, PortView, PowerSource,
-    Reply, Request, Selection, SignalProgress, State, Supply, Target, Usb, UsbDevice, UsbLink,
+    Reply, Request, RequestProgress, Selection, State, Supply, Target, Usb, UsbDevice, UsbLink,
 };
 use iasis_protocol::{DebugActions, Link, Port, PortAction, RestorePhase, Status};
 
@@ -45,10 +45,42 @@ enum Command {
     Restore(Restore),
     /// Repair the devices on the selected ports from a restore image and keep their data
     Revive(Revive),
+    /// Set language and region, try Automated Device Enrollment, or do both in Setup Assistant
+    AdvanceSetup {
+        #[arg(long, value_delimiter = ',', value_parser = parse_port, required = true)]
+        ports: Vec<Port>,
+        #[arg(long, requires = "locale", required_unless_present_any = ["dep", "check"])]
+        language: Option<String>,
+        #[arg(long, requires = "language")]
+        locale: Option<String>,
+        /// Activate the device and request its assigned Automated Device Enrollment configuration
+        #[arg(long)]
+        dep: bool,
+        /// Check setup availability, including any requested language and region, without changing devices
+        #[arg(long)]
+        check: bool,
+    },
     /// List and manage restore images
     Images {
         #[command(subcommand)]
         command: Option<ImagesCommand>,
+    },
+    /// Show or set what the agent does after erasing a Mac, iPhone or iPad
+    PostRestore {
+        #[arg(long, value_enum)]
+        mac: Option<MacAction>,
+        /// Try assigned enrollment after erasing iPhones and iPads
+        #[arg(long, value_enum)]
+        enroll: Option<Switch>,
+        /// Preferred language for erased iPhones and iPads (for example, en-AU)
+        #[arg(long, requires = "locale", conflicts_with = "leave_setup")]
+        language: Option<String>,
+        /// Regional format for erased iPhones and iPads (for example, en_AU)
+        #[arg(long, requires = "language")]
+        locale: Option<String>,
+        /// Leave the choice of language and region to Setup Assistant
+        #[arg(long)]
+        leave_setup: bool,
     },
     /// Share this host’s internet connection with attached USB devices
     Sharing {
@@ -96,7 +128,7 @@ enum Command {
         #[arg(value_parser = parse_port)]
         port: Port,
         #[arg(value_enum)]
-        state: Power,
+        state: Switch,
     },
     /// Send an Apple DFU VDM; does not start a restore
     Dfu {
@@ -115,7 +147,7 @@ enum Command {
         #[arg(value_parser = parse_port)]
         port: Port,
         #[arg(value_enum)]
-        state: Power,
+        state: Switch,
     },
 }
 
@@ -182,7 +214,13 @@ enum ImagesCommand {
 }
 
 #[derive(Clone, Copy, ValueEnum)]
-enum Power {
+enum MacAction {
+    Restart,
+    Shutdown,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum Switch {
     On,
     Off,
 }
@@ -232,7 +270,81 @@ fn main() -> Result<()> {
             &revive.ports,
             revive.latest,
         ),
+        Some(Command::AdvanceSetup {
+            ports,
+            language,
+            locale,
+            dep,
+            check,
+        }) => {
+            let settings = language
+                .zip(locale)
+                .map(|(language, locale)| iasis_api::SetupLanguage { language, locale });
+            let hubs = vec![selection(&state, &hub()?, &ports)?];
+            agent.request(&Request::AdvanceSetup {
+                hubs,
+                settings,
+                dep,
+                check_only: check,
+            })?;
+            println!(
+                "{}",
+                if check {
+                    "All selected devices are ready for setup"
+                } else if dep {
+                    "Selected devices accepted the enrollment request"
+                } else {
+                    "Language and region set"
+                }
+            );
+            Ok(())
+        }
         Some(Command::Images { command }) => images(&mut agent, command.as_ref()),
+        Some(Command::PostRestore {
+            mac,
+            enroll,
+            language,
+            locale,
+            leave_setup,
+        }) => {
+            if let Some(mac) = mac {
+                agent.request(&Request::ShutdownMacs {
+                    enabled: matches!(mac, MacAction::Shutdown),
+                })?;
+            }
+            if let Some((language, locale)) = language.zip(locale) {
+                agent.request(&Request::SetupLanguage {
+                    settings: Some(iasis_api::SetupLanguage { language, locale }),
+                })?;
+            } else if leave_setup {
+                agent.request(&Request::SetupLanguage { settings: None })?;
+            }
+            if let Some(enroll) = enroll {
+                agent.request(&Request::EnrollmentAfterErase {
+                    enabled: matches!(enroll, Switch::On),
+                })?;
+            }
+            let prefs = agent.state()?.post_restore;
+            println!(
+                "Try enrollment after erasing: {}",
+                if prefs.try_enrollment { "on" } else { "off" }
+            );
+            let shutdown = prefs.shutdown_macs;
+            println!(
+                "After erasing a Mac: {}",
+                if shutdown { "shut down" } else { "restart" }
+            );
+            match prefs.setup_language {
+                Some(s) => println!(
+                    "After erasing an iPhone or iPad: set language {} and region {}",
+                    s.language, s.locale
+                ),
+                None => println!(
+                    "After erasing an iPhone or iPad: leave language and region to Setup Assistant"
+                ),
+            }
+            Ok(())
+        }
         Some(Command::Sharing { command, json }) => sharing(&mut agent, command.as_ref(), json),
         Some(Command::Supervision { command }) => supervision(&mut agent, command.as_ref()),
         Some(Command::Dfu { ports }) => dfu(&mut agent, &state, &hub()?, &ports),
@@ -252,7 +364,7 @@ fn main() -> Result<()> {
             agent.request(&Request::Power {
                 hub: hub()?,
                 port: port.number(),
-                on: matches!(state, Power::On),
+                on: matches!(state, Switch::On),
             })?;
             println!("{}", power_text(port, state));
             Ok(())
@@ -261,7 +373,7 @@ fn main() -> Result<()> {
             agent.request(&Request::DebugUsb {
                 hub: hub()?,
                 port: port.number(),
-                on: matches!(state, Power::On),
+                on: matches!(state, Switch::On),
             })?;
             println!("{}", debug_usb_text(port, state));
             Ok(())
@@ -368,24 +480,24 @@ fn hub_name(view: &HubView) -> String {
     format!("{}  {name}", view.serial)
 }
 
-fn power_text(port: Port, state: Power) -> String {
+fn power_text(port: Port, state: Switch) -> String {
     format!(
         "Port {} power {}; use status to inspect supply and attachment.",
         port.number(),
         match state {
-            Power::On => "enabled",
-            Power::Off => "disabled",
+            Switch::On => "enabled",
+            Switch::Off => "disabled",
         }
     )
 }
 
-fn debug_usb_text(port: Port, state: Power) -> String {
+fn debug_usb_text(port: Port, state: Switch) -> String {
     format!(
         "Port {} Debug USB {}.",
         port.number(),
         match state {
-            Power::On => "on",
-            Power::Off => "off",
+            Switch::On => "on",
+            Switch::Off => "off",
         }
     )
 }
@@ -629,9 +741,11 @@ fn activity(port: &PortView) -> String {
         return "waiting for image".into();
     }
     match port.request {
-        Some(SignalProgress::EnteringDfu) => "entering DFU",
-        Some(SignalProgress::DfuUnconfirmed) => "DFU unconfirmed",
-        Some(SignalProgress::Restarting) => "restarting",
+        Some(RequestProgress::Enrolling) => "requesting enrollment",
+        Some(RequestProgress::SettingLanguage) => "setting language and region",
+        Some(RequestProgress::EnteringDfu) => "entering DFU",
+        Some(RequestProgress::DfuUnconfirmed) => "DFU unconfirmed",
+        Some(RequestProgress::Restarting) => "restarting",
         None if !port.enabled => "off",
         None if !port.occupied => "empty",
         None if port.waiting_for_power => "waiting for power",
@@ -772,7 +886,7 @@ fn dfu(agent: &mut Client, state: &State, hub: &str, ports: &[Port]) -> Result<(
             let now = row(&state, port).context("the hub left USB")?;
             if in_dfu(&now) {
                 waiting.suspend(|| println!("Port {} is in DFU.", port.number()));
-            } else if now.fault.is_some() || now.request == Some(SignalProgress::DfuUnconfirmed) {
+            } else if now.fault.is_some() || now.request == Some(RequestProgress::DfuUnconfirmed) {
                 failed.push(format!("Port {}  {}", port.number(), activity(&now)));
             } else {
                 pending.push(port);
@@ -1073,8 +1187,11 @@ fn follow_work(agent: &mut Client, hub: &str, ports: &[Port]) -> Result<()> {
                     phase: ending.phase,
                 });
                 println!("Port {}  {phase}: {}", port.number(), ending.message);
+                if let Some(error) = &ending.setup_error {
+                    println!("Port {}  {error}", port.number());
+                }
                 ended[index] = true;
-                success &= ending.phase == RestorePhase::Reported;
+                success &= ending.phase == RestorePhase::Reported && ending.setup_error.is_none();
             } else if let Some(row) = view
                 .and_then(|view| view.ports.get(port.index()))
                 // A job that has ended says so in its ending, or starts again.
@@ -1259,6 +1376,40 @@ fn hub_temperature(adc: u16) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn setup_accepts_locale_enrollment_or_both() {
+        let parse = |options: &[&str]| {
+            Cli::try_parse_from(
+                ["iasis", "advance-setup", "--ports", "1,2"]
+                    .into_iter()
+                    .chain(options.iter().copied()),
+            )
+        };
+        for options in [
+            &["--check"][..],
+            &["--dep"],
+            &["--language", "en-AU", "--locale", "en_AU"],
+            &[
+                "--language",
+                "en-AU",
+                "--locale",
+                "en_AU",
+                "--dep",
+                "--check",
+            ],
+        ] {
+            assert!(parse(options).is_ok());
+        }
+        for options in [
+            &[][..],
+            &["--language", "en-AU", "--dep"],
+            &["--locale", "en_AU", "--dep"],
+            &["--language", "en-AU", "--check"],
+        ] {
+            assert!(parse(options).is_err());
+        }
+    }
 
     #[test]
     fn a_reading_names_its_source_and_power() {

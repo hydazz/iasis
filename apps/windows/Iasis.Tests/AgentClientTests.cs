@@ -28,6 +28,7 @@ public class AgentClientTests
             Assert.Equal(2, frames.Count);
             Assert.Null(Assert.Single(frames[0].Submitted!));
             Assert.Empty(frames[1].Hubs);
+            Assert.True(frames[1].PostRestore.TryEnrollment);
             Assert.Equal(RestorePhase.Reported, Assert.Single(frames[1].Submitted!)!.Phase);
         }
         finally { File.Delete(path); }
@@ -45,7 +46,7 @@ public class AgentClientTests
             Assert.Equal("watch", (string?)JsonNode.Parse((await reader.ReadLineAsync(token))!)!["op"]);
             var frame = JsonNode.Parse("""
                 {"state":{"version":"0.1.0","hubs":[],"submitted":[null],"images":{"images":[]},
-                "sharing":{"enabled":false,"ports":[]},"supervision":{},"missing":[]}}
+                "post_restore":{"shutdown_macs":false,"setup_language":null,"try_enrollment":true},"sharing":{"enabled":false,"ports":[]},"supervision":{},"missing":[]}}
                 """)!;
             await writer.WriteLineAsync(frame.ToJsonString());
             frame["state"]!["submitted"]![0] = JsonNode.Parse("""

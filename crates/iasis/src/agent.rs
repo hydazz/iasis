@@ -18,8 +18,8 @@ use std::{
 use anyhow::{Context, Result, bail, ensure};
 use base64::Engine;
 use iasis_api::{
-    Diagnostics, FirmwareUpdate, HubView, Operation, Planned, Reply, Request, Selection, State,
-    Target,
+    Diagnostics, FirmwareUpdate, HubView, Operation, Planned, Reply, Request, RequestProgress,
+    Selection, State, Target,
 };
 use iasis_protocol::{CommandResult, Port, PortAction};
 use nusb::DeviceInfo;
@@ -30,10 +30,10 @@ use crate::{
     Hub,
     home::Home,
     host::{Link, Work},
-    identity::models::Models,
+    identity::{AppleMode, Observation, TargetTracker, models::Models},
     images::{Network, Store},
     inventory::Inventory,
-    job::{self, Endings, Gate, PortWork},
+    job::{self, Gate, PortSlots, PortWork},
     parse_serial,
     restore::RestoreEngine,
     update, view,
@@ -57,7 +57,7 @@ pub struct Options {
 /// outlive them.
 pub(crate) struct Attendance {
     pub(crate) work: Arc<Work>,
-    pub(crate) endings: Endings,
+    pub(crate) ports: PortSlots,
     link: Mutex<Option<Arc<Link>>>,
     notice: Mutex<Option<String>>,
     /// What a hub on another protocol says of itself.
@@ -69,7 +69,7 @@ impl Attendance {
     fn new(changes: Arc<Watch>) -> Self {
         Self {
             work: Arc::new(Work::new(changes)),
-            endings: Endings::default(),
+            ports: PortSlots::default(),
             link: Mutex::default(),
             notice: Mutex::default(),
             outdated: Mutex::default(),
@@ -85,10 +85,20 @@ impl Attendance {
             .clone()
             .filter(|link| link.alive())
     }
+
+    pub(crate) fn set_setup(&self, port: Port, ecid: u64, stage: RequestProgress, changes: &Watch) {
+        let mut slots = self.ports.lock().unwrap();
+        let current = &mut slots[port.index()].setup;
+        if *current != Some((ecid, stage)) {
+            *current = Some((ecid, stage));
+            changes.changed();
+        }
+    }
 }
 
 pub struct Agent {
     home: Home,
+    post_restore: Mutex<iasis_api::PostRestore>,
     sharing: crate::sharing::Sharing,
     supervision: Arc<crate::supervision::Supervision>,
     store: Store,
@@ -142,6 +152,62 @@ fn targets(status: &iasis_protocol::Status, selected: &[Target]) -> Result<Vec<T
     Ok(targets)
 }
 
+/// The caller holds the reservation lock across hubs. Check all ports before replacing any result.
+fn reserve(
+    hubs: &[(Arc<Attendance>, Vec<Target>)],
+) -> Result<Vec<(Arc<Attendance>, Target, PortWork)>> {
+    for (hub, targets) in hubs {
+        let slots = hub.ports.lock().unwrap();
+        for target in targets {
+            slots[target.port.index()].require_idle(target.port)?;
+        }
+    }
+    let mut reserved = Vec::new();
+    for (hub, targets) in hubs {
+        let mut slots = hub.ports.lock().unwrap();
+        for target in targets {
+            let work = PortWork::default();
+            slots[target.port.index()].restore = Some(work.clone());
+            reserved.push((hub.clone(), *target, work));
+        }
+    }
+    Ok(reserved)
+}
+
+fn setup_target(link: &Link, target: &Target) -> Result<()> {
+    let (status, snapshot) = link.sample().context("the hub has not been read")?;
+    let serial = link.hub().serial();
+    let port = &status.ports[target.port.index()];
+    let tracker = TargetTracker {
+        hub_serial: serial,
+        port: target.port,
+        ecid: target.ecid.context("missing ECID")?,
+    };
+    ensure!(
+        link.alive() && port.generation == target.generation && port.ecid == target.ecid,
+        "the attachment on port {} changed",
+        target.port.number()
+    );
+    ensure!(
+        port.occupied()
+            && port.enabled
+            && port.error.is_none()
+            && port.state != iasis_protocol::PortState::Fault
+            && port.request.is_none()
+            && !port.restore.is_some_and(|r| matches!(
+                r.phase,
+                iasis_protocol::RestorePhase::Preparing | iasis_protocol::RestorePhase::Running
+            ))
+            && tracker.observe(serial, &snapshot)
+                == (Observation::Present {
+                    mode: AppleMode::Normal
+                }),
+        "port {} needs an idle, booted iPhone or iPad",
+        target.port.number()
+    );
+    Ok(())
+}
+
 impl Agent {
     pub fn new() -> Result<Arc<Self>> {
         let home = Home::locate()?;
@@ -151,6 +217,12 @@ impl Agent {
         let changes = Arc::<Watch>::default();
         let supervision = Arc::new(crate::supervision::Supervision::open(&home.supervision()));
         Ok(Arc::new(Self {
+            post_restore: Mutex::new(crate::post_restore::read(&home.state).unwrap_or_else(
+                |error| {
+                    log::error!("Could not load post-restore settings: {error:#}");
+                    Default::default()
+                },
+            )),
             store: Store::open(
                 home.cache.join("images"),
                 home.state.join("images"),
@@ -176,6 +248,15 @@ impl Agent {
         }))
     }
 
+    fn configure_after_erase(&self, edit: impl FnOnce(&mut iasis_api::PostRestore)) -> Result<()> {
+        let mut current = self.post_restore.lock().unwrap();
+        let mut next = current.clone();
+        edit(&mut next);
+        crate::post_restore::save(&self.home.state, &next)?;
+        *current = next;
+        Ok(())
+    }
+
     pub fn state(&self) -> State {
         let hubs = self.hubs.lock().unwrap();
         State {
@@ -195,16 +276,28 @@ impl Agent {
                                     version: update::carried_text(&carried),
                                     required: false,
                                 });
-                            let endings = hub.endings.lock().unwrap();
-                            for (port, ending) in view.ports.iter_mut().zip(endings.iter()) {
-                                if let Some(work) = ending {
-                                    if let Some(ended) = work.get() {
-                                        view::attach_result(port, view.session, ended);
-                                    } else {
-                                        port.restore = false;
-                                        port.reboot = false;
-                                        port.dfu = false;
-                                    }
+                            let slots = hub.ports.lock().unwrap();
+                            for (port, slot) in view.ports.iter_mut().zip(slots.iter()) {
+                                if let Some(ended) =
+                                    slot.restore.as_ref().and_then(|work| work.get())
+                                {
+                                    view::attach_result(port, view.session, ended);
+                                }
+                                if let Some((ecid, progress)) = slot.setup
+                                    && port
+                                        .ecid
+                                        .as_ref()
+                                        .is_none_or(|id| u64::from_str_radix(id, 16) == Ok(ecid))
+                                {
+                                    port.job = None;
+                                    port.result = None;
+                                    port.stage = None;
+                                    port.request = Some(progress);
+                                }
+                                if slot.busy() {
+                                    port.restore = false;
+                                    port.reboot = false;
+                                    port.dfu = false;
                                 }
                             }
                             view.notice = notice;
@@ -234,6 +327,7 @@ impl Agent {
                 .collect(),
             submitted: Vec::new(),
             images: self.store.snapshot(),
+            post_restore: self.post_restore.lock().unwrap().clone(),
             sharing: self.sharing.state(),
             supervision: self.supervision.state(),
             missing: crate::native::mux::missing().into_iter().collect(),
@@ -288,9 +382,10 @@ impl Agent {
     /// each target that does not.
     fn signal(&self, selections: &[Selection], action: PortAction) -> Result<()> {
         ensure!(!selections.is_empty(), "no ports selected");
+        let _reserving = self.reserving.lock().unwrap();
         let mut checked: Vec<(Arc<Link>, Vec<Target>)> = Vec::new();
         for selection in selections {
-            let (_, link, targets) = self.checked(selection, |actions| match action {
+            let (hub, link, targets) = self.checked(selection, |actions| match action {
                 PortAction::Dfu => actions.dfu,
                 _ => actions.reboot,
             })?;
@@ -298,6 +393,9 @@ impl Agent {
                 !checked.iter().any(|(other, _)| Arc::ptr_eq(other, &link)),
                 "a hub is named twice"
             );
+            for target in &targets {
+                hub.ports.lock().unwrap()[target.port.index()].require_idle(target.port)?;
+            }
             checked.push((link, targets));
         }
         let mut failed = Vec::new();
@@ -312,6 +410,109 @@ impl Agent {
         }
         ensure!(failed.is_empty(), "{}", failed.join("; "));
         Ok(())
+    }
+
+    fn setup(
+        &self,
+        selections: &[Selection],
+        setup: crate::post_restore::Setup<'_>,
+        check_only: bool,
+    ) -> Result<()> {
+        ensure!(
+            check_only || setup.requested(),
+            "choose language and region, Automated Device Enrollment, or both"
+        );
+        ensure!(!selections.is_empty(), "no ports selected");
+        let mut selected = Vec::new();
+        for selection in selections {
+            let (hub, link) = self.hub(&selection.hub)?;
+            ensure!(
+                link.session() == selection.session,
+                "the hub has reconnected"
+            );
+            let (status, _) = link.sample().context("the hub has not been read")?;
+            for target in targets(&status, &selection.targets)? {
+                let ecid = target
+                    .ecid
+                    .context("the selected device has no confirmed identity")?;
+                ensure!(
+                    !selected
+                        .iter()
+                        .any(|(_, _, t): &(_, _, Target)| t.ecid == Some(ecid)),
+                    "a device is named twice"
+                );
+                setup_target(&link, &target)?;
+                selected.push((hub.clone(), link.clone(), target));
+            }
+        }
+        {
+            let _reserving = self.reserving.lock().unwrap();
+            for (hub, _, target) in &selected {
+                hub.ports.lock().unwrap()[target.port.index()].require_idle(target.port)?;
+            }
+            if !check_only {
+                for (hub, _, target) in &selected {
+                    hub.ports.lock().unwrap()[target.port.index()].setup =
+                        Some((target.ecid.unwrap(), setup.first_stage()));
+                }
+            }
+        }
+        if !check_only {
+            self.changes.changed();
+        }
+        let result = (|| {
+            let running = restorekit::recovery::devices()?;
+            let mut ready = Vec::new();
+            for (hub, link, target) in &selected {
+                let step = (|| {
+                    let device = running
+                        .iter()
+                        .find(|d| Some(d.ecid) == target.ecid)
+                        .context("the device is unavailable through USB")?;
+                    setup.prepare(device, false)
+                })()
+                .with_context(|| {
+                    format!(
+                        "hub {:016x}, port {}",
+                        link.hub().serial(),
+                        target.port.number()
+                    )
+                })?;
+                ready.push((hub, link, target, step));
+            }
+            if !check_only {
+                let mut outcomes = Vec::new();
+                let mut failed = false;
+                for (hub, link, target, step) in ready {
+                    let result = setup_target(link, target).and_then(|()| {
+                        step.run(|progress| {
+                            hub.set_setup(
+                                target.port,
+                                target.ecid.unwrap(),
+                                progress,
+                                &self.changes,
+                            );
+                        })
+                    });
+                    failed |= result.is_err();
+                    let message = result.unwrap_or_else(|err| format!("{err:#}"));
+                    outcomes.push(format!(
+                        "hub {:016x}, port {}: {message}",
+                        link.hub().serial(),
+                        target.port.number()
+                    ));
+                }
+                ensure!(!failed, "{}", outcomes.join("\n"));
+            }
+            Ok(())
+        })();
+        if !check_only {
+            for (hub, _, target) in selected {
+                hub.ports.lock().unwrap()[target.port.index()].setup = None;
+            }
+            self.changes.changed();
+        }
+        result
     }
 
     /// A selection checked against its hub as the hub is now: the session,
@@ -421,19 +622,9 @@ impl Agent {
         gate: Option<Vec<job::Ticket>>,
     ) -> Result<Vec<PortWork>> {
         let _reserving = self.reserving.lock().unwrap();
-        let mut reserved: Vec<(Arc<Attendance>, Vec<Target>, Vec<PortWork>)> = Vec::new();
-        for (hub, targets) in hubs {
-            match job::reserve(&hub.endings, &targets) {
-                Ok(works) => reserved.push((hub, targets, works)),
-                Err(error) => {
-                    for (hub, targets, works) in &reserved {
-                        job::release(&hub.endings, targets, works);
-                    }
-                    return Err(error);
-                }
-            }
-        }
+        let reserved = reserve(&hubs)?;
         let host = job::Host {
+            post_restore: self.post_restore.lock().unwrap().clone(),
             engine: self.engine.clone(),
             store: self.store.clone(),
             models: self.models.clone(),
@@ -441,13 +632,11 @@ impl Agent {
         };
         let mut tickets = gate.map(Vec::into_iter);
         let mut all = Vec::new();
-        for (hub, targets, works) in reserved {
+        for (hub, target, work) in reserved {
             *hub.notice.lock().unwrap() = None;
-            for (target, work) in targets.into_iter().zip(works) {
-                all.push(work.clone());
-                let ticket = tickets.as_mut().and_then(Iterator::next);
-                job::spawn(host.clone(), hub.clone(), target, ask, work, ticket);
-            }
+            all.push(work.clone());
+            let ticket = tickets.as_mut().and_then(Iterator::next);
+            job::spawn(host.clone(), hub, target, ask, work, ticket);
         }
         self.changes.changed();
         Ok(all)
@@ -507,14 +696,8 @@ impl Agent {
                 .as_ref()
                 .and_then(|link| link.status())
                 .is_some_and(|status| status.ports.iter().any(|port| port.restoring()))
-                || hub
-                    .endings
-                    .lock()
-                    .unwrap()
-                    .iter()
-                    .flatten()
-                    .any(|work| work.get().is_none());
-            ensure!(!restoring, "the hub is restoring");
+                || hub.ports.lock().unwrap().iter().any(job::PortSlot::busy);
+            ensure!(!restoring, "the hub has an active operation");
         }
         // An attended hub is asked through its session's claim. One on another
         // build has none, and one in its ROM is not asked at all.
@@ -568,6 +751,21 @@ impl Agent {
                 .map(|work| *submitted = work),
             Request::Dfu { hubs } => self.signal(&hubs, PortAction::Dfu),
             Request::Reboot { hubs } => self.signal(&hubs, PortAction::Reboot),
+            Request::AdvanceSetup {
+                hubs,
+                settings,
+                dep,
+                check_only,
+            } => {
+                let setup = crate::post_restore::Setup {
+                    language: settings.as_ref(),
+                    dep,
+                };
+                return match self.setup(&hubs, setup, check_only) {
+                    Ok(()) => Reply::Ok,
+                    Err(error) => Reply::Error(format!("{error:#}")),
+                };
+            }
             Request::Power { hub, port, on } => self.command(
                 &hub,
                 port,
@@ -596,6 +794,15 @@ impl Agent {
             Request::Download { model, build } => self.store.download(&model, build.as_deref()),
             Request::Import { name, bytes } => self.store.import(&name, payload, bytes).map(|_| ()),
             Request::Remove { image } => self.store.remove(&image),
+            Request::ShutdownMacs { enabled } => {
+                self.configure_after_erase(|s| s.shutdown_macs = enabled)
+            }
+            Request::SetupLanguage { settings } => {
+                self.configure_after_erase(|s| s.setup_language = settings)
+            }
+            Request::EnrollmentAfterErase { enabled } => {
+                self.configure_after_erase(|s| s.try_enrollment = enabled)
+            }
             Request::Sharing { enabled } => self.sharing.configure(enabled),
             Request::ImportSupervision { pkcs12, password } => {
                 let password = SecretString::from(password);
@@ -1301,18 +1508,22 @@ mod socket {
         use crate::restore::Operation;
         use iasis_protocol::RestorePhase;
         let (mut server, reader) = UnixStream::pair().unwrap();
-        let slots = Endings::default();
-        let selection = [Target {
-            port: Port::ALL[0],
-            generation: 7,
-            ecid: None,
-        }];
-        let submitted = job::reserve(&slots, &selection).unwrap();
+        let hub = Arc::new(Attendance::new(Arc::default()));
+        let selection = [(
+            hub.clone(),
+            vec![Target {
+                port: Port::ALL[0],
+                generation: 7,
+                ecid: None,
+            }],
+        )];
+        let submitted = [reserve(&selection).unwrap().remove(0).2];
         let result = iasis_api::Ending {
             operation: Operation::Restore,
             ecid: Some("000000000000002a".into()),
             phase: RestorePhase::Failed,
             message: "Restore worker lost the device".into(),
+            setup_error: None,
         };
         let ended = |ending| job::Ended {
             attachment: None,
@@ -1332,14 +1543,16 @@ mod socket {
                 )),
                 2 => {}
                 3 => {
-                    slots.lock().unwrap()[0]
+                    hub.ports.lock().unwrap()[0]
+                        .restore
                         .as_ref()
                         .unwrap()
                         .set(ended(result.clone()))
                         .unwrap();
                     // A later job can finish before the client reads its first result.
-                    let next = job::reserve(&slots, &selection).unwrap();
+                    let next = reserve(&selection).unwrap();
                     next[0]
+                        .2
                         .set(ended(iasis_api::Ending {
                             phase: RestorePhase::Reported,
                             ..result.clone()
@@ -1422,6 +1635,66 @@ mod tests {
         status.ports[0].debug_actions =
             iasis_protocol::DebugActions::Listed([0x0106, 0x0606, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         status
+    }
+
+    #[test]
+    fn a_busy_port_refuses_the_group_and_preserves_earlier_results() {
+        let first = Arc::new(Attendance::new(Arc::default()));
+        let second = Arc::new(Attendance::new(Arc::default()));
+        let a = Target {
+            port: Port::ALL[0],
+            generation: 9,
+            ecid: Some(17),
+        };
+        let b = Target {
+            port: Port::ALL[1],
+            generation: 10,
+            ecid: Some(18),
+        };
+        let group = [(first.clone(), vec![a]), (second.clone(), vec![b])];
+        let previous = reserve(&group[..1]).unwrap().remove(0).2;
+        let replacement = Target {
+            generation: 10,
+            ecid: Some(19),
+            ..a
+        };
+        assert!(
+            reserve(&[
+                (second.clone(), vec![b]),
+                (first.clone(), vec![replacement])
+            ])
+            .is_err()
+        );
+        assert!(!second.ports.lock().unwrap()[b.port.index()].busy());
+        previous
+            .set(job::Ended {
+                attachment: None,
+                ending: iasis_api::Ending {
+                    operation: Operation::Revive,
+                    ecid: Some("0000000000000011".into()),
+                    phase: iasis_protocol::RestorePhase::Failed,
+                    message: "Device disconnected".into(),
+                    setup_error: None,
+                },
+            })
+            .unwrap();
+        second.ports.lock().unwrap()[b.port.index()].setup = Some((18, RequestProgress::Enrolling));
+        assert!(reserve(&group).is_err());
+        assert!(Arc::ptr_eq(
+            first.ports.lock().unwrap()[a.port.index()]
+                .restore
+                .as_ref()
+                .unwrap(),
+            &previous
+        ));
+        second.ports.lock().unwrap()[b.port.index()].setup = None;
+        let reserved = reserve(&group).unwrap();
+        assert_eq!(reserved.len(), 2);
+        assert!(reserved.iter().all(|(_, _, work)| work.get().is_none()));
+        assert_eq!(
+            previous.get().unwrap().ending.message,
+            "Device disconnected"
+        );
     }
 
     #[test]

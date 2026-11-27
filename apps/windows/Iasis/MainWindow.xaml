@@ -28,7 +28,8 @@
                     </CommandBar>
                     <Grid Grid.Row="1" ColumnDefinitions="*,Auto">
                         <ListView x:Name="Ports" ItemsSource="{Binding Source={StaticResource Groups}}" SelectionMode="Extended"
-                                  SelectionChanged="SelectionChanged" AutomationProperties.Name="Hub ports">
+                                  SelectionChanged="SelectionChanged" ContextRequested="PortContextRequested"
+                                  ContextCanceled="PortContextCanceled" AutomationProperties.Name="Hub ports">
                             <ListView.GroupStyle>
                                 <GroupStyle>
                                     <GroupStyle.HeaderTemplate>
@@ -106,6 +107,11 @@
                 </Grid>
                 <ScrollViewer x:Name="SettingsPage" Visibility="Collapsed">
                     <StackPanel Spacing="12" MaxWidth="640" HorizontalAlignment="Left">
+                        <ToggleSwitch x:Name="SetupLanguage" Header="Set language and region on erased iPhones and iPads" Toggled="SetupLanguageChanged" />
+                        <ToggleSwitch x:Name="EnrollmentAfterErase" Header="Try enrollment after erasing" Toggled="EnrollmentAfterEraseChanged" />
+                        <TextBlock Text="An iPhone or iPad may ask you to sign in or show Partially Set Up. Continue setup on the device."
+                                   Style="{ThemeResource CaptionTextBlockStyle}" TextWrapping="Wrap" />
+                        <ToggleSwitch x:Name="ShutdownMacs" Header="Shut down Macs after erasing" Toggled="ShutdownMacsChanged" />
                         <ToggleSwitch x:Name="Login" Header="Open at sign-in" Toggled="LoginChanged" />
                         <TextBlock Text="Hubs" Style="{ThemeResource SubtitleTextBlockStyle}" />
                         <ComboBox x:Name="HubList" DisplayMemberPath="Title" SelectionChanged="HubChanged" PlaceholderText="Connect an Iasis hub" />

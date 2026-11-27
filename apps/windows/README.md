@@ -4,7 +4,13 @@ Install `Iasis-<version>-x64.msi` and open **Iasis** from Start. The installer i
 
 ## Devices
 
-Select a port to see its device and current operation. Ctrl-click to add ports from any hub to the selection. **Enter DFU** and **Restart** act on the selected devices that support the signal. **Revive** repairs system software. **Restore** erases every selected device. Review the hub, port, device and image for each target before choosing **Erase and restore**. If an attachment changes, select it again.
+Select a port to see its device and current operation. Ctrl-click to select ports across hubs, then right-click a selected row for actions every selected device supports. Right-clicking an unselected row selects it alone.
+
+**Revive** repairs system software. **Restore** erases every selected device. Review the hub, port, device and image for each target before choosing **Erase and restore**. If an attachment changes, select it again.
+
+Choose **Advance Setup…** for iPhones and iPads in Setup Assistant. Choose whether to set the displayed language and region, try enrollment, or do both. Enrollment activates the device and requests its assigned management profile. If the device asks you to sign in or shows **Partially Set Up**, continue Setup Assistant on the device.
+
+The dialog starts with your after-erase settings. If both options are off in Settings, it starts with your Windows language and regional format. Choices in the dialog apply to this run.
 
 When a device needs host software, its details show what to install. For a running iPhone or iPad that needs Apple Devices, use the link there and wait for the service to enable the action.
 

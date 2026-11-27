@@ -18,6 +18,22 @@ public class ContractTests
     [Fact]
     public void EveryRequestRoundTrips() => RoundTrip("requests.json", AgentJson.Default.IReadOnlyListRequest);
 
+    [Theory]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, true)]
+    [InlineData(true, true, false)]
+    public void SetupCarriesTheChosenOptionsAndAttachments(bool language, bool dep, bool checkOnly)
+    {
+        var selected = new Selection("a", 4, [new Target(2, 7, "1234")]);
+        var settings = language ? new SetupLanguage("en-AU", "en_AU") : null;
+        var request = JsonSerializer.SerializeToNode(new AdvanceSetupRequest([selected], settings, dep, checkOnly), AgentJson.Default.Request)!.AsObject();
+        Assert.Equal("advance_setup", (string?)request["op"]);
+        Assert.Equal(settings?.Locale, (string?)request["settings"]?["locale"]);
+        Assert.Equal(dep, (bool?)request["dep"]);
+        Assert.Equal(checkOnly, (bool?)request["check_only"]);
+        Assert.Equal("1234", (string?)request["hubs"]![0]!["targets"]![0]!["ecid"]);
+    }
+
     [Fact]
     public void EveryReplyReadsWhole()
     {

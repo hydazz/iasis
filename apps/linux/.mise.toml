@@ -24,6 +24,7 @@ run = [
 ]
 
 [tasks.test]
+env = { GTK_A11Y = "none" }
 description = "Under Xvfb"
 run = "xvfb-run -a dbus-run-session -- cargo test --locked -p iasis-desktop"
 

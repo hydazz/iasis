@@ -16,11 +16,14 @@ public sealed record Device(Hub Hub, Port Port, Prerequisite? Needs)
         { Fault: { } fault } => fault,
         { Awaiting: not null } => "Waiting for image",
         { Job: { } job, Stage: { } stage } => $"{job.Operation} · {stage.Name} · {stage.Percent}%",
+        { Job: { Phase: RestorePhase.Preparing or RestorePhase.Running } active } => Phase(active.Operation, active.Phase),
+        { Request: RequestProgress.SettingLanguage } => "Setting language and region",
+        { Request: RequestProgress.Enrolling } => "Trying enrollment",
+        { Request: RequestProgress.EnteringDfu } => "Entering DFU",
+        { Request: RequestProgress.DfuUnconfirmed } => "DFU not confirmed",
+        { Request: RequestProgress.Restarting } => "Restarting",
+        { Result: { } result } => Outcome(result),
         { Job: { } job } => Phase(job.Operation, job.Phase),
-        { Request: SignalProgress.EnteringDfu } => "Entering DFU",
-        { Request: SignalProgress.DfuUnconfirmed } => "DFU not confirmed",
-        { Request: SignalProgress.Restarting } => "Restarting",
-        { Result: { } result } => $"{Phase(result.Operation, result.Phase)} · {result.Message}",
         { WaitingForPower: true } => "Waiting for power",
         { WrongDfuPort: true } => "Connect the cable to the Mac’s DFU port.",
         _ when Needs is { } missing => missing.Reason,
@@ -48,35 +51,47 @@ public sealed record Device(Hub Hub, Port Port, Prerequisite? Needs)
         _ => operation == Operation.Restore ? "Restoring" : "Reviving",
     };
 
+    public static string Outcome(Ending result)
+    {
+        var summary = $"{Phase(result.Operation, result.Phase)} · {result.Message}";
+        return result.SetupError is { } error ? $"{summary} · Setup incomplete: {error}" : summary;
+    }
+
     public bool SameAttachment(Device other) =>
         Hub.Serial == other.Hub.Serial && Hub.Session == other.Hub.Session &&
         Port.Number == other.Port.Number && Port.Generation == other.Port.Generation &&
         (Port.Ecid is null || Port.Ecid == other.Port.Ecid);
+
+    public bool CanCheckSetup => Hub.Session is not null && Port.Job is not { Phase: RestorePhase.Preparing or RestorePhase.Running } &&
+        Port is { Enabled: true, Occupied: true, Mode: AppleMode.Normal, Ecid: not null, Fault: null, Request: null };
+
+    public bool Supports(DeviceAction action) => action switch
+    {
+        DeviceAction.Dfu => Port.Dfu,
+        DeviceAction.Restart => Port.Reboot,
+        DeviceAction.Revive or DeviceAction.Restore => Port.Occupied && Port.Restore && Needs is null,
+        _ => throw new ArgumentOutOfRangeException(nameof(action)),
+    };
 }
 
 public enum DeviceAction { Dfu, Restart, Revive, Restore }
 
 public sealed record DeviceActionTargets(IReadOnlyList<Device> Devices, IReadOnlyList<Selection> Hubs)
 {
-    public static DeviceActionTargets? For(IEnumerable<Device> devices, DeviceAction action)
-    {
-        var selected = devices.ToArray();
-        if (action is DeviceAction.Restore or DeviceAction.Revive &&
-            selected.Any(d => !d.Port.Occupied || !d.Port.Restore || d.Needs is not null))
-        {
-            return null;
-        }
-        var targets = selected.Where(d => action switch
-        {
-            DeviceAction.Dfu => d.Port.Dfu,
-            DeviceAction.Restart => d.Port.Reboot,
-            _ => true,
-        }).GroupBy(d => d.Hub.Serial).ToArray();
+    public static DeviceActionTargets? For(IReadOnlyList<Device> devices, DeviceAction action) =>
+        devices.All(d => d.Supports(action)) ? From(devices) : null;
 
-        if (targets.Length == 0 || targets.Any(group => group.First().Hub.Session is null))
-        {
+    public static IReadOnlyList<Selection>? SetupSelection(IReadOnlyList<Device> devices) =>
+        devices.All(d => d.CanCheckSetup) ? From(devices)?.Hubs : null;
+
+    public static AdvanceSetupRequest DefaultSetup(IReadOnlyList<Selection> hubs, PostRestore saved, SetupLanguage desktop) =>
+        new(hubs, saved.SetupLanguage ?? (saved.TryEnrollment ? null : desktop), saved.TryEnrollment, CheckOnly: true);
+
+    private static DeviceActionTargets? From(IReadOnlyList<Device> devices)
+    {
+        if (devices.Count == 0 || devices.Any(d => d.Hub.Session is null))
             return null;
-        }
+        var targets = devices.GroupBy(d => d.Hub.Serial).ToArray();
 
         // The watch reports submitted results in hub order, then target order.
         var hubs = targets.Select(group => new Selection(group.Key, group.First().Hub.Session!.Value,

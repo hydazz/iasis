@@ -14,6 +14,7 @@ public sealed record AgentState
     /// A submitting connection's results in target order, each null until it has one.
     public IReadOnlyList<Ending?>? Submitted { get; init; }
     public required ImageStore Images { get; init; }
+    public required PostRestore PostRestore { get; init; }
     public required Sharing Sharing { get; init; }
     public required Supervision Supervision { get; init; }
     /// What the host lacks that some of Iasis needs.
@@ -55,7 +56,7 @@ public sealed record Port
     public Usb? Usb { get; init; }
     public AppleMode? Mode { get; init; }
     public required Light Light { get; init; }
-    public SignalProgress? Request { get; init; }
+    public RequestProgress? Request { get; init; }
     public required bool WaitingForPower { get; init; }
     public required bool Powered { get; init; }
     public required bool WrongDfuPort { get; init; }
@@ -89,7 +90,8 @@ public sealed record Ending(
     Operation Operation,
     string? Ecid,
     RestorePhase Phase,
-    string Message);
+    string Message,
+    string? SetupError);
 
 public sealed record ImageStore(IReadOnlyList<Image> Images, Fetch? Fetch);
 
@@ -107,6 +109,9 @@ public sealed record Image(
     bool InUse);
 
 public sealed record Fetch(string Id, string Version, string Build, long Bytes, long Done);
+
+public sealed record PostRestore(bool ShutdownMacs, SetupLanguage? SetupLanguage, bool TryEnrollment);
+public sealed record SetupLanguage(string Language, string Locale);
 
 public sealed record Sharing(bool Enabled, string? Problem, IReadOnlyList<SharingPort> Ports);
 
@@ -145,8 +150,8 @@ public enum AppleMode { Dfu, PortDfu, Recovery, Kis, KisDfu, Restored, Normal }
 [JsonConverter(typeof(SnakeCaseEnum<Hue>))]
 public enum Hue { Off, Red, Green, White, Blue, Amber, Purple }
 
-[JsonConverter(typeof(SnakeCaseEnum<SignalProgress>))]
-public enum SignalProgress { EnteringDfu, DfuUnconfirmed, Restarting }
+[JsonConverter(typeof(SnakeCaseEnum<RequestProgress>))]
+public enum RequestProgress { SettingLanguage, Enrolling, EnteringDfu, DfuUnconfirmed, Restarting }
 
 [JsonConverter(typeof(SnakeCaseEnum<UsbLink>))]
 public enum UsbLink { Usb, Usb2, Usb3 }
@@ -173,11 +178,14 @@ public sealed class SnakeCaseEnum<T>() : JsonStringEnumConverter<T>(JsonNamingPo
 [JsonDerivedType(typeof(ReviveRequest), "revive")]
 [JsonDerivedType(typeof(DfuRequest), "dfu")]
 [JsonDerivedType(typeof(RebootRequest), "reboot")]
+[JsonDerivedType(typeof(AdvanceSetupRequest), "advance_setup")]
 [JsonDerivedType(typeof(PowerRequest), "power")]
 [JsonDerivedType(typeof(DebugUsbRequest), "debug_usb")]
 [JsonDerivedType(typeof(RenameRequest), "rename")]
 [JsonDerivedType(typeof(BrightnessRequest), "brightness")]
 [JsonDerivedType(typeof(UpdateRequest), "update")]
+[JsonDerivedType(typeof(ShutdownMacsRequest), "shutdown_macs")]
+[JsonDerivedType(typeof(SetupLanguageRequest), "setup_language")]
 [JsonDerivedType(typeof(SharingRequest), "sharing")]
 [JsonDerivedType(typeof(ImportSupervisionRequest), "import_supervision")]
 [JsonDerivedType(typeof(ExportSupervisionRequest), "export_supervision")]
@@ -187,6 +195,7 @@ public sealed class SnakeCaseEnum<T>() : JsonStringEnumConverter<T>(JsonNamingPo
 [JsonDerivedType(typeof(RemoveRequest), "remove")]
 [JsonDerivedType(typeof(CatalogRequest), "catalog")]
 [JsonDerivedType(typeof(DiagnosticsRequest), "diagnostics")]
+[JsonDerivedType(typeof(EnrollmentAfterEraseRequest), "enrollment_after_erase")]
 public abstract record Request
 {
     /// The bytes that follow the request on the connection.
@@ -200,6 +209,7 @@ public sealed record RestoreRequest(IReadOnlyList<Selection> Hubs, bool Latest) 
 public sealed record ReviveRequest(IReadOnlyList<Selection> Hubs, bool Latest) : Request;
 public sealed record DfuRequest(IReadOnlyList<Selection> Hubs) : Request;
 public sealed record RebootRequest(IReadOnlyList<Selection> Hubs) : Request;
+public sealed record AdvanceSetupRequest(IReadOnlyList<Selection> Hubs, SetupLanguage? Settings, bool Dep, bool CheckOnly) : Request;
 public sealed record PowerRequest(string Hub, int Port, bool On) : Request;
 public sealed record DebugUsbRequest(string Hub, int Port, bool On) : Request;
 public sealed record RenameRequest(string Hub, string Name) : Request;
@@ -210,6 +220,8 @@ public sealed record UpdateRequest(string Hub, long? Bytes) : Request
     public override long Payload() => Bytes ?? 0;
 }
 
+public sealed record ShutdownMacsRequest(bool Enabled) : Request;
+public sealed record SetupLanguageRequest(SetupLanguage? Settings) : Request;
 public sealed record SharingRequest(bool Enabled) : Request;
 /// Replace the supervision identity with the one in a PKCS #12 archive, in base64.
 public sealed record ImportSupervisionRequest(string Pkcs12, string Password) : Request;
@@ -226,6 +238,7 @@ public sealed record ImportRequest(string Name, long Bytes) : Request
 public sealed record RemoveRequest(string Image) : Request;
 public sealed record CatalogRequest : Request;
 public sealed record DiagnosticsRequest(string Hub) : Request;
+public sealed record EnrollmentAfterEraseRequest(bool Enabled) : Request;
 
 /// A reply: `"ok"`, or an object whose one member names what it carries.
 [JsonConverter(typeof(ReplyConverter))]

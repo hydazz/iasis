@@ -85,6 +85,8 @@ struct DeviceTests {
         #expect(activity(state, 2) == .idle)
         state.hubs[0].ports[1].request = .restarting
         #expect(activity(state, 2) == Activity("Restarting", .working(nil)))
+        state.hubs[0].ports[1].request = .enrolling
+        #expect(activity(state, 2) == Activity("Requesting Enrollment", .working(nil)))
     }
 
     @Test func anOperationLaysOutItsStepsAndItsEnding() throws {
@@ -192,15 +194,19 @@ struct DeviceTests {
         #expect(confirmation.message.hasSuffix("asking the image catalog: no route"))
     }
 
-    @Test func actionsGoToTheDevicesThatTakeThem() throws {
+    @Test func actionsRequireEverySelectedDevice() throws {
         var state = try Fixtures.state
         let hub = "a0e012192cdfdb67"
         let all = DeviceActions(state.devices.filter(\.isSelectable))
         let mac = RestoreTarget(port: 2, generation: 2, ecid: "001a79d10e6bc01c")
         let other = RestoreTarget(port: 4, generation: 4, ecid: "0002250e3c04c01e")
-        #expect(all.dfu == [.dfu(hubs: [RestoreSelection(hub: hub, session: 77, targets: [other])])])
-        #expect(all.restart == [.reboot(hubs: [RestoreSelection(hub: hub, session: 77, targets: [mac, other])])])
+        #expect(all.dfu.isEmpty)
+        #expect(all.restart.isEmpty)
         #expect(all.revive == nil)
+        let pair = DeviceActions([state.devices[1], state.devices[3]])
+        #expect(pair.dfu.isEmpty)
+        #expect(pair.restart == [.reboot(hubs: [RestoreSelection(hub: hub, session: 77, targets: [mac, other])])])
+        #expect(DeviceActions([state.devices[3]]).dfu == [.dfu(hubs: [RestoreSelection(hub: hub, session: 77, targets: [other])])])
 
         state.hubs[0].ports[1].restore = true
         let one = DeviceActions([state.devices[1]])

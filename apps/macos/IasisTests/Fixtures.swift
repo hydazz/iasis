@@ -15,6 +15,7 @@ nonisolated enum Fixtures {
     {"id":"UniversalMac_27.2.1_26B131_Restore.ipsw","os":"macOS","version":"27.2.1","build":"26B131","bytes":25595954706,"models":["MacBook Air (M1, Late 2020)","Mac mini (M1, Late 2020)","MacBook Pro (M3 Max, 14-inch, Nov 2023)"],"ready":true,"error":null,"path":"/Users/Shared/Iasis/images/UniversalMac_27.2.1_26B131_Restore.ipsw","fetched":true,"in_use":false},
     {"id":"iPad_Fall_2022_27.2.1_24B156_Restore.ipsw","os":"iPadOS","version":"27.2.1","build":"24B156","bytes":10941876409,"models":["iPad (WiFi, 10th generation)"],"ready":false,"error":null,"path":null,"fetched":true,"in_use":false}],
     "fetch":{"id":"iPad_Fall_2022_27.2.1_24B156_Restore.ipsw","version":"27.2.1","build":"24B156","bytes":10941876409,"done":4704986855}},
+    "post_restore":{"shutdown_macs":false,"setup_language":null,"try_enrollment":false},
     "sharing":{"enabled":true,"problem":null,
     "ports":[{"hub":"a0e012192cdfdb67","port":3,"active":true},{"hub":"a0e012192cdfdb67","port":4,"active":false,"problem":"Cannot open USB interface"}]},
     "supervision":{"name":"Iasis on bench","certificate":"MIIBszCCAVmgAwIBAgIIb3Vy","problem":null},
@@ -38,6 +39,7 @@ nonisolated enum Fixtures {
 /// An agent that reports what a test gives it and records what it is asked.
 actor FakeAgent: AgentService {
     private var requests: [AgentRequest] = []
+    private var refused: (AgentRequest, String)?
     private let stream = AsyncThrowingStream<AgentState, any Error>.makeStream()
 
     init(reports: [AgentState]) {
@@ -64,6 +66,13 @@ actor FakeAgent: AgentService {
 
     func send(_ request: AgentRequest) async throws {
         requests.append(request)
+        if let refused, refused.0 == request {
+            throw AgentError.refused(refused.1)
+        }
+    }
+
+    func refuse(_ request: AgentRequest, reason: String = "The selection cannot advance through setup.") {
+        refused = (request, reason)
     }
 
     func catalog() async throws -> [AgentState.CatalogModel] {

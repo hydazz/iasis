@@ -132,6 +132,7 @@ public sealed partial class MainWindow : Window
         ShowHub();
         ShowImages();
         ShowIdentity();
+        ShowPostRestore();
         if (!(next?.Missing ?? []).SequenceEqual(old?.Missing ?? [])) ShowPrerequisites();
         ShowSelection();
         StateChanged?.Invoke();
@@ -139,6 +140,7 @@ public sealed partial class MainWindow : Window
 
     private void SelectionChanged(object sender, SelectionChangedEventArgs args)
     {
+        HideDeviceMenu();
         if (initialized) ShowSelection();
     }
 
@@ -222,6 +224,7 @@ public sealed partial class MainWindow : Window
         ShowSelection();
         ShowHub();
         ShowIdentity();
+        ShowPostRestore();
         ImageButtons();
     }
 
@@ -241,13 +244,14 @@ public sealed partial class MainWindow : Window
         DefaultButton = ContentDialogButton.Close,
     };
 
-    private void EnterDfu(object sender, RoutedEventArgs args) => Act(DeviceAction.Dfu, Selected);
-    private void RestartDevice(object sender, RoutedEventArgs args) => Act(DeviceAction.Restart, Selected);
-    private void ReviveDevice(object sender, RoutedEventArgs args) => Act(DeviceAction.Revive, Selected);
-    private void RestoreDevice(object sender, RoutedEventArgs args) => Act(DeviceAction.Restore, Selected);
+    private void EnterDfu(object sender, RoutedEventArgs args) => Act(DeviceAction.Dfu);
+    private void RestartDevice(object sender, RoutedEventArgs args) => Act(DeviceAction.Restart);
+    private void ReviveDevice(object sender, RoutedEventArgs args) => Act(DeviceAction.Revive);
+    private void RestoreDevice(object sender, RoutedEventArgs args) => Act(DeviceAction.Restore);
 
-    internal void Act(DeviceAction action, IReadOnlyList<Device> selected)
+    internal void Act(DeviceAction action, Device? trayDevice = null)
     {
+        var selected = trayDevice is null ? Selected : [trayDevice];
         _ = Run(async () =>
         {
             var targets = DeviceActionTargets.For(selected, action);
@@ -268,8 +272,10 @@ public sealed partial class MainWindow : Window
                 if (await dialog.ShowAsync() != ContentDialogResult.Primary || plan.Blocked) return;
                 latest = newest.IsChecked == true;
             }
-            if (targets.Devices.Any(old => !Devices.Any(old.SameAttachment)))
-                throw new InvalidOperationException("The attachment changed. Select the device again.");
+            var current = trayDevice is null ? Selected : Devices.ToArray();
+            if ((trayDevice is null && current.Length != selected.Length) ||
+                selected.Any(old => !current.Any(d => old.SameAttachment(d) && d.Supports(action))))
+                throw new InvalidOperationException("The devices available for this action changed. Select them again.");
             var request = targets.Request(action, latest);
             if (action is DeviceAction.Restore or DeviceAction.Revive)
                 _ = Track(request, targets);
@@ -296,11 +302,11 @@ public sealed partial class MainWindow : Window
                 if (update.Submitted is not { } results || results.Count != targets.Devices.Count)
                     throw new InvalidDataException("The service returned incomplete submission details.");
                 bar.Message = string.Join("\n", results.Select((r, i) =>
-                    $"{targets.Devices[i].Place} · {targets.Devices[i].Name}: " + (r is null ? "In progress" : $"{Device.Phase(r.Operation, r.Phase)} · {r.Message}")));
+                    $"{targets.Devices[i].Place} · {targets.Devices[i].Name}: " + (r is null ? "In progress" : Device.Outcome(r))));
                 if (results.All(r => r is not null))
                 {
                     bar.Severity = results.Any(r => r!.Phase == RestorePhase.Failed) ? InfoBarSeverity.Error :
-                        results.Any(r => r!.Phase == RestorePhase.Unconfirmed) ? InfoBarSeverity.Warning : InfoBarSeverity.Success;
+                        results.Any(r => r!.Phase == RestorePhase.Unconfirmed || r.SetupError is not null) ? InfoBarSeverity.Warning : InfoBarSeverity.Success;
                     return;
                 }
             }

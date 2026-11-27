@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using Iasis.Agent;
 using Microsoft.UI.Xaml;
@@ -13,6 +14,9 @@ namespace Iasis;
 public sealed partial class MainWindow
 {
     private const string LoginPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+
+    private static Agent.SetupLanguage DesktopLanguage => new(
+        CultureInfo.CurrentUICulture.Name, CultureInfo.CurrentCulture.Name.Replace('-', '_'));
 
     private void LoginChanged(object sender, RoutedEventArgs args)
     {
@@ -31,6 +35,42 @@ public sealed partial class MainWindow
             Problem.Message = error.Message;
             Problem.IsOpen = true;
         }
+    }
+
+    private void ShowPostRestore()
+    {
+        ShutdownMacs.IsEnabled = state is not null && !busy;
+        ShutdownMacs.IsOn = state?.PostRestore.ShutdownMacs == true;
+        var region = state?.PostRestore.SetupLanguage;
+        SetupLanguage.IsEnabled = state is not null && !busy;
+        SetupLanguage.IsOn = region is not null;
+        SetupLanguage.OnContent = region is null ? "On" : $"{region.Language}, {region.Locale}";
+        EnrollmentAfterErase.IsEnabled = state is not null && !busy;
+        EnrollmentAfterErase.IsOn = state?.PostRestore.TryEnrollment == true;
+    }
+
+    private void ShutdownMacsChanged(object sender, RoutedEventArgs args)
+    {
+        var enabled = ShutdownMacs.IsOn;
+        if (initialized && state is not null && enabled != state.PostRestore.ShutdownMacs)
+            _ = Run(() => Send(new ShutdownMacsRequest(enabled)));
+    }
+
+    private void SetupLanguageChanged(object sender, RoutedEventArgs args)
+    {
+        var enabled = SetupLanguage.IsOn;
+        if (initialized && state is not null && enabled != (state.PostRestore.SetupLanguage is not null))
+        {
+            var settings = enabled ? DesktopLanguage : null;
+            _ = Run(() => Send(new SetupLanguageRequest(settings)));
+        }
+    }
+
+    private void EnrollmentAfterEraseChanged(object sender, RoutedEventArgs args)
+    {
+        var enabled = EnrollmentAfterErase.IsOn;
+        if (initialized && state is not null && enabled != state.PostRestore.TryEnrollment)
+            _ = Run(() => Send(new EnrollmentAfterEraseRequest(enabled)));
     }
 
     private Agent.Hub? CurrentHub => (HubList.SelectedItem as HubRow)?.Hub;

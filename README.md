@@ -163,6 +163,18 @@ target/release/iasis --serial 0123456789abcdef restore --ports 1,2,3,4,5 --erase
 
 Each target is its own job, and each restore its own process. A job fetches the target's image before it puts the target into DFU or recovery when this host already knows the target's model; otherwise the target waits there for it. A restore that fails while its target is still in DFU or recovery is started again, up to three times. A target that can’t be prepared, such as an iPad waiting for Trust, ends with the reason on its port while the others restore.
 
+Erased Macs restart into Setup Assistant. To leave them powered off, enable **Shut down Macs after erasing** in the app’s settings or run `iasis post-restore --mac shutdown`. Use `--mac restart` to restore the default. Revived devices always restart.
+
+For iPhones and iPads, right-click the selection and choose **Advance Setup…**. Choose language and region, Automated Device Enrollment, or both. Iasis checks the whole selection before acting. If Setup Assistant has already accepted the requested language and region, a combined request proceeds to enrollment.
+
+```sh
+iasis advance-setup --ports 1,2 --language en-AU --locale en_AU --dep
+```
+
+Omit `--dep` to set just language and region, or use `--dep` alone to request enrollment. Add `--check` to check readiness without changing any device. Enrollment activates the device if needed and requests its assigned management profile. The host needs internet access for activation. The device reaches its enrollment service over Wi-Fi or USB Internet Sharing. Finish any required sign-in or “Partially Set Up” prompt on the device.
+
+To run the same setup after erasing, choose the options in the app’s settings or run `iasis post-restore --language en-AU --locale en_AU --enroll on`. Use `--leave-setup` to leave language and region to the device and `--enroll off` to turn off automatic enrollment.
+
 The host stays out of idle sleep from a target's preparation until its restore ends, while its display can still sleep. On battery, a Windows laptop with Modern Standby drops that hold five minutes after its sleep timeout.
 
 A port's percentage follows the whole restore, with the current stage alongside it. Repeated firmware and image transfers can hold it at the same percentage until the next milestone. Logs and working files go under `restores/` in the agent's cache directory. Allow space for an extracted OS image per worker. Iasis matches each image to the target's chip and board IDs, or to its product type when only a model identifier is available. The restore program checks Apple signing.

@@ -9,7 +9,7 @@ use std::{
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
-use iasis_api::{Reply, Request, State};
+use iasis_api::{Reply, Request, Selection, State};
 
 use crate::{
     agent::{self, Event},
@@ -17,6 +17,7 @@ use crate::{
     inspector::Inspector,
     preferences::Preferences,
     row::PortRow,
+    setup::SetupDialog,
 };
 
 pub struct Window {
@@ -33,6 +34,10 @@ pub struct Window {
     show_inspector: gtk::ToggleButton,
     select: gtk::ToggleButton,
     action_bar: gtk::ActionBar,
+    context: gtk::PopoverMenu,
+    advance_setup: gio::SimpleAction,
+    menu_probe: RefCell<Option<Rc<Vec<Selection>>>>,
+    setup_dialog: RefCell<Option<Rc<SetupDialog>>>,
     title: adw::WindowTitle,
     preferences: RefCell<Option<Rc<Preferences>>>,
     model: RefCell<Model>,
@@ -168,6 +173,10 @@ impl Window {
             show_inspector,
             select,
             action_bar,
+            context: device_menu(),
+            advance_setup: gio::SimpleAction::new("advance-setup", None),
+            menu_probe: RefCell::default(),
+            setup_dialog: RefCell::default(),
             title,
             preferences: RefCell::default(),
             model: RefCell::default(),
@@ -224,15 +233,39 @@ impl Window {
             self.window.add_action(&action);
         };
         simple("dfu", |this| {
-            this.perform_all(|actions| actions.dfu.clone())
+            this.perform_all(this.model.borrow().actions.dfu.clone())
         });
         simple("restart", |this| {
-            this.perform_all(|actions| actions.restart.clone());
+            this.perform_all(this.model.borrow().actions.restart.clone());
         });
         simple("revive", |this| {
-            this.perform_all(|actions| actions.revive.clone().into_iter().collect());
+            this.perform_all(this.model.borrow().actions.revive.clone());
         });
         simple("restore", |this| this.restore());
+
+        let group = gio::SimpleActionGroup::new();
+        self.advance_setup.set_enabled(false);
+        let weak = Rc::downgrade(self);
+        self.advance_setup.connect_activate(move |_, _| {
+            if let Some(this) = weak.upgrade() {
+                this.open_setup();
+            }
+        });
+        group.add_action(&self.advance_setup);
+        self.context.insert_action_group("device", Some(&group));
+        let weak = Rc::downgrade(self);
+        self.context.connect_closed(move |popover| {
+            if let Some(this) = weak.upgrade() {
+                this.menu_probe.take();
+            }
+            // GTK closes the popover before activating its menu item.
+            let popover = popover.clone();
+            glib::idle_add_local_once(move || {
+                if !popover.is_visible() && popover.parent().is_some() {
+                    popover.unparent();
+                }
+            });
+        });
 
         let update = gio::SimpleAction::new("update-hub", Some(glib::VariantTy::STRING));
         let weak = Rc::downgrade(self);
@@ -277,6 +310,19 @@ impl Window {
                     self.stack.set_visible_child_name("hubs");
                 }
                 self.show_banner(&state);
+                let lost_selection = {
+                    let mut model = self.model.borrow_mut();
+                    let count = model.selected.len();
+                    model.selected.retain(|id| {
+                        hubs.iter()
+                            .flat_map(|hub| &hub.devices)
+                            .any(|device| device.selectable() && device.id() == *id)
+                    });
+                    model.selected.len() != count
+                };
+                if lost_selection {
+                    self.context.popdown();
+                }
                 self.show_hubs(&hubs);
                 if let Some(preferences) = &*self.preferences.borrow() {
                     preferences.update(&state);
@@ -308,9 +354,11 @@ impl Window {
                 self.status.set_description(Some(&description));
                 self.stack.set_visible_child_name("status");
                 self.banner.set_revealed(false);
+                self.context.popdown();
                 self.show_hubs(&[]);
                 let mut model = self.model.borrow_mut();
                 model.hubs.clear();
+                model.selected.clear();
                 model.state = None;
             }
         }
@@ -426,10 +474,26 @@ impl Window {
         self.show_inspector.set_sensitive(one.is_some());
         self.split
             .set_show_sidebar(one.is_some() && self.show_inspector.is_active());
+        let targets = actions.setup_targets.as_ref();
+        if self
+            .menu_probe
+            .borrow()
+            .as_deref()
+            .is_some_and(|seen| Some(seen) != targets)
+        {
+            self.menu_probe.take();
+            self.advance_setup.set_enabled(false);
+        }
+        if let Some(form) = self.setup_dialog.borrow().as_ref()
+            && targets != Some(&form.hubs)
+        {
+            form.invalidate();
+        }
         self.model.borrow_mut().actions = actions;
     }
 
     fn set_selecting(self: &Rc<Self>, selecting: bool) {
+        self.context.popdown();
         {
             let mut model = self.model.borrow_mut();
             model.selecting = selecting;
@@ -459,9 +523,16 @@ impl Window {
         if self.model.borrow().selected == [id.clone()] {
             return;
         }
+        self.context.popdown();
         self.model.borrow_mut().selected = vec![id.clone()];
+        let selecting = self.model.borrow().selecting;
         for group in self.groups.borrow().iter() {
-            if group.serial != id.0 {
+            if selecting {
+                for (index, row) in group.rows.borrow().iter().enumerate() {
+                    row.check
+                        .set_active(group.serial == id.0 && index + 1 == usize::from(id.1));
+                }
+            } else if group.serial != id.0 {
                 group.list.unselect_all();
             } else if let Some(row) = group.rows.borrow().get(usize::from(id.1) - 1) {
                 group.list.select_row(Some(&row.row));
@@ -471,6 +542,10 @@ impl Window {
     }
 
     fn check(self: &Rc<Self>, id: DeviceId, on: bool) {
+        if self.model.borrow().selected.contains(&id) == on {
+            return;
+        }
+        self.context.popdown();
         {
             let mut model = self.model.borrow_mut();
             model.selected.retain(|selected| *selected != id);
@@ -481,15 +556,96 @@ impl Window {
         self.refresh();
     }
 
+    fn open_device_menu(self: &Rc<Self>, row: &adw::ActionRow, id: &DeviceId, x: f64, y: f64) {
+        if !self.model.borrow().selected.contains(id) {
+            self.select_one(id.clone());
+        }
+        let model = self.model.borrow();
+        let actions = &model.actions;
+        if actions.dfu.is_empty()
+            && actions.restart.is_empty()
+            && actions.restore.is_none()
+            && actions.setup_targets.is_none()
+        {
+            return;
+        }
+        drop(model);
+        self.context.popdown();
+        if self.context.parent().is_some() {
+            self.context.unparent();
+        }
+        self.context.set_parent(row);
+        self.context
+            .set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+        self.advance_setup.set_enabled(false);
+        self.context.popup();
+        let Some(hubs) = self.model.borrow().actions.setup_targets.clone() else {
+            return;
+        };
+        let seen = Rc::new(hubs);
+        self.menu_probe.replace(Some(seen.clone()));
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let check = Request::AdvanceSetup {
+                hubs: (*seen).clone(),
+                settings: None,
+                dep: false,
+                check_only: true,
+            };
+            let eligible = matches!(agent::ask(check).await, Ok(Reply::Ok));
+            if let Some(this) = weak.upgrade()
+                && this
+                    .menu_probe
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|current| Rc::ptr_eq(current, &seen))
+            {
+                this.advance_setup.set_enabled(eligible);
+            }
+        });
+    }
+
+    fn open_setup(self: &Rc<Self>) {
+        if self.setup_dialog.borrow().is_some() {
+            return;
+        }
+        let model = self.model.borrow();
+        let (Some(hubs), Some(state)) = (model.actions.setup_targets.clone(), &model.state) else {
+            return;
+        };
+        let subject = match self.selected().as_slice() {
+            [device] => format!(
+                "{} · port {} · {}",
+                device.hub_title,
+                device.port.number,
+                device.short_name()
+            ),
+            devices => format!("{} selected devices", devices.len()),
+        };
+        let form = SetupDialog::new(hubs, &state.post_restore, &subject);
+        drop(model);
+        let weak = Rc::downgrade(self);
+        form.dialog.connect_response(None, move |_, response| {
+            if let Some(this) = weak.upgrade()
+                && let Some(form) = this.setup_dialog.take()
+                && response == "apply"
+                && this.model.borrow().actions.setup_targets.as_ref() == Some(&form.hubs)
+                && let Some(request) = form.approved_request()
+            {
+                this.perform_all([request]);
+            }
+        });
+        self.setup_dialog.replace(Some(form.clone()));
+        form.present(&self.window);
+    }
+
     /// Send each request the actions make, and say why any was refused.
-    fn perform_all(self: &Rc<Self>, requests: impl Fn(&Actions) -> Vec<Request>) {
-        let requests = requests(&self.model.borrow().actions);
+    fn perform_all(self: &Rc<Self>, requests: impl IntoIterator<Item = Request> + 'static) {
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             for request in requests {
-                if let Err(message) = agent::perform(request).await
-                    && let Some(this) = weak.upgrade()
-                {
+                let result = agent::perform(request).await;
+                if let (Err(message), Some(this)) = (result, weak.upgrade()) {
                     this.toast(&message);
                 }
             }
@@ -716,7 +872,7 @@ impl HubGroup {
                     window.check(checked.clone(), check.is_active());
                 }
             });
-            context_menu(window, &row.row, id);
+            connect_context_menu(window, &row.row, id);
             self.list.append(&row.row);
             rows.push(row);
         }
@@ -727,39 +883,46 @@ impl HubGroup {
         }
         for (row, device) in rows.iter().zip(&hub.devices) {
             row.update(device);
+            if !device.selectable() {
+                row.check.set_active(false);
+            }
         }
     }
 }
 
-/// The device actions on a secondary click or a long press, for the row
-/// under the pointer.
-fn context_menu(window: &Rc<Window>, row: &adw::ActionRow, id: DeviceId) {
+fn device_menu() -> gtk::PopoverMenu {
     let menu = gio::Menu::new();
-    let signals = gio::Menu::new();
-    signals.append(Some("Enter DFU"), Some("win.dfu"));
-    signals.append(Some("Restart"), Some("win.restart"));
-    menu.append_section(None, &signals);
-    let operations = gio::Menu::new();
-    operations.append(Some("Revive"), Some("win.revive"));
-    operations.append(Some("Restore…"), Some("win.restore"));
-    menu.append_section(None, &operations);
-    let popover = gtk::PopoverMenu::builder()
+    for entries in [
+        &[("Enter DFU", "win.dfu"), ("Restart", "win.restart")][..],
+        &[
+            ("Revive", "win.revive"),
+            ("Restore…", "win.restore"),
+            ("Advance Setup…", "device.advance-setup"),
+        ],
+    ] {
+        let section = gio::Menu::new();
+        for (label, action) in entries {
+            let item = gio::MenuItem::new(Some(label), Some(action));
+            item.set_attribute_value("hidden-when", Some(&"action-disabled".to_variant()));
+            section.append_item(&item);
+        }
+        menu.append_section(None, &section);
+    }
+    gtk::PopoverMenu::builder()
         .menu_model(&menu)
         .has_arrow(false)
         .halign(gtk::Align::Start)
-        .build();
-    popover.set_parent(row);
+        .build()
+}
 
-    let open = {
-        let weak = Rc::downgrade(window);
-        let popover = popover.clone();
-        move |x: f64, y: f64| {
-            let Some(window) = weak.upgrade() else { return };
-            if !window.model.borrow().selecting {
-                window.select_one(id.clone());
-            }
-            popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
-            popover.popup();
+fn connect_context_menu(window: &Rc<Window>, row: &adw::ActionRow, id: DeviceId) {
+    let weak = Rc::downgrade(window);
+    let row_ref = row.downgrade();
+    let open = move |x: f64, y: f64| {
+        if let (Some(window), Some(row)) = (weak.upgrade(), row_ref.upgrade())
+            && row.is_selectable()
+        {
+            window.open_device_menu(&row, &id, x, y);
         }
     };
     let click = gtk::GestureClick::builder()

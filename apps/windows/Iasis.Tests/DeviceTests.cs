@@ -35,20 +35,63 @@ public class DeviceTests
     }
 
     [Fact]
-    public void SignalsUseEligiblePortsAndRestoreNeedsEveryTarget()
+    public void DeviceCommandsRequireEverySelectedPort()
     {
         var a = DeviceOn("aaa", 1);
         var b = a with
         {
-            Port = a.Port with { Number = 2, Dfu = true },
+            Port = a.Port with { Number = 2, Dfu = true, Reboot = false },
             Needs = new("driver", "Driver", null, "Install the driver."),
         };
-        var signal = DeviceActionTargets.For([a, b], DeviceAction.Dfu)!;
-        Assert.Equal([2], signal.Hubs.Single().Targets.Select(t => t.Port));
+        Assert.Null(DeviceActionTargets.For([a, b], DeviceAction.Dfu));
+        Assert.Null(DeviceActionTargets.For([a, b], DeviceAction.Restart));
+        var signal = DeviceActionTargets.For([a with { Port = a.Port with { Dfu = true } }, b], DeviceAction.Dfu)!;
+        Assert.Equal([1, 2], signal.Hubs.Single().Targets.Select(t => t.Port));
         Assert.Null(DeviceActionTargets.For([a, b], DeviceAction.Restore));
         Assert.Null(DeviceActionTargets.For([a, b], DeviceAction.Revive));
         Assert.Null(DeviceActionTargets.For([], DeviceAction.Restore));
         Assert.Null(DeviceActionTargets.For([a with { Hub = a.Hub with { Session = null } }], DeviceAction.Restart));
+    }
+
+    [Fact]
+    public void SetupAssistantActionsRequireTheWholeSelectionToBeIdleAndIdentified()
+    {
+        var device = DeviceOn("aaa", 2, "1234");
+        var a = device with { Port = device.Port with { Mode = AppleMode.Normal, Request = null, Job = null } };
+        var b = a with { Hub = a.Hub with { Serial = "bbb", Session = 8 }, Port = a.Port with { Ecid = "5678" } };
+        var hubs = DeviceActionTargets.SetupSelection([a, b])!;
+        Assert.Equal(["aaa", "bbb"], hubs.Select(hub => hub.Hub));
+        Assert.Equal([3u, 8u], hubs.Select(hub => hub.Session));
+        Assert.Equal([new Target(2, 7, "1234"), new Target(2, 7, "5678")], hubs.Select(hub => Assert.Single(hub.Targets)));
+        Assert.Null(DeviceActionTargets.SetupSelection([]));
+        Assert.Null(DeviceActionTargets.SetupSelection([a, device]));
+        Assert.Null(DeviceActionTargets.SetupSelection([a, b with { Port = b.Port with { Ecid = null } }]));
+        Assert.Null(DeviceActionTargets.SetupSelection([a, b with { Port = b.Port with { Request = RequestProgress.SettingLanguage } }]));
+        var enrolling = b with { Port = b.Port with { Request = RequestProgress.Enrolling, Awaiting = null } };
+        Assert.Equal("Trying enrollment", enrolling.Status);
+        Assert.Null(DeviceActionTargets.SetupSelection([a, enrolling]));
+        Assert.Null(DeviceActionTargets.SetupSelection([a, b with { Hub = b.Hub with { Session = null } }]));
+    }
+
+    [Fact]
+    public void OneTimeSetupStartsWithSavedChoicesOrTheDesktopLanguage()
+    {
+        var desktop = new SetupLanguage("en-AU", "en_AU");
+        var french = new SetupLanguage("fr-CA", "fr_CA");
+        IReadOnlyList<Selection> hubs = [new("a", 3, [new(1, 4, "1234")])];
+        Assert.Equal(new AdvanceSetupRequest(hubs, desktop, false, true), DeviceActionTargets.DefaultSetup(hubs, new(false, null, false), desktop));
+        Assert.Equal(new AdvanceSetupRequest(hubs, null, true, true), DeviceActionTargets.DefaultSetup(hubs, new(false, null, true), desktop));
+        Assert.Equal(new AdvanceSetupRequest(hubs, french, false, true), DeviceActionTargets.DefaultSetup(hubs, new(false, french, false), desktop));
+        Assert.Equal(new AdvanceSetupRequest(hubs, french, true, true), DeviceActionTargets.DefaultSetup(hubs, new(false, french, true), desktop));
+    }
+
+    [Fact]
+    public void ReportedEraseKeepsTheRestoreOutcomeAndThePostEraseFailure()
+    {
+        var reported = new Ending(Operation.Restore, "1234", RestorePhase.Reported, "Language and region set", null);
+        Assert.Equal("Restore complete · Language and region set", Device.Outcome(reported));
+        var incomplete = reported with { SetupError = "Enrollment: Sign in on the device." };
+        Assert.Equal("Restore complete · Language and region set · Setup incomplete: Enrollment: Sign in on the device.", Device.Outcome(incomplete));
     }
 
     [Fact]

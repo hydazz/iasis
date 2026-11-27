@@ -16,6 +16,7 @@ nonisolated enum AgentRequest: Encodable, Equatable {
     case dfu(hubs: [RestoreSelection])
     /// Signals the targets to restart, as `dfu`.
     case reboot(hubs: [RestoreSelection])
+    case advanceSetup(hubs: [RestoreSelection], settings: AgentState.SetupLanguage?, dep: Bool, checkOnly: Bool)
     case power(hub: String, port: Int, on: Bool)
     case debugUsb(hub: String, port: Int, on: Bool)
     case rename(hub: String, name: String)
@@ -23,6 +24,9 @@ nonisolated enum AgentRequest: Encodable, Equatable {
     /// Write IasisOS to a hub: the image the agent carries, or the UF2 file
     /// of `bytes` bytes that follows the request.
     case update(hub: String, bytes: Int64?)
+    case shutdownMacs(enabled: Bool)
+    case setupLanguage(AgentState.SetupLanguage?)
+    case enrollmentAfterErase(enabled: Bool)
     case sharing(enabled: Bool)
     /// Replace the host's supervision identity with the one in this PKCS #12
     /// archive, in base64.
@@ -49,7 +53,8 @@ nonisolated enum AgentRequest: Encodable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case op, hub, hubs, port, name, on, percent, bytes, model, build, enabled, image, latest, pkcs12, password
+        case op, hub, hubs, port, name, on, percent, bytes, model, build, enabled, image, latest, pkcs12, password, settings, dep
+        case checkOnly = "check_only"
     }
 
     /// The request as the line the agent reads.
@@ -83,6 +88,12 @@ nonisolated enum AgentRequest: Encodable, Equatable {
         case let .reboot(hubs):
             try fields.encode("reboot", forKey: .op)
             try fields.encode(hubs, forKey: .hubs)
+        case let .advanceSetup(hubs, settings, dep, checkOnly):
+            try fields.encode("advance_setup", forKey: .op)
+            try fields.encode(hubs, forKey: .hubs)
+            try fields.encode(settings, forKey: .settings)
+            try fields.encode(dep, forKey: .dep)
+            try fields.encode(checkOnly, forKey: .checkOnly)
         case let .power(hub, port, on):
             try fields.encode("power", forKey: .op)
             try fields.encode(hub, forKey: .hub)
@@ -105,6 +116,15 @@ nonisolated enum AgentRequest: Encodable, Equatable {
             try fields.encode("update", forKey: .op)
             try fields.encode(hub, forKey: .hub)
             try fields.encode(bytes, forKey: .bytes)
+        case let .shutdownMacs(enabled):
+            try fields.encode("shutdown_macs", forKey: .op)
+            try fields.encode(enabled, forKey: .enabled)
+        case let .setupLanguage(settings):
+            try fields.encode("setup_language", forKey: .op)
+            try fields.encode(settings, forKey: .settings)
+        case let .enrollmentAfterErase(enabled):
+            try fields.encode("enrollment_after_erase", forKey: .op)
+            try fields.encode(enabled, forKey: .enabled)
         case let .sharing(enabled):
             try fields.encode("sharing", forKey: .op)
             try fields.encode(enabled, forKey: .enabled)
