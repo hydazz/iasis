@@ -9,6 +9,9 @@ struct MenuTests {
         let (model, agent) = try await started(state)
         let browser = DeviceBrowser(model: model)
         let port = state.devices[0].id
+        let menu = NSHostingMenu(rootView: DeviceActionButtons(browser: browser, contextSelection: [port]))
+        menu.update()
+        #expect(menu.items.filter { !$0.isSeparatorItem }.isEmpty)
         browser.selection = [port]
         #expect(browser.inspected?.id == port)
         #expect(browser.inspected?.name == "Empty")
@@ -58,6 +61,7 @@ struct MenuTests {
         var state = try Fixtures.state
         state.hubs[0].ports[1].device = nil
         state.hubs[0].ports[1].mode = .normal
+        state.hubs[0].ports[1].reboot = false
         state.hubs[0].ports[3].device = "iPhone 16"
         state.hubs[0].ports[3].mode = .normal
         let (model, agent) = try await started(state)
@@ -183,14 +187,21 @@ struct MenuTests {
 
     @Test func aDeviceShowsItsPortNameAndStatusAndTheDownloadItsPercent() async throws {
         let (model, _) = try await started(Fixtures.state)
-        let status = StatusMenu(browser: DeviceBrowser(model: model), showDevices: {}, showSettings: {})
+        let browser = DeviceBrowser(model: model)
+        browser.showsInspector = false
+        var opened = false
+        let status = StatusMenu(browser: browser, showDevices: { opened = true }, showSettings: {})
         let menu = status.menu
         status.menuNeedsUpdate(menu)
         let mac = try #require(menu.item(withTitle: "MacBook Air"))
         let two = NSImage(systemSymbolName: "2.circle", accessibilityDescription: nil)?.accessibilityDescription
         #expect(mac.image?.accessibilityDescription == two)
         #expect(mac.subtitle == "DFU")
-        #expect(mac.submenu != nil)
+        let submenu = try #require(mac.submenu)
+        let open = try #require(submenu.item(withTitle: "Open Device"))
+        submenu.performActionForItem(at: submenu.index(of: open))
+        #expect(opened && browser.showsInspector)
+        #expect(browser.inspected?.port.number == 2)
         #expect(menu.item(withTitle: "iPad")?.subtitle == "Restoring 43%")
         let download = try #require(menu.item(withTitle: "Downloading iPadOS 27.2.1"))
         #expect(download.subtitle == "42%")
@@ -258,7 +269,7 @@ struct MenuTests {
         let row = try #require(menu.item(withTitle: "MacBook Air"))
         let submenu = try #require(row.submenu)
         let restart = submenu.indexOfItem(withTitle: "Restart")
-        let info = submenu.indexOfItem(withTitle: "Get Info")
+        let info = submenu.indexOfItem(withTitle: "Open Device")
         try #require([restart, info].allSatisfy { $0 >= 0 })
         status.menuWillOpen(menu)
         submenu.performActionForItem(at: restart)
