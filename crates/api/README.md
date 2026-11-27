@@ -99,7 +99,7 @@ Each port has:
 | `waiting_for_power`, `powered` | The port is awaiting power, or has an active supply                                                                          |
 | `wrong_dfu_port`               | The target takes DFU or reboot, but this connector carries no DFU USB, as on a Mac's other port                              |
 | `link`                         | USB link: `usb2`, `usb3`, `usb` for unknown speed, or null                                                                   |
-| `power`                        | PD contract or default USB allowance with `source` (`pd` or `usb`), `millivolts` and operating `milliamps`, or null          |
+| `power`                        | `source` (`pd` contract or `usb` allowance), `millivolts` and `milliamps` for an externally supplied port, otherwise null    |
 | `allocated_mw`                 | Power supply capacity committed to the port, including voltage tolerance and the USB starting allowance                      |
 | `short`                        | The target would take more power than the charging pool lets its port offer                                                  |
 | `fault`                        | Why the port faulted, in the words the hub's display uses, or null                                                           |

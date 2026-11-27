@@ -280,9 +280,8 @@ fn usb_device(device: &topology::UsbDevice) -> UsbDevice {
     }
 }
 
-/// The port's negotiated PD operating point, or its default USB allowance.
-/// What a port gives its target. Host power charges nothing: its 0 mA
-/// contract only carries Apple signalling.
+/// The port's share of the external supply. A host-powered port can have
+/// a 0 mA PD contract for Apple signalling.
 fn port_power(port: &PortStatus) -> Option<PortPower> {
     if !port.occupied() || port.supply != iasis_protocol::Supply::Brick {
         return None;
@@ -362,7 +361,6 @@ pub(crate) mod tests {
                 milliamps: 900
             })
         );
-        // Host power funds no charging, whatever its contract carries.
         port.supply = iasis_protocol::Supply::HostPresence;
         port.contract_mv = 5_000;
         assert_eq!(port_power(&port), None);

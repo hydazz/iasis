@@ -52,7 +52,7 @@ struct DeviceTests {
 
     @Test func precisePowerReadingsDistinguishAnAllowanceFromAContract() {
         let usb = AgentState.PortPower(source: .usb, millivolts: 5000, milliamps: 900)
-        #expect(usb.title == "USB Power")
+        #expect(usb.title == "USB Allowance")
         #expect(usb.reading == "5 V 900 mA (4.5 W)")
         var pd = AgentState.PortPower(source: .pd, millivolts: 20000, milliamps: 780)
         #expect(pd.title == "PD Contract")
