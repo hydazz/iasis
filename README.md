@@ -172,7 +172,7 @@ iasis advance-setup --ports 1,2 --language en-AU --locale en_AU --enroll
 
 The same options on `iasis restore --erase` run setup after installation. Each device keeps any language or region it has already accepted. The CLI prints the result for each port.
 
-In the Mac app, choose the language, region and enrollment preference in **Settings > General**. **Advance Setup** applies them immediately. **Advance Setup After Erase** also applies them to erases started from the app or the hub button.
+In the Mac app, choose the language, region and enrollment preference in **Settings > Restore**. **Advance Setup** applies them immediately. **Advance Setup After Erase** also applies them to erases started from the app or the hub button.
 
 Advance Setup activates the device if needed. With enrollment enabled, it then requests the assigned management profile. The host needs internet access for activation. The device reaches its enrollment service over Wi-Fi or USB Internet Sharing. If the result says “continue on device”, follow the sign-in or management prompt in Setup Assistant. A “Partially Set Up” prompt also needs a choice on the device.
 
@@ -182,7 +182,7 @@ The device inspector shows the requested steps and keeps each outcome. During in
 
 Logs and working files go under `restores/` in the agent's cache directory. Allow space for an extracted OS image per worker. Iasis matches each image to the target's chip and board IDs, or to its product type when only a model identifier is available. The restore program checks Apple signing.
 
-On macOS 27.3, Finder opens a window for each Mac, iPad or iPhone that enters DFU or recovery mode. To stop it, turn off **Open Finder for DFU and Recovery Devices** in the app's Settings > General, or run this once as the user running Finder. The preference is undocumented.
+On macOS 27.3, Finder opens a window for each Mac, iPad or iPhone that enters DFU or recovery mode. To stop it, turn off **Open Finder for DFU and Recovery** in the app's Settings > General, or run this once as the user running Finder. The preference is undocumented.
 
 ```sh
 defaults write com.apple.AMPDeviceDiscoveryAgent reveal-devices -bool false
@@ -194,7 +194,7 @@ To restore the default behaviour, run `defaults delete com.apple.AMPDeviceDiscov
 
 An iPhone or iPad whose enrollment profile lists the agent's supervision certificate pairs with the host without asking for Trust, so its restores through recovery need no one at the device. Other devices still ask.
 
-The agent makes its identity when it first starts. Export the certificate with Export… in the identity's ⋯ menu, in the Mac app's Settings, or with `iasis supervision certificate Iasis.cer`, and add it to the devices' Automated Device Enrollment profile as a supervising host certificate. In Intune that is Sync with computers, Allow Apple Configurator by certificate, in the enrollment program token's profile. A device takes the certificate when it enrolls, so an enrolled one needs one erase, with a Trust tap, and enrollment again first.
+The agent makes its identity when it first starts. Export the certificate with Export… in the identity's ⋯ menu, in the Mac app's Settings > Restore, or with `iasis supervision certificate Iasis.cer`, and add it to the devices' Automated Device Enrollment profile as a supervising host certificate. In Intune that is Sync with computers, Allow Apple Configurator by certificate, in the enrollment program token's profile. A device takes the certificate when it enrolls, so an enrolled one needs one erase, with a Trust tap, and enrollment again first.
 
 To back the identity up or give another host the same one, export it with its private key in a password-protected PKCS #12 archive, with Export… in the Mac app or `iasis supervision export Iasis.p12`, and import it with Import… or `iasis supervision import Iasis.p12`. The agent keeps it as `supervision.pem` in its state directory, open to the agent's account alone: mode 600 in a 700 directory on macOS (`~/Library/Application Support/com.hydaz.Iasis`) and Linux (`/var/lib/iasis`), and on Windows an access list of the agent's account and Administrators. Anyone holding the identity can pair with every device that lists its certificate.
 

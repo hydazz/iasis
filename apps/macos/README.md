@@ -39,7 +39,7 @@ Select rows and use the toolbar, the Device menu or a row’s context menu. The 
 | Restore       | Asks for confirmation, then erases the devices and reinstalls their system.                             |
 | Advance Setup | Sets language and region, activates the selected iPhones and iPads, and requests enrollment if enabled. |
 
-**Advance Setup** starts immediately when every selected device is eligible. Devices known to have finished Setup Assistant are excluded. In Settings > General, enable **Advance Setup After Erase** to run it automatically as well. Choose **Language** and **Region** by name. Each selection is saved immediately. **Try Enrollment** adds the enrollment request. Complete any required sign-in or **Partially Set Up** prompt on the device.
+**Advance Setup** starts immediately when every selected device is eligible. Devices known to have finished Setup Assistant are excluded. In Settings > Restore, enable **Advance Setup After Erase** to run it automatically as well. Choose **Language** and **Region** by name. Each selection is saved immediately. **Try Enrollment** adds the enrollment request. Complete any required sign-in or **Partially Set Up** prompt on the device.
 
 Before it asks, Restore checks what Apple signs for each device. Where a downloaded image is older than the newest release, it offers both: download the newest, or use the one downloaded. Otherwise it says what each device gets and how much is to download. Restore is unavailable while any selected device cannot be restored.
 
@@ -51,7 +51,12 @@ The inspector also shows device identity, USB connection and power. Power shows 
 
 ## Settings and Help
 
-In Settings > Hubs, rename a hub or adjust its lights; the hub keeps both when moved to another Mac. It also shows the hub's IasisOS. When that differs from the IasisOS this Iasis carries, **Update to** writes the carried version, as does Hub > Update IasisOS. The hub leaves USB for a few seconds and its ports lose power; the agent refuses while the hub is restoring. A hub that runs IasisOS this Iasis cannot talk to has no ports until it is updated. Settings > Images lists every restore image Iasis holds or is downloading. Add Image ▸ Download offers, for any model, the releases Apple still signs, such as an older macOS; From File adds an IPSW, as does File ▸ Add Restore Image, and the list shows it being sent and checked. Images stay until you remove them. Settings > General shows the supervision identity and its fingerprint; its ⋯ menu exports the certificate for an enrollment profile, or the identity with its private key in a password-protected PKCS #12 archive, and imports one ([supervised devices](../../README.md#supervised-iphones-and-ipads)). The Finder preference applies to all connected Apple devices. Help ▸ Indicator Lights explains the port and status lights.
+- **General** controls opening Iasis at login, USB internet sharing and whether Finder opens for devices in DFU or recovery.
+- **Restore** sets the iPhone and iPad setup preferences and what happens after an erase. The supervision identity menu can copy the certificate fingerprint, export the certificate for an enrollment profile, or transfer the identity using a password-protected PKCS #12 archive. See [supervised iPhones and iPads](../../README.md#supervised-iphones-and-ipads).
+- **Hubs** lets you rename a hub and adjust its lights. The hub keeps both settings when you move it. **Update to** installs the bundled IasisOS, as does Hub > Update IasisOS. The hub disconnects and its ports lose power briefly. Iasis waits for you to finish any restores before you can update. A hub with incompatible firmware has no usable ports until updated.
+- **Images** lists restore images by device. Use **+** to download a signed release for a model or import an IPSW. You can also import from File > Add Restore Image. Double-click a stored image for its full model list, or select images and use **−** to remove them.
+
+Help > Indicator Lights explains the port and status lights.
 
 ### USB internet sharing
 
