@@ -16,9 +16,9 @@ struct AgentMessagesTests {
         #expect(hub.ports[2].short)
         #expect(hub.ports[4].fault == "Protection tripped")
         #expect(hub.ports[1].ecid == "001a79d10e6bc01c")
-        #expect(hub.ports[2].stage?.steps.count == 4)
-        #expect(hub.ports[2].stage?.step == 2)
-        #expect(hub.ports[3].result?.phase == .reported)
+        #expect(hub.ports[2].run?.steps[0].progress?.steps.count == 4)
+        #expect(hub.ports[2].run?.steps[0].progress?.step == 2)
+        #expect(hub.ports[3].run?.steps.first?.state == .complete)
         #expect(state.images.images.map(\.title) == ["macOS 27.2.1", "iPadOS 27.2.1"])
         #expect(state.images.images.map(\.ready) == [true, false])
         #expect(state.images.fetching?.build == "24B156")
@@ -58,8 +58,8 @@ struct AgentMessagesTests {
     @Test(arguments: [
         (AgentRequest.watch, #"{"op":"watch"}"#),
         (
-            .restore(hubs: [.init(hub: "a0e0", session: 77, targets: [.init(port: 2, generation: 4), .init(port: 3, generation: 1, ecid: "0014692221e0801e")])], latest: true),
-            #"{"hubs":[{"hub":"a0e0","session":77,"targets":[{"generation":4,"port":2},{"ecid":"0014692221e0801e","generation":1,"port":3}]}],"latest":true,"op":"restore"}"#
+            .restore(hubs: [.init(hub: "a0e0", session: 77, targets: [.init(port: 2, generation: 4), .init(port: 3, generation: 1, ecid: "0014692221e0801e")])], latest: true, after: AfterErase(shutdownMacs: false)),
+            #"{"after":{"shutdown_macs":false},"hubs":[{"hub":"a0e0","session":77,"targets":[{"generation":4,"port":2},{"ecid":"0014692221e0801e","generation":1,"port":3}]}],"latest":true,"op":"restore"}"#
         ),
         (
             .revive(hubs: [.init(hub: "a0e0", session: 77, targets: [.init(port: 2, generation: 4)])], latest: false),

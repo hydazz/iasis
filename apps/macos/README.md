@@ -29,20 +29,25 @@ Each row represents a physical port. Its number follows the port light. A new at
 
 The bolt shows USB power. The cable marks a live USB link. A highlighted tip indicates USB 3. A wired network symbol marks active internet sharing. **PORT** means the connected Mac reports that this connector lacks DFU USB. Hover over an indicator or open Get Info for details.
 
-Select rows and use the toolbar, the Device menu or a row's context menu:
+Select rows and use the toolbar, the Device menu or a row’s context menu. The context menu shows actions that apply to every selected device, including selections across hubs.
 
-| Action    | Applies to                                                                          |
-| --------- | ----------------------------------------------------------------------------------- |
-| Enter DFU | Each selected device that can be signalled                                          |
-| Restart   | Each selected device that can be signalled                                          |
-| Revive    | Every selected device, on any number of hubs. Repairs the system and keeps the data |
-| Restore   | Every selected device, on any number of hubs. Asks first, then erases them          |
+| Action        | What it does                                                                                            |
+| ------------- | ------------------------------------------------------------------------------------------------------- |
+| Enter DFU     | Signals the selected devices to enter DFU.                                                              |
+| Restart       | Signals the selected devices to restart.                                                                |
+| Revive        | Repairs the system and keeps the data.                                                                  |
+| Restore       | Asks for confirmation, then erases the devices and reinstalls their system.                             |
+| Advance Setup | Sets language and region, activates the selected iPhones and iPads, and requests enrollment if enabled. |
+
+**Advance Setup** starts immediately when every selected device is eligible. Devices known to have finished Setup Assistant are excluded. In Settings > General, enable **Advance Setup After Erase** to run it automatically as well. Choose **Language** and **Region** by name. Each selection is saved immediately. **Try Enrollment** adds the enrollment request. Complete any required sign-in or **Partially Set Up** prompt on the device.
 
 Before it asks, Restore checks what Apple signs for each device. Where a downloaded image is older than the newest release, it offers both: download the newest, or use the one downloaded. Otherwise it says what each device gets and how much is to download. Restore is unavailable while any selected device cannot be restored.
 
 A hub on a power supply shows, beside its name, the power allocated to its ports out of the available charging budget. A bolt with a warning marks a device that took the largest offer the hub could make and would use more: with several devices sharing a supply, one with a flat battery may get too little to start.
 
-Each row ends in one mark for its operation: a ring that fills as a download, restore or revive runs, then how it ended. Select a row to inspect its operation step by step, its identity, USB connection and power. Power shows the PD contract or default USB allowance with exact nominal watts in parentheses. The toolbar lets you hide or show the inspector. The bar under the list reports an image download.
+Each row shows the current activity or the outcome of the run.
+
+The inspector also shows device identity, USB connection and power. Power shows the PD contract or default USB allowance with exact nominal watts in parentheses. The toolbar lets you hide or show the inspector. The bar under the list reports an image download.
 
 ## Settings and Help
 

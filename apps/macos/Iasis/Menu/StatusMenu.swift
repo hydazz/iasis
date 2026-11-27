@@ -189,6 +189,7 @@ private final class DeviceMenu: NSObject {
     private let dfu = NSMenuItem.command("Enter DFU", symbol: DeviceSymbol.dfu)
     private let restart = NSMenuItem.command("Restart", symbol: DeviceSymbol.restart)
     private let revive = NSMenuItem.command("Revive", symbol: DeviceSymbol.revive)
+    private let advanceSetup = NSMenuItem.command("Advance Setup", symbol: DeviceSymbol.advanceSetup)
     private let restore = NSMenuItem.command("Restore…", symbol: DeviceSymbol.restore)
 
     init(device: Device, browser: DeviceBrowser, showDevices: @escaping () -> Void) {
@@ -200,7 +201,7 @@ private final class DeviceMenu: NSObject {
         item.image = NSImage(systemSymbolName: "\(device.port.number).circle", accessibilityDescription: nil)
         let submenu = NSMenu()
         submenu.autoenablesItems = false
-        for command in [info, .separator(), dfu, restart, .separator(), revive, restore] {
+        for command in [info, .separator(), dfu, restart, .separator(), revive, restore, advanceSetup] {
             if !command.isSeparatorItem {
                 command.target = self
                 command.action = #selector(chooseDeviceAction)
@@ -233,6 +234,7 @@ private final class DeviceMenu: NSObject {
         restart.isEnabled = !actions.restart.isEmpty
         revive.isEnabled = actions.revive != nil
         restore.isEnabled = actions.restore != nil
+        advanceSetup.isEnabled = !actions.advanceSetup.isEmpty
     }
 
     @objc private func chooseDeviceAction(_ command: NSMenuItem) {
@@ -243,6 +245,7 @@ private final class DeviceMenu: NSObject {
             browser.selection = [id]
             browser.showsInspector = true
             showDevices()
+        case advanceSetup: browser.model.advanceSetup(actions.advanceSetup)
         case dfu: browser.model.perform(actions.dfu)
         case restart: browser.model.perform(actions.restart)
         case revive:

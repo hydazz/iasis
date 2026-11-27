@@ -17,29 +17,30 @@ On Linux any local user can connect; the agent reads the client's credentials an
 
 A client writes requests and reads replies as JSON, one to a line. A request is an object with an `op`:
 
-| `op`                 | Other fields             | Effect                                                               |
-| -------------------- | ------------------------ | -------------------------------------------------------------------- |
-| `state`              |                          | Reply with the state once                                            |
-| `watch`              |                          | Reply with the state now and again each time it changes              |
-| `plan`               | `hubs`                   | Reply with what a restore would install on each target               |
-| `restore`            | `hubs`, `latest`         | Erase and restore the confirmed attachments on those hubs            |
-| `revive`             | `hubs`, `latest`         | Repair the confirmed attachments on those hubs and keep their data   |
-| `dfu`                | `hubs`                   | Signal the selected attachments into DFU                             |
-| `reboot`             | `hubs`                   | Signal the selected attachments to restart                           |
-| `power`              | `hub`, `port`, `on`      | Enable or disable a port                                             |
-| `debug_usb`          | `hub`, `port`, `on`      | Carry the target's Apple Debug USB on its USB 2 pair, or take it off |
-| `brightness`         | `hub`, `percent`         | Save one hub's light level                                           |
-| `rename`             | `hub`, `name`            | Save one hub's display name                                          |
-| `update`             | `hub`, `bytes` or null   | Write IasisOS: the image the agent carries, or the UF2 sent          |
-| `sharing`            | `enabled`                | Configure USB Internet Sharing on the host                           |
-| `import_supervision` | `pkcs12`, `password`     | Replace the supervision identity with the one in a PKCS #12 archive  |
-| `export_supervision` | `password`               | Reply with the supervision identity in a PKCS #12 archive            |
-| `download`           | `model`, `build` or null | Fetch a model's newest signed release, or the one of `build`         |
-| `releases`           | `model`                  | Reply with the releases Apple signs for a model, newest first        |
-| `import`             | `name`, `bytes`          | Check the IPSW archive sent and keep it in the store as `name`       |
-| `remove`             | `image`                  | Delete an image by its `id`, or cancel its download                  |
-| `catalog`            |                          | Reply with every model the store can fetch images for                |
-| `diagnostics`        | `hub`                    | Reply with what the agent reads from the hub and finds on its USB    |
+| `op`                 | Other fields              | Effect                                                               |
+| -------------------- | ------------------------- | -------------------------------------------------------------------- |
+| `state`              |                           | Reply with the state once                                            |
+| `watch`              |                           | Reply with the state now and again each time it changes              |
+| `plan`               | `hubs`                    | Reply with what a restore would install on each target               |
+| `restore`            | `hubs`, `latest`, `after` | Erase and restore the confirmed attachments on those hubs            |
+| `revive`             | `hubs`, `latest`          | Repair the confirmed attachments on those hubs and keep their data   |
+| `dfu`                | `hubs`                    | Signal the selected attachments into DFU                             |
+| `reboot`             | `hubs`                    | Signal the selected attachments to restart                           |
+| `advance_setup`      | `hubs`, `setup`           | Advance Setup Assistant independently on each selected device        |
+| `power`              | `hub`, `port`, `on`       | Enable or disable a port                                             |
+| `debug_usb`          | `hub`, `port`, `on`       | Carry the target's Apple Debug USB on its USB 2 pair, or take it off |
+| `brightness`         | `hub`, `percent`          | Save one hub's light level                                           |
+| `rename`             | `hub`, `name`             | Save one hub's display name                                          |
+| `update`             | `hub`, `bytes` or null    | Write IasisOS: the image the agent carries, or the UF2 sent          |
+| `sharing`            | `enabled`                 | Configure USB Internet Sharing on the host                           |
+| `import_supervision` | `pkcs12`, `password`      | Replace the supervision identity with the one in a PKCS #12 archive  |
+| `export_supervision` | `password`                | Reply with the supervision identity in a PKCS #12 archive            |
+| `download`           | `model`, `build` or null  | Fetch a model's newest signed release, or the one of `build`         |
+| `releases`           | `model`                   | Reply with the releases Apple signs for a model, newest first        |
+| `import`             | `name`, `bytes`           | Check the IPSW archive sent and keep it in the store as `name`       |
+| `remove`             | `image`                   | Delete an image by its `id`, or cancel its download                  |
+| `catalog`            |                           | Reply with every model the store can fetch images for                |
+| `diagnostics`        | `hub`                     | Reply with what the agent reads from the hub and finds on its USB    |
 
 `hub` is the serial as sixteen hexadecimal digits, and ports are numbered 1 to 5.
 
@@ -51,7 +52,11 @@ A reply is `"ok"`, `{"error": "…"}`, `{"state": {…}}`, to `catalog` `{"catal
 
 A restore takes, for each target, the newest image in the store that Apple still signs. With `latest` true it takes the newest release Apple signs, fetched first if the store lacks it. `plan` says beforehand what there is to choose from: each entry has the `hub`, the `port` and an `offer`, which is null while the agent does not know the target's model. An offer has the `latest` release Apple signs and the newest `held` image that fits, each a release or null, and a `problem` when the catalog could not be asked. A client asks its user only when `held` is older than `latest`.
 
-To follow a restore or revive, `watch` on the connection that sent it. The state's `submitted` holds one result per target in request order, each null until the agent has an outcome, including when the hub has left USB. The stream closes after delivering every result.
+`advance_setup` requires a `setup` object with `language` and `locale`, for example `{"language":"en-AU","locale":"en_AU","enroll":true}`. Enrollment defaults to false. An erase can include this object at `after.setup` for iPhones and iPads, and set `after.shutdown_macs` to power off Macs. Omitting `after` requests a plain erase and restart.
+
+`advance_setup` accepts the selected attachments and returns one submitted run per target, in request order. The agent validates each target at execution. A stale or busy target can fail while the others proceed. Language and region already accepted by Setup Assistant are preserved and the step records the actual values. On a device still in Setup Assistant, the agent confirms activation even when enrollment is off. A device that reports setup is already complete skips the requested setup steps. When enrollment is requested, the device uses its assigned configuration. A device that requires sign-in or is waiting for management to release it reports `on_device`. Acknowledgement completes the enrollment request.
+
+To follow a restore, revive or setup operation, `watch` on the connection that sent it. The state's `submitted` holds one result per target in request order, each null until the agent has an outcome, including when the hub has left USB. The stream closes after delivering every result. The `submitted` result is the completed run, including every requested step. An enrollment refusal leaves the restore and any completed region step intact.
 
 ```sh
 printf '{"op":"state"}\n' | nc -U /run/iasis/agent.sock
@@ -67,6 +72,7 @@ printf '{"op":"state"}\n' | nc -U /run/iasis/agent.sock
 | `hubs`        | Every attached hub                                            |
 | `submitted`   | On a connection that submitted work, its results; else absent |
 | `images`      | The image store                                               |
+| `preferences` | Saved choices for setup and erasing                           |
 | `sharing`     | USB Internet Sharing                                          |
 | `supervision` | The supervision identity                                      |
 | `missing`     | Software the host lacks that some of Iasis needs              |
@@ -79,35 +85,37 @@ Each hub has its `serial`, `name` (empty for an unnamed hub), `session` ID, the 
 
 Each port has:
 
-| Field                          | Meaning                                                                                                                       |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `number`                       | 1 to 5                                                                                                                        |
-| `generation`, `occupied`       | The attachment generation, and whether the port is occupied                                                                   |
-| `device`                       | The target's model, or a USB product's name, or null                                                                          |
-| `identifying`                  | A newly attached device is awaiting its first name                                                                            |
-| `ecid`                         | The target's ECID as sixteen hexadecimal digits, once read on this attachment, or null                                        |
-| `usb`                          | What the host finds on the port's USB: `absent`, `other`, `ambiguous` (several devices) or `apple`; null until it has looked  |
-| `mode`                         | With `usb` `apple`, its mode: `dfu`, `port_dfu`, `kis_dfu`, `kis`, `recovery`, `restored` or `normal`                         |
-| `light`                        | What the port's light shows: `hue`, `pulse` and `dim`                                                                         |
-| `request`                      | A signal in progress (`entering_dfu`, `restarting`) or `dfu_unconfirmed`, otherwise null                                      |
-| `waiting_for_power`, `powered` | The port is awaiting power, or has an active supply                                                                           |
-| `wrong_dfu_port`               | The target takes DFU or reboot, but this connector carries no DFU USB, as on a Mac's other port                               |
-| `link`                         | USB link: `usb2`, `usb3`, `usb` for unknown speed, or null                                                                    |
-| `power`                        | PD contract or default USB allowance with `source` (`pd` or `usb`), `millivolts` and operating `milliamps`, or null           |
-| `allocated_mw`                 | Power supply capacity committed to the port, including voltage tolerance and the USB starting allowance                       |
-| `short`                        | The target would take more power than the charging pool lets its port offer                                                   |
-| `fault`                        | Why the port faulted, in the words the hub's display uses, or null                                                            |
-| `dfu`, `reboot`, `restore`     | The actions the target would take now. A target that can be restored can be revived                                           |
-| `enabled`                      | Port power is enabled                                                                                                         |
-| `job`                          | `operation` (`restore` or `revive`) and its `phase` (`Preparing`, `Running`, `Reported`, `Unconfirmed`, `Failed`), or null    |
-| `awaiting`                     | The `id` of the image the port's restore waits for, otherwise null; the images' `fetch` says how much is here                 |
-| `stage`                        | The worker's current `name`, overall job `percent`, the job's `steps` in order and the index of the `step` under way, or null |
-| `result`                       | How the last operation ended: `operation`, `ecid`, `phase` and `message`, or null                                             |
-| `needs`                        | The `id` of the entry in `missing` the target's restore waits for, or null                                                    |
+| Field                          | Meaning                                                                                                                      |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `number`                       | 1 to 5                                                                                                                       |
+| `generation`, `occupied`       | The attachment generation, and whether the port is occupied                                                                  |
+| `device`                       | The target's model, or a USB product's name, or null                                                                         |
+| `identifying`                  | A newly attached device is awaiting its first name                                                                           |
+| `ecid`                         | The target's ECID as sixteen hexadecimal digits, once read on this attachment, or null                                       |
+| `usb`                          | What the host finds on the port's USB: `absent`, `other`, `ambiguous` (several devices) or `apple`; null until it has looked |
+| `mode`                         | With `usb` `apple`, its mode: `dfu`, `port_dfu`, `kis_dfu`, `kis`, `recovery`, `restored` or `normal`                        |
+| `light`                        | What the port's light shows: `hue`, `pulse` and `dim`                                                                        |
+| `request`                      | An action in progress (`entering_dfu`, `restarting`) or `dfu_unconfirmed`, otherwise null                                    |
+| `waiting_for_power`, `powered` | The port is awaiting power, or has an active supply                                                                          |
+| `wrong_dfu_port`               | The target takes DFU or reboot, but this connector carries no DFU USB, as on a Mac's other port                              |
+| `link`                         | USB link: `usb2`, `usb3`, `usb` for unknown speed, or null                                                                   |
+| `power`                        | PD contract or default USB allowance with `source` (`pd` or `usb`), `millivolts` and operating `milliamps`, or null          |
+| `allocated_mw`                 | Power supply capacity committed to the port, including voltage tolerance and the USB starting allowance                      |
+| `short`                        | The target would take more power than the charging pool lets its port offer                                                  |
+| `fault`                        | Why the port faulted, in the words the hub's display uses, or null                                                           |
+| `dfu`, `reboot`, `restore`     | The actions the target would take now. A target that can be restored can be revived                                          |
+| `advance_setup`                | An identified, idle iPhone or iPad in normal USB mode whose Setup Assistant is not known to have finished                    |
+| `enabled`                      | Port power is enabled                                                                                                        |
+| `job`                          | `operation` (`restore` or `revive`) and its `phase` (`Preparing`, `Running`, `Reported`, `Unconfirmed`, `Failed`), or null   |
+| `awaiting`                     | The `id` of the image the port's restore waits for, otherwise null; the images' `fetch` says how much is here                |
+| `run`                          | The ordered steps requested on this target, or null                                                                          |
+| `needs`                        | The `id` of the entry in `missing` the target's restore waits for, or null                                                   |
 
 The hub keeps a target's `ecid` for as long as its attachment lasts, so a Mac that has started up and left USB is still the device on its port. A device moved to another connector is identified again there. The agent notes the model of each ECID it identifies, so a mode that gives the ECID alone still names the device.
 
-The hub drops a job when its target leaves, which a restored target does by restarting. The agent shows a result on the port while its ECID matches; a failure before the target was identified stays with its session and attachment generation.
+The hub reports its current USB job in `job`. The agent owns `run` from submission through completion. Each step has a `kind` (restore, revive, set_region, activate or request_enrollment) and a `state` (pending, active, complete, failed, unconfirmed, on_device or skipped). Restore and revive carry the selected `system` (OS, version and build) once the image is known, and retain the nested restore `progress` (current activity and estimated overall percent). A region step carries its language and locale. A failed or unconfirmed step carries its own `error`. An `on_device` step uses that field to explain where to continue. Later steps that cannot run are skipped.
+
+A port retains its latest run for the matching device while the agent is running. A client can reopen the inspector during or after the operation. Targets without an ECID are identified by hub session and attachment generation until their identity is known.
 
 `light.hue` is `off`, `red`, `green`, `white`, `blue`, `amber` or `purple`, with the meanings in the [light table](../firmware/README.md#controls-and-status). A client that draws the port in that colour agrees with the hub.
 

@@ -44,21 +44,7 @@ struct DevicesView: View {
             }
         }
         .contextMenu(forSelectionType: Device.ID.self) { ids in
-            let devices = browser.devices(in: ids)
-            if !devices.isEmpty {
-                DeviceActionButtons(actions: browser.actions(for: ids)) { requests in
-                    model.perform(requests)
-                } restore: { confirmation in
-                    browser.confirm(confirmation)
-                }
-            }
-            if devices.count == 1 {
-                Divider()
-                Button("Get Info", systemImage: "info.circle") {
-                    browser.selection = ids
-                    browser.showsInspector = true
-                }
-            }
+            DeviceActionButtons(browser: browser, contextSelection: ids)
         } primaryAction: { ids in
             browser.selection = ids
             browser.showsInspector = true
@@ -117,6 +103,9 @@ struct DevicesView: View {
                 }
                 .disabled(actions.restore == nil)
                 .help(browser.lacking?.reason ?? "Erase the selected devices and reinstall their system")
+                Button("Advance Setup", systemImage: DeviceSymbol.advanceSetup) { model.advanceSetup(actions.advanceSetup) }
+                    .disabled(actions.advanceSetup.isEmpty)
+                    .help("Apply the saved setup preferences to the selected devices")
             }
             ToolbarSpacer(.fixed)
             ToolbarItem {
@@ -133,6 +122,7 @@ struct DevicesView: View {
             Group {
                 if let device = browser.inspected {
                     DeviceInspector(device: device)
+                        .id(device.id)
                 }
             }
             .inspectorColumnWidth(min: 240, ideal: 280, max: 400)
@@ -147,7 +137,7 @@ struct DevicesView: View {
             presenting: browser.confirming
         ) { confirmation in
             ForEach(confirmation.choices) { choice in
-                Button(choice.title, role: .destructive) { model.perform([choice.request]) }
+                Button(choice.title, role: .destructive) { model.restore(confirmation.hubs, latest: choice.latest) }
             }
             Button(confirmation.choices.isEmpty ? "OK" : "Cancel", role: .cancel) {}
         } message: { confirmation in

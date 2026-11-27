@@ -15,8 +15,9 @@ use iasis::{
     parse_port, parse_serial, progress, update, view,
 };
 use iasis_api::{
-    AppleUsb, Companion, Diagnostics, HubView, Job, Operation, PortPower, PortView, PowerSource,
-    Reply, Request, Selection, SignalProgress, State, Supply, Target, Usb, UsbDevice, UsbLink,
+    AfterErase, AppleUsb, Companion, Diagnostics, HubView, Job, Operation, PortPower, PortView,
+    PowerSource, Reply, Request, RequestProgress, Selection, SetupLanguage, SetupOptions, State,
+    Supply, Target, Usb, UsbDevice, UsbLink,
 };
 use iasis_protocol::{DebugActions, Link, Port, PortAction, RestorePhase, Status};
 
@@ -45,6 +46,21 @@ enum Command {
     Restore(Restore),
     /// Repair the devices on the selected ports from a restore image and keep their data
     Revive(Revive),
+    /// Advance Setup Assistant on the selected iPhones and iPads
+    AdvanceSetup {
+        /// Physical ports, comma-separated
+        #[arg(long, value_delimiter = ',', value_parser = parse_port, required = true)]
+        ports: Vec<Port>,
+        /// Device language (for example, en-AU)
+        #[arg(long)]
+        language: String,
+        /// Regional format (for example, en_AU)
+        #[arg(long)]
+        locale: String,
+        /// Request Automated Device Enrollment
+        #[arg(long)]
+        enroll: bool,
+    },
     /// List and manage restore images
     Images {
         #[command(subcommand)]
@@ -96,7 +112,7 @@ enum Command {
         #[arg(value_parser = parse_port)]
         port: Port,
         #[arg(value_enum)]
-        state: Power,
+        state: Switch,
     },
     /// Send an Apple DFU VDM; does not start a restore
     Dfu {
@@ -115,7 +131,7 @@ enum Command {
         #[arg(value_parser = parse_port)]
         port: Port,
         #[arg(value_enum)]
-        state: Power,
+        state: Switch,
     },
 }
 
@@ -131,6 +147,18 @@ struct Restore {
     /// image store has an older one that fits
     #[arg(long)]
     latest: bool,
+    /// Shut down erased Macs
+    #[arg(long)]
+    shutdown_macs: bool,
+    /// Advance setup on erased iPhones and iPads with this language (for example, en-AU)
+    #[arg(long, requires = "locale")]
+    language: Option<String>,
+    /// Regional format for setup (for example, en_AU)
+    #[arg(long, requires = "language")]
+    locale: Option<String>,
+    /// Request Automated Device Enrollment after setting the language and region
+    #[arg(long, requires = "language")]
+    enroll: bool,
 }
 
 #[derive(Args)]
@@ -182,7 +210,7 @@ enum ImagesCommand {
 }
 
 #[derive(Clone, Copy, ValueEnum)]
-enum Power {
+enum Switch {
     On,
     Off,
 }
@@ -216,22 +244,48 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Some(Command::Restore(restore)) => submit(
-            &mut agent,
-            &state,
-            &hub()?,
-            Operation::Restore,
-            &restore.ports,
-            restore.latest,
-        ),
-        Some(Command::Revive(revive)) => submit(
-            &mut agent,
-            &state,
-            &hub()?,
-            Operation::Revive,
-            &revive.ports,
-            revive.latest,
-        ),
+        Some(Command::Restore(restore)) => {
+            submit(&mut agent, &state, &hub()?, &restore.ports, |hubs| {
+                Request::Restore {
+                    hubs,
+                    latest: restore.latest,
+                    after: AfterErase {
+                        shutdown_macs: restore.shutdown_macs,
+                        setup: restore
+                            .language
+                            .zip(restore.locale)
+                            .map(|(language, locale)| SetupOptions {
+                                region: SetupLanguage { language, locale },
+                                enroll: restore.enroll,
+                            }),
+                    },
+                }
+            })
+        }
+        Some(Command::Revive(revive)) => {
+            submit(&mut agent, &state, &hub()?, &revive.ports, |hubs| {
+                Request::Revive {
+                    hubs,
+                    latest: revive.latest,
+                }
+            })
+        }
+        Some(Command::AdvanceSetup {
+            ports,
+            language,
+            locale,
+            enroll,
+        }) => {
+            let hub = hub()?;
+            agent.request(&Request::AdvanceSetup {
+                hubs: vec![selection(&state, &hub, &ports)?],
+                setup: SetupOptions {
+                    region: SetupLanguage { language, locale },
+                    enroll,
+                },
+            })?;
+            follow_work(&mut agent, &hub, &ports)
+        }
         Some(Command::Images { command }) => images(&mut agent, command.as_ref()),
         Some(Command::Sharing { command, json }) => sharing(&mut agent, command.as_ref(), json),
         Some(Command::Supervision { command }) => supervision(&mut agent, command.as_ref()),
@@ -252,7 +306,7 @@ fn main() -> Result<()> {
             agent.request(&Request::Power {
                 hub: hub()?,
                 port: port.number(),
-                on: matches!(state, Power::On),
+                on: matches!(state, Switch::On),
             })?;
             println!("{}", power_text(port, state));
             Ok(())
@@ -261,7 +315,7 @@ fn main() -> Result<()> {
             agent.request(&Request::DebugUsb {
                 hub: hub()?,
                 port: port.number(),
-                on: matches!(state, Power::On),
+                on: matches!(state, Switch::On),
             })?;
             println!("{}", debug_usb_text(port, state));
             Ok(())
@@ -368,24 +422,24 @@ fn hub_name(view: &HubView) -> String {
     format!("{}  {name}", view.serial)
 }
 
-fn power_text(port: Port, state: Power) -> String {
+fn power_text(port: Port, state: Switch) -> String {
     format!(
         "Port {} power {}; use status to inspect supply and attachment.",
         port.number(),
         match state {
-            Power::On => "enabled",
-            Power::Off => "disabled",
+            Switch::On => "enabled",
+            Switch::Off => "disabled",
         }
     )
 }
 
-fn debug_usb_text(port: Port, state: Power) -> String {
+fn debug_usb_text(port: Port, state: Switch) -> String {
     format!(
         "Port {} Debug USB {}.",
         port.number(),
         match state {
-            Power::On => "on",
-            Power::Off => "off",
+            Switch::On => "on",
+            Switch::Off => "off",
         }
     )
 }
@@ -617,21 +671,40 @@ fn activity(port: &PortView) -> String {
     if let Some(fault) = &port.fault {
         return fault.clone();
     }
-    if let Some(job) = port.job {
-        let phase = job_text(job);
-        return match (&port.awaiting, &port.stage) {
-            (Some(_), _) => format!("{phase}  waiting for image"),
-            (None, Some(stage)) => format!("{phase}  {}%  {}", stage.percent, stage.name),
-            (None, None) => phase.into(),
-        };
+    if let Some(run) = &port.run {
+        let step = run
+            .steps
+            .iter()
+            .find(|s| {
+                matches!(
+                    s.state,
+                    iasis_api::StepState::Failed
+                        | iasis_api::StepState::Unconfirmed
+                        | iasis_api::StepState::OnDevice
+                        | iasis_api::StepState::Active
+                        | iasis_api::StepState::Pending
+                )
+            })
+            .or_else(|| run.steps.last());
+        if let Some(step) = step {
+            if step.state == iasis_api::StepState::Active
+                && let Some(progress) = &step.progress
+            {
+                return format!("{}  {}%  {}", step, progress.percent, progress.name);
+            }
+            return step.to_string();
+        }
     }
     if port.awaiting.is_some() {
         return "waiting for image".into();
     }
+    if let Some(job) = port.job {
+        return job_text(job).into();
+    }
     match port.request {
-        Some(SignalProgress::EnteringDfu) => "entering DFU",
-        Some(SignalProgress::DfuUnconfirmed) => "DFU unconfirmed",
-        Some(SignalProgress::Restarting) => "restarting",
+        Some(RequestProgress::EnteringDfu) => "entering DFU",
+        Some(RequestProgress::DfuUnconfirmed) => "DFU unconfirmed",
+        Some(RequestProgress::Restarting) => "restarting",
         None if !port.enabled => "off",
         None if !port.occupied => "empty",
         None if port.waiting_for_power => "waiting for power",
@@ -772,7 +845,7 @@ fn dfu(agent: &mut Client, state: &State, hub: &str, ports: &[Port]) -> Result<(
             let now = row(&state, port).context("the hub left USB")?;
             if in_dfu(&now) {
                 waiting.suspend(|| println!("Port {} is in DFU.", port.number()));
-            } else if now.fault.is_some() || now.request == Some(SignalProgress::DfuUnconfirmed) {
+            } else if now.fault.is_some() || now.request == Some(RequestProgress::DfuUnconfirmed) {
                 failed.push(format!("Port {}  {}", port.number(), activity(&now)));
             } else {
                 pending.push(port);
@@ -993,16 +1066,12 @@ fn submit(
     agent: &mut Client,
     state: &State,
     hub: &str,
-    operation: Operation,
     ports: &[Port],
-    latest: bool,
+    request: impl FnOnce(Vec<Selection>) -> Request,
 ) -> Result<()> {
     // The agent refuses a target it would not restore, and says why.
     let hubs = vec![selection(state, hub, ports)?];
-    agent.request(&match operation {
-        Operation::Restore => Request::Restore { hubs, latest },
-        Operation::Revive => Request::Revive { hubs, latest },
-    })?;
+    agent.request(&request(hubs))?;
     follow_work(agent, hub, ports)
 }
 
@@ -1068,22 +1137,12 @@ fn follow_work(agent: &mut Client, hub: &str, ports: &[Port]) -> Result<()> {
                 continue;
             }
             if let Some(ending) = &state.submitted[index] {
-                let phase = job_text(Job {
-                    operation: ending.operation,
-                    phase: ending.phase,
-                });
-                println!("Port {}  {phase}: {}", port.number(), ending.message);
+                for step in &ending.steps {
+                    println!("Port {}  {step}", port.number());
+                }
                 ended[index] = true;
-                success &= ending.phase == RestorePhase::Reported;
-            } else if let Some(row) = view
-                .and_then(|view| view.ports.get(port.index()))
-                // A job that has ended says so in its ending, or starts again.
-                .filter(|row| {
-                    row.job.is_none_or(|job| {
-                        matches!(job.phase, RestorePhase::Preparing | RestorePhase::Running)
-                    })
-                })
-            {
+                success &= ending.succeeded();
+            } else if let Some(row) = view.and_then(|view| view.ports.get(port.index())) {
                 let line = format!(
                     "{}  {}",
                     activity(row),
@@ -1096,10 +1155,7 @@ fn follow_work(agent: &mut Client, hub: &str, ports: &[Port]) -> Result<()> {
             }
         }
         if ended.iter().all(|ended| *ended) {
-            ensure!(
-                success,
-                "one or more selected operations failed or remain unconfirmed"
-            );
+            ensure!(success, "one or more selected devices need attention");
             return Ok(());
         }
         reply = agent
@@ -1259,6 +1315,60 @@ fn hub_temperature(adc: u16) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn advance_setup_requires_a_language_and_locale_each_time() {
+        let base = ["iasis", "advance-setup", "--ports", "1,2"];
+        assert!(Cli::try_parse_from(base).is_err());
+        for enroll in [false, true] {
+            let args = base
+                .into_iter()
+                .chain(["--language", "en-AU", "--locale", "en_AU"])
+                .chain(enroll.then_some("--enroll"));
+            let Some(Command::AdvanceSetup {
+                ports,
+                language,
+                locale,
+                enroll: requested,
+            }) = Cli::try_parse_from(args).unwrap().command
+            else {
+                panic!("expected advance-setup")
+            };
+            assert_eq!(ports, &Port::ALL[..2]);
+            assert_eq!(
+                (language.as_str(), locale.as_str(), requested),
+                ("en-AU", "en_AU", enroll)
+            );
+        }
+    }
+
+    #[test]
+    fn after_erase_options_apply_to_one_erase() {
+        let base = ["iasis", "restore", "--ports", "1", "--erase"];
+        let parse =
+            |extra: &[&str]| Cli::try_parse_from(base.into_iter().chain(extra.iter().copied()));
+        let Some(Command::Restore(plain)) = parse(&[]).unwrap().command else {
+            panic!("expected restore")
+        };
+        assert!(
+            plain.language.is_none()
+                && plain.locale.is_none()
+                && !plain.enroll
+                && !plain.shutdown_macs
+        );
+        assert!(parse(&["--shutdown-macs"]).is_ok());
+        assert!(parse(&["--language", "en-AU", "--locale", "en_AU", "--enroll"]).is_ok());
+        for incomplete in [
+            &["--enroll"][..],
+            &["--language", "en-AU"],
+            &["--locale", "en_AU"],
+        ] {
+            assert!(parse(incomplete).is_err());
+        }
+        assert!(
+            Cli::try_parse_from(["iasis", "revive", "--ports", "1", "--shutdown-macs"]).is_err()
+        );
+    }
 
     #[test]
     fn a_reading_names_its_source_and_power() {

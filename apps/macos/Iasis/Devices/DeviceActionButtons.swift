@@ -2,32 +2,59 @@ import SwiftUI
 
 /// The actions in the Device menu and a row's context menu.
 struct DeviceActionButtons: View {
-    let actions: DeviceActions
-    var shortcuts = false
-    let perform: ([AgentRequest]) -> Void
-    let restore: (RestoreConfirmation) -> Void
+    let browser: DeviceBrowser?
+    var contextSelection: Set<Device.ID>?
 
     var body: some View {
-        Button("Enter DFU", systemImage: DeviceSymbol.dfu) { perform(actions.dfu) }
-            .keyboardShortcut(shortcuts ? KeyboardShortcut("d", modifiers: [.command, .shift]) : nil)
-            .disabled(actions.dfu.isEmpty)
-        Button("Restart", systemImage: DeviceSymbol.restart) { perform(actions.restart) }
-            .keyboardShortcut(shortcuts ? KeyboardShortcut("r", modifiers: [.command, .shift]) : nil)
-            .disabled(actions.restart.isEmpty)
-        Divider()
-        Button("Revive", systemImage: DeviceSymbol.revive) {
-            if let revive = actions.revive {
-                perform([revive])
+        let ids = contextSelection ?? browser?.selection ?? []
+        let devices = browser?.devices(in: ids) ?? []
+        let actions = DeviceActions(devices)
+        let fullMenu = contextSelection == nil
+
+        Section {
+            if fullMenu || !actions.dfu.isEmpty {
+                Button("Enter DFU", systemImage: DeviceSymbol.dfu) { browser?.model.perform(actions.dfu) }
+                    .keyboardShortcut(fullMenu ? KeyboardShortcut("d", modifiers: [.command, .shift]) : nil)
+                    .disabled(actions.dfu.isEmpty)
+            }
+            if fullMenu || !actions.restart.isEmpty {
+                Button("Restart", systemImage: DeviceSymbol.restart) { browser?.model.perform(actions.restart) }
+                    .keyboardShortcut(fullMenu ? KeyboardShortcut("r", modifiers: [.command, .shift]) : nil)
+                    .disabled(actions.restart.isEmpty)
             }
         }
-        .disabled(actions.revive == nil)
-        Button("Restore…", systemImage: DeviceSymbol.restore) {
-            if let confirmation = actions.restore {
-                restore(confirmation)
+        Section {
+            if fullMenu || actions.revive != nil {
+                Button("Revive", systemImage: DeviceSymbol.revive) {
+                    if let revive = actions.revive {
+                        browser?.model.perform([revive])
+                    }
+                }
+                .disabled(actions.revive == nil)
+            }
+            if fullMenu || actions.restore != nil {
+                Button("Restore…", systemImage: DeviceSymbol.restore) {
+                    if let confirmation = actions.restore {
+                        browser?.confirm(confirmation)
+                    }
+                }
+                .keyboardShortcut(fullMenu ? KeyboardShortcut("r") : nil)
+                .disabled(actions.restore == nil)
+            }
+            if fullMenu || !actions.advanceSetup.isEmpty {
+                Button("Advance Setup", systemImage: DeviceSymbol.advanceSetup) {
+                    browser?.model.advanceSetup(actions.advanceSetup)
+                }
+                .disabled(actions.advanceSetup.isEmpty)
             }
         }
-        .keyboardShortcut(shortcuts ? KeyboardShortcut("r") : nil)
-        .disabled(actions.restore == nil)
+        if let browser, contextSelection != nil, devices.count == 1 {
+            Divider()
+            Button("Get Info", systemImage: "info.circle") {
+                browser.selection = ids
+                browser.showsInspector = true
+            }
+        }
     }
 }
 
@@ -36,6 +63,7 @@ enum DeviceSymbol {
     static let restart = "restart"
     static let revive = "cross.case"
     static let restore = "arrow.counterclockwise"
+    static let advanceSetup = "globe"
     static let lan = "rectangle.connected.to.line.below"
     static let download = "arrow.down.circle"
 
@@ -74,14 +102,5 @@ enum DeviceSymbol {
             ("apple vision", "vision.pro"),
         ]
         return kinds.first { name.hasPrefix($0.0) }?.1 ?? "questionmark"
-    }
-}
-
-extension AgentState.Operation {
-    var symbol: String {
-        switch self {
-        case .restore: DeviceSymbol.restore
-        case .revive: DeviceSymbol.revive
-        }
     }
 }

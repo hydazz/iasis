@@ -27,14 +27,24 @@ struct Device: Identifiable, Equatable {
         ID(hub: serial, port: port.number)
     }
 
-    /// The port holds a device or is switched off; an empty port offers nothing.
+    /// An active run stays on its reserved port while the target reboots.
     var isSelectable: Bool {
-        port.occupied || !port.enabled
+        port.occupied || !port.enabled || run?.inProgress == true
+    }
+
+    var run: AgentState.OperationRun? {
+        guard let run = port.run, run.inProgress || port.occupied && port.enabled else { return nil }
+        if let expected = run.ecid, let attached = port.ecid, expected != attached {
+            return nil
+        }
+        return run
     }
 
     var name: String {
         if !port.enabled {
             "Off"
+        } else if !port.occupied, run?.inProgress == true {
+            port.device ?? "Waiting for Device"
         } else if !port.occupied {
             "Empty"
         } else if let name = port.device {
@@ -56,6 +66,9 @@ struct Device: Identifiable, Equatable {
     }
 
     var activity: Activity {
+        if let run, run.inProgress, let activity = run.activity {
+            return port.awaiting == nil ? activity : Activity("Waiting for Image", .working(nil), symbol: DeviceSymbol.download)
+        }
         if let fault = port.fault {
             return Activity(fault, .failed)
         }
@@ -63,15 +76,8 @@ struct Device: Identifiable, Equatable {
         if port.awaiting != nil {
             return Activity("Waiting for Image", .working(nil), symbol: DeviceSymbol.download)
         }
-        if let job = port.job {
-            guard let stage = port.stage else {
-                return Activity(job.phase, operation: job.operation)
-            }
-            return Activity(
-                "\(job.operation.running) \(stage.percent)%",
-                .working(Double(stage.percent) / 100),
-                symbol: "\(job.operation.symbol).circle"
-            )
+        if let job = port.job, job.phase == .preparing || job.phase == .running {
+            return Activity(job.phase, operation: job.operation)
         }
         switch port.request {
         case .enteringDfu: return Activity("Entering DFU", .working(nil))
@@ -82,52 +88,17 @@ struct Device: Identifiable, Equatable {
         if port.waitingForPower {
             return Activity("Waiting for Power", .caution)
         }
-        if let result = port.result {
-            return Activity(result.phase, operation: result.operation)
+        if let activity = run?.activity {
+            return activity
+        }
+        if let job = port.job {
+            return Activity(job.phase, operation: job.operation)
         }
         switch port.mode {
         case .dfu, .kisDfu: return Activity("DFU", .none)
         case .recovery: return Activity("Recovery", .none)
         default: return .idle
         }
-    }
-
-    /// The operation on the port: one under way, or else how the last ended.
-    var operation: OperationStatus? {
-        guard port.fault == nil, port.occupied, port.enabled else { return nil }
-        let activity = activity
-        if let job = port.job, job.phase == .preparing || job.phase == .running {
-            var status = OperationStatus(title: job.operation.title, symbol: job.operation.symbol, mark: activity.mark)
-            if port.awaiting != nil {
-                status.steps = [.init(name: "Waiting for Image", state: .active)]
-            } else if let stage = port.stage {
-                status.steps = stage.steps.enumerated().map { index, name in
-                    .init(name: name, state: index < stage.step ? .done : index == stage.step ? .active : .pending)
-                }
-                // Firmware transfers interleave with the steps and belong to none.
-                status.detail = stage.steps.contains(stage.name) ? nil : stage.name
-            } else {
-                status.detail = activity.text
-            }
-            return status
-        }
-        if let request = port.request {
-            let symbol = request == .restarting ? DeviceSymbol.restart : DeviceSymbol.dfu
-            return OperationStatus(title: activity.text, symbol: symbol, mark: activity.mark)
-        }
-        if let result = port.result {
-            let ending = Activity(result.phase, operation: result.operation)
-            return OperationStatus(
-                title: ending.text,
-                symbol: result.operation.symbol,
-                mark: ending.mark,
-                detail: result.message
-            )
-        }
-        if let job = port.job {
-            return OperationStatus(title: activity.text, symbol: job.operation.symbol, mark: activity.mark)
-        }
-        return nil
     }
 
     var restoreTarget: RestoreTarget {
@@ -152,30 +123,10 @@ extension [Device] {
     }
 }
 
-/// A port's operation as the inspector lays it out: what it is, how it
-/// stands and the steps it goes through.
-struct OperationStatus: Equatable {
-    struct Step: Equatable {
-        enum State {
-            case done, active, pending
-        }
-
-        let name: String
-        let state: State
-    }
-
-    let title: String
-    let symbol: String
-    let mark: Activity.Mark
-    /// What is happening when no step says it, or how the operation ended.
-    var detail: String?
-    var steps: [Step] = []
-}
-
 /// What a port is doing, in words and as one mark.
 struct Activity: Equatable {
     enum Mark: Equatable {
-        case none
+        case none, pending, skipped, onDevice
         /// Under way, with the fraction done when it is known.
         case working(Double?)
         case done
@@ -236,22 +187,29 @@ extension AgentState {
     }
 }
 
-/// DFU and restart target eligible devices. Restore and revive require the whole selection.
+/// An action is available when it applies to the whole selection.
 struct DeviceActions: Equatable {
     var dfu: [AgentRequest] = []
     var restart: [AgentRequest] = []
     var revive: AgentRequest?
+    var advanceSetup: [RestoreSelection] = []
     var restore: RestoreConfirmation?
 
     init() {}
 
     init(_ devices: [Device]) {
-        let signal = { (devices: [Device], request: ([RestoreSelection]) -> AgentRequest) -> [AgentRequest] in
-            guard let hubs = devices.selections, !hubs.isEmpty else { return [] }
-            return [request(hubs)]
+        guard !devices.isEmpty, devices.allSatisfy(\.isSelectable) else { return }
+        if let hubs = devices.selections {
+            if devices.allSatisfy(\.port.dfu) {
+                dfu = [.dfu(hubs: hubs)]
+            }
+            if devices.allSatisfy(\.port.advanceSetup) {
+                advanceSetup = hubs
+            }
+            if devices.allSatisfy(\.port.reboot) {
+                restart = [.reboot(hubs: hubs)]
+            }
         }
-        dfu = signal(devices.filter(\.port.dfu)) { .dfu(hubs: $0) }
-        restart = signal(devices.filter(\.port.reboot)) { .reboot(hubs: $0) }
         restore = RestoreConfirmation(devices)
         revive = restore.map { .revive(hubs: $0.hubs, latest: false) }
     }
@@ -260,10 +218,10 @@ struct DeviceActions: Equatable {
 /// An erase the user is asked to confirm: the attachments as shown, on any
 /// number of hubs, and what the agent says each would be restored with.
 struct RestoreConfirmation: Equatable {
-    /// One way to go on: its button and the request that makes.
+    /// An available image choice for the selected devices.
     struct Choice: Equatable, Identifiable {
         let title: String
-        let request: AgentRequest
+        let latest: Bool
 
         var id: String {
             title
@@ -300,18 +258,18 @@ struct RestoreConfirmation: Equatable {
         guard !blocked else { return [] }
         let newer = devices.compactMap(offer).filter { $0.newer != nil }
         guard !newer.isEmpty else {
-            return [Choice(title: "Restore", request: .restore(hubs: hubs, latest: false))]
+            return [Choice(title: "Restore", latest: false)]
         }
         let latest = Set(newer.compactMap(\.latest?.title))
         let held = Set(newer.compactMap(\.held?.title))
         return [
             Choice(
                 title: latest.count == 1 ? "Download \(latest.first ?? "")" : "Download Latest",
-                request: .restore(hubs: hubs, latest: true)
+                latest: true
             ),
             Choice(
                 title: held.count == 1 ? "Use \(held.first ?? "")" : "Use Downloaded",
-                request: .restore(hubs: hubs, latest: false)
+                latest: false
             ),
         ]
     }

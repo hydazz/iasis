@@ -16,6 +16,7 @@ final class DeviceBrowser {
         self.model = model
     }
 
+
     /// Ask the agent what each device would be restored with, then ask the
     /// user to confirm the erase.
     func confirm(_ restore: RestoreConfirmation) {
@@ -45,15 +46,12 @@ final class DeviceBrowser {
     }
 
     var actions: DeviceActions {
-        actions(for: selection)
+        DeviceActions(selected)
     }
 
     func devices(in ids: Set<Device.ID>) -> [Device] {
-        model.state?.devices.filter { ids.contains($0.id) && $0.isSelectable } ?? []
-    }
-
-    func actions(for ids: Set<Device.ID>) -> DeviceActions {
-        DeviceActions(devices(in: ids))
+        let devices = model.state?.devices.filter { ids.contains($0.id) && $0.isSelectable } ?? []
+        return devices.count == ids.count ? devices : []
     }
 }
 

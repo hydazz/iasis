@@ -468,7 +468,7 @@ fn apple_copy(name: &str, bytes: u64) -> Option<PathBuf> {
 }
 
 /// The system a product type runs, for the families the store keeps.
-fn system(product_type: &str) -> Option<&'static str> {
+pub(crate) fn system(product_type: &str) -> Option<&'static str> {
     let families = [
         ("iPhone", "iOS"),
         ("iPad", "iPadOS"),

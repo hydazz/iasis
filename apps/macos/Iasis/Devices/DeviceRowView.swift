@@ -34,6 +34,7 @@ struct DeviceRowView: View {
 /// The port's number, drawn as its light on the hub: same colour, and
 /// pulsing while the light pulses.
 struct PortBadge: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let number: Int
     let light: AgentState.Light
 
@@ -41,12 +42,13 @@ struct PortBadge: View {
         Image(systemName: light.hue == .off ? "\(number).circle" : "\(number).circle.fill")
             .imageScale(.large)
             .foregroundStyle(light.style)
-            .symbolEffect(.pulse, options: .repeating, isActive: light.pulse)
+            .symbolEffect(.pulse, options: .repeating, isActive: light.pulse && !reduceMotion)
             .accessibilityLabel("Port \(number)")
     }
 }
 
 struct DeviceName: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let device: Device
 
     var lineLimit: Int? = 1
@@ -56,7 +58,7 @@ struct DeviceName: View {
             Group {
                 if device.port.identifying {
                     Image(systemName: ActivityMark.turning)
-                        .symbolEffect(.rotate, options: .repeat(.continuous))
+                        .symbolEffect(.rotate, options: .repeat(.continuous), isActive: !reduceMotion)
                 } else if let symbol = device.symbol {
                     Image(systemName: symbol)
                 } else {
@@ -122,6 +124,7 @@ private struct ConnectionMarks: View {
 struct ActivityMark: View {
     static let turning = "arrow.trianglehead.2.clockwise.rotate.90"
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let activity: Activity
 
     var body: some View {
@@ -129,12 +132,18 @@ struct ActivityMark: View {
             switch activity.mark {
             case .none:
                 EmptyView()
+            case .pending:
+                Image(systemName: "circle").foregroundStyle(.tertiary)
+            case .skipped:
+                Image(systemName: "minus.circle").foregroundStyle(.secondary)
             case let .working(fraction?):
                 Image(systemName: activity.symbol, variableValue: fraction)
                     .symbolVariableValueMode(.draw)
             case .working(nil):
                 Image(systemName: "\(Self.turning).circle")
-                    .symbolEffect(.rotate, options: .repeat(.continuous))
+                    .symbolEffect(.rotate, options: .repeat(.continuous), isActive: !reduceMotion)
+            case .onDevice:
+                Image(systemName: "hand.tap.fill").foregroundStyle(.secondary)
             case .done:
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
             case .failed:

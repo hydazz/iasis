@@ -33,14 +33,16 @@ struct ContractTests {
         let hub = "817a23bd502453b4"
         let identity = "MIIJ4QIBAzCCCZcGCSqGSIb3DQEHAaCCCYgEggmEMIIJgDCCBDcGCSqGSIb3DQEH"
         let selection = [RestoreSelection(hub: hub, session: 3, targets: [.init(port: 2, generation: 7, ecid: "0002250e3c04c01e")])]
+        let setup = SetupOptions(language: "en-AU", locale: "en_AU", enroll: true)
         let requests: [AgentRequest] = [
             .state,
             .watch,
             .plan(hubs: selection),
-            .restore(hubs: selection, latest: true),
+            .restore(hubs: selection, latest: true, after: AfterErase(shutdownMacs: true, setup: setup)),
             .revive(hubs: selection, latest: false),
             .dfu(hubs: selection),
             .reboot(hubs: selection),
+            .advanceSetup(hubs: selection, setup: setup),
             .power(hub: hub, port: 2, on: true),
             .debugUsb(hub: hub, port: 1, on: true),
             .rename(hub: hub, name: "Bench A"),

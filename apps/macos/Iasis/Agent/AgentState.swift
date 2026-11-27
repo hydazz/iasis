@@ -9,7 +9,7 @@ nonisolated struct AgentState: Codable, Equatable {
     var hubs: [Hub]
     /// A submitting connection's results in target order, each null until it
     /// has one. Absent on other connections.
-    var submitted: [Ending?]?
+    var submitted: [OperationRun?]?
     var images: ImageStore
     var sharing: Sharing
     var supervision: Supervision
@@ -90,7 +90,7 @@ nonisolated struct AgentState: Codable, Equatable {
         /// The Apple target's USB mode, when `usb` is `apple`.
         var mode: AppleMode?
         var light: Light
-        var request: SignalProgress?
+        var request: RequestProgress?
         var waitingForPower: Bool
         var powered: Bool
         var wrongDfuPort: Bool
@@ -106,13 +106,13 @@ nonisolated struct AgentState: Codable, Equatable {
         var dfu: Bool
         var reboot: Bool
         var restore: Bool
+        var advanceSetup: Bool
         var enabled: Bool
         var job: Job?
         /// The store's id for the image the port's restore waits for, while
         /// it waits.
         var awaiting: String?
-        var stage: Stage?
-        var result: Ending?
+        var run: OperationRun?
         /// The `id` of the missing prerequisite the target's restore waits
         /// for.
         var needs: String?
@@ -155,6 +155,11 @@ nonisolated struct AgentState: Codable, Equatable {
     struct Pool: Codable, Equatable {
         var budgetMw: Int
         var allocatedMw: Int
+    }
+
+    struct SetupLanguage: Codable, Equatable {
+        var language: String
+        var locale: String
     }
 
     struct Sharing: Codable, Equatable {
@@ -203,7 +208,7 @@ nonisolated struct AgentState: Codable, Equatable {
         }
     }
 
-    enum SignalProgress: String, Codable {
+    enum RequestProgress: String, Codable {
         case enteringDfu = "entering_dfu"
         case dfuUnconfirmed = "dfu_unconfirmed"
         case restarting
@@ -214,9 +219,7 @@ nonisolated struct AgentState: Codable, Equatable {
         var phase: RestorePhase
     }
 
-    /// What a job's worker is doing: its step among the job's steps, and
-    /// how far along the whole job is.
-    struct Stage: Codable, Equatable {
+    struct Progress: Codable, Equatable {
         var name: String
         var percent: UInt8
         var steps: [String]
@@ -261,13 +264,36 @@ nonisolated struct AgentState: Codable, Equatable {
         }
     }
 
-    /// How an operation ended.
-    struct Ending: Codable, Equatable {
-        var operation: Operation
-        /// The target's ECID, when it was known.
+    struct OperationRun: Codable, Equatable {
         var ecid: String?
-        var phase: RestorePhase
-        var message: String
+        var steps: [OperationStep]
+    }
+
+    struct OperationStep: Codable, Equatable {
+        var kind: StepKind
+        var state: StepState
+        var system: SystemImage?
+        var language: SetupLanguage?
+        var progress: Progress?
+        var error: String?
+    }
+
+    enum StepKind: String, Codable {
+        case restore, revive
+        case setRegion = "set_region"
+        case activate
+        case requestEnrollment = "request_enrollment"
+    }
+
+    enum StepState: String, Codable {
+        case pending, active, complete, failed, unconfirmed, skipped
+        case onDevice = "on_device"
+    }
+
+    struct SystemImage: Codable, Equatable {
+        var os: String
+        var version: String
+        var build: String
     }
 
     /// The store's archives: those it holds and those it is still to fetch.

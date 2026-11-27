@@ -18,12 +18,23 @@ use super::*;
 /// A supervision identity's PKCS #12 archive in base64, shortened.
 const PKCS12: &str = "MIIJ4QIBAzCCCZcGCSqGSIb3DQEHAaCCCYgEggmEMIIJgDCCBDcGCSqGSIb3DQEH";
 
-fn ending(operation: Operation, phase: RestorePhase) -> Ending {
-    Ending {
-        operation,
+fn step(kind: StepKind, state: StepState) -> OperationStep {
+    OperationStep {
+        kind,
+        state,
+        language: (kind == StepKind::SetRegion).then(|| SetupLanguage {
+            language: "en-AU".into(),
+            locale: "en_AU".into(),
+        }),
+        system: None,
+        progress: None,
+        error: None,
+    }
+}
+fn run(steps: Vec<OperationStep>) -> OperationRun {
+    OperationRun {
         ecid: Some("001a79d10e6bc01c".into()),
-        phase,
-        message: "Restore finished".into(),
+        steps,
     }
 }
 
@@ -55,38 +66,50 @@ fn port(number: u8) -> PortView {
         allocated_mw: 68_250,
         short: false,
         fault: None,
+        advance_setup: false,
         dfu: false,
         reboot: true,
         restore: true,
         enabled: true,
         job: None,
         awaiting: None,
-        stage: None,
-        result: None,
+        run: None,
         needs: None,
     }
 }
 
 fn state() -> State {
     let working = PortView {
-        request: Some(SignalProgress::EnteringDfu),
+        request: Some(RequestProgress::EnteringDfu),
         job: Some(Job {
             operation: Operation::Restore,
             phase: RestorePhase::Running,
         }),
-        stage: Some(Progress {
-            name: "Restoring the system".into(),
-            percent: 42,
-            steps: vec!["Preparing".into(), "Restoring the system".into()],
-            step: 1,
-        }),
+        run: Some(run(vec![
+            OperationStep {
+                system: Some(SystemImage {
+                    os: "iPadOS".into(),
+                    version: "26.2".into(),
+                    build: "24C101".into(),
+                }),
+                progress: Some(Progress {
+                    name: "Restoring the system".into(),
+                    percent: 42,
+                    steps: vec!["Preparing".into(), "Restoring the system".into()],
+                    step: 1,
+                }),
+                ..step(StepKind::Restore, StepState::Active)
+            },
+            step(StepKind::SetRegion, StepState::Pending),
+            step(StepKind::Activate, StepState::Pending),
+            step(StepKind::RequestEnrollment, StepState::Pending),
+        ])),
         awaiting: Some("iPad_Fall_2022_26.2_24C101_Restore.ipsw".into()),
         light: Light {
             hue: Hue::Purple,
             pulse: true,
             dim: true,
         },
-        result: Some(ending(Operation::Restore, RestorePhase::Reported)),
         ..port(1)
     };
     let modes = [
@@ -95,7 +118,6 @@ fn state() -> State {
         AppleMode::Kis,
         AppleMode::KisDfu,
         AppleMode::Restored,
-        AppleMode::Normal,
     ];
     let ports = vec![
         working,
@@ -104,7 +126,7 @@ fn state() -> State {
             mode: None,
             device: Some("USB Keyboard".into()),
             ecid: None,
-            request: Some(SignalProgress::DfuUnconfirmed),
+            request: Some(RequestProgress::DfuUnconfirmed),
             link: Some(UsbLink::Usb3),
             power: Some(PortPower {
                 source: PowerSource::Usb,
@@ -122,13 +144,16 @@ fn state() -> State {
                 pulse: false,
                 dim: false,
             },
-            result: Some(ending(Operation::Revive, RestorePhase::Failed)),
+            run: Some(run(vec![OperationStep {
+                error: Some("The device disconnected".into()),
+                ..step(StepKind::Revive, StepState::Unconfirmed)
+            }])),
             ..port(2)
         },
         PortView {
             usb: Some(Usb::Ambiguous),
             mode: None,
-            request: Some(SignalProgress::Restarting),
+            request: Some(RequestProgress::Restarting),
             link: Some(UsbLink::Usb),
             fault: Some("Overcurrent".into()),
             job: Some(Job {
@@ -144,7 +169,7 @@ fn state() -> State {
         },
         PortView {
             usb: Some(Usb::Absent),
-            mode: None,
+            mode: Some(AppleMode::Normal),
             identifying: true,
             waiting_for_power: true,
             powered: false,
@@ -154,6 +179,12 @@ fn state() -> State {
                 operation: Operation::Restore,
                 phase: RestorePhase::Reported,
             }),
+            run: Some(run(vec![
+                step(StepKind::SetRegion, StepState::Complete),
+                step(StepKind::Activate, StepState::Complete),
+                step(StepKind::RequestEnrollment, StepState::Active),
+            ])),
+            needs: Some("apple-devices".into()),
             light: Light {
                 hue: Hue::White,
                 pulse: false,
@@ -186,13 +217,12 @@ fn state() -> State {
         .enumerate()
         .map(|(index, mode)| PortView {
             mode: Some(*mode),
-            needs: (*mode == AppleMode::Normal).then(|| "apple-devices".into()),
             light: Light {
                 hue: if index == 0 { Hue::Blue } else { Hue::Green },
                 pulse: false,
                 dim: false,
             },
-            ..port(index as u8 % 5 + 1)
+            ..port(index as u8 + 1)
         })
         .collect();
     State {
@@ -242,7 +272,15 @@ fn state() -> State {
             },
         ],
         submitted: vec![
-            Some(ending(Operation::Restore, RestorePhase::Reported)),
+            Some(run(vec![
+                step(StepKind::Restore, StepState::Complete),
+                OperationStep {
+                    error: Some("The device does not support the requested region".into()),
+                    ..step(StepKind::SetRegion, StepState::Failed)
+                },
+                step(StepKind::Activate, StepState::Skipped),
+                step(StepKind::RequestEnrollment, StepState::Skipped),
+            ])),
             None,
         ],
         images: Images {
@@ -341,6 +379,10 @@ fn requests() -> Vec<Request> {
             hubs: vec![selection()],
         },
         Request::Restore {
+            after: AfterErase {
+                shutdown_macs: true,
+                setup: Some(setup()),
+            },
             hubs: vec![selection()],
             latest: true,
         },
@@ -352,6 +394,10 @@ fn requests() -> Vec<Request> {
             hubs: vec![selection()],
         },
         Request::Reboot {
+            hubs: vec![selection()],
+        },
+        Request::AdvanceSetup {
+            setup: setup(),
             hubs: vec![selection()],
         },
         Request::Power {
@@ -401,6 +447,16 @@ fn requests() -> Vec<Request> {
         Request::Catalog,
         Request::Diagnostics { hub: hub() },
     ]
+}
+
+fn setup() -> SetupOptions {
+    SetupOptions {
+        region: SetupLanguage {
+            language: "en-AU".into(),
+            locale: "en_AU".into(),
+        },
+        enroll: true,
+    }
 }
 
 fn release() -> Release {
@@ -611,4 +667,10 @@ fn a_target_names_its_device_by_ecid() {
     ] {
         assert!(serde_json::from_str::<Target>(&wire.replace("000000000000002a", bad)).is_err());
     }
+}
+
+#[test]
+fn a_read_only_option_cannot_be_ignored_on_a_device_action() {
+    let action = r#"{"op":"advance_setup","hubs":[],"setup":{"language":"en","locale":"en_US"},"check_only":true}"#;
+    assert!(serde_json::from_str::<Request>(action).is_err());
 }

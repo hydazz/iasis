@@ -25,19 +25,7 @@ struct DeviceCommands: Commands {
 
     var body: some Commands {
         CommandMenu("Device") {
-            DeviceMenuItems(browser: browser)
-        }
-    }
-}
-
-private struct DeviceMenuItems: View {
-    let browser: DeviceBrowser?
-
-    var body: some View {
-        DeviceActionButtons(actions: browser?.actions ?? DeviceActions(), shortcuts: true) { requests in
-            browser?.model.perform(requests)
-        } restore: { confirmation in
-            browser?.confirm(confirmation)
+            DeviceActionButtons(browser: browser)
         }
     }
 }

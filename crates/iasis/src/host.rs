@@ -30,7 +30,7 @@ use crate::{
     Error, Events, Hub, dfu,
     identity::{AppleDevice, models::Models},
     inventory::Inventory,
-    restore::{Operation, Progress},
+    restore::Operation,
     topology::{self, Attachment, Snapshot, UsbDevice},
     watch::Watch,
 };
@@ -204,7 +204,6 @@ pub struct PortJob {
     pub generation: u32,
     pub status: RestoreStatus,
     pub operation: Operation,
-    pub stage: Option<Progress>,
 }
 
 /// A port's attachment generation and what the host finds there.
@@ -484,6 +483,7 @@ struct Shared {
     /// the view, which a client or a slow host can hold.
     reported: Mutex<(Seen, [RestoreAccess; PORT_COUNT])>,
     identified: Mutex<Identified>,
+    setup_finished: Mutex<[Option<Attachment>; PORT_COUNT]>,
     /// Advances when a target is named or forgotten.
     identified_version: AtomicU64,
     failure: Mutex<Option<String>>,
@@ -859,16 +859,54 @@ impl Shared {
         Ok(unnamed)
     }
 
+    /// Setup Assistant can finish on the device without a USB re-enumeration.
+    fn observe_setup(&self) {
+        let Some((status, snapshot)) = self.view.lock().unwrap().sample.clone() else {
+            return;
+        };
+        let known = self.setup_finished.lock().unwrap().clone();
+        let mut finished = known.clone();
+        for port in Port::ALL {
+            let i = port.index();
+            let device = snapshot.target(port);
+            if finished[i].is_some() && finished[i].as_ref() == device.map(|d| &d.attachment) {
+                continue;
+            }
+            finished[i] = None;
+            if let Some(device) = device
+                && crate::view::setup_ready(
+                    &status.ports[i],
+                    observe(&snapshot, port),
+                    Some(device),
+                    &self.models,
+                )
+                && let Some(serial) = &device.serial_number
+                && crate::post_restore::finished(serial)
+            {
+                finished[i] = Some(device.attachment.clone());
+            }
+        }
+        if finished != known {
+            *self.setup_finished.lock().unwrap() = finished;
+            self.changes.changed();
+        }
+    }
+
     /// Identify targets when the hub or the host's USB devices change, and
     /// again while one stays unnamed.
     fn identify_until_stopped(&self) {
         let mut asked = None;
         let mut again = None;
+        let mut check_setup = Instant::now();
         let mut seen = self.changes.count();
         while !self.stop.load(Ordering::Relaxed) {
             let status = self.view.lock().unwrap().sample.as_ref().map(|(s, _)| *s);
             if let Some(status) = status {
                 let now = (self.inventory.version(), status.revision);
+                if asked.is_none_or(|(usb, _)| usb != now.0) || Instant::now() >= check_setup {
+                    self.observe_setup();
+                    check_setup = Instant::now() + Duration::from_secs(15);
+                }
                 if asked != Some(now) || again.is_some_and(|at| Instant::now() >= at) {
                     asked = Some(now);
                     again = match self.identify(&status) {
@@ -878,7 +916,8 @@ impl Shared {
                     };
                 }
             }
-            seen = self.changes.wait(seen, again);
+            let next = status.map(|_| again.map_or(check_setup, |at| at.min(check_setup)));
+            seen = self.changes.wait(seen, next);
         }
     }
 }
@@ -918,6 +957,7 @@ impl Link {
             view: Mutex::default(),
             reported: Mutex::default(),
             identified: Mutex::default(),
+            setup_finished: Mutex::default(),
             identified_version: AtomicU64::new(0),
             failure: Mutex::default(),
             commands: Mutex::default(),
@@ -1082,7 +1122,15 @@ impl Link {
         );
         let jobs = self.shared.work.jobs.lock().unwrap();
         let awaiting = self.shared.work.awaiting.lock().unwrap();
+        let setup_finished = self.shared.setup_finished.lock().unwrap();
         for (index, row) in hub.ports.iter_mut().enumerate() {
+            if let Some(finished) = &setup_finished[index]
+                && snapshot
+                    .target(Port::ALL[index])
+                    .is_some_and(|d| &d.attachment == finished)
+            {
+                row.advance_setup = false;
+            }
             if let Some(job) = &jobs[index] {
                 crate::view::describe_job(row, job);
             }
@@ -1570,7 +1618,6 @@ mod tests {
             generation,
             status: job(phase),
             operation: Operation::Restore,
-            stage: None,
         };
         let mut jobs = [const { None }; PORT_COUNT];
         jobs[0] = Some(on(3, RestorePhase::Running));

@@ -245,6 +245,7 @@ pub enum RestoreState {
     /// The restore service reported completion and the process exited zero.
     /// This does not prove a booted OS or independently verify erased data.
     RestoreReported,
+    Unconfirmed,
     TransportLost,
     Failed,
 }
@@ -253,7 +254,7 @@ impl RestoreState {
     pub fn is_terminal(self) -> bool {
         matches!(
             self,
-            Self::RestoreReported | Self::TransportLost | Self::Failed
+            Self::RestoreReported | Self::TransportLost | Self::Failed | Self::Unconfirmed
         )
     }
 }
@@ -373,7 +374,7 @@ impl RestoreEngine {
         let directory = tempfile::Builder::new()
             .prefix(&format!("{ecid:016x}-"))
             .tempdir_in(&scratch)
-            .context("creating restore worker directory")?;
+            .context("preparing temporary storage for the restore")?;
         ensure!(
             self.active.lock().unwrap().insert(ecid),
             "ECID {ecid:016x} already has an active restore"
@@ -453,16 +454,13 @@ fn run_worker(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let program = command.get_program().to_string_lossy().into_owned();
     let mut command = CommandWrap::from(command);
     #[cfg(unix)]
     command.wrap(ProcessGroup::leader());
     #[cfg(windows)]
     command.wrap(JobObject);
     command.wrap(KillOnDrop);
-    let mut child = command
-        .spawn()
-        .with_context(|| format!("starting {program}"))?;
+    let mut child = command.spawn().context("starting the restore")?;
     {
         let mut status = status.lock().unwrap();
         status.pid = Some(child.id());
@@ -471,8 +469,8 @@ fn run_worker(
     changes.changed();
     // Held open for the worker's life.
     let _stdin = child.stdin().take();
-    let stdout = child.stdout().take().context("worker stdout missing")?;
-    let stderr = child.stderr().take().context("worker stderr missing")?;
+    let stdout = child.stdout().take().context("opening restore progress")?;
+    let stderr = child.stderr().take().context("opening the restore log")?;
     let ecid = status.lock().unwrap().ecid;
     thread::spawn(move || log_lines(stderr, ecid));
     let (ended, records) = mpsc::channel();
@@ -484,15 +482,14 @@ fn run_worker(
             let _ = ended.send(());
         });
     }
-    let exit = child.wait().context("waiting for the restore worker")?;
+    let exit = child.wait().context("waiting for the restore outcome")?;
     // A record written before the exit is read before the exit counts.
     let _ = records.recv_timeout(RECORDS_AFTER_EXIT);
     status.lock().unwrap().exit_code = exit.code();
     Ok(match terminal.lock().unwrap().take() {
-        Some(Record::Finished) if exit.success() => (
-            RestoreState::RestoreReported,
-            "Restore service reported completion".into(),
-        ),
+        Some(Record::Finished) if exit.success() => {
+            (RestoreState::RestoreReported, "Restore completed".into())
+        }
         Some(Record::Failed {
             summary,
             tail,
@@ -510,12 +507,13 @@ fn run_worker(
                 summary,
             )
         }
-        _ => (
-            RestoreState::Failed,
-            format!(
-                "The restore worker stopped without a result ({exit}); the device's state is unknown"
-            ),
-        ),
+        _ => {
+            log::warn!("{ecid:016x}: restore process exited without a result ({exit})");
+            (
+                RestoreState::Unconfirmed,
+                "The device did not confirm the restore outcome".into(),
+            )
+        }
     })
 }
 
@@ -990,10 +988,15 @@ esac
                 "confirmed",
                 RestoreState::RestoreReported,
                 45,
-                "Restore service reported completion",
+                "Restore completed",
             ),
-            ("diagnostic", RestoreState::Failed, 45, "without a result"),
-            ("exit", RestoreState::Failed, 45, "without a result"),
+            (
+                "diagnostic",
+                RestoreState::Unconfirmed,
+                45,
+                "did not confirm",
+            ),
+            ("exit", RestoreState::Unconfirmed, 45, "did not confirm"),
             (
                 "dropped",
                 RestoreState::TransportLost,
@@ -1006,12 +1009,7 @@ esac
                 45,
                 "Unable to discover device mode",
             ),
-            (
-                "silent",
-                RestoreState::Failed,
-                45,
-                "the device's state is unknown",
-            ),
+            ("silent", RestoreState::Unconfirmed, 45, "did not confirm"),
         ] {
             let mut cmd = Command::new(&program);
             cmd.arg(arg);

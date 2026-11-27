@@ -421,11 +421,7 @@ async fn main(_spawner: Spawner) {
             next.upstream_cc = physical.cc;
             next.upstream_orientation = physical.orientation;
             next.upstream_error = physical.error;
-            let allowance = || {
-                physical
-                    .advertisement
-                    .allowance(Instant::now().as_millis())
-            };
+            let allowance = || physical.advertisement.allowance(Instant::now().as_millis());
             next.host_allowance_ma = allowance();
             let paths = next.ports.map(|port| port.supply);
             let qualified_mv = board.brick.voltage_mv(&next, board.bus.faulted());

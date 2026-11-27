@@ -161,9 +161,26 @@ target/release/iasis --serial 0123456789abcdef restore --ports 1,2,3,4,5 --erase
 
 Each target is its own job, and each restore its own process. A job fetches the target's image before it puts the target into DFU or recovery when this host already knows the target's model; otherwise the target waits there for it. A restore that fails while its target is still in DFU or recovery is started again, up to three times. A target that can’t be prepared, such as an iPad waiting for Trust, ends with the reason on its port while the others restore.
 
+Erased Macs restart into Setup Assistant. Add `--shutdown-macs` to a restore command to power them off after that erase. Revived devices always restart.
+
+To advance Setup Assistant on iPhones and iPads, supply the language and regional format. Add `--enroll` to request Automated Device Enrollment.
+
+```sh
+iasis advance-setup --ports 1,2 --language en-AU --locale en_AU
+iasis advance-setup --ports 1,2 --language en-AU --locale en_AU --enroll
+```
+
+The same options on `iasis restore --erase` run setup after installation. Each device keeps any language or region it has already accepted. The CLI prints the result for each port.
+
+In the Mac app, choose the language, region and enrollment preference in **Settings > General**. **Advance Setup** applies them immediately. **Advance Setup After Erase** also applies them to erases started from the app or the hub button.
+
+Advance Setup activates the device if needed. With enrollment enabled, it then requests the assigned management profile. The host needs internet access for activation. The device reaches its enrollment service over Wi-Fi or USB Internet Sharing. If the result says “continue on device”, follow the sign-in or management prompt in Setup Assistant. A “Partially Set Up” prompt also needs a choice on the device.
+
 The host stays out of idle sleep from a target's preparation until its restore ends, while its display can still sleep. On battery, a Windows laptop with Modern Standby drops that hold five minutes after its sleep timeout.
 
-A port's percentage follows the whole restore, with the current stage alongside it. Repeated firmware and image transfers can hold it at the same percentage until the next milestone. Logs and working files go under `restores/` in the agent's cache directory. Allow space for an extracted OS image per worker. Iasis matches each image to the target's chip and board IDs, or to its product type when only a model identifier is available. The restore program checks Apple signing.
+The device inspector shows the requested steps and keeps each outcome. During installation, the restore row shows the current activity and overall percentage. The percentage can hold steady during repeated firmware and image transfers.
+
+Logs and working files go under `restores/` in the agent's cache directory. Allow space for an extracted OS image per worker. Iasis matches each image to the target's chip and board IDs, or to its product type when only a model identifier is available. The restore program checks Apple signing.
 
 On macOS 27.3, Finder opens a window for each Mac, iPad or iPhone that enters DFU or recovery mode. To stop it, turn off **Open Finder for DFU and Recovery Devices** in the app's Settings > General, or run this once as the user running Finder. The preference is undocumented.
 

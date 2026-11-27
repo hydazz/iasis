@@ -20,9 +20,41 @@ final class AgentModel {
 
     static let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
 
-    init(agent: any AgentService, restartAgent: (() async -> Void)? = nil) {
+    private let preferencesFile: URL
+    private var savedPreferences: RestorePreferences
+
+    init(agent: any AgentService, preferencesFile: URL = RestorePreferences.file, restartAgent: (() async -> Void)? = nil) {
+        self.preferencesFile = preferencesFile
+        do {
+            savedPreferences = try JSONDecoder().decode(RestorePreferences.self, from: Data(contentsOf: preferencesFile))
+        } catch {
+            if (error as? CocoaError)?.code != .fileReadNoSuchFile {
+                Log.agent.error("Could not read restore settings: \(error.localizedDescription)")
+            }
+            savedPreferences = RestorePreferences()
+        }
         self.agent = agent
         self.restartAgent = restartAgent
+    }
+
+    var restorePreferences: RestorePreferences {
+        get { savedPreferences }
+        set {
+            do {
+                try newValue.save(to: preferencesFile)
+                savedPreferences = newValue
+            } catch {
+                report(error)
+            }
+        }
+    }
+
+    func advanceSetup(_ hubs: [RestoreSelection]) {
+        perform([.advanceSetup(hubs: hubs, setup: restorePreferences.setup)])
+    }
+
+    func restore(_ hubs: [RestoreSelection], latest: Bool) {
+        perform([.restore(hubs: hubs, latest: latest, after: restorePreferences.afterErase)])
     }
 
     /// Follow the agent for as long as the app runs, across its restarts.

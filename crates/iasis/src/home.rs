@@ -66,6 +66,30 @@ impl Home {
         })
     }
 
+    /// A physical Restore hold uses the settings saved by the local app.
+    pub(crate) fn button_after_erase(&self) -> Result<iasis_api::AfterErase> {
+        use iasis_api::{AfterErase, SetupOptions};
+        #[derive(serde::Deserialize)]
+        struct RestoreSettings {
+            shutdown_macs: bool,
+            advance_after_erase: bool,
+            setup: SetupOptions,
+        }
+        let path = self.state.join("restore-settings.json");
+        let file = match std::fs::File::open(&path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(AfterErase::default());
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let settings: RestoreSettings = serde_json::from_reader(file)?;
+        Ok(AfterErase {
+            shutdown_macs: settings.shutdown_macs,
+            setup: settings.advance_after_erase.then_some(settings.setup),
+        })
+    }
+
     /// The supervision identity the agent makes and pairs with.
     pub fn supervision(&self) -> PathBuf {
         self.state.join("supervision.pem")

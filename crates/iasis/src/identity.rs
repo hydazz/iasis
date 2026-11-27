@@ -109,8 +109,8 @@ pub fn mode_name(mode: AppleMode) -> &'static str {
         AppleMode::Kis => "debug USB",
         AppleMode::PortDfu => "port DFU",
         AppleMode::Recovery => "recovery",
-        AppleMode::Restored => "restore service",
-        AppleMode::Normal => "booted",
+        AppleMode::Restored => "restore mode",
+        AppleMode::Normal => "normal mode",
     }
 }
 

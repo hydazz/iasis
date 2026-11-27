@@ -8,7 +8,7 @@ nonisolated enum AgentRequest: Encodable, Equatable {
     case plan(hubs: [RestoreSelection])
     /// Erases the targets. The user has confirmed. With `latest`, each gets
     /// the newest release Apple signs, downloaded if the store lacks it.
-    case restore(hubs: [RestoreSelection], latest: Bool)
+    case restore(hubs: [RestoreSelection], latest: Bool, after: AfterErase)
     /// Repairs the targets from the images a restore would install and keeps
     /// their data.
     case revive(hubs: [RestoreSelection], latest: Bool)
@@ -16,6 +16,7 @@ nonisolated enum AgentRequest: Encodable, Equatable {
     case dfu(hubs: [RestoreSelection])
     /// Signals the targets to restart, as `dfu`.
     case reboot(hubs: [RestoreSelection])
+    case advanceSetup(hubs: [RestoreSelection], setup: SetupOptions)
     case power(hub: String, port: Int, on: Bool)
     case debugUsb(hub: String, port: Int, on: Bool)
     case rename(hub: String, name: String)
@@ -49,7 +50,7 @@ nonisolated enum AgentRequest: Encodable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case op, hub, hubs, port, name, on, percent, bytes, model, build, enabled, image, latest, pkcs12, password
+        case op, hub, hubs, port, name, on, percent, bytes, model, build, enabled, image, latest, pkcs12, password, after, setup
     }
 
     /// The request as the line the agent reads.
@@ -69,7 +70,8 @@ nonisolated enum AgentRequest: Encodable, Equatable {
         case let .plan(hubs):
             try fields.encode("plan", forKey: .op)
             try fields.encode(hubs, forKey: .hubs)
-        case let .restore(hubs, latest):
+        case let .restore(hubs, latest, after):
+            try fields.encode(after, forKey: .after)
             try fields.encode("restore", forKey: .op)
             try fields.encode(hubs, forKey: .hubs)
             try fields.encode(latest, forKey: .latest)
@@ -82,6 +84,10 @@ nonisolated enum AgentRequest: Encodable, Equatable {
             try fields.encode(hubs, forKey: .hubs)
         case let .reboot(hubs):
             try fields.encode("reboot", forKey: .op)
+            try fields.encode(hubs, forKey: .hubs)
+        case let .advanceSetup(hubs, setup):
+            try fields.encode(setup, forKey: .setup)
+            try fields.encode("advance_setup", forKey: .op)
             try fields.encode(hubs, forKey: .hubs)
         case let .power(hub, port, on):
             try fields.encode("power", forKey: .op)
@@ -194,4 +200,20 @@ nonisolated struct RestoreTarget: Encodable, Equatable {
     let port: Int
     let generation: UInt32
     var ecid: String?
+}
+
+nonisolated struct SetupOptions: Codable, Equatable {
+    var language: String
+    var locale: String
+    var enroll: Bool
+}
+
+nonisolated struct AfterErase: Encodable, Equatable {
+    var shutdownMacs: Bool
+    var setup: SetupOptions?
+
+    private enum CodingKeys: String, CodingKey {
+        case shutdownMacs = "shutdown_macs"
+        case setup
+    }
 }

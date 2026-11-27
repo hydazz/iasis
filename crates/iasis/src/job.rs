@@ -4,13 +4,16 @@
 //! that ends.
 
 use std::{
-    sync::{Arc, Condvar, Mutex, OnceLock},
+    sync::{Arc, Condvar, Mutex},
     thread,
     time::{Duration, Instant},
 };
 
+mod run;
+pub(crate) use run::{PortWork, Run};
+
 use anyhow::{Context, Result, anyhow, bail, ensure};
-use iasis_api::{Ending, Target};
+use iasis_api::{StepState, SystemImage, Target};
 use iasis_protocol::{
     self as protocol, CommandError, CommandResult, DebugActions, Gesture, Port, PortAction,
     PortStatus, RestoreAccess, RestoreArm, RestoreDecision, RestorePhase, RestoreStatus, Status,
@@ -44,54 +47,27 @@ const LOOK: Duration = Duration::from_secs(1);
 /// drop at the same stage of more than one attempt.
 const RELAUNCHES: u32 = 3;
 
-/// How a port's last operation ended. The hub forgets a result when its
-/// target leaves, which a restored target does by restarting.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Ended {
-    /// The session and generation of the attachment it was tried on, for an
-    /// operation that ended before a worker ran. Its result describes that
-    /// attachment alone, not the device when it comes back.
-    pub(crate) attachment: Option<(u32, u32)>,
-    pub ending: Ending,
+#[derive(Default)]
+pub(crate) struct PortSlot {
+    pub run: Option<PortWork>,
 }
 
-/// The port and its submitting client share this operation's result across USB sessions.
-pub type PortWork = Arc<OnceLock<Ended>>;
-pub type Endings = Arc<Mutex<[Option<PortWork>; protocol::PORT_COUNT]>>;
+impl PortSlot {
+    pub fn busy(&self) -> bool {
+        self.run.as_ref().is_some_and(|run| run.busy())
+    }
 
-/// Hold each selected port for a new operation, or none of them when one
-/// already has an operation that has not ended.
-pub(crate) fn reserve(endings: &Endings, selected: &[Target]) -> Result<Vec<PortWork>> {
-    let mut slots = endings.lock().unwrap();
-    for Target { port, .. } in selected {
+    pub fn require_idle(&self, port: Port) -> Result<()> {
         ensure!(
-            slots[port.index()]
-                .as_ref()
-                .is_none_or(|work| work.get().is_some()),
-            "port {} already has an active operation",
+            !self.busy(),
+            "port {} has an active operation",
             port.number()
         );
+        Ok(())
     }
-    Ok(selected
-        .iter()
-        .map(|target| {
-            let work = PortWork::default();
-            slots[target.port.index()] = Some(work.clone());
-            work
-        })
-        .collect())
 }
 
-/// Give back ports reserved for operations that will not run.
-pub(crate) fn release(endings: &Endings, selected: &[Target], works: &[PortWork]) {
-    let mut slots = endings.lock().unwrap();
-    for (target, work) in selected.iter().zip(works) {
-        let slot = &mut slots[target.port.index()];
-        if slot.as_ref().is_some_and(|held| Arc::ptr_eq(held, work)) {
-            *slot = None;
-        }
-    }
-}
+pub(crate) type PortSlots = Mutex<[PortSlot; protocol::PORT_COUNT]>;
 
 /// What every job uses of its host.
 #[derive(Clone)]
@@ -103,8 +79,9 @@ pub(crate) struct Host {
 }
 
 /// What a job is asked to do.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct Ask {
+    pub after: iasis_api::AfterErase,
     pub operation: Operation,
     /// Fetch the newest release instead of using an older image in the store.
     pub latest: bool,
@@ -128,37 +105,30 @@ pub(crate) fn spawn(
         generation: target.generation,
         ecid: target.ecid,
         ask,
+        run: work.clone(),
     };
-    let finished = work.clone();
     let spawned = thread::Builder::new()
         .name(format!("job-{}", port.number()))
         .spawn(move || {
-            let ended = job.run(ticket);
-            log::info!(
-                "Port {}: {:?} {:?}: {}",
-                port.number(),
-                ended.ending.operation,
-                ended.ending.phase,
-                ended.ending.message
-            );
-            let _ = finished.set(ended);
-            job.host.changes.changed();
+            if let Err(error) = job.run(ticket) {
+                job.hub.work.awaiting(port, None);
+                log::warn!("Port {}: {error:#}", port.number());
+                job.run.stop(
+                    crate::post_restore::error_state(&error),
+                    format!("{error:#}"),
+                );
+            }
         });
     if let Err(error) = spawned {
-        let session = hub.link().map_or(0, |link| link.session());
-        let _ = work.set(Ended {
-            attachment: Some((session, target.generation)),
-            ending: Ending {
-                operation: ask.operation,
-                phase: RestorePhase::Failed,
-                ecid: target.ecid.map(|id| format!("{id:016x}")),
-                message: format!("Could not start the job: {error}"),
-            },
-        });
+        work.stop(
+            StepState::Failed,
+            format!("Could not start the operation: {error}"),
+        );
     }
 }
 
 struct Job {
+    run: PortWork,
     host: Host,
     hub: Arc<Attendance>,
     port: Port,
@@ -170,38 +140,63 @@ struct Job {
 }
 
 impl Job {
-    fn run(&mut self, ticket: Option<Ticket>) -> Ended {
-        let _taken = self.hub.work.take(self.port);
-        let operation = self.ask.operation;
+    fn run(&mut self, ticket: Option<Ticket>) -> Result<()> {
+        self.run.start();
+        let taken = self.hub.work.take(self.port);
         let awake = crate::awake::hold("Preparing a restore");
-        let started = self.prepare(ticket);
+        let (worker, tracker, image) = self.prepare(ticket)?;
         drop(awake);
-        let (worker, tracker, image) = match started {
-            Ok(started) => started,
-            Err(error) => {
-                self.hub.work.awaiting(self.port, None);
-                let session = self.hub.link().map_or(0, |link| link.session());
-                return Ended {
-                    attachment: Some((session, self.generation)),
-                    ending: Ending {
-                        operation,
-                        ecid: self.ecid.map(|id| format!("{id:016x}")),
-                        phase: RestorePhase::Failed,
-                        message: format!("{error:#}"),
-                    },
-                };
-            }
-        };
         let job = self.follow(worker, &tracker, &image);
-        Ended {
-            attachment: None,
-            ending: Ending {
-                operation: job.operation,
-                ecid: Some(format!("{:016x}", job.ecid)),
-                phase: phase(job.state),
-                message: job.message,
-            },
+        drop(taken);
+        if job.state != RestoreState::RestoreReported {
+            self.run.stop(
+                if job.state == RestoreState::Unconfirmed {
+                    StepState::Unconfirmed
+                } else {
+                    StepState::Failed
+                },
+                job.message,
+            );
+            return Ok(());
         }
+        self.run.complete();
+        drop(image);
+        if self.run.busy() {
+            self.setup_device(&tracker)?;
+        }
+        Ok(())
+    }
+
+    fn after(&self, image: &PreparedIpsw) -> PostRestoreAction {
+        after(
+            self.ask.operation,
+            self.ask.after.shutdown_macs,
+            &image.product_types,
+        )
+    }
+
+    fn setup_device(&self, tracker: &TargetTracker) -> Result<()> {
+        crate::post_restore::advance(
+            || {
+                let Some(link) = self.hub.link() else {
+                    return Ok(None);
+                };
+                let Some((_, snapshot)) = link.sample() else {
+                    return Ok(None);
+                };
+                match tracker.observe(link.hub().serial(), &snapshot) {
+                    Observation::Present {
+                        mode: AppleMode::Normal,
+                    } => Ok(Some(tracker.ecid)),
+                    Observation::Replaced { .. }
+                    | Observation::Moved { .. }
+                    | Observation::HubChanged
+                    | Observation::Ambiguous => bail!("the selected device or port changed"),
+                    _ => Ok(None),
+                }
+            },
+            &self.run,
+        )
     }
 
     /// Bring the target to its restore: its image, from the model known
@@ -213,6 +208,7 @@ impl Job {
             None => None,
         };
         let tracker = self.enter()?;
+        self.run.identify(tracker.ecid);
         let image = match image {
             Some(image) => image,
             // A target this host has not identified names its hardware in DFU
@@ -288,7 +284,32 @@ impl Job {
             Ok(())
         });
         self.hub.work.awaiting(self.port, None);
-        image
+        let image = image?;
+        let os = model
+            .identifier()
+            .and_then(crate::images::system)
+            .or_else(|| {
+                image
+                    .product_types
+                    .iter()
+                    .find_map(|kind| crate::images::system(kind))
+            })
+            .unwrap_or("OS");
+        let setup = self
+            .ask
+            .after
+            .setup
+            .as_ref()
+            .filter(|_| matches!(os, "iOS" | "iPadOS"));
+        self.run.image(
+            SystemImage {
+                os: os.into(),
+                version: image.product_version.clone(),
+                build: image.build_version.clone(),
+            },
+            setup,
+        );
+        Ok(image)
     }
 
     /// The port still holds the target, as the hub reports it: on its
@@ -525,7 +546,7 @@ impl Job {
                                 tracker.ecid,
                                 mode,
                                 self.ask.operation,
-                                after(self.ask.operation, &image.product_types),
+                                self.after(image),
                                 location,
                             );
                             if worker.is_err() {
@@ -628,7 +649,6 @@ impl Job {
                 progress: 0,
             },
             operation: self.ask.operation,
-            stage: None,
         }
     }
 
@@ -646,6 +666,7 @@ impl Job {
         let mut seen = self.host.changes.count();
         loop {
             let job = worker.status();
+            self.run.progress(&job.progress);
             let link = self.hub.link();
             let sample = link.as_ref().and_then(|link| link.sample());
             let observed = sample
@@ -673,7 +694,6 @@ impl Job {
                         progress: job.progress.percent,
                     },
                     operation: job.operation,
-                    stage: Some(job.progress.clone()),
                 }),
             );
             if job.state.is_terminal() {
@@ -808,6 +828,7 @@ fn phase(state: RestoreState) -> RestorePhase {
         RestoreState::Running => RestorePhase::Running,
         RestoreState::RestoreReported => RestorePhase::Reported,
         RestoreState::Failed | RestoreState::TransportLost => RestorePhase::Failed,
+        RestoreState::Unconfirmed => RestorePhase::Unconfirmed,
     }
 }
 
@@ -822,14 +843,12 @@ fn present(tracker: &TargetTracker, snapshot: &Snapshot) -> Option<(AppleMode, D
     }
 }
 
-/// What the target does once its restore OS reports the restore finished,
-/// from the models its image restores. An erased Mac that starts sits at
-/// Language Chooser repeating its spoken prompt, so it powers off instead. A
-/// revived Mac starts into its own setup, and an iPhone or iPad starts as
-/// usual.
-fn after(operation: Operation, product_types: &[String]) -> PostRestoreAction {
-    let mac = product_types.iter().any(|kind| kind.contains("Mac"));
-    if operation == Operation::Restore && mac {
+fn after(operation: Operation, shutdown_macs: bool, product_types: &[String]) -> PostRestoreAction {
+    let mac = !product_types.is_empty()
+        && product_types
+            .iter()
+            .all(|kind| crate::images::system(kind) == Some("macOS"));
+    if operation == Operation::Restore && shutdown_macs && mac {
         PostRestoreAction::Shutdown
     } else {
         PostRestoreAction::Reboot
@@ -1076,54 +1095,6 @@ mod tests {
     use iasis_protocol::PortState;
 
     #[test]
-    fn port_reservations_survive_reattachment_and_reject_whole_overlapping_requests() {
-        let slots = Endings::default();
-        let a = Target {
-            port: Port::ALL[0],
-            generation: 9,
-            ecid: Some(17),
-        };
-        let b = Target {
-            port: Port::ALL[1],
-            ..a
-        };
-        let first = reserve(&slots, &[a]).unwrap();
-        let replacement = Target {
-            generation: 10,
-            ecid: Some(18),
-            ..a
-        };
-        assert!(reserve(&slots, &[b, replacement]).is_err());
-        assert!(slots.lock().unwrap()[1].is_none());
-        first[0]
-            .set(Ended {
-                attachment: None,
-                ending: Ending {
-                    operation: Operation::Revive,
-                    ecid: Some("0000000000000011".into()),
-                    phase: RestorePhase::Failed,
-                    message: "Device disconnected".into(),
-                },
-            })
-            .unwrap();
-        let second = reserve(&slots, &[a, b]).unwrap();
-        assert!(second[0].get().is_none());
-        assert_eq!(
-            first[0].get().unwrap().ending.message,
-            "Device disconnected"
-        );
-        // Released ports take a new operation; a port reserved since stays.
-        release(&slots, &[a, b], &second);
-        assert!(slots.lock().unwrap().iter().all(Option::is_none));
-        let third = reserve(&slots, &[a]).unwrap();
-        release(&slots, &[a], &second[..1]);
-        assert!(Arc::ptr_eq(
-            slots.lock().unwrap()[0].as_ref().unwrap(),
-            &third[0]
-        ));
-    }
-
-    #[test]
     fn a_hold_waits_for_every_job_and_one_verdict() {
         let (gate, mut tickets) = Gate::new(3);
         let stopped = tickets.pop().unwrap();
@@ -1228,10 +1199,26 @@ mod tests {
     fn only_an_erased_mac_powers_off_after_its_restore() {
         let mac = ["Mac16,1".to_owned(), "MacBookAir10,1".to_owned()];
         let ipad = ["iPad13,18".to_owned()];
-        assert_eq!(after(Operation::Restore, &mac), PostRestoreAction::Shutdown);
-        assert_eq!(after(Operation::Revive, &mac), PostRestoreAction::Reboot);
-        assert_eq!(after(Operation::Restore, &ipad), PostRestoreAction::Reboot);
-        assert_eq!(after(Operation::Revive, &ipad), PostRestoreAction::Reboot);
+        assert_eq!(
+            after(Operation::Restore, false, &mac),
+            PostRestoreAction::Reboot
+        );
+        assert_eq!(
+            after(Operation::Restore, true, &mac),
+            PostRestoreAction::Shutdown
+        );
+        assert_eq!(
+            after(Operation::Revive, true, &mac),
+            PostRestoreAction::Reboot
+        );
+        assert_eq!(
+            after(Operation::Restore, true, &ipad),
+            PostRestoreAction::Reboot
+        );
+        assert_eq!(
+            after(Operation::Revive, true, &ipad),
+            PostRestoreAction::Reboot
+        );
     }
 
     #[test]

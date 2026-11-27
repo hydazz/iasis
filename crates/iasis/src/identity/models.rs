@@ -106,6 +106,18 @@ impl Models {
         entries.get(&format!("{ecid:016x}")).cloned()
     }
 
+    pub(crate) fn supports_setup(&self, ecid: Option<u64>, device: Option<&UsbDevice>) -> bool {
+        if let Some(kind) = device.and_then(|d| d.apple.as_ref()?.model.as_deref())
+            && !kind.is_empty()
+        {
+            return crate::post_restore::supports(kind);
+        }
+        ecid.and_then(|id| self.model(id))
+            .as_ref()
+            .and_then(DeviceModel::identifier)
+            .is_some_and(crate::post_restore::supports)
+    }
+
     pub(crate) fn name(&self, ecid: u64, store: &Store) -> Option<String> {
         self.model(ecid)?.name(store)
     }

@@ -36,7 +36,15 @@
         ]
       }
     ],
-    "latest": true
+    "latest": true,
+    "after": {
+      "shutdown_macs": true,
+      "setup": {
+        "language": "en-AU",
+        "locale": "en_AU",
+        "enroll": true
+      }
+    }
   },
   {
     "op": "revive",
@@ -86,6 +94,27 @@
         ]
       }
     ]
+  },
+  {
+    "op": "advance_setup",
+    "hubs": [
+      {
+        "hub": "817a23bd502453b4",
+        "session": 3,
+        "targets": [
+          {
+            "port": 2,
+            "generation": 7,
+            "ecid": "0002250e3c04c01e"
+          }
+        ]
+      }
+    ],
+    "setup": {
+      "language": "en-AU",
+      "locale": "en_AU",
+      "enroll": true
+    }
   },
   {
     "op": "power",

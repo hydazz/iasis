@@ -28,13 +28,7 @@ pub const VERSION: u16 = {
     ])
 };
 /// Every message exchanged after `GET_INFO`.
-type Messages = (
-    Status,
-    HostReport,
-    HostControl,
-    PortCommand,
-    Setting,
-);
+type Messages = (Status, HostReport, HostControl, PortCommand, Setting);
 pub const MAX_PACKET: usize = 1408;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
