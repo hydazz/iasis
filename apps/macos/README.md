@@ -47,7 +47,7 @@ A hub on a power supply shows, beside its name, the power allocated to its ports
 
 Each row ends in a mark for the current step or the outcome of the run. Select a device to see its requested steps in order, including while it reboots. Restore and Revive show the OS version and build. During installation, a progress bar shows the percentage complete and the activity beneath it names the current stage. Set Region shows the target region and language. A checkmark beside Request Enrollment means the device accepted the request. **Continue on Device** means the device or its management service must finish the step. The inspector shows the reason.
 
-The inspector also shows device identity, USB connection and power. Power shows the PD contract or default USB allowance with exact nominal watts in parentheses. The toolbar lets you hide or show the inspector. The bar under the list reports an image download.
+The inspector also shows device identity, USB connection and power. Power shows the PD contract or default USB allowance with exact nominal watts in parentheses. The inspector follows the selected port through disconnects and reconnects. You can also show or hide it from the View menu or toolbar. The bar under the list reports an image download.
 
 ## Settings and Help
 

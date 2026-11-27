@@ -7,58 +7,22 @@ struct DeviceInspector: View {
     var body: some View {
         let steps = device.run?.steps ?? []
         let hasLiveAction = device.port.request != nil || device.port.job != nil || device.port.awaiting != nil
-        let leads = !steps.isEmpty || hasLiveAction || device.port.fault != nil || device.needs != nil
+        let showsActivity = !steps.isEmpty || hasLiveAction || device.port.fault != nil || device.needs != nil
         Form {
-            if leads {
-                Section {
-                    if let fault = device.port.fault {
-                        Label(fault, systemImage: "exclamationmark.triangle.fill")
-                    }
-                    if hasLiveAction, device.port.fault == nil,
-                       steps.isEmpty || device.port.request != nil && device.run?.inProgress != true
-                    {
-                        HStack {
-                            ActivityMark(activity: device.activity)
-                            Text(device.activity.text)
-                        }
-                        .accessibilityElement(children: .combine)
-                    }
-                    ForEach(steps, id: \.kind) { step in
-                        OperationStepRow(step: step, waitingForImage: device.port.awaiting != nil)
-                    }
-                    if let needs = device.needs {
-                        Label(needs.reason, systemImage: "exclamationmark.triangle")
-                        if let url = needs.url.flatMap(URL.init(string:)) {
-                            Link("Get \(needs.name)", destination: url)
-                        }
-                    }
-                } header: {
-                    DeviceTitle(device: device)
-                }
-            }
             Section {
-                LabeledContent("Port", value: "\(device.hubTitle) · \(device.port.number)")
-                if let ecid = device.port.ecid {
-                    LabeledContent("ECID", value: ecid)
-                }
-                if let link = device.port.link {
-                    LabeledContent("USB Link", value: link.title)
-                }
-                if let mode = device.port.modeTitle {
-                    LabeledContent("USB Mode", value: mode)
-                }
-                if device.port.wrongDfuPort {
-                    Text(Device.dfuPortHelp).foregroundStyle(.secondary)
-                }
-                if let problem = device.sharing?.problem {
-                    Label(problem, systemImage: "exclamationmark.triangle")
-                } else if device.sharesInternet {
-                    Label("Internet Sharing", systemImage: DeviceSymbol.lan)
+                if showsActivity {
+                    activityRows(steps: steps, hasLiveAction: hasLiveAction)
+                } else {
+                    portDetails
                 }
             } header: {
-                if !leads {
-                    DeviceTitle(device: device)
-                }
+                DeviceName(device: device, lineLimit: nil)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .textCase(nil)
+            }
+            if showsActivity {
+                Section { portDetails }
             }
             if device.port.powered || device.port.power != nil || device.port.waitingForPower || device.port.short {
                 Section("Power") {
@@ -79,16 +43,51 @@ struct DeviceInspector: View {
         .formStyle(.grouped)
         .textSelection(.enabled)
     }
-}
 
-private struct DeviceTitle: View {
-    let device: Device
+    @ViewBuilder
+    private func activityRows(steps: [AgentState.OperationStep], hasLiveAction: Bool) -> some View {
+        if let fault = device.port.fault {
+            Label(fault, systemImage: "exclamationmark.triangle.fill")
+        }
+        if hasLiveAction, device.port.fault == nil,
+           steps.isEmpty || device.port.request != nil && device.run?.inProgress != true
+        {
+            HStack {
+                ActivityMark(activity: device.activity)
+                Text(device.activity.text)
+            }
+            .accessibilityElement(children: .combine)
+        }
+        ForEach(steps, id: \.kind) { step in
+            OperationStepRow(step: step, waitingForImage: device.port.awaiting != nil)
+        }
+        if let needs = device.needs {
+            Label(needs.reason, systemImage: "exclamationmark.triangle")
+            if let url = needs.url.flatMap(URL.init(string:)) {
+                Link("Get \(needs.name)", destination: url)
+            }
+        }
+    }
 
-    var body: some View {
-        DeviceName(device: device, lineLimit: nil)
-            .font(.headline)
-            .foregroundStyle(.primary)
-            .textCase(nil)
+    @ViewBuilder private var portDetails: some View {
+        LabeledContent("Port", value: "\(device.hubTitle) · \(device.port.number)")
+        if let ecid = device.port.ecid {
+            LabeledContent("ECID", value: ecid)
+        }
+        if let link = device.port.link {
+            LabeledContent("USB Link", value: link.title)
+        }
+        if let mode = device.port.modeTitle {
+            LabeledContent("USB Mode", value: mode)
+        }
+        if device.port.wrongDfuPort {
+            Text(Device.dfuPortHelp).foregroundStyle(.secondary)
+        }
+        if let problem = device.sharing?.problem {
+            Label(problem, systemImage: "exclamationmark.triangle")
+        } else if device.sharesInternet {
+            Label("Internet Sharing", systemImage: DeviceSymbol.lan)
+        }
     }
 }
 

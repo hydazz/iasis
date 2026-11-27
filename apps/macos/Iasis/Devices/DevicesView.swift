@@ -35,7 +35,6 @@ struct DevicesView: View {
                     }
                     ForEach(group.devices) { device in
                         DeviceRowView(device: device)
-                            .selectionDisabled(!device.isSelectable)
                     }
                 } header: {
                     HubHeader(group: group)
@@ -110,19 +109,26 @@ struct DevicesView: View {
             ToolbarSpacer(.fixed)
             ToolbarItem {
                 Button("Inspector", systemImage: "sidebar.trailing") { browser.showsInspector.toggle() }
-                    .disabled(browser.inspected == nil)
                     .help("Show or hide device information")
             }
         }
-        .inspector(isPresented: Binding {
-            browser.showsInspector && browser.inspected != nil
-        } set: { shown in
-            browser.showsInspector = shown
-        }) {
+        .inspector(isPresented: $browser.showsInspector) {
             Group {
                 if let device = browser.inspected {
                     DeviceInspector(device: device)
                         .id(device.id)
+                } else {
+                    Group {
+                        if browser.selection.isEmpty {
+                            Text("No Selection")
+                        } else if browser.selection.count == 1 {
+                            Text("Port Unavailable")
+                        } else {
+                            Text("\(browser.selection.count) Ports Selected")
+                        }
+                    }
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .inspectorColumnWidth(min: 240, ideal: 280, max: 400)

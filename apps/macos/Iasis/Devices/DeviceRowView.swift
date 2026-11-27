@@ -54,26 +54,25 @@ struct DeviceName: View {
     var lineLimit: Int? = 1
 
     var body: some View {
-        HStack(spacing: 6) {
-            Group {
-                if device.port.identifying {
-                    Image(systemName: ActivityMark.turning)
-                        .symbolEffect(.rotate, options: .repeat(.continuous), isActive: !reduceMotion)
-                } else if let symbol = device.symbol {
-                    Image(systemName: symbol)
-                } else {
-                    Color.clear.frame(height: 1)
+        Text(device.name)
+            .italic(device.port.identifying)
+            .foregroundStyle(device.port.identifying || !device.port.occupied ? .secondary : .primary)
+            .lineLimit(lineLimit)
+            .padding(.leading, 26)
+            .overlay(alignment: .topLeading) {
+                Group {
+                    if device.port.identifying {
+                        Image(systemName: ActivityMark.turning)
+                            .symbolEffect(.rotate, options: .repeat(.continuous), isActive: !reduceMotion)
+                    } else if let symbol = device.symbol {
+                        Image(systemName: symbol)
+                    }
                 }
+                .frame(width: 20)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             }
-            .frame(width: 20)
-            .foregroundStyle(.secondary)
-            .accessibilityHidden(true)
-            Text(device.name)
-                .italic(device.port.identifying)
-                .foregroundStyle(device.port.identifying || !device.port.occupied ? .secondary : .primary)
-                .lineLimit(lineLimit)
-                .help(device.name)
-        }
+            .help(device.name)
     }
 }
 

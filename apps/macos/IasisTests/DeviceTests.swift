@@ -23,7 +23,6 @@ struct DeviceTests {
         let devices = state.devices
         #expect(devices.map(\.port.number) == [1, 2, 3, 4, 5])
         #expect(devices.map(\.name) == ["Empty", "MacBook Air (13-inch, M5)", "iPad", "Unknown Device", "Unknown Device"])
-        #expect(devices.map(\.isSelectable) == [false, true, true, true, true])
         #expect(devices[1].symbol == "laptopcomputer")
         #expect(devices[0].symbol == nil)
 
@@ -35,7 +34,6 @@ struct DeviceTests {
 
         state.hubs[0].ports[0].enabled = false
         #expect(state.devices[0].name == "Off")
-        #expect(state.devices[0].isSelectable)
     }
 
     @Test func aPeripheralWithNoAppleModeIsAnOrdinaryDevice() throws {
@@ -139,19 +137,17 @@ struct DeviceTests {
         #expect(state.waitingForDownload == 2)
     }
 
-    @Test func anActiveRunKeepsItsPortSelectableAcrossReboots() throws {
+    @Test func anActiveRunFollowsThePortAcrossReboots() throws {
         var state = try Fixtures.state
         state.hubs[0].ports[2].occupied = false
         state.hubs[0].ports[2].device = nil
         state.hubs[0].ports[2].job = nil
         let waiting = state.devices[2]
-        #expect(waiting.isSelectable)
         #expect(waiting.name == "Waiting for Device")
         #expect(waiting.activity.text == "Restoring 43%")
 
         state.hubs[0].ports[2].run = state.hubs[0].ports[3].run
         #expect(state.devices[2].run == nil)
-        #expect(!state.devices[2].isSelectable)
         #expect(state.devices[2].activity == .idle)
         state.hubs[0].ports[2].occupied = true
         state.hubs[0].ports[2].ecid = "0000000000001234"
@@ -238,7 +234,7 @@ struct DeviceTests {
     @Test func actionsRequireEverySelectedDevice() throws {
         var state = try Fixtures.state
         let hub = "a0e012192cdfdb67"
-        let all = DeviceActions(state.devices.filter(\.isSelectable))
+        let all = DeviceActions(state.devices)
         let mac = RestoreTarget(port: 2, generation: 2, ecid: "001a79d10e6bc01c")
         let other = RestoreTarget(port: 4, generation: 4, ecid: "0002250e3c04c01e")
         #expect(all.dfu.isEmpty)

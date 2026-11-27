@@ -39,7 +39,7 @@ final class DeviceBrowser {
         selected.lazy.compactMap(\.needs).first
     }
 
-    /// The device the inspector shows: the selection, when it is one device.
+    /// The selected physical port, including while it is empty.
     var inspected: Device? {
         let selected = selected
         return selected.count == 1 ? selected.first : nil
@@ -50,7 +50,7 @@ final class DeviceBrowser {
     }
 
     func devices(in ids: Set<Device.ID>) -> [Device] {
-        let devices = model.state?.devices.filter { ids.contains($0.id) && $0.isSelectable } ?? []
+        let devices = model.state?.devices.filter { ids.contains($0.id) } ?? []
         return devices.count == ids.count ? devices : []
     }
 }

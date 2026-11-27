@@ -3,9 +3,7 @@ import Foundation
 /// One port of one hub and what is on it, as every view shows it.
 struct Device: Identifiable, Equatable {
     struct ID: Hashable {
-        // periphery:ignore
         let hub: String
-        // periphery:ignore
         let port: Int
     }
 
@@ -25,11 +23,6 @@ struct Device: Identifiable, Equatable {
 
     var id: ID {
         ID(hub: serial, port: port.number)
-    }
-
-    /// An active run stays on its reserved port while the target reboots.
-    var isSelectable: Bool {
-        port.occupied || !port.enabled || run?.inProgress == true
     }
 
     var run: AgentState.OperationRun? {
@@ -198,7 +191,7 @@ struct DeviceActions: Equatable {
     init() {}
 
     init(_ devices: [Device]) {
-        guard !devices.isEmpty, devices.allSatisfy(\.isSelectable) else { return }
+        guard !devices.isEmpty, devices.allSatisfy(\.port.occupied) else { return }
         if let hubs = devices.selections {
             if devices.allSatisfy(\.port.dfu) {
                 dfu = [.dfu(hubs: hubs)]
