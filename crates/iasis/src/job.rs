@@ -540,14 +540,12 @@ impl Job {
                             self.hub
                                 .work
                                 .job(self.port, Some(self.preparing(tracker.ecid)));
-                            let location = crate::native::kis_location(&snapshot, self.port, mode);
                             let worker = self.host.engine.start(
                                 image,
                                 tracker.ecid,
                                 mode,
                                 self.ask.operation,
                                 self.after(image),
-                                location,
                             );
                             if worker.is_err() {
                                 self.hub.work.job(self.port, None);
