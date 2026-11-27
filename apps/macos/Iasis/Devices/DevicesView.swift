@@ -15,38 +15,14 @@ struct DevicesView: View {
         let state = model.state
         let hubs = state?.hubDevices ?? []
 
-        List(selection: $browser.selection) {
-            ForEach(hubs) { group in
-                Section {
-                    if let notice = group.hub.notice {
-                        Label(notice, systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.secondary)
-                            .selectionDisabled()
+        ScrollViewReader { proxy in
+            portList(hubs)
+                .onChange(of: browser.portToReveal, initial: true) { _, id in
+                    if let id {
+                        proxy.scrollTo(id)
+                        browser.portToReveal = nil
                     }
-                    if group.hub.update?.required == true {
-                        HStack {
-                            Label("Update IasisOS to use this hub", systemImage: "arrow.down.circle")
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Button("Update") { model.updateFirmware(of: group.hub.serial) }
-                                .disabled(model.updating.contains(group.hub.serial))
-                        }
-                        .selectionDisabled()
-                    }
-                    ForEach(group.devices) { device in
-                        DeviceRowView(device: device)
-                    }
-                } header: {
-                    HubHeader(group: group)
-                        .listRowSeparator(.hidden, edges: .bottom)
                 }
-            }
-        }
-        .contextMenu(forSelectionType: Device.ID.self) { ids in
-            DeviceActionButtons(browser: browser, contextSelection: ids)
-        } primaryAction: { ids in
-            browser.selection = ids
-            browser.showsInspector = true
         }
         .overlay {
             if state == nil, BundledAgent.needsApproval {
@@ -151,6 +127,45 @@ struct DevicesView: View {
         }
         .focusedSceneValue(\.deviceBrowser, browser)
         .frame(minWidth: 400, minHeight: 260)
+    }
+
+    private func portList(_ hubs: [HubDevices]) -> some View {
+        @Bindable var browser = browser
+        return List(selection: $browser.selection) {
+            ForEach(hubs) { group in
+                Section {
+                    if let notice = group.hub.notice {
+                        Label(notice, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.secondary)
+                            .selectionDisabled()
+                    }
+                    if group.hub.update?.required == true {
+                        HStack {
+                            Label("Update IasisOS to use this hub", systemImage: "arrow.down.circle")
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Update") { model.updateFirmware(of: group.hub.serial) }
+                                .disabled(model.updating.contains(group.hub.serial))
+                        }
+                        .selectionDisabled()
+                    }
+                    ForEach(group.devices) { device in
+                        DeviceRowView(device: device)
+                            .contentShape(.rect)
+                            .simultaneousGesture(TapGesture().onEnded { browser.showsInspector = true })
+                    }
+                } header: {
+                    HubHeader(group: group)
+                        .listRowSeparator(.hidden, edges: .bottom)
+                }
+            }
+        }
+        .contextMenu(forSelectionType: Device.ID.self) { ids in
+            DeviceActionButtons(browser: browser, contextSelection: ids)
+        } primaryAction: { ids in
+            browser.selection = ids
+            browser.showsInspector = true
+        }
     }
 }
 

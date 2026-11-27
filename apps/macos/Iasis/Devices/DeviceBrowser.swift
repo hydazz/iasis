@@ -8,6 +8,7 @@ final class DeviceBrowser {
     let model: AgentModel
     var selection = Set<Device.ID>()
     var showsInspector = true
+    var portToReveal: Device.ID?
     /// The erase the user is being asked to confirm.
     var confirming: RestoreConfirmation?
     @ObservationIgnored private var planning: Task<Void, Never>?
@@ -16,6 +17,11 @@ final class DeviceBrowser {
         self.model = model
     }
 
+    func openDevice(_ id: Device.ID) {
+        selection = [id]
+        showsInspector = true
+        portToReveal = id
+    }
 
     /// Ask the agent what each device would be restored with, then ask the
     /// user to confirm the erase.

@@ -21,13 +21,13 @@ sudo ln -sf /Applications/Iasis.app/Contents/Helpers/iasis /usr/local/bin/iasis
 
 The cable dims when no hub is connected. A ring over its tail shows work under way, and a red mark means a hub or port needs attention.
 
-The menu groups devices by hub, each under its physical port number with a line on what it is doing. Choose a device for its actions or choose Get Info to open its inspector. Status and available actions update while the menu is open. If another device takes the same port, the old submenu’s actions become unavailable. New rows appear when you move off the highlighted item or reopen the menu.
+The menu groups devices by hub, each under its physical port number with a line on what it is doing. Choose **Open Device** in its submenu to select the port and open its inspector in the Iasis window. Status and available actions update while the menu is open. If another device takes the same port, the old submenu’s actions become unavailable. New rows appear when you move off the highlighted item or reopen the menu.
 
 ## Window
 
 Each row represents a physical port. Its number follows the port light. A new attachment shows _Identifying…_ until the agent learns its name or the initial lookup ends. A question mark represents an unrecognized device. A Mac keeps its name when it leaves USB while still plugged in.
 
-The bolt shows USB power. The cable marks a live USB link. A highlighted tip indicates USB 3. A wired network symbol marks active internet sharing. **PORT** means the connected Mac reports that this connector lacks DFU USB. Hover over an indicator or open Get Info for details.
+The bolt shows USB power. The cable marks a live USB link. A highlighted tip indicates USB 3. A wired network symbol marks active internet sharing. **PORT** means the connected Mac reports that this connector lacks DFU USB. Hover over an indicator or click the row for details.
 
 Select rows and use the toolbar, the Device menu or a row’s context menu. The context menu shows actions that apply to every selected device, including selections across hubs.
 
@@ -47,7 +47,7 @@ A hub on a power supply shows, beside its name, the power allocated to its ports
 
 Each row ends in a mark for the current step or the outcome of the run. Select a device to see its requested steps in order, including while it reboots. Restore and Revive show the OS version and build. During installation, a progress bar shows the percentage complete and the activity beneath it names the current stage. Set Region shows the target region and language. A checkmark beside Request Enrollment means the device accepted the request. **Continue on Device** means the device or its management service must finish the step. The inspector shows the reason.
 
-The inspector also shows device identity, USB connection and power. Power shows the PD contract or default USB allowance with exact nominal watts in parentheses. The inspector follows the selected port through disconnects and reconnects. You can also show or hide it from the View menu or toolbar. The bar under the list reports an image download.
+The inspector also shows device identity, USB connection and power. Power shows the PD contract or default USB allowance with exact nominal watts in parentheses. Clicking a port opens its inspector. It follows that port through disconnects and reconnects. You can also show or hide it from the View menu or toolbar. The bar under the list reports an image download.
 
 ## Settings and Help
 

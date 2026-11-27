@@ -48,13 +48,6 @@ struct DeviceActionButtons: View {
                 .disabled(actions.advanceSetup.isEmpty)
             }
         }
-        if let browser, contextSelection != nil, devices.count == 1 {
-            Divider()
-            Button("Get Info", systemImage: "info.circle") {
-                browser.selection = ids
-                browser.showsInspector = true
-            }
-        }
     }
 }
 
