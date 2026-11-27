@@ -8,8 +8,10 @@ namespace Iasis.Tests;
 
 public class AgentClientTests
 {
-    [Fact]
-    public async Task SubmittedResultsStayOnTheConnectionThatSentTheRequest()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SubmittedResultsStayOnTheConnectionThatSentTheRequest(bool setup)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var token = timeout.Token;
@@ -17,19 +19,23 @@ public class AgentClientTests
         using var listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
         listener.Bind(new UnixDomainSocketEndPoint(path));
         listener.Listen(1);
-        var hubs = new[] { new Selection("abcd", 1, [new(2, 4, null)]) };
+        var hubs = new[] { new Selection("abcd", 1, [new(2, 4, "1234")]) };
+        Request request = setup ? new AdvanceSetupRequest(hubs, null, Dep: true, CheckOnly: false) : new ReviveRequest(hubs, false);
         try
         {
             var serving = Serve();
             var frames = new List<AgentState>();
-            await foreach (var frame in new AgentClient(path).Watch(token, new ReviveRequest(hubs, false)))
+            await foreach (var frame in new AgentClient(path).Watch(token, request))
                 frames.Add(frame);
             await serving;
             Assert.Equal(2, frames.Count);
             Assert.Null(Assert.Single(frames[0].Submitted!));
             Assert.Empty(frames[1].Hubs);
             Assert.True(frames[1].PostRestore.TryEnrollment);
-            Assert.Equal(RestorePhase.Reported, Assert.Single(frames[1].Submitted!)!.Phase);
+            var run = Assert.Single(frames[1].Submitted!)!;
+            Assert.True(run.Finished());
+            Assert.True(run.Succeeded());
+            Assert.Equal(setup ? StepKind.RequestEnrollment : StepKind.Revive, Assert.Single(run.Steps).Kind);
         }
         finally { File.Delete(path); }
 
@@ -40,7 +46,8 @@ public class AgentClientTests
             using var reader = new StreamReader(stream, leaveOpen: true);
             using var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
             var submit = JsonNode.Parse((await reader.ReadLineAsync(token))!)!;
-            Assert.Equal("revive", (string?)submit["op"]);
+            Assert.Equal(setup ? "advance_setup" : "revive", (string?)submit["op"]);
+            if (setup) Assert.False((bool?)submit["check_only"]);
             Assert.Equal(4, (int?)submit["hubs"]![0]!["targets"]![0]!["generation"]);
             await writer.WriteLineAsync("\"ok\"");
             Assert.Equal("watch", (string?)JsonNode.Parse((await reader.ReadLineAsync(token))!)!["op"]);
@@ -50,8 +57,9 @@ public class AgentClientTests
                 """)!;
             await writer.WriteLineAsync(frame.ToJsonString());
             frame["state"]!["submitted"]![0] = JsonNode.Parse("""
-                {"operation":"revive","phase":"Reported","message":"Complete"}
+                {"ecid":"1234","steps":[{"kind":"revive","state":"complete"}]}
                 """);
+            if (setup) frame["state"]!["submitted"]![0]!["steps"]![0]!["kind"] = "request_enrollment";
             await writer.WriteLineAsync(frame.ToJsonString());
         }
     }

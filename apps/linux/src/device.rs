@@ -3,9 +3,9 @@
 //! and descriptions take sentence case.
 
 use iasis_api::{
-    AppleMode, HubView, Offer, Operation, Planned, Port, PortPower, PortView, PowerSource,
-    Prerequisite, Release, Request, RequestProgress, RestorePhase, Selection, SharingPort, State,
-    Target, UsbLink,
+    AppleMode, HubView, Offer, Operation, OperationRun, OperationStep, Planned, Port, PortPower,
+    PortView, PowerSource, Prerequisite, Release, Request, RequestProgress, RestorePhase,
+    Selection, SharingPort, State, StepKind, StepState, Target, UsbLink,
 };
 
 /// A port, named by its hub's serial and its number.
@@ -100,18 +100,31 @@ impl Device {
         (self.serial.clone(), self.port.number)
     }
 
-    /// The port holds a device or is switched off; an empty port offers nothing.
+    /// The run keeps its port through a reboot before the device enumerates again.
+    pub fn has_target(&self) -> bool {
+        self.port.occupied || self.port.run.as_ref().is_some_and(|run| !run.finished())
+    }
+
+    pub fn ecid(&self) -> Option<&str> {
+        self.port
+            .ecid
+            .as_deref()
+            .or_else(|| self.port.run.as_ref()?.ecid.as_deref())
+    }
+
     pub fn selectable(&self) -> bool {
-        self.port.occupied || !self.port.enabled
+        self.has_target() || !self.port.enabled
     }
 
     pub fn name(&self) -> String {
         if !self.port.enabled {
             "Off".into()
-        } else if !self.port.occupied {
+        } else if !self.has_target() {
             "Empty".into()
         } else if let Some(name) = &self.port.device {
             name.clone()
+        } else if !self.port.occupied {
+            "Reconnecting…".into()
         } else if self.port.identifying {
             "Identifying…".into()
         } else {
@@ -127,8 +140,7 @@ impl Device {
 
     /// The icon for the kind of device on the port.
     pub fn icon(&self) -> Option<&'static str> {
-        self.port
-            .occupied
+        self.has_target()
             .then(|| kind_icon(self.port.device.as_deref().unwrap_or_default()))
     }
 
@@ -138,55 +150,25 @@ impl Device {
         if let Some(fault) = &port.fault {
             return Activity::new(fault, Mark::Failed);
         }
+        let run = port.run.as_ref().filter(|run| !run.steps.is_empty());
+        if let Some(run) = run
+            && !run.finished()
+        {
+            return run_activity(run, port.awaiting.is_some());
+        }
         if !port.occupied || !port.enabled {
             return Activity::idle();
         }
-        if port.awaiting.is_some() {
-            return Activity::new("Waiting for image", Mark::Working(None));
-        }
-        if let Some(job) = &port.job
-            && matches!(job.phase, RestorePhase::Preparing | RestorePhase::Running)
-        {
-            return match &port.stage {
-                Some(stage) => Activity::new(
-                    format!("{} {}%", operation_running(job.operation), stage.percent),
-                    Mark::Working(Some(f64::from(stage.percent) / 100.0)),
-                ),
-                None => Activity::phase(job.phase, job.operation),
-            };
-        }
-        match port.request {
-            Some(RequestProgress::SettingLanguage) => {
-                return Activity::new("Setting language and region", Mark::Working(None));
-            }
-            Some(RequestProgress::Enrolling) => {
-                return Activity::new("Trying enrollment", Mark::Working(None));
-            }
-            Some(RequestProgress::EnteringDfu) => {
-                return Activity::new("Entering DFU", Mark::Working(None));
-            }
-            Some(RequestProgress::Restarting) => {
-                return Activity::new("Restarting", Mark::Working(None));
-            }
-            Some(RequestProgress::DfuUnconfirmed) => {
-                return Activity::new("DFU not confirmed", Mark::Uncertain);
-            }
-            None => {}
-        }
-        if port
-            .result
-            .as_ref()
-            .is_some_and(|result| result.setup_error.is_some())
-        {
-            return Activity::new("Restored, setup incomplete", Mark::Caution);
+        if let Some(activity) = self.current_action() {
+            return activity;
         }
         if port.waiting_for_power {
             return Activity::new("Waiting for power", Mark::Caution);
         }
-        if let Some(result) = &port.result {
-            return Activity::phase(result.phase, result.operation);
+        if let Some(run) = run {
+            return run_activity(run, false);
         }
-        if let Some(job) = &port.job {
+        if let Some(job) = port.job {
             return Activity::phase(job.phase, job.operation);
         }
         match port.mode {
@@ -196,76 +178,47 @@ impl Device {
         }
     }
 
-    /// The operation on the port: one under way, or else how the last ended.
-    pub fn operation(&self) -> Option<OperationStatus> {
+    fn current_action(&self) -> Option<Activity> {
         let port = &self.port;
-        if port.fault.is_some() || !port.occupied || !port.enabled {
-            return None;
+        if port.awaiting.is_some() {
+            return Some(Activity::new("Waiting for image", Mark::Working(None)));
         }
-        let activity = self.activity();
-        if let Some(job) = &port.job
+        if let Some(job) = port.job
             && matches!(job.phase, RestorePhase::Preparing | RestorePhase::Running)
         {
-            let mut status = OperationStatus::new(
-                operation_title(job.operation),
-                operation_icon(job.operation),
-                activity.mark,
-            );
-            if port.awaiting.is_some() {
-                status.steps = vec![Step {
-                    name: "Waiting for Image".into(),
-                    state: StepState::Active,
-                }];
-            } else if let Some(stage) = &port.stage {
-                status.steps = stage
-                    .steps
-                    .iter()
-                    .enumerate()
-                    .map(|(index, name)| Step {
-                        name: name.clone(),
-                        state: match index.cmp(&stage.step) {
-                            std::cmp::Ordering::Less => StepState::Done,
-                            std::cmp::Ordering::Equal => StepState::Active,
-                            std::cmp::Ordering::Greater => StepState::Pending,
-                        },
-                    })
-                    .collect();
-                // Firmware transfers interleave with the steps and belong to none.
-                status.detail = (!stage.steps.contains(&stage.name)).then(|| stage.name.clone());
-            } else {
-                status.detail = Some(activity.text);
-            }
-            return Some(status);
+            return Some(Activity::phase(job.phase, job.operation));
         }
-        if let Some(request) = port.request {
-            let icon = match request {
-                RequestProgress::Enrolling => "network-server-symbolic",
-                RequestProgress::SettingLanguage => "preferences-desktop-locale-symbolic",
-                RequestProgress::Restarting => RESTART_ICON,
-                RequestProgress::EnteringDfu | RequestProgress::DfuUnconfirmed => DFU_ICON,
-            };
-            return Some(OperationStatus::new(&activity.text, icon, activity.mark));
-        }
-        if let Some(result) = &port.result {
-            let ending = if result.setup_error.is_some() {
-                activity
-            } else {
-                Activity::phase(result.phase, result.operation)
-            };
-            let mut status =
-                OperationStatus::new(&ending.text, operation_icon(result.operation), ending.mark);
-            status.detail = Some(
-                result
-                    .setup_error
-                    .as_ref()
-                    .unwrap_or(&result.message)
-                    .clone(),
-            );
-            return Some(status);
-        }
-        port.job.map(|job| {
-            OperationStatus::new(&activity.text, operation_icon(job.operation), activity.mark)
+        Some(match port.request? {
+            RequestProgress::EnteringDfu => Activity::new("Entering DFU", Mark::Working(None)),
+            RequestProgress::Restarting => Activity::new("Restarting", Mark::Working(None)),
+            RequestProgress::DfuUnconfirmed => Activity::new("DFU not confirmed", Mark::Uncertain),
         })
+    }
+
+    pub fn operation_steps(&self) -> Vec<Step> {
+        let port = &self.port;
+        let mut steps = Vec::new();
+        if let Some(run) = &port.run {
+            steps.extend(
+                run.steps
+                    .iter()
+                    .map(|step| Step::from_run(step, port.awaiting.is_some())),
+            );
+            if !run.finished() {
+                return steps;
+            }
+        }
+        if !port.occupied || !port.enabled {
+            return Vec::new();
+        }
+        if let Some(activity) = self.current_action() {
+            steps.push(Step::observation(activity));
+        } else if steps.is_empty()
+            && let Some(job) = port.job
+        {
+            steps.push(Step::observation(Activity::phase(job.phase, job.operation)));
+        }
+        steps
     }
 
     fn target(&self) -> Target {
@@ -302,13 +255,6 @@ fn operation_running(operation: Operation) -> &'static str {
     }
 }
 
-pub fn operation_icon(operation: Operation) -> &'static str {
-    match operation {
-        Operation::Restore => RESTORE_ICON,
-        Operation::Revive => REVIVE_ICON,
-    }
-}
-
 /// The icon for a device of this name.
 fn kind_icon(name: &str) -> &'static str {
     let name = name.to_lowercase();
@@ -335,7 +281,7 @@ pub fn mode_title(mode: AppleMode) -> &'static str {
         AppleMode::Recovery => "Recovery",
         AppleMode::Kis => "Debug USB",
         AppleMode::PortDfu => "Port DFU",
-        AppleMode::Restored => "Restore service",
+        AppleMode::Restored => "Restore mode",
         AppleMode::Normal => "Started up",
     }
 }
@@ -397,6 +343,8 @@ pub struct Activity {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mark {
     None,
+    Pending,
+    Skipped,
     /// Under way, with the fraction done when it is known.
     Working(Option<f64>),
     Done,
@@ -431,40 +379,123 @@ impl Activity {
     }
 }
 
-/// A port's operation as the inspector lays it out.
-#[derive(Clone, Debug, PartialEq)]
-pub struct OperationStatus {
-    pub title: String,
-    pub icon: &'static str,
-    pub mark: Mark,
-    /// What is happening when no step says it, or how the operation ended.
-    pub detail: Option<String>,
-    pub steps: Vec<Step>,
-}
-
-impl OperationStatus {
-    fn new(title: &str, icon: &'static str, mark: Mark) -> Self {
-        Self {
-            title: title.to_owned(),
-            icon,
-            mark,
-            detail: None,
-            steps: Vec::new(),
+fn run_activity(run: &OperationRun, waiting_for_image: bool) -> Activity {
+    let Some(step) = run.steps.iter().min_by_key(|step| match step.state {
+        StepState::Active => 0,
+        StepState::Failed | StepState::Unconfirmed => 1,
+        StepState::Pending => 2,
+        StepState::Skipped => 3,
+        StepState::Complete => 4,
+    }) else {
+        return Activity::idle();
+    };
+    let (part, running, completed) = match step.kind {
+        StepKind::Restore => ("Restore", "Restoring", "Restore complete"),
+        StepKind::Revive => ("Revive", "Reviving", "Revive complete"),
+        StepKind::SetRegion => (
+            "Language and region",
+            "Setting language and region",
+            "Language and region set",
+        ),
+        StepKind::RequestEnrollment => (
+            "Enrollment request",
+            "Requesting enrollment",
+            "Enrollment requested",
+        ),
+    };
+    let system = matches!(step.kind, StepKind::Restore | StepKind::Revive);
+    match step.state {
+        StepState::Active | StepState::Pending if waiting_for_image && system => {
+            Activity::new("Waiting for image", Mark::Working(None))
         }
+        StepState::Active => match step.progress.as_ref().filter(|_| system) {
+            Some(progress) => Activity::new(
+                format!("{running} {}%", progress.percent),
+                Mark::Working(Some(f64::from(progress.percent) / 100.0)),
+            ),
+            None => Activity::new(running, Mark::Working(None)),
+        },
+        StepState::Complete => Activity::new(
+            if run.steps.len() == 1 {
+                completed
+            } else {
+                "Requested steps complete"
+            },
+            Mark::Done,
+        ),
+        StepState::Failed => Activity::new(format!("{part} failed"), Mark::Failed),
+        StepState::Unconfirmed => Activity::new(format!("{part} unconfirmed"), Mark::Uncertain),
+        StepState::Skipped => Activity::new(format!("{part} skipped"), Mark::Skipped),
+        StepState::Pending => Activity::new(format!("{part} pending"), Mark::Pending),
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Step {
-    pub name: String,
+    pub title: String,
     pub state: StepState,
+    pub detail: String,
+    pub percent: Option<u8>,
+    pub activity: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum StepState {
-    Done,
-    Active,
-    Pending,
+impl Step {
+    fn observation(activity: Activity) -> Self {
+        let state = match activity.mark {
+            Mark::Done => StepState::Complete,
+            Mark::Failed => StepState::Failed,
+            Mark::Uncertain => StepState::Unconfirmed,
+            _ => StepState::Active,
+        };
+        Self {
+            title: activity.text,
+            state,
+            detail: String::new(),
+            percent: None,
+            activity: String::new(),
+        }
+    }
+
+    fn from_run(step: &OperationStep, waiting_for_image: bool) -> Self {
+        let title = match step.kind {
+            StepKind::Restore => "Restore",
+            StepKind::Revive => "Revive",
+            StepKind::SetRegion => "Set Region",
+            StepKind::RequestEnrollment => "Request Enrollment",
+        };
+        let mut detail = Vec::new();
+        if let Some(system) = &step.system {
+            let version = format!("{} {}", system.os, system.version);
+            detail.push(if system.build.is_empty() {
+                version.trim().to_owned()
+            } else {
+                format!("{} ({})", version.trim(), system.build)
+            });
+        }
+        if let Some(language) = &step.language {
+            detail.push(format!("{}, {}", language.language, language.locale));
+        }
+        if let Some(error) = &step.error {
+            detail.push(error.clone());
+        }
+        let system = matches!(step.kind, StepKind::Restore | StepKind::Revive);
+        let (percent, activity) = match (step.state, &step.progress) {
+            (StepState::Pending | StepState::Active, _) if system && waiting_for_image => {
+                (None, "Waiting for image")
+            }
+            (StepState::Active, Some(progress)) if system => {
+                (Some(progress.percent), progress.name.as_str())
+            }
+            _ => (None, ""),
+        };
+        Self {
+            title: title.into(),
+            state: step.state,
+            detail: detail.join("\n"),
+            percent,
+            activity: activity.into(),
+        }
+    }
 }
 
 /// Actions available to the whole selection.
@@ -501,6 +532,7 @@ impl Actions {
                 && port.fault.is_none()
                 && port.request.is_none()
                 && port.awaiting.is_none()
+                && port.run.as_ref().is_none_or(OperationRun::finished)
                 && !port.job.is_some_and(|job| {
                     matches!(job.phase, RestorePhase::Preparing | RestorePhase::Running)
                 })
@@ -709,7 +741,7 @@ pub fn size(bytes: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use iasis_api::{Hue, Job, Light, Progress, Usb};
+    use iasis_api::{Hue, Job, Light, Usb};
 
     use super::*;
 
@@ -755,62 +787,131 @@ mod tests {
             enabled: true,
             job: None,
             awaiting: None,
-            stage: None,
-            result: None,
+            run: None,
+        }
+    }
+
+    fn restore_run() -> Device {
+        let state: State =
+            serde_json::from_str(include_str!("../../../crates/api/fixtures/state.json")).unwrap();
+        let mut device = hubs(&state).remove(0).devices.remove(0);
+        device.port.awaiting = None;
+        device.port.request = None;
+        device.port.job = None;
+        device
+    }
+
+    #[test]
+    fn active_installation_shows_the_current_activity_and_requested_steps() {
+        let mut device = restore_run();
+        for (kind, title, running) in [
+            (StepKind::Restore, "Restore", "Restoring 42%"),
+            (StepKind::Revive, "Revive", "Reviving 42%"),
+        ] {
+            let step = &mut device.port.run.as_mut().unwrap().steps[0];
+            step.kind = kind;
+            step.progress.as_mut().unwrap().name = "Sending firmware".into();
+            assert_eq!(
+                device.activity(),
+                Activity::new(running, Mark::Working(Some(0.42)))
+            );
+            let steps = device.operation_steps();
+            assert_eq!(
+                steps
+                    .iter()
+                    .map(|step| step.title.as_str())
+                    .collect::<Vec<_>>(),
+                [title, "Set Region", "Request Enrollment"]
+            );
+            assert_eq!(steps[0].detail, "iPadOS 26.2 (24C101)");
+            assert_eq!(steps[0].percent, Some(42));
+            assert_eq!(steps[0].activity, "Sending firmware");
+            assert_eq!(steps[1].detail, "en-AU, en_AU");
+            assert_eq!(steps[2].state, StepState::Pending);
         }
     }
 
     #[test]
-    fn a_running_restore_leads_with_its_steps() {
-        let mut running = port(2);
-        running.job = Some(Job {
-            operation: Operation::Restore,
-            phase: RestorePhase::Running,
-        });
-        running.stage = Some(Progress {
-            name: "Sending firmware".into(),
-            percent: 42,
-            steps: vec!["Preparing".into(), "Restoring the system".into()],
-            step: 1,
-        });
-        let device = device(running);
-        assert_eq!(device.activity().mark, Mark::Working(Some(0.42)));
-        let operation = device.operation().unwrap();
-        assert_eq!(operation.title, "Restore");
+    fn a_finished_restore_keeps_its_setup_outcomes() {
+        let mut device = restore_run();
+        let steps = &mut device.port.run.as_mut().unwrap().steps;
+        steps[0].state = StepState::Complete;
+        steps[1].state = StepState::Failed;
+        steps[1].error = Some("Unsupported locale".into());
+        steps[2].state = StepState::Skipped;
+        let rows = device.operation_steps();
+        assert_eq!(rows[0].percent, None);
+        assert!(rows[0].activity.is_empty());
+        assert_eq!(rows[1].detail, "en-AU, en_AU\nUnsupported locale");
+        assert_eq!(rows[1].state, StepState::Failed);
+        assert_eq!(rows[2].state, StepState::Skipped);
         assert_eq!(
-            operation
-                .steps
-                .iter()
-                .map(|step| step.state)
-                .collect::<Vec<_>>(),
-            [StepState::Done, StepState::Active]
+            device.activity(),
+            Activity::new("Language and region failed", Mark::Failed)
         );
-        assert_eq!(operation.detail.as_deref(), Some("Sending firmware"));
     }
 
     #[test]
-    fn enrollment_progress_follows_the_erase() {
-        let mut port = port(1);
-        port.job = Some(Job {
-            operation: Operation::Restore,
-            phase: RestorePhase::Reported,
-        });
-        port.result = Some(iasis_api::Ending {
-            operation: Operation::Restore,
-            phase: RestorePhase::Reported,
-            ecid: port.ecid.clone(),
-            message: "Restore finished".into(),
-            setup_error: Some("Sign in on the device".into()),
-        });
-        let mut device = device(port);
-        assert_eq!(
-            device.operation().unwrap().title,
-            "Restored, setup incomplete"
+    fn manual_setup_reports_the_request_and_its_outcome() {
+        let mut device = restore_run();
+        let steps = &mut device.port.run.as_mut().unwrap().steps;
+        steps.remove(0);
+        steps[0].state = StepState::Complete;
+        steps[1].state = StepState::Active;
+        device.port.mode = Some(AppleMode::Normal);
+        assert!(
+            Actions::new(std::slice::from_ref(&device))
+                .setup_targets
+                .is_none()
         );
-        device.port.request = Some(RequestProgress::Enrolling);
-        let progress = device.operation().unwrap();
-        assert_eq!(progress.title, "Trying enrollment");
-        assert_eq!(progress.mark, Mark::Working(None));
+        assert_eq!(device.activity().text, "Requesting enrollment");
+        device.port.run.as_mut().unwrap().steps[1].state = StepState::Unconfirmed;
+        assert_eq!(
+            device.activity(),
+            Activity::new("Enrollment request unconfirmed", Mark::Uncertain)
+        );
+        device.port.run.as_mut().unwrap().steps[1].state = StepState::Complete;
+        assert_eq!(
+            device.activity(),
+            Activity::new("Requested steps complete", Mark::Done)
+        );
+        device.port.run.as_mut().unwrap().steps.remove(0);
+        assert_eq!(device.activity().text, "Enrollment requested");
+    }
+
+    #[test]
+    fn an_active_run_remains_selectable_while_its_device_reboots() {
+        let mut device = restore_run();
+        device.port.occupied = false;
+        device.port.device = None;
+        device.port.ecid = None;
+        assert!(device.selectable());
+        assert_eq!(device.name(), "Reconnecting…");
+        assert_eq!(
+            device.ecid(),
+            device.port.run.as_ref().unwrap().ecid.as_deref()
+        );
+        assert_eq!(device.operation_steps().len(), 3);
+        assert!(matches!(device.activity().mark, Mark::Working(_)));
+        assert!(
+            Actions::new(std::slice::from_ref(&device))
+                .setup_targets
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_hub_restore_without_a_run_still_shows_its_phase() {
+        let mut device = device(port(1));
+        device.port.job = Some(Job {
+            operation: Operation::Revive,
+            phase: RestorePhase::Running,
+        });
+        assert_eq!(
+            device.activity(),
+            Activity::new("Reviving", Mark::Working(None))
+        );
+        assert_eq!(device.operation_steps()[0].state, StepState::Active);
     }
 
     #[test]

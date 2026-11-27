@@ -18,13 +18,23 @@ use super::*;
 /// A supervision identity's PKCS #12 archive in base64, shortened.
 const PKCS12: &str = "MIIJ4QIBAzCCCZcGCSqGSIb3DQEHAaCCCYgEggmEMIIJgDCCBDcGCSqGSIb3DQEH";
 
-fn ending(operation: Operation, phase: RestorePhase) -> Ending {
-    Ending {
-        operation,
+fn step(kind: StepKind, state: StepState) -> OperationStep {
+    OperationStep {
+        kind,
+        state,
+        language: (kind == StepKind::SetRegion).then(|| SetupLanguage {
+            language: "en-AU".into(),
+            locale: "en_AU".into(),
+        }),
+        system: None,
+        progress: None,
+        error: None,
+    }
+}
+fn run(steps: Vec<OperationStep>) -> OperationRun {
+    OperationRun {
         ecid: Some("001a79d10e6bc01c".into()),
-        phase,
-        message: "Restore finished".into(),
-        setup_error: None,
+        steps,
     }
 }
 
@@ -62,8 +72,7 @@ fn port(number: u8) -> PortView {
         enabled: true,
         job: None,
         awaiting: None,
-        stage: None,
-        result: None,
+        run: None,
         needs: None,
     }
 }
@@ -75,19 +84,30 @@ fn state() -> State {
             operation: Operation::Restore,
             phase: RestorePhase::Running,
         }),
-        stage: Some(Progress {
-            name: "Restoring the system".into(),
-            percent: 42,
-            steps: vec!["Preparing".into(), "Restoring the system".into()],
-            step: 1,
-        }),
+        run: Some(run(vec![
+            OperationStep {
+                system: Some(SystemImage {
+                    os: "iPadOS".into(),
+                    version: "26.2".into(),
+                    build: "24C101".into(),
+                }),
+                progress: Some(Progress {
+                    name: "Restoring the system".into(),
+                    percent: 42,
+                    steps: vec!["Preparing".into(), "Restoring the system".into()],
+                    step: 1,
+                }),
+                ..step(StepKind::Restore, StepState::Active)
+            },
+            step(StepKind::SetRegion, StepState::Pending),
+            step(StepKind::RequestEnrollment, StepState::Pending),
+        ])),
         awaiting: Some("iPad_Fall_2022_26.2_24C101_Restore.ipsw".into()),
         light: Light {
             hue: Hue::Purple,
             pulse: true,
             dim: true,
         },
-        result: Some(ending(Operation::Restore, RestorePhase::Reported)),
         ..port(1)
     };
     let modes = [
@@ -96,8 +116,6 @@ fn state() -> State {
         AppleMode::Kis,
         AppleMode::KisDfu,
         AppleMode::Restored,
-        AppleMode::Normal,
-        AppleMode::Normal,
     ];
     let ports = vec![
         working,
@@ -124,7 +142,10 @@ fn state() -> State {
                 pulse: false,
                 dim: false,
             },
-            result: Some(ending(Operation::Revive, RestorePhase::Failed)),
+            run: Some(run(vec![OperationStep {
+                error: Some("The device disconnected".into()),
+                ..step(StepKind::Revive, StepState::Unconfirmed)
+            }])),
             ..port(2)
         },
         PortView {
@@ -146,7 +167,7 @@ fn state() -> State {
         },
         PortView {
             usb: Some(Usb::Absent),
-            mode: None,
+            mode: Some(AppleMode::Normal),
             identifying: true,
             waiting_for_power: true,
             powered: false,
@@ -156,6 +177,11 @@ fn state() -> State {
                 operation: Operation::Restore,
                 phase: RestorePhase::Reported,
             }),
+            run: Some(run(vec![
+                step(StepKind::SetRegion, StepState::Complete),
+                step(StepKind::RequestEnrollment, StepState::Active),
+            ])),
+            needs: Some("apple-devices".into()),
             light: Light {
                 hue: Hue::White,
                 pulse: false,
@@ -188,18 +214,12 @@ fn state() -> State {
         .enumerate()
         .map(|(index, mode)| PortView {
             mode: Some(*mode),
-            request: match mode {
-                AppleMode::Normal if index == modes.len() - 1 => Some(RequestProgress::Enrolling),
-                AppleMode::Normal => Some(RequestProgress::SettingLanguage),
-                _ => None,
-            },
-            needs: (*mode == AppleMode::Normal).then(|| "apple-devices".into()),
             light: Light {
                 hue: if index == 0 { Hue::Blue } else { Hue::Green },
                 pulse: false,
                 dim: false,
             },
-            ..port(index as u8 % 5 + 1)
+            ..port(index as u8 + 1)
         })
         .collect();
     State {
@@ -249,10 +269,14 @@ fn state() -> State {
             },
         ],
         submitted: vec![
-            Some(Ending {
-                setup_error: Some("The device does not support the requested region".into()),
-                ..ending(Operation::Restore, RestorePhase::Reported)
-            }),
+            Some(run(vec![
+                step(StepKind::Restore, StepState::Complete),
+                OperationStep {
+                    error: Some("The device does not support the requested region".into()),
+                    ..step(StepKind::SetRegion, StepState::Failed)
+                },
+                step(StepKind::RequestEnrollment, StepState::Skipped),
+            ])),
             None,
         ],
         images: Images {

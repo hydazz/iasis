@@ -122,7 +122,7 @@ public sealed partial class MainWindow : Window
                 if (row is null) group.Ports.Add(new PortRow(snapshot));
                 else
                 {
-                    if (!row.Device.SameAttachment(snapshot)) Ports.SelectedItems.Remove(row);
+                    if (!row.Device.SameAttachment(snapshot) && !row.Device.FollowsRun(snapshot)) Ports.SelectedItems.Remove(row);
                     row.Update(snapshot);
                 }
             }
@@ -158,15 +158,13 @@ public sealed partial class MainWindow : Window
         DeviceTitle.Text = d.Name;
         var port = d.Port;
         var details = new List<string> { d.Place };
-        if (port.Ecid is { } ecid) details.Add($"ECID {ecid}");
+        if ((port.Ecid ?? port.Run?.Ecid) is { } ecid) details.Add($"ECID {ecid}");
         if (d.Mode.Length > 0) details.Add(d.Mode);
         if (port.Power is { } power) details.Add($"{power.Millivolts / 1000.0:g} V · {power.Milliamps} mA");
-        if (d.Status.Length > 0 && d.Status != d.Mode && d.Status != d.Needs?.Reason) details.Add(d.Status);
+        if (d.Status.Length > 0 && d.Status != d.Mode && d.Status != d.Needs?.Reason &&
+            (port.Run is null || d.Status != Device.RunStatus(port.Run))) details.Add(d.Status);
         Details.Text = string.Join("\n", details);
-        Progress.Visibility = ShowWhen(port.Stage is not null);
-        Progress.Value = port.Stage?.Percent ?? 0;
-        Steps.Text = port.Stage is { } stage ? string.Join("\n", stage.Steps.Select((s, i) =>
-            i == stage.Step ? $"{s} (in progress)" : i < stage.Step ? $"{s} (done)" : s)) : "";
+        ShowRun(Steps, port.Run);
         Needs.Text = d.Needs?.Reason ?? "";
         Needs.Visibility = ShowWhen(d.Needs is not null);
         GetPrerequisite.Visibility = ShowWhen(d.Needs?.Url is not null);
@@ -288,11 +286,26 @@ public sealed partial class MainWindow : Window
     {
         var bar = new InfoBar
         {
-            Title = request is ReviveRequest ? "Revive" : "Restore",
-            Message = "Submitting…",
+            Title = request switch
+            {
+                RestoreRequest => "Restore",
+                ReviveRequest => "Revive",
+                AdvanceSetupRequest => "Advance Setup",
+                _ => throw new ArgumentOutOfRangeException(nameof(request)),
+            },
+            Message = "Starting…",
             IsOpen = true,
             IsClosable = false,
         };
+        var devices = new StackPanel { Spacing = 8 };
+        var steps = targets.Devices.Select(device =>
+        {
+            devices.Children.Add(new TextBlock { Text = $"{device.Place} · {device.Name}", TextWrapping = TextWrapping.Wrap });
+            var list = new ItemsControl { ItemTemplate = (DataTemplate)Root.Resources["OperationStepTemplate"], Margin = new Thickness(12, 0, 0, 0) };
+            devices.Children.Add(list);
+            return list;
+        }).ToArray();
+        bar.Content = devices;
         Submissions.Children.Add(bar);
         bar.Closed += (_, _) => Submissions.Children.Remove(bar);
         try
@@ -300,17 +313,21 @@ public sealed partial class MainWindow : Window
             await foreach (var update in AgentClient.Local.Watch(stop.Token, request))
             {
                 if (update.Submitted is not { } results || results.Count != targets.Devices.Count)
-                    throw new InvalidDataException("The service returned incomplete submission details.");
-                bar.Message = string.Join("\n", results.Select((r, i) =>
-                    $"{targets.Devices[i].Place} · {targets.Devices[i].Name}: " + (r is null ? "In progress" : Device.Outcome(r))));
-                if (results.All(r => r is not null))
+                    throw new InvalidDataException("Results are missing for some selected devices.");
+                var runs = results.Select((run, i) => run ?? targets.Devices[i].ActiveRunIn(update.Hubs)).ToArray();
+                bar.Message = runs.Any(run => run is null) ? "Waiting for device…" : "";
+                for (var i = 0; i < runs.Length; i++)
+                    ShowRun(steps[i], runs[i]);
+                if (results.All(run => run?.Finished() == true))
                 {
-                    bar.Severity = results.Any(r => r!.Phase == RestorePhase.Failed) ? InfoBarSeverity.Error :
-                        results.Any(r => r!.Phase == RestorePhase.Unconfirmed || r.SetupError is not null) ? InfoBarSeverity.Warning : InfoBarSeverity.Success;
+                    var failed = results.Any(run => run!.Steps.Any(step => step.State == StepState.Failed) &&
+                        !run.Steps.Any(step => step.State == StepState.Complete));
+                    bar.Severity = failed ? InfoBarSeverity.Error :
+                        results.All(run => run!.Succeeded()) ? InfoBarSeverity.Success : InfoBarSeverity.Warning;
                     return;
                 }
             }
-            throw new IOException("The service disconnected before reporting every outcome.");
+            throw new IOException("The connection closed before all devices reported their results.");
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
         catch (Exception error)
@@ -319,5 +336,13 @@ public sealed partial class MainWindow : Window
             bar.Message = $"{bar.Message}\n{error.Message}";
         }
         finally { bar.IsClosable = true; }
+    }
+
+    private static void ShowRun(ItemsControl list, OperationRun? run)
+    {
+        var rows = run?.Steps.Select(RunStepRow.From).ToArray() ?? [];
+        list.Visibility = ShowWhen(rows.Length > 0);
+        if (list.ItemsSource is not RunStepRow[] displayed || !displayed.SequenceEqual(rows))
+            list.ItemsSource = rows;
     }
 }

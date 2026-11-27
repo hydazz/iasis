@@ -280,24 +280,20 @@ fn main() -> Result<()> {
             let settings = language
                 .zip(locale)
                 .map(|(language, locale)| iasis_api::SetupLanguage { language, locale });
-            let hubs = vec![selection(&state, &hub()?, &ports)?];
+            let hub = hub()?;
+            let hubs = vec![selection(&state, &hub, &ports)?];
             agent.request(&Request::AdvanceSetup {
                 hubs,
                 settings,
                 dep,
                 check_only: check,
             })?;
-            println!(
-                "{}",
-                if check {
-                    "All selected devices are ready for setup"
-                } else if dep {
-                    "Selected devices accepted the enrollment request"
-                } else {
-                    "Language and region set"
-                }
-            );
-            Ok(())
+            if check {
+                println!("All selected devices are ready for setup");
+                Ok(())
+            } else {
+                follow_work(&mut agent, &hub, &ports)
+            }
         }
         Some(Command::Images { command }) => images(&mut agent, command.as_ref()),
         Some(Command::PostRestore {
@@ -729,20 +725,36 @@ fn activity(port: &PortView) -> String {
     if let Some(fault) = &port.fault {
         return fault.clone();
     }
-    if let Some(job) = port.job {
-        let phase = job_text(job);
-        return match (&port.awaiting, &port.stage) {
-            (Some(_), _) => format!("{phase}  waiting for image"),
-            (None, Some(stage)) => format!("{phase}  {}%  {}", stage.percent, stage.name),
-            (None, None) => phase.into(),
-        };
+    if let Some(run) = &port.run {
+        let step = run
+            .steps
+            .iter()
+            .find(|s| {
+                matches!(
+                    s.state,
+                    iasis_api::StepState::Failed
+                        | iasis_api::StepState::Unconfirmed
+                        | iasis_api::StepState::Active
+                        | iasis_api::StepState::Pending
+                )
+            })
+            .or_else(|| run.steps.last());
+        if let Some(step) = step {
+            if step.state == iasis_api::StepState::Active
+                && let Some(progress) = &step.progress
+            {
+                return format!("{}  {}%  {}", step, progress.percent, progress.name);
+            }
+            return step.to_string();
+        }
     }
     if port.awaiting.is_some() {
         return "waiting for image".into();
     }
+    if let Some(job) = port.job {
+        return job_text(job).into();
+    }
     match port.request {
-        Some(RequestProgress::Enrolling) => "requesting enrollment",
-        Some(RequestProgress::SettingLanguage) => "setting language and region",
         Some(RequestProgress::EnteringDfu) => "entering DFU",
         Some(RequestProgress::DfuUnconfirmed) => "DFU unconfirmed",
         Some(RequestProgress::Restarting) => "restarting",
@@ -1182,25 +1194,12 @@ fn follow_work(agent: &mut Client, hub: &str, ports: &[Port]) -> Result<()> {
                 continue;
             }
             if let Some(ending) = &state.submitted[index] {
-                let phase = job_text(Job {
-                    operation: ending.operation,
-                    phase: ending.phase,
-                });
-                println!("Port {}  {phase}: {}", port.number(), ending.message);
-                if let Some(error) = &ending.setup_error {
-                    println!("Port {}  {error}", port.number());
+                for step in &ending.steps {
+                    println!("Port {}  {step}", port.number());
                 }
                 ended[index] = true;
-                success &= ending.phase == RestorePhase::Reported && ending.setup_error.is_none();
-            } else if let Some(row) = view
-                .and_then(|view| view.ports.get(port.index()))
-                // A job that has ended says so in its ending, or starts again.
-                .filter(|row| {
-                    row.job.is_none_or(|job| {
-                        matches!(job.phase, RestorePhase::Preparing | RestorePhase::Running)
-                    })
-                })
-            {
+                success &= ending.succeeded();
+            } else if let Some(row) = view.and_then(|view| view.ports.get(port.index())) {
                 let line = format!(
                     "{}  {}",
                     activity(row),

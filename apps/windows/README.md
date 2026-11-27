@@ -6,6 +6,8 @@ Install `Iasis-<version>-x64.msi` and open **Iasis** from Start. The installer i
 
 Select a port to see its device and current operation. Ctrl-click to select ports across hubs, then right-click a selected row for actions every selected device supports. Right-clicking an unselected row selects it alone.
 
+The inspector shows the requested steps in order, including the system version and build, language and region, and enrollment when selected. During a restore or revive, the progress bar shows how far it has advanced and the activity underneath shows what the device is doing. Completed steps stay in the inspector with their outcomes.
+
 **Revive** repairs system software. **Restore** erases every selected device. Review the hub, port, device and image for each target before choosing **Erase and restore**. If an attachment changes, select it again.
 
 Choose **Advance Setup…** for iPhones and iPads in Setup Assistant. Choose whether to set the displayed language and region, try enrollment, or do both. Enrollment activates the device and requests its assigned management profile. If the device asks you to sign in or shows **Partially Set Up**, continue Setup Assistant on the device.

@@ -38,7 +38,7 @@ public partial class App : Application
         foreach (var hub in main.State?.Hubs ?? [])
         {
             var section = new MenuFlyoutSubItem { Text = string.IsNullOrEmpty(hub.Name) ? hub.Serial : $"{hub.Name} ({hub.Serial})" };
-            foreach (var d in main.Devices.Where(d => d.Hub.Serial == hub.Serial && d.Port.Occupied))
+            foreach (var d in main.Devices.Where(d => d.Hub.Serial == hub.Serial && (d.Port.Occupied || d.Port.Run?.Finished() == false)))
             {
                 var target = new MenuFlyoutSubItem { Text = $"{d.Port.Number}. {d.Name}" + (d.Status.Length > 0 ? $" · {d.Status}" : "") };
                 AddAction("Enter DFU", DeviceAction.Dfu);

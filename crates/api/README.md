@@ -55,7 +55,7 @@ A reply is `"ok"`, `{"error": "…"}`, `{"state": {…}}`, to `catalog` `{"catal
 
 A restore takes, for each target, the newest image in the store that Apple still signs. With `latest` true it takes the newest release Apple signs, fetched first if the store lacks it. `plan` says beforehand what there is to choose from: each entry has the `hub`, the `port` and an `offer`, which is null while the agent does not know the target's model. An offer has the `latest` release Apple signs and the newest `held` image that fits, each a release or null, and a `problem` when the catalog could not be asked. A client asks its user only when `held` is older than `latest`.
 
-To follow a restore or revive, `watch` on the connection that sent it. The state's `submitted` holds one result per target in request order, each null until the agent has an outcome, including when the hub has left USB. The stream closes after delivering every result.
+To follow a restore, revive or setup operation, `watch` on the connection that sent it. The state's `submitted` holds one result per target in request order, each null until the agent has an outcome, including when the hub has left USB. The stream closes after delivering every result.
 
 ```sh
 printf '{"op":"state"}\n' | nc -U /run/iasis/agent.sock
@@ -84,35 +84,36 @@ Each hub has its `serial`, `name` (empty for an unnamed hub), `session` ID, the 
 
 Each port has:
 
-| Field                          | Meaning                                                                                                                       |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `number`                       | 1 to 5                                                                                                                        |
-| `generation`, `occupied`       | The attachment generation, and whether the port is occupied                                                                   |
-| `device`                       | The target's model, or a USB product's name, or null                                                                          |
-| `identifying`                  | A newly attached device is awaiting its first name                                                                            |
-| `ecid`                         | The target's ECID as sixteen hexadecimal digits, once read on this attachment, or null                                        |
-| `usb`                          | What the host finds on the port's USB: `absent`, `other`, `ambiguous` (several devices) or `apple`; null until it has looked  |
-| `mode`                         | With `usb` `apple`, its mode: `dfu`, `port_dfu`, `kis_dfu`, `kis`, `recovery`, `restored` or `normal`                         |
-| `light`                        | What the port's light shows: `hue`, `pulse` and `dim`                                                                         |
-| `request`                      | An action in progress (`entering_dfu`, `restarting`, `setting_language`, `enrolling`) or `dfu_unconfirmed`, otherwise null    |
-| `waiting_for_power`, `powered` | The port is awaiting power, or has an active supply                                                                           |
-| `wrong_dfu_port`               | The target takes DFU or reboot, but this connector carries no DFU USB, as on a Mac's other port                               |
-| `link`                         | USB link: `usb2`, `usb3`, `usb` for unknown speed, or null                                                                    |
-| `power`                        | PD contract or default USB allowance with `source` (`pd` or `usb`), `millivolts` and operating `milliamps`, or null           |
-| `allocated_mw`                 | Power supply capacity committed to the port, including voltage tolerance and the USB starting allowance                       |
-| `short`                        | The target would take more power than the charging pool lets its port offer                                                   |
-| `fault`                        | Why the port faulted, in the words the hub's display uses, or null                                                            |
-| `dfu`, `reboot`, `restore`     | The actions the target would take now. A target that can be restored can be revived                                           |
-| `enabled`                      | Port power is enabled                                                                                                         |
-| `job`                          | `operation` (`restore` or `revive`) and its `phase` (`Preparing`, `Running`, `Reported`, `Unconfirmed`, `Failed`), or null    |
-| `awaiting`                     | The `id` of the image the port's restore waits for, otherwise null; the images' `fetch` says how much is here                 |
-| `stage`                        | The worker's current `name`, overall job `percent`, the job's `steps` in order and the index of the `step` under way, or null |
-| `result`                       | How the last operation ended: `operation`, `ecid`, `phase`, `message` and optional `setup_error`, or null                     |
-| `needs`                        | The `id` of the entry in `missing` the target's restore waits for, or null                                                    |
+| Field                          | Meaning                                                                                                                      |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `number`                       | 1 to 5                                                                                                                       |
+| `generation`, `occupied`       | The attachment generation, and whether the port is occupied                                                                  |
+| `device`                       | The target's model, or a USB product's name, or null                                                                         |
+| `identifying`                  | A newly attached device is awaiting its first name                                                                           |
+| `ecid`                         | The target's ECID as sixteen hexadecimal digits, once read on this attachment, or null                                       |
+| `usb`                          | What the host finds on the port's USB: `absent`, `other`, `ambiguous` (several devices) or `apple`; null until it has looked |
+| `mode`                         | With `usb` `apple`, its mode: `dfu`, `port_dfu`, `kis_dfu`, `kis`, `recovery`, `restored` or `normal`                        |
+| `light`                        | What the port's light shows: `hue`, `pulse` and `dim`                                                                        |
+| `request`                      | An action in progress (`entering_dfu`, `restarting`) or `dfu_unconfirmed`, otherwise null                                    |
+| `waiting_for_power`, `powered` | The port is awaiting power, or has an active supply                                                                          |
+| `wrong_dfu_port`               | The target takes DFU or reboot, but this connector carries no DFU USB, as on a Mac's other port                              |
+| `link`                         | USB link: `usb2`, `usb3`, `usb` for unknown speed, or null                                                                   |
+| `power`                        | PD contract or default USB allowance with `source` (`pd` or `usb`), `millivolts` and operating `milliamps`, or null          |
+| `allocated_mw`                 | Power supply capacity committed to the port, including voltage tolerance and the USB starting allowance                      |
+| `short`                        | The target would take more power than the charging pool lets its port offer                                                  |
+| `fault`                        | Why the port faulted, in the words the hub's display uses, or null                                                           |
+| `dfu`, `reboot`, `restore`     | The actions the target would take now. A target that can be restored can be revived                                          |
+| `enabled`                      | Port power is enabled                                                                                                        |
+| `job`                          | `operation` (`restore` or `revive`) and its `phase` (`Preparing`, `Running`, `Reported`, `Unconfirmed`, `Failed`), or null   |
+| `awaiting`                     | The `id` of the image the port's restore waits for, otherwise null; the images' `fetch` says how much is here                |
+| `run`                          | The ordered steps requested on this target, or null                                                                          |
+| `needs`                        | The `id` of the entry in `missing` the target's restore waits for, or null                                                   |
 
 The hub keeps a target's `ecid` for as long as its attachment lasts, so a Mac that has started up and left USB is still the device on its port. A device moved to another connector is identified again there. The agent notes the model of each ECID it identifies, so a mode that gives the ECID alone still names the device.
 
-The hub drops a job when its target leaves, which a restored target does by restarting. The agent shows a result on the port while its ECID matches; a failure before the target was identified stays with its session and attachment generation.
+The hub reports its current USB job in `job`. The agent owns `run` from submission through completion. Each step has a `kind` (restore, revive, set_region or request_enrollment) and a `state` (pending, active, complete, failed, unconfirmed or skipped). Restore and revive carry the selected `system` (OS, version and build) once the image is known, and retain the nested restore `progress` (name, percent, steps and zero-based current step). A region step carries its language and locale. A failed or unconfirmed step carries its own `error`. Later steps that cannot run are skipped.
+
+A port retains its latest run for the matching device while the agent is running. A client can reopen the inspector during or after the operation. Targets without an ECID are identified by hub session and attachment generation until their identity is known.
 
 `light.hue` is `off`, `red`, `green`, `white`, `blue`, `amber` or `purple`, with the meanings in the [light table](../firmware/README.md#controls-and-status). A client that draws the port in that colour agrees with the hub.
 
@@ -134,9 +135,9 @@ Archives for different models share version and build numbers, so only the `id` 
 
 An erase uses the agent’s `post_restore` settings at submission, including an erase requested by the hub button. `shutdown_macs` defaults to false. `setup_language` is null or an object with a `language` (such as `en-AU`) and a `locale` (such as `en_AU`). `try_enrollment` defaults to false.
 
-`advance_setup` takes optional language and region in `settings` and requests assigned enrollment when `dep` is true. With `check_only` set, the agent checks every target through an existing paired session. Omit the options to check general availability. Execution requires at least one option. Execution checks the whole selection again, sets any requested language and region, then activates and requests enrollment when selected. A matching, accepted language and region can be skipped on the way to enrollment. The reply is `ok` or an `error` with per-target outcomes if a step failed. Enrollment success here means the device acknowledged its assigned configuration request.
+`advance_setup` takes optional language and region in `settings` and requests assigned enrollment when `dep` is true. With `check_only` set, the agent checks every target through an existing paired session. Omit the options to check general availability. To run setup, select at least one option. The agent checks the group before the first write and checks each device again when its turn starts. It sets any requested language and region, then activates and requests enrollment when selected. A matching, accepted language and region can be skipped on the way to enrollment. The reply is `ok` once the agent accepts the selection. Follow the submitted runs for per-target outcomes. Enrollment success here means the device acknowledged its assigned configuration request.
 
-A completed erase keeps its `Reported` phase. If a setup step fails, the ending’s `setup_error` describes the failure and the CLI exits unsuccessfully.
+The `submitted` result is the completed run, including every requested step. An enrollment refusal leaves the restore and any completed region step intact.
 
 `sharing.enabled` is the saved USB Internet Sharing setting. Each entry in `sharing.ports` names a `hub` and `port`; `active` means the port's gateway is running. A `problem` on the sharing state or on a port describes a failure.
 

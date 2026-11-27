@@ -6,8 +6,13 @@ namespace Iasis.Agent;
 public sealed record Device(Hub Hub, Port Port, Prerequisite? Needs)
 {
     public string Place => $"{HubTitle(Hub)}, port {Port.Number}";
-    public string Name => !Port.Enabled ? "Off" : !Port.Occupied ? "Empty" :
-        Port.Device ?? (Port.Identifying ? "Identifying…" : "Unknown device");
+    public string Name => Port switch
+    {
+        { Enabled: false } => "Off",
+        { Occupied: false, Run: { } run } when !run.Finished() => Port.Device ?? "Reconnecting…",
+        { Occupied: false } => "Empty",
+        _ => Port.Device ?? (Port.Identifying ? "Identifying…" : "Unknown device"),
+    };
 
     public static string HubTitle(Hub hub) => string.IsNullOrWhiteSpace(hub.Name) ? hub.Serial : hub.Name;
 
@@ -15,14 +20,12 @@ public sealed record Device(Hub Hub, Port Port, Prerequisite? Needs)
     {
         { Fault: { } fault } => fault,
         { Awaiting: not null } => "Waiting for image",
-        { Job: { } job, Stage: { } stage } => $"{job.Operation} · {stage.Name} · {stage.Percent}%",
-        { Job: { Phase: RestorePhase.Preparing or RestorePhase.Running } active } => Phase(active.Operation, active.Phase),
-        { Request: RequestProgress.SettingLanguage } => "Setting language and region",
-        { Request: RequestProgress.Enrolling } => "Trying enrollment",
         { Request: RequestProgress.EnteringDfu } => "Entering DFU",
         { Request: RequestProgress.DfuUnconfirmed } => "DFU not confirmed",
         { Request: RequestProgress.Restarting } => "Restarting",
-        { Result: { } result } => Outcome(result),
+        { Run: { } activeRun } when !activeRun.Finished() => RunStatus(activeRun),
+        { Job: { Phase: RestorePhase.Preparing or RestorePhase.Running } active } => Phase(active.Operation, active.Phase),
+        { Run.Steps.Count: > 0, Run: { } run } => RunStatus(run),
         { Job: { } job } => Phase(job.Operation, job.Phase),
         { WaitingForPower: true } => "Waiting for power",
         { WrongDfuPort: true } => "Connect the cable to the Mac’s DFU port.",
@@ -37,7 +40,7 @@ public sealed record Device(Hub Hub, Port Port, Prerequisite? Needs)
         AppleMode.KisDfu => "DFU over Debug USB",
         AppleMode.Recovery => "Recovery",
         AppleMode.Kis => "Debug USB",
-        AppleMode.Restored => "Restore service",
+        AppleMode.Restored => "Restore mode",
         AppleMode.Normal => "Started up",
         _ => "",
     };
@@ -51,18 +54,49 @@ public sealed record Device(Hub Hub, Port Port, Prerequisite? Needs)
         _ => operation == Operation.Restore ? "Restoring" : "Reviving",
     };
 
-    public static string Outcome(Ending result)
+    public static string RunStatus(OperationRun run)
     {
-        var summary = $"{Phase(result.Operation, result.Phase)} · {result.Message}";
-        return result.SetupError is { } error ? $"{summary} · Setup incomplete: {error}" : summary;
+        if (run.Steps.Count > 1 && run.Succeeded()) return "Requested steps complete";
+        var step = run.Steps.FirstOrDefault(s => s.State == StepState.Active) ??
+            run.Steps.FirstOrDefault(s => s.State is StepState.Failed or StepState.Unconfirmed) ??
+            run.Steps.FirstOrDefault(s => s.State != StepState.Complete) ?? run.Steps.FirstOrDefault();
+        if (step is null) return "";
+        return $"{StepTitle(step.Kind)} · {StepStatus(step.State)}";
     }
+
+    public static string StepTitle(StepKind kind) => kind switch
+    {
+        StepKind.Restore => "Restore",
+        StepKind.Revive => "Revive",
+        StepKind.SetRegion => "Set language and region",
+        StepKind.RequestEnrollment => "Request enrollment",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+    };
+
+    public static string StepStatus(StepState state) => state == StepState.Active ? "In progress" : state.ToString();
 
     public bool SameAttachment(Device other) =>
         Hub.Serial == other.Hub.Serial && Hub.Session == other.Hub.Session &&
         Port.Number == other.Port.Number && Port.Generation == other.Port.Generation &&
         (Port.Ecid is null || Port.Ecid == other.Port.Ecid);
 
-    public bool CanCheckSetup => Hub.Session is not null && Port.Job is not { Phase: RestorePhase.Preparing or RestorePhase.Running } &&
+    public bool FollowsRun(Device other)
+    {
+        if (Port.Run is not { } previous || previous.Finished() || other.Port.Run is not { } next ||
+            Hub.Serial != other.Hub.Serial || Hub.Session != other.Hub.Session || Port.Number != other.Port.Number) return false;
+        var ecid = previous.Ecid ?? Port.Ecid;
+        return ecid is null || ((next.Ecid is null || next.Ecid == ecid) && (other.Port.Ecid is null || other.Port.Ecid == ecid));
+    }
+
+    public OperationRun? ActiveRunIn(IReadOnlyList<Hub> hubs)
+    {
+        var hub = hubs.FirstOrDefault(h => h.Serial == Hub.Serial && h.Session == Hub.Session);
+        var run = hub?.Ports.FirstOrDefault(p => p.Number == Port.Number)?.Run;
+        return run is not null && !run.Finished() && (Port.Ecid is null || run.Ecid is null || Port.Ecid == run.Ecid) ? run : null;
+    }
+
+    public bool CanCheckSetup => Hub.Session is not null && Port.Run?.Finished() != false &&
+        Port.Job is not { Phase: RestorePhase.Preparing or RestorePhase.Running } &&
         Port is { Enabled: true, Occupied: true, Mode: AppleMode.Normal, Ecid: not null, Fault: null, Request: null };
 
     public bool Supports(DeviceAction action) => action switch
@@ -81,8 +115,8 @@ public sealed record DeviceActionTargets(IReadOnlyList<Device> Devices, IReadOnl
     public static DeviceActionTargets? For(IReadOnlyList<Device> devices, DeviceAction action) =>
         devices.All(d => d.Supports(action)) ? From(devices) : null;
 
-    public static IReadOnlyList<Selection>? SetupSelection(IReadOnlyList<Device> devices) =>
-        devices.All(d => d.CanCheckSetup) ? From(devices)?.Hubs : null;
+    public static DeviceActionTargets? ForSetup(IReadOnlyList<Device> devices) =>
+        devices.All(d => d.CanCheckSetup) ? From(devices) : null;
 
     public static AdvanceSetupRequest DefaultSetup(IReadOnlyList<Selection> hubs, PostRestore saved, SetupLanguage desktop) =>
         new(hubs, saved.SetupLanguage ?? (saved.TryEnrollment ? null : desktop), saved.TryEnrollment, CheckOnly: true);

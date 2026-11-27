@@ -11,8 +11,8 @@ use plist::{Dictionary, Value};
 use reqwest::blocking::Client;
 
 use super::{
-    CStr, CString, Plist, Session, c_char, c_int, check, lockdownd_set_value, matches_string,
-    plist_new_string, ptr, sys,
+    CStr, CString, Plist, Session, Unconfirmed, c_char, c_int, check, lockdownd_set_value,
+    matches_string, plist_new_string, ptr, sys,
 };
 
 const ACTIVATION: &str = "https://albert.apple.com/deviceservices/deviceActivation";
@@ -295,15 +295,16 @@ impl MobileConfig {
         let code = unsafe {
             property_list_service_receive_plist_with_timeout(self.0, &mut reply.0, timeout_ms)
         };
-        if code == RECEIVE_TIMEOUT {
-            if kind == APPLY {
-                bail!(
-                    "The device has not reported its enrollment result after {} seconds. Check Setup Assistant before retrying.",
-                    timeout_ms / 1000
-                );
-            }
-            bail!("The device did not respond to the management check.");
+        if code != 0 && kind == APPLY {
+            return Err(Unconfirmed(
+                "The device has not confirmed enrollment. Check Setup Assistant before retrying.",
+            )
+            .into());
         }
+        ensure!(
+            code != RECEIVE_TIMEOUT,
+            "The device did not respond to the management check."
+        );
         ensure!(code == 0, "the device did not acknowledge {kind} ({code})");
         let response: Dictionary = plist::from_bytes(&reply.xml()?)?;
         check_response(&response)?;

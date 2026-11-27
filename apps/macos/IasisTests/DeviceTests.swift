@@ -28,7 +28,7 @@ struct DeviceTests {
         #expect(devices[0].symbol == nil)
 
         // Progress, a new attachment and another device leave the row where it was.
-        state.hubs[0].ports[2].stage?.percent = 44
+        state.hubs[0].ports[2].run?.steps[0].progress?.percent = 44
         state.hubs[0].ports[3].generation += 1
         state.hubs[0].ports[3].ecid = "0000000000001234"
         #expect(state.devices.map(\.id) == devices.map(\.id))
@@ -76,45 +76,77 @@ struct DeviceTests {
         #expect(activity(state, 5) == Activity("Protection tripped", .failed))
 
         #expect(activity(state, 4) == Activity("Restore Complete", .done))
-        state.hubs[0].ports[3].result?.phase = .failed
+        state.hubs[0].ports[3].run?.steps[0].state = .failed
         #expect(activity(state, 4) == Activity("Restore Failed", .failed))
-        state.hubs[0].ports[3].result = nil
+        state.hubs[0].ports[3].run = nil
         #expect(activity(state, 4) == .idle)
 
         state.hubs[0].ports[1].mode = nil
         #expect(activity(state, 2) == .idle)
         state.hubs[0].ports[1].request = .restarting
         #expect(activity(state, 2) == Activity("Restarting", .working(nil)))
-        state.hubs[0].ports[1].request = .enrolling
-        #expect(activity(state, 2) == Activity("Requesting Enrollment", .working(nil)))
     }
 
-    @Test func anOperationLaysOutItsStepsAndItsEnding() throws {
+    @Test func onlyTheActiveInstallReportsItsPercentAndActivity() throws {
         var state = try Fixtures.state
-        let running = try #require(state.devices[2].operation)
-        #expect(running.title == "Restore")
-        #expect(running.steps.map(\.state) == [.done, .done, .active, .pending])
-        #expect(running.detail == nil)
-        state.hubs[0].ports[2].stage?.name = "Updating Firmware"
-        #expect(state.devices[2].operation?.detail == "Updating Firmware")
+        var run = try #require(state.devices[2].port.run)
+        #expect(run.steps.map(\.kind) == [.restore, .setRegion, .requestEnrollment])
+        #expect(run.steps[0].detail == "iPadOS 27.2.1 (24B156)")
+        #expect(run.steps[1].detail?.contains("en-AU") == true)
+        #expect(run.steps[0].activeInstallProgress?.percent == 43)
+        #expect(run.steps[0].activeInstallProgress?.activityCaption == "Sending filesystem…")
+        run.steps[0].progress?.name = "Sending Image"
+        #expect(run.steps[0].activeInstallProgress?.activityCaption == "Sending image…")
+        run.steps[0].state = .failed
+        #expect(run.steps[0].activeInstallProgress == nil)
+        run.steps[0].state = .complete
+        #expect(run.steps[0].activeInstallProgress == nil)
+        run.steps[1].state = .active
+        state.hubs[0].ports[2].run = run
+        #expect(state.devices[2].activity == Activity("Setting Language and Region", .working(nil)))
+        run.steps[1].state = .failed
+        run.steps[1].error = "The device does not support this region."
+        run.steps[2].state = .skipped
+        #expect(run.activity == Activity("Set Region Failed", .failed))
 
-        state.hubs[0].ports[2].stage = nil
-        state.hubs[0].ports[2].job?.phase = .preparing
-        #expect(state.devices[2].operation?.detail == "Preparing")
+        run.steps = [.init(kind: .requestEnrollment, state: .active)]
+        state.hubs[0].ports[3].run = run
+        state.hubs[0].ports[3].mode = .normal
+        #expect(state.devices[3].activity == Activity("Requesting Enrollment", .working(nil)))
+        #expect(!state.devices[3].canCheckSetup)
+        run.steps[0].state = .complete
+        #expect(run.activity == Activity("Enrollment Requested", .done))
+        run.steps[0].state = .unconfirmed
+        #expect(run.activity == Activity("Request Enrollment Unconfirmed", .uncertain))
+    }
+
+    @Test func downloadsCountTheDevicesWaitingForThatImage() throws {
+        var state = try Fixtures.state
         state.hubs[0].ports[2].awaiting = state.images.fetch?.id
-        #expect(state.devices[2].activity == Activity("Waiting for Image", .working(nil), symbol: "arrow.down.circle"))
-        #expect(state.devices[2].operation?.steps == [.init(name: "Waiting for Image", state: .active)])
+        #expect(state.devices[2].activity == Activity("Waiting for Image", .working(nil), symbol: DeviceSymbol.download))
         #expect(state.waitingForDownload == 1)
         state.hubs[0].ports[3].awaiting = state.images.fetch?.id
         state.hubs[0].ports[4].awaiting = "UniversalMac_27.2.1_26B131_Restore.ipsw"
-        // A port waiting behind another download is not this one's.
         #expect(state.waitingForDownload == 2)
+    }
 
-        let ended = try #require(state.devices[3].operation)
-        #expect(ended.title == "Restore Complete")
-        #expect(ended.mark == .done)
-        #expect(state.devices[0].operation == nil)
-        #expect(state.devices[4].operation == nil)
+    @Test func anActiveRunKeepsItsPortSelectableAcrossReboots() throws {
+        var state = try Fixtures.state
+        state.hubs[0].ports[2].occupied = false
+        state.hubs[0].ports[2].device = nil
+        state.hubs[0].ports[2].job = nil
+        let waiting = state.devices[2]
+        #expect(waiting.isSelectable)
+        #expect(waiting.name == "Waiting for Device")
+        #expect(waiting.activity.text == "Restoring 43%")
+
+        state.hubs[0].ports[2].run = state.hubs[0].ports[3].run
+        #expect(state.devices[2].run == nil)
+        #expect(!state.devices[2].isSelectable)
+        #expect(state.devices[2].activity == .idle)
+        state.hubs[0].ports[2].occupied = true
+        state.hubs[0].ports[2].ecid = "0000000000001234"
+        #expect(state.devices[2].run == nil)
     }
 
     @Test func aRestorePinsEveryAttachmentAcrossHubs() throws {

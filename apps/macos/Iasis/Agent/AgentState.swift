@@ -9,7 +9,7 @@ nonisolated struct AgentState: Codable, Equatable {
     var hubs: [Hub]
     /// A submitting connection's results in target order, each null until it
     /// has one. Absent on other connections.
-    var submitted: [Ending?]?
+    var submitted: [OperationRun?]?
     var images: ImageStore
     var postRestore: PostRestore
     var sharing: Sharing
@@ -112,8 +112,7 @@ nonisolated struct AgentState: Codable, Equatable {
         /// The store's id for the image the port's restore waits for, while
         /// it waits.
         var awaiting: String?
-        var stage: Stage?
-        var result: Ending?
+        var run: OperationRun?
         /// The `id` of the missing prerequisite the target's restore waits
         /// for.
         var needs: String?
@@ -222,8 +221,6 @@ nonisolated struct AgentState: Codable, Equatable {
     }
 
     enum RequestProgress: String, Codable {
-        case settingLanguage = "setting_language"
-        case enrolling
         case enteringDfu = "entering_dfu"
         case dfuUnconfirmed = "dfu_unconfirmed"
         case restarting
@@ -234,9 +231,7 @@ nonisolated struct AgentState: Codable, Equatable {
         var phase: RestorePhase
     }
 
-    /// What a job's worker is doing: its step among the job's steps, and
-    /// how far along the whole job is.
-    struct Stage: Codable, Equatable {
+    struct Progress: Codable, Equatable {
         var name: String
         var percent: UInt8
         var steps: [String]
@@ -281,14 +276,34 @@ nonisolated struct AgentState: Codable, Equatable {
         }
     }
 
-    /// How an operation ended.
-    struct Ending: Codable, Equatable {
-        var operation: Operation
-        /// The target's ECID, when it was known.
+    struct OperationRun: Codable, Equatable {
         var ecid: String?
-        var phase: RestorePhase
-        var message: String
-        var setupError: String?
+        var steps: [OperationStep]
+    }
+
+    struct OperationStep: Codable, Equatable {
+        var kind: StepKind
+        var state: StepState
+        var system: SystemImage?
+        var language: SetupLanguage?
+        var progress: Progress?
+        var error: String?
+    }
+
+    enum StepKind: String, Codable {
+        case restore, revive
+        case setRegion = "set_region"
+        case requestEnrollment = "request_enrollment"
+    }
+
+    enum StepState: String, Codable {
+        case pending, active, complete, failed, unconfirmed, skipped
+    }
+
+    struct SystemImage: Codable, Equatable {
+        var os: String
+        var version: String
+        var build: String
     }
 
     /// The store's archives: those it holds and those it is still to fetch.

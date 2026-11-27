@@ -12,7 +12,7 @@ public sealed record AgentState
     public required string Version { get; init; }
     public required IReadOnlyList<Hub> Hubs { get; init; }
     /// A submitting connection's results in target order, each null until it has one.
-    public IReadOnlyList<Ending?>? Submitted { get; init; }
+    public IReadOnlyList<OperationRun?>? Submitted { get; init; }
     public required ImageStore Images { get; init; }
     public required PostRestore PostRestore { get; init; }
     public required Sharing Sharing { get; init; }
@@ -72,8 +72,7 @@ public sealed record Port
     public required bool Enabled { get; init; }
     public Job? Job { get; init; }
     public string? Awaiting { get; init; }
-    public Progress? Stage { get; init; }
-    public Ending? Result { get; init; }
+    public OperationRun? Run { get; init; }
     /// The id of the missing prerequisite the target's restore waits for.
     public string? Needs { get; init; }
 }
@@ -86,12 +85,22 @@ public sealed record Job(Operation Operation, RestorePhase Phase);
 
 public sealed record Progress(string Name, int Percent, IReadOnlyList<string> Steps, int Step);
 
-public sealed record Ending(
-    Operation Operation,
-    string? Ecid,
-    RestorePhase Phase,
-    string Message,
-    string? SetupError);
+public sealed record OperationRun(string? Ecid, IReadOnlyList<OperationStep> Steps)
+{
+    public bool Finished() => Steps.All(s => s.State is not (StepState.Active or StepState.Pending));
+    public bool Succeeded() => Steps.All(s => s.State == StepState.Complete);
+}
+
+public sealed record OperationStep(StepKind Kind, StepState State, SystemImage? System = null,
+    SetupLanguage? Language = null, Progress? Progress = null, string? Error = null);
+
+public sealed record SystemImage(string Os, string Version, string Build);
+
+[JsonConverter(typeof(SnakeCaseEnum<StepKind>))]
+public enum StepKind { Restore, Revive, SetRegion, RequestEnrollment }
+
+[JsonConverter(typeof(SnakeCaseEnum<StepState>))]
+public enum StepState { Pending, Active, Complete, Failed, Unconfirmed, Skipped }
 
 public sealed record ImageStore(IReadOnlyList<Image> Images, Fetch? Fetch);
 
@@ -151,7 +160,7 @@ public enum AppleMode { Dfu, PortDfu, Recovery, Kis, KisDfu, Restored, Normal }
 public enum Hue { Off, Red, Green, White, Blue, Amber, Purple }
 
 [JsonConverter(typeof(SnakeCaseEnum<RequestProgress>))]
-public enum RequestProgress { SettingLanguage, Enrolling, EnteringDfu, DfuUnconfirmed, Restarting }
+public enum RequestProgress { EnteringDfu, DfuUnconfirmed, Restarting }
 
 [JsonConverter(typeof(SnakeCaseEnum<UsbLink>))]
 public enum UsbLink { Usb, Usb2, Usb3 }

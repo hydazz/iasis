@@ -6,10 +6,11 @@ namespace Iasis;
 
 public sealed partial class MainWindow
 {
-    private async Task AdvanceSetup(Device[] selected, IReadOnlyList<Selection> targets)
+    private async Task AdvanceSetup(DeviceActionTargets targets)
     {
         if (state is null) return;
-        var defaults = DeviceActionTargets.DefaultSetup(targets, state.PostRestore, DesktopLanguage);
+        var selected = targets.Devices;
+        var defaults = DeviceActionTargets.DefaultSetup(targets.Hubs, state.PostRestore, DesktopLanguage);
         var region = defaults.Settings ?? DesktopLanguage;
         var language = new CheckBox
         {
@@ -26,7 +27,7 @@ public sealed partial class MainWindow
         var content = new StackPanel { Spacing = 8 };
         content.Children.Add(new TextBlock
         {
-            Text = selected is [var one] ? $"{one.Place} · {one.Name}" : $"{selected.Length} selected devices",
+            Text = selected is [var one] ? $"{one.Place} · {one.Name}" : $"{selected.Count} selected devices",
             TextWrapping = TextWrapping.Wrap,
         });
         content.Children.Add(language);
@@ -55,16 +56,16 @@ public sealed partial class MainWindow
         }
         if (!SelectionAvailable() || approved is null || approved != Choice())
             throw new InvalidOperationException("The selection changed. Open Advance Setup again.");
-        await Send(approved with { CheckOnly = false });
+        _ = Track(approved with { CheckOnly = false }, targets);
 
-        AdvanceSetupRequest Choice() => new(targets, language.IsChecked == true ? region : null, enroll.IsChecked == true, CheckOnly: true);
+        AdvanceSetupRequest Choice() => new(targets.Hubs, language.IsChecked == true ? region : null, enroll.IsChecked == true, CheckOnly: true);
 
         void OptionsChanged(object sender, RoutedEventArgs args) => _ = Check();
 
         bool SelectionAvailable()
         {
             var current = Selected;
-            return state is not null && current.Length == selected.Length && current.All(d => d.CanCheckSetup) &&
+            return state is not null && current.Length == selected.Count && current.All(d => d.CanCheckSetup) &&
                 selected.All(d => current.Any(d.SameAttachment));
         }
 

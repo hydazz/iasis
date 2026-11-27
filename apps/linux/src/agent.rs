@@ -87,8 +87,7 @@ fn send(stream: &mut UnixStream, request: &Request) -> io::Result<()> {
 }
 
 fn connect() -> Result<UnixStream, String> {
-    UnixStream::connect(socket())
-        .map_err(|error| format!("cannot reach the Iasis service: {error}"))
+    UnixStream::connect(socket()).map_err(|error| format!("cannot connect to Iasis: {error}"))
 }
 
 fn reply(stream: UnixStream) -> Result<Reply, String> {

@@ -98,7 +98,7 @@ impl PortRow {
         } else {
             name.to_string()
         });
-        let quiet = port.identifying || !port.occupied;
+        let quiet = port.identifying || !device.has_target();
         set_class(&self.row, "quiet", quiet);
         let activity = device.activity();
         // A mode is the device's own state; an operation is the mark's to show.
@@ -286,6 +286,8 @@ impl ActivityMark {
                 return;
             }
             Mark::Working(None) => (TURNING, &["accent", "turning"]),
+            Mark::Pending => ("content-loading-symbolic", &["dim-label"]),
+            Mark::Skipped => ("go-next-symbolic", &["dim-label"]),
             Mark::Done => ("object-select-symbolic", &["success"]),
             Mark::Failed => ("dialog-error-symbolic", &["error"]),
             Mark::Uncertain => ("dialog-question-symbolic", &["uncertain"]),

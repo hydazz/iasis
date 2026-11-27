@@ -12,7 +12,6 @@ use crate::{
     host::{PortJob, observe},
     identity::models::{DeviceModel, Models},
     images::Store,
-    job::Ended,
     topology::{self, Snapshot, UsbDevice as Device},
 };
 
@@ -96,8 +95,7 @@ pub fn hub(serial: u64, info: &Info, status: &Status) -> HubView {
                         phase: job.phase,
                     }),
                     awaiting: None,
-                    stage: None,
-                    result: None,
+                    run: None,
                     needs: None,
                 }
             })
@@ -181,23 +179,6 @@ pub(crate) fn identify_for(row: &mut PortView, attachment_age_ms: u64) {
         && attachment_age_ms < IDENTIFYING_MS;
 }
 
-/// Show how an operation ended on the port: a worker's result while the port
-/// holds its device, a result from before any worker ran while the port
-/// holds the attachment it was tried on.
-pub(crate) fn attach_result(row: &mut PortView, session: Option<u32>, outcome: &Ended) {
-    let matches = match (outcome.attachment, &outcome.ending.ecid) {
-        (Some(attachment), _) => session.is_some_and(|id| attachment == (id, row.generation)),
-        (None, Some(id)) => row.ecid.as_ref() == Some(id),
-        (None, None) => false,
-    };
-    if row.occupied && matches {
-        row.result = Some(outcome.ending.clone());
-        if let Some(job) = &mut row.job {
-            job.operation = outcome.ending.operation;
-        }
-    }
-}
-
 /// Show the host's job on the port, while it runs on the port's attachment.
 pub(crate) fn describe_job(row: &mut PortView, job: &PortJob) {
     if row.generation != job.generation || !row.occupied || row.fault.is_some() {
@@ -207,11 +188,6 @@ pub(crate) fn describe_job(row: &mut PortView, job: &PortJob) {
         phase: job.status.phase,
         operation: job.operation,
     });
-    row.stage = job
-        .stage
-        .as_ref()
-        .filter(|_| job.status.phase == RestorePhase::Running)
-        .cloned();
     if matches!(
         job.status.phase,
         RestorePhase::Preparing | RestorePhase::Running
@@ -305,7 +281,6 @@ fn port_power(port: &PortStatus) -> Option<PortPower> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use iasis_api::{Ending, Progress};
     use iasis_protocol::{Observed, RestoreStatus};
 
     pub(crate) fn info() -> Info {
@@ -405,76 +380,56 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_result_from_before_any_worker_stays_with_its_attachment() {
+    fn an_unidentified_run_stays_with_its_attachment_until_it_learns_the_ecid() {
+        use crate::job::Run;
+        use iasis_api::Target;
         let mut status = Status::default();
         status.ports[0].state = PortState::Ready;
         status.ports[0].generation = 3;
-        let ecid = Some(format!("{:016x}", 42));
-        let outcome = Ended {
-            attachment: Some((9, 3)),
-            ending: Ending {
-                operation: Operation::Restore,
-                ecid: ecid.clone(),
-                phase: RestorePhase::Failed,
-                message: "the device declined to trust this computer".into(),
-                setup_error: None,
+        let run = Run::restore(
+            Target {
+                port: Port::ALL[0],
+                generation: 3,
+                ecid: None,
             },
-        };
+            Some(9),
+            Operation::Restore,
+            false,
+            &Default::default(),
+            Default::default(),
+        );
         let mut row = hub(1, &info(), &status).ports.remove(0);
-        row.ecid = ecid.clone();
-        attach_result(&mut row, Some(8), &outcome);
-        assert!(row.result.is_none());
-        attach_result(&mut row, Some(9), &outcome);
-        assert!(row.result.is_some());
-        // The same device, unplugged and plugged back in.
-        status.ports[0].generation += 1;
-        let mut replugged = hub(1, &info(), &status).ports.remove(0);
-        replugged.ecid = ecid;
-        attach_result(&mut replugged, Some(9), &outcome);
-        assert!(replugged.result.is_none());
+        assert!(run.visible(&row, Some(8)).is_none());
+        assert!(run.visible(&row, Some(9)).is_some());
+        row.generation += 1;
+        assert!(run.visible(&row, Some(9)).is_none());
+        run.identify(42);
+        row.ecid = Some(format!("{:016x}", 42));
+        assert!(run.visible(&row, Some(10)).is_some());
+        row.ecid = Some(format!("{:016x}", 43));
+        assert!(run.visible(&row, Some(10)).is_none());
     }
 
     #[test]
-    fn restore_stage_follows_the_running_job_on_its_attachment() {
+    fn the_hub_job_describes_only_its_attachment() {
         let mut status = Status::default();
         status.ports[0].state = PortState::Contract;
         status.ports[0].generation = 8;
-        let stage = |name: &str, percent| Progress {
-            name: name.into(),
-            percent,
-            ..Progress::default()
-        };
-        let mut job = PortJob {
+        let job = PortJob {
             generation: 8,
-            operation: Operation::Restore,
-            stage: Some(stage("Sending Image", 10)),
+            operation: Operation::Revive,
             status: RestoreStatus {
                 phase: RestorePhase::Running,
                 ecid: 42,
                 progress: 10,
             },
         };
-        status.ports[0].restore = Some(job.status);
         let mut view = hub(1, &info(), &status);
-        let port = &mut view.ports[0];
-        assert_eq!(port.job.unwrap().phase, RestorePhase::Running);
-        assert_eq!(port.stage, None);
-        describe_job(port, &job);
-        assert_eq!(port.stage, Some(stage("Sending Image", 10)));
-
-        job.stage = Some(stage("Sending Filesystem", 23));
-        job.status.progress = 23;
-        describe_job(port, &job);
-        assert_eq!(port.stage, Some(stage("Sending Filesystem", 23)));
-        assert_eq!(port.job.unwrap().phase, RestorePhase::Running);
-
-        let mut next = hub(1, &info(), &status);
-        next.ports[0].generation += 1;
-        describe_job(&mut next.ports[0], &job);
-        assert!(next.ports[0].stage.is_none());
-        job.status.phase = RestorePhase::Failed;
+        view.ports[0].generation += 1;
         describe_job(&mut view.ports[0], &job);
-        assert!(view.ports[0].stage.is_none());
-        assert_eq!(view.ports[0].job.unwrap().phase, RestorePhase::Failed);
+        assert!(view.ports[0].job.is_none());
+        view.ports[0].generation = 8;
+        describe_job(&mut view.ports[0], &job);
+        assert_eq!(view.ports[0].job.unwrap().operation, Operation::Revive);
     }
 }

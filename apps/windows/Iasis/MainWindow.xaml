@@ -3,10 +3,24 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:Iasis"
+    xmlns:agent="using:Iasis.Agent"
     Title="Iasis">
     <Grid x:Name="Root" RowDefinitions="Auto,Auto,Auto,*">
         <Grid.Resources>
             <CollectionViewSource x:Key="Groups" IsSourceGrouped="True" ItemsPath="Ports" />
+            <DataTemplate x:Key="OperationStepTemplate" x:DataType="agent:RunStepRow">
+                <StackPanel Margin="0,4" Spacing="2">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <TextBlock Text="{x:Bind Title}" Style="{ThemeResource BodyStrongTextBlockStyle}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Column="1" Text="{x:Bind Status}" Style="{ThemeResource CaptionTextBlockStyle}" />
+                    </Grid>
+                    <TextBlock Text="{x:Bind Detail}" Visibility="{x:Bind HasDetail}" TextWrapping="Wrap" />
+                    <ProgressBar Maximum="100" Value="{x:Bind ProgressValue}" IsIndeterminate="{x:Bind IsIndeterminate}"
+                                 Visibility="{x:Bind HasProgress}" AutomationProperties.Name="{x:Bind Title}" />
+                    <TextBlock Text="{x:Bind Activity}" Visibility="{x:Bind HasActivity}" Style="{ThemeResource CaptionTextBlockStyle}" TextWrapping="Wrap" />
+                    <TextBlock Text="{x:Bind Error}" Visibility="{x:Bind HasError}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                </StackPanel>
+            </DataTemplate>
         </Grid.Resources>
         <TitleBar x:Name="AppTitleBar" Title="Iasis" />
         <InfoBar x:Name="Connection" Grid.Row="1" IsClosable="False" Margin="16,0" />
@@ -52,9 +66,8 @@
                         <ScrollViewer x:Name="Inspector" Grid.Column="1" Width="264" Padding="12" Visibility="Collapsed">
                             <StackPanel Spacing="8">
                                 <TextBlock x:Name="DeviceTitle" Style="{ThemeResource SubtitleTextBlockStyle}" TextWrapping="Wrap" />
+                                <ItemsControl x:Name="Steps" ItemTemplate="{StaticResource OperationStepTemplate}" />
                                 <TextBlock x:Name="Details" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
-                                <ProgressBar x:Name="Progress" Maximum="100" />
-                                <TextBlock x:Name="Steps" TextWrapping="Wrap" />
                                 <TextBlock x:Name="Needs" TextWrapping="Wrap" />
                                 <HyperlinkButton x:Name="GetPrerequisite" />
                             </StackPanel>

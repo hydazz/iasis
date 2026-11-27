@@ -27,14 +27,24 @@ struct Device: Identifiable, Equatable {
         ID(hub: serial, port: port.number)
     }
 
-    /// The port holds a device or is switched off; an empty port offers nothing.
+    /// An active run stays on its reserved port while the target reboots.
     var isSelectable: Bool {
-        port.occupied || !port.enabled
+        port.occupied || !port.enabled || run?.inProgress == true
+    }
+
+    var run: AgentState.OperationRun? {
+        guard let run = port.run, run.inProgress || port.occupied && port.enabled else { return nil }
+        if let expected = run.ecid, let attached = port.ecid, expected != attached {
+            return nil
+        }
+        return run
     }
 
     var name: String {
         if !port.enabled {
             "Off"
+        } else if !port.occupied, run?.inProgress == true {
+            port.device ?? "Waiting for Device"
         } else if !port.occupied {
             "Empty"
         } else if let name = port.device {
@@ -56,6 +66,9 @@ struct Device: Identifiable, Equatable {
     }
 
     var activity: Activity {
+        if let run, run.inProgress, let activity = run.activity {
+            return port.awaiting == nil ? activity : Activity("Waiting for Image", .working(nil), symbol: DeviceSymbol.download)
+        }
         if let fault = port.fault {
             return Activity(fault, .failed)
         }
@@ -63,23 +76,11 @@ struct Device: Identifiable, Equatable {
         if port.awaiting != nil {
             return Activity("Waiting for Image", .working(nil), symbol: DeviceSymbol.download)
         }
-        if port.result?.setupError != nil {
-            return Activity("Restored, Setup Incomplete", .caution)
-        }
-        if let job = port.job {
-            guard let stage = port.stage else {
-                return Activity(job.phase, operation: job.operation)
-            }
-            return Activity(
-                "\(job.operation.running) \(stage.percent)%",
-                .working(Double(stage.percent) / 100),
-                symbol: "\(job.operation.symbol).circle"
-            )
+        if let job = port.job, job.phase == .preparing || job.phase == .running {
+            return Activity(job.phase, operation: job.operation)
         }
         switch port.request {
         case .enteringDfu: return Activity("Entering DFU", .working(nil))
-        case .settingLanguage: return Activity("Setting Language and Region", .working(nil))
-        case .enrolling: return Activity("Requesting Enrollment", .working(nil))
         case .restarting: return Activity("Restarting", .working(nil))
         case .dfuUnconfirmed: return Activity("DFU Not Confirmed", .uncertain)
         case nil: break
@@ -87,57 +88,17 @@ struct Device: Identifiable, Equatable {
         if port.waitingForPower {
             return Activity("Waiting for Power", .caution)
         }
-        if let result = port.result {
-            return Activity(result.phase, operation: result.operation)
+        if let activity = run?.activity {
+            return activity
+        }
+        if let job = port.job {
+            return Activity(job.phase, operation: job.operation)
         }
         switch port.mode {
         case .dfu, .kisDfu: return Activity("DFU", .none)
         case .recovery: return Activity("Recovery", .none)
         default: return .idle
         }
-    }
-
-    /// The operation on the port: one under way, or else how the last ended.
-    var operation: OperationStatus? {
-        guard port.fault == nil, port.occupied, port.enabled else { return nil }
-        let activity = activity
-        if let job = port.job, job.phase == .preparing || job.phase == .running {
-            var status = OperationStatus(title: job.operation.title, symbol: job.operation.symbol, mark: activity.mark)
-            if port.awaiting != nil {
-                status.steps = [.init(name: "Waiting for Image", state: .active)]
-            } else if let stage = port.stage {
-                status.steps = stage.steps.enumerated().map { index, name in
-                    .init(name: name, state: index < stage.step ? .done : index == stage.step ? .active : .pending)
-                }
-                // Firmware transfers interleave with the steps and belong to none.
-                status.detail = stage.steps.contains(stage.name) ? nil : stage.name
-            } else {
-                status.detail = activity.text
-            }
-            return status
-        }
-        if let request = port.request {
-            let symbol = switch request {
-            case .settingLanguage: "globe"
-            case .enrolling: "building.2"
-            case .restarting: DeviceSymbol.restart
-            case .enteringDfu, .dfuUnconfirmed: DeviceSymbol.dfu
-            }
-            return OperationStatus(title: activity.text, symbol: symbol, mark: activity.mark)
-        }
-        if let result = port.result {
-            let ending = result.setupError == nil ? Activity(result.phase, operation: result.operation) : activity
-            return OperationStatus(
-                title: ending.text,
-                symbol: result.operation.symbol,
-                mark: ending.mark,
-                detail: result.setupError ?? result.message
-            )
-        }
-        if let job = port.job {
-            return OperationStatus(title: activity.text, symbol: job.operation.symbol, mark: activity.mark)
-        }
-        return nil
     }
 
     var restoreTarget: RestoreTarget {
@@ -147,7 +108,7 @@ struct Device: Identifiable, Equatable {
     var canCheckSetup: Bool {
         port.enabled && port.occupied && port.usb == .apple && port.mode == .normal
             && port.ecid != nil && port.fault == nil && port.request == nil && port.awaiting == nil
-            && port.job?.phase != .preparing && port.job?.phase != .running
+            && port.job?.phase != .preparing && port.job?.phase != .running && run?.inProgress != true
     }
 }
 
@@ -168,30 +129,10 @@ extension [Device] {
     }
 }
 
-/// A port's operation as the inspector lays it out: what it is, how it
-/// stands and the steps it goes through.
-struct OperationStatus: Equatable {
-    struct Step: Equatable {
-        enum State {
-            case done, active, pending
-        }
-
-        let name: String
-        let state: State
-    }
-
-    let title: String
-    let symbol: String
-    let mark: Activity.Mark
-    /// What is happening when no step says it, or how the operation ended.
-    var detail: String?
-    var steps: [Step] = []
-}
-
 /// What a port is doing, in words and as one mark.
 struct Activity: Equatable {
     enum Mark: Equatable {
-        case none
+        case none, pending, skipped
         /// Under way, with the fraction done when it is known.
         case working(Double?)
         case done

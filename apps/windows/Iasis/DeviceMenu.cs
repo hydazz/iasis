@@ -33,7 +33,7 @@ public sealed partial class MainWindow
             Ports.SelectedItems.Add(row);
         }
         var selected = Selected;
-        var targets = DeviceActionTargets.SetupSelection(selected);
+        var targets = DeviceActionTargets.ForSetup(selected);
         var hasPoint = args.TryGetPosition(container, out var point);
         var menu = new MenuFlyout();
         var shown = false;
@@ -53,10 +53,10 @@ public sealed partial class MainWindow
         {
             try
             {
-                await Send(new AdvanceSetupRequest(targets, null, Dep: false, CheckOnly: true));
+                await Send(new AdvanceSetupRequest(targets.Hubs, null, Dep: false, CheckOnly: true));
                 if (deviceMenu != menu || !IsCurrent(Selected)) return;
                 AddAction("Advance Setup…", current => current.All(d => d.CanCheckSetup),
-                    () => _ = Run(() => AdvanceSetup(selected, targets)));
+                    () => _ = Run(() => AdvanceSetup(targets)));
                 Refresh();
             }
             catch (AgentRefusedException) { }

@@ -57,20 +57,22 @@ public class DeviceTests
     public void SetupAssistantActionsRequireTheWholeSelectionToBeIdleAndIdentified()
     {
         var device = DeviceOn("aaa", 2, "1234");
-        var a = device with { Port = device.Port with { Mode = AppleMode.Normal, Request = null, Job = null } };
+        var a = device with { Port = device.Port with { Mode = AppleMode.Normal, Request = null, Job = null, Run = null } };
         var b = a with { Hub = a.Hub with { Serial = "bbb", Session = 8 }, Port = a.Port with { Ecid = "5678" } };
-        var hubs = DeviceActionTargets.SetupSelection([a, b])!;
+        var c = a with { Port = a.Port with { Number = 3, Ecid = "9876" } };
+        var targets = DeviceActionTargets.ForSetup([a, b, c])!;
+        var hubs = targets.Hubs;
+        Assert.Equal([a, c, b], targets.Devices);
         Assert.Equal(["aaa", "bbb"], hubs.Select(hub => hub.Hub));
         Assert.Equal([3u, 8u], hubs.Select(hub => hub.Session));
-        Assert.Equal([new Target(2, 7, "1234"), new Target(2, 7, "5678")], hubs.Select(hub => Assert.Single(hub.Targets)));
-        Assert.Null(DeviceActionTargets.SetupSelection([]));
-        Assert.Null(DeviceActionTargets.SetupSelection([a, device]));
-        Assert.Null(DeviceActionTargets.SetupSelection([a, b with { Port = b.Port with { Ecid = null } }]));
-        Assert.Null(DeviceActionTargets.SetupSelection([a, b with { Port = b.Port with { Request = RequestProgress.SettingLanguage } }]));
-        var enrolling = b with { Port = b.Port with { Request = RequestProgress.Enrolling, Awaiting = null } };
-        Assert.Equal("Trying enrollment", enrolling.Status);
-        Assert.Null(DeviceActionTargets.SetupSelection([a, enrolling]));
-        Assert.Null(DeviceActionTargets.SetupSelection([a, b with { Hub = b.Hub with { Session = null } }]));
+        Assert.Equal([new Target(2, 7, "1234"), new Target(3, 7, "9876"), new Target(2, 7, "5678")], hubs.SelectMany(hub => hub.Targets));
+        Assert.Null(DeviceActionTargets.ForSetup([]));
+        Assert.Null(DeviceActionTargets.ForSetup([a, device]));
+        Assert.Null(DeviceActionTargets.ForSetup([a, b with { Port = b.Port with { Ecid = null } }]));
+        var enrolling = b with { Port = b.Port with { Run = new(b.Port.Ecid, [new(StepKind.RequestEnrollment, StepState.Active)]), Awaiting = null } };
+        Assert.Equal("Request enrollment · In progress", enrolling.Status);
+        Assert.Null(DeviceActionTargets.ForSetup([a, enrolling]));
+        Assert.Null(DeviceActionTargets.ForSetup([a, b with { Hub = b.Hub with { Session = null } }]));
     }
 
     [Fact]
@@ -86,12 +88,61 @@ public class DeviceTests
     }
 
     [Fact]
-    public void ReportedEraseKeepsTheRestoreOutcomeAndThePostEraseFailure()
+    public void RestoreAndSetupKeepTheirOwnOutcomesAndRequestedValues()
     {
-        var reported = new Ending(Operation.Restore, "1234", RestorePhase.Reported, "Language and region set", null);
-        Assert.Equal("Restore complete · Language and region set", Device.Outcome(reported));
-        var incomplete = reported with { SetupError = "Enrollment: Sign in on the device." };
-        Assert.Equal("Restore complete · Language and region set · Setup incomplete: Enrollment: Sign in on the device.", Device.Outcome(incomplete));
+        var restore = new OperationStep(StepKind.Restore, StepState.Active, new("iPadOS", "27.2", "24C101"),
+            Progress: new("Sending image", 45, ["Prepare", "Install", "Verify"], 1));
+        var restoring = RunStepRow.From(restore);
+        Assert.Equal("iPadOS 27.2 (24C101)", restoring.Detail);
+        Assert.True(restoring.HasProgress);
+        Assert.Equal("45%", restoring.Status);
+        Assert.Equal("Sending image", restoring.Activity);
+        var run = new OperationRun("1234", [
+            restore with { State = StepState.Complete },
+            new(StepKind.SetRegion, StepState.Complete, Language: new("en-AU", "en_AU")),
+            new(StepKind.RequestEnrollment, StepState.Failed, Error: "Sign in on the device."),
+        ]);
+        Assert.True(run.Finished());
+        Assert.False(run.Succeeded());
+        Assert.Equal("Request enrollment · Failed", Device.RunStatus(run));
+        var rows = run.Steps.Select(RunStepRow.From).ToArray();
+        Assert.Equal(["Restore", "Set language and region", "Request enrollment"], rows.Select(r => r.Title));
+        Assert.Equal("en-AU · en_AU", rows[1].Detail);
+        Assert.Equal("Sign in on the device.", rows[2].Error);
+        Assert.All(rows, row =>
+        {
+            Assert.False(row.HasProgress);
+            Assert.False(row.HasActivity);
+        });
+    }
+
+    [Fact]
+    public void RestoreModeHasAnOperatorFacingLabel()
+    {
+        var device = DeviceOn("aaa", 1);
+        var restored = device with
+        {
+            Port = device.Port with { Mode = AppleMode.Restored, Run = null, Job = null, Request = null, Awaiting = null }
+        };
+        Assert.Equal("Restore mode", restored.Mode);
+        Assert.Equal("Restore mode", restored.Status);
+    }
+
+    [Fact]
+    public void AReservedPortKeepsItsRunVisibleWhileTheDeviceReconnects()
+    {
+        var device = DeviceOn("aaa", 1, "1234");
+        var run = new OperationRun("1234", [new(StepKind.Restore, StepState.Active)]);
+        var before = device with { Port = device.Port with { Run = run } };
+        var gap = before with { Port = before.Port with { Generation = 8, Ecid = null, Occupied = false, Device = null } };
+        Assert.False(before.SameAttachment(gap));
+        Assert.True(before.FollowsRun(gap));
+        Assert.Equal("Reconnecting…", gap.Name);
+        Assert.Equal(run, before.ActiveRunIn([gap.Hub with { Ports = [gap.Port] }]));
+        Assert.Null(before.ActiveRunIn([gap.Hub with { Session = 9, Ports = [gap.Port] }]));
+        Assert.Null(before.ActiveRunIn([gap.Hub with { Ports = [gap.Port with { Run = run with { Ecid = "5678" } }] }]));
+        Assert.False(before.FollowsRun(gap with { Port = gap.Port with { Ecid = "5678" } }));
+        Assert.False(before.FollowsRun(gap with { Port = gap.Port with { Run = null } }));
     }
 
     [Fact]

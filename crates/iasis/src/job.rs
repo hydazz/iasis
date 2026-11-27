@@ -4,14 +4,17 @@
 //! that ends.
 
 use std::{
-    sync::{Arc, Condvar, Mutex, OnceLock},
+    sync::{Arc, Condvar, Mutex},
     thread,
     time::{Duration, Instant},
 };
 
+mod run;
+pub(crate) use run::{PortWork, Run};
+
 use crate::post_restore::Setup;
 use anyhow::{Context, Result, anyhow, bail, ensure};
-use iasis_api::{Ending, RequestProgress, Target};
+use iasis_api::{StepState, SystemImage, Target};
 use iasis_protocol::{
     self as protocol, CommandError, CommandResult, DebugActions, Gesture, Port, PortAction,
     PortStatus, RestoreAccess, RestoreArm, RestoreDecision, RestorePhase, RestoreStatus, Status,
@@ -45,33 +48,14 @@ const LOOK: Duration = Duration::from_secs(1);
 /// drop at the same stage of more than one attempt.
 const RELAUNCHES: u32 = 3;
 
-/// How a port's last operation ended. The hub forgets a result when its
-/// target leaves, which a restored target does by restarting.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Ended {
-    /// The session and generation of the attachment it was tried on, for an
-    /// operation that ended before a worker ran. Its result describes that
-    /// attachment alone, not the device when it comes back.
-    pub(crate) attachment: Option<(u32, u32)>,
-    pub ending: Ending,
-}
-
-/// The port and its submitting client share this operation's result across USB sessions.
-pub type PortWork = Arc<OnceLock<Ended>>;
-
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(crate) struct PortSlot {
-    pub restore: Option<PortWork>,
-    pub setup: Option<(u64, RequestProgress)>,
+    pub run: Option<PortWork>,
 }
 
 impl PortSlot {
     pub fn busy(&self) -> bool {
-        self.setup.is_some()
-            || self
-                .restore
-                .as_ref()
-                .is_some_and(|work| work.get().is_none())
+        self.run.as_ref().is_some_and(|run| run.busy())
     }
 
     pub fn require_idle(&self, port: Port) -> Result<()> {
@@ -122,41 +106,30 @@ pub(crate) fn spawn(
         generation: target.generation,
         ecid: target.ecid,
         ask,
+        run: work.clone(),
     };
-    let finished = work.clone();
     let spawned = thread::Builder::new()
         .name(format!("job-{}", port.number()))
         .spawn(move || {
-            let ended = job.run(ticket);
-            log::info!(
-                "Port {}: {:?} {:?}: {}",
-                port.number(),
-                ended.ending.operation,
-                ended.ending.phase,
-                ended.ending.message
-            );
-            let mut ports = job.hub.ports.lock().unwrap();
-            ports[port.index()].setup = None;
-            let _ = finished.set(ended);
-            drop(ports);
-            job.host.changes.changed();
+            if let Err(error) = job.run(ticket) {
+                job.hub.work.awaiting(port, None);
+                log::warn!("Port {}: {error:#}", port.number());
+                job.run.stop(
+                    crate::post_restore::error_state(&error),
+                    format!("{error:#}"),
+                );
+            }
         });
     if let Err(error) = spawned {
-        let session = hub.link().map_or(0, |link| link.session());
-        let _ = work.set(Ended {
-            attachment: Some((session, target.generation)),
-            ending: Ending {
-                operation: ask.operation,
-                phase: RestorePhase::Failed,
-                ecid: target.ecid.map(|id| format!("{id:016x}")),
-                message: format!("Could not start the job: {error}"),
-                setup_error: None,
-            },
-        });
+        work.stop(
+            StepState::Failed,
+            format!("Could not start the operation: {error}"),
+        );
     }
 }
 
 struct Job {
+    run: PortWork,
     host: Host,
     hub: Arc<Attendance>,
     port: Port,
@@ -168,72 +141,37 @@ struct Job {
 }
 
 impl Job {
-    fn run(&mut self, ticket: Option<Ticket>) -> Ended {
+    fn run(&mut self, ticket: Option<Ticket>) -> Result<()> {
+        self.run.start();
         let taken = self.hub.work.take(self.port);
-        let operation = self.ask.operation;
         let awake = crate::awake::hold("Preparing a restore");
-        let started = self.prepare(ticket);
+        let (worker, tracker, image) = self.prepare(ticket)?;
         drop(awake);
-        let (worker, tracker, image) = match started {
-            Ok(started) => started,
-            Err(error) => {
-                self.hub.work.awaiting(self.port, None);
-                let session = self.hub.link().map_or(0, |link| link.session());
-                return Ended {
-                    attachment: Some((session, self.generation)),
-                    ending: Ending {
-                        operation,
-                        ecid: self.ecid.map(|id| format!("{id:016x}")),
-                        phase: RestorePhase::Failed,
-                        message: format!("{error:#}"),
-                        setup_error: None,
-                    },
-                };
-            }
-        };
-        let mut job = self.follow(worker, &tracker, &image);
+        let job = self.follow(worker, &tracker, &image);
         drop(taken);
-        let follow_up = mobile_erase(operation, job.state, &image.product_types);
+        if job.state != RestoreState::RestoreReported {
+            self.run.stop(
+                if job.state == RestoreState::Unconfirmed {
+                    StepState::Unconfirmed
+                } else {
+                    StepState::Failed
+                },
+                job.message,
+            );
+            return Ok(());
+        }
+        self.run.complete();
         drop(image);
-        let settings = &self.host.post_restore;
-        let setup = Setup {
-            language: settings.setup_language.as_ref(),
-            dep: settings.try_enrollment,
-        };
-        let mut setup_error = None;
-        if follow_up && setup.requested() {
-            let stage = |progress| {
-                self.hub
-                    .set_setup(self.port, job.ecid, progress, &self.host.changes);
-            };
-            stage(setup.first_stage());
-            match self.setup_device(&tracker, setup, stage) {
-                Ok(message) => job.message.push_str(&format!(". {message}")),
-                Err(error) => {
-                    let message = format!("{error:#}");
-                    log::warn!("Port {}: {message}", self.port.number());
-                    setup_error = Some(message);
-                }
-            }
+        let plan = self.run.snapshot();
+        let setup = Setup::from(&plan);
+        if setup.requested() {
+            self.run.start();
+            self.setup_device(&tracker, setup)?;
         }
-        Ended {
-            attachment: None,
-            ending: Ending {
-                operation: job.operation,
-                ecid: Some(format!("{:016x}", job.ecid)),
-                phase: phase(job.state),
-                message: job.message,
-                setup_error,
-            },
-        }
+        Ok(())
     }
 
-    fn setup_device(
-        &self,
-        tracker: &TargetTracker,
-        setup: Setup<'_>,
-        stage: impl FnMut(RequestProgress),
-    ) -> Result<String> {
+    fn setup_device(&self, tracker: &TargetTracker, setup: Setup<'_>) -> Result<()> {
         let deadline = Instant::now() + Duration::from_secs(120);
         let mut seen = self.host.changes.count();
         loop {
@@ -248,7 +186,7 @@ impl Job {
                             .into_iter()
                             .find(|d| d.ecid == tracker.ecid)
                         {
-                            return setup.prepare(&device, true)?.run(stage);
+                            return setup.prepare(&device, true)?.run(&self.run);
                         }
                     }
                     Observation::Replaced { .. }
@@ -278,6 +216,7 @@ impl Job {
             None => None,
         };
         let tracker = self.enter()?;
+        self.run.identify(tracker.ecid);
         let image = match image {
             Some(image) => image,
             // A target this host has not identified names its hardware in DFU
@@ -353,7 +292,28 @@ impl Job {
             Ok(())
         });
         self.hub.work.awaiting(self.port, None);
-        image
+        let image = image?;
+        let os = model
+            .identifier()
+            .and_then(crate::images::system)
+            .or_else(|| {
+                image
+                    .product_types
+                    .iter()
+                    .find_map(|kind| crate::images::system(kind))
+            })
+            .unwrap_or("OS");
+        let setup = (self.ask.operation == Operation::Restore && matches!(os, "iOS" | "iPadOS"))
+            .then(|| Setup::from(&self.host.post_restore));
+        self.run.image(
+            SystemImage {
+                os: os.into(),
+                version: image.product_version.clone(),
+                build: image.build_version.clone(),
+            },
+            setup,
+        );
+        Ok(image)
     }
 
     /// The port still holds the target, as the hub reports it: on its
@@ -697,7 +657,6 @@ impl Job {
                 progress: 0,
             },
             operation: self.ask.operation,
-            stage: None,
         }
     }
 
@@ -715,6 +674,7 @@ impl Job {
         let mut seen = self.host.changes.count();
         loop {
             let job = worker.status();
+            self.run.progress(&job.progress);
             let link = self.hub.link();
             let sample = link.as_ref().and_then(|link| link.sample());
             let observed = sample
@@ -742,7 +702,6 @@ impl Job {
                         progress: job.progress.percent,
                     },
                     operation: job.operation,
-                    stage: Some(job.progress.clone()),
                 }),
             );
             if job.state.is_terminal() {
@@ -877,6 +836,7 @@ fn phase(state: RestoreState) -> RestorePhase {
         RestoreState::Running => RestorePhase::Running,
         RestoreState::RestoreReported => RestorePhase::Reported,
         RestoreState::Failed | RestoreState::TransportLost => RestorePhase::Failed,
+        RestoreState::Unconfirmed => RestorePhase::Unconfirmed,
     }
 }
 
@@ -889,15 +849,6 @@ fn present(tracker: &TargetTracker, snapshot: &Snapshot) -> Option<(AppleMode, D
         }
         _ => None,
     }
-}
-
-fn mobile_erase(operation: Operation, state: RestoreState, product_types: &[String]) -> bool {
-    operation == Operation::Restore
-        && state == RestoreState::RestoreReported
-        && !product_types.is_empty()
-        && product_types
-            .iter()
-            .all(|t| t.starts_with("iPad") || t.starts_with("iPhone"))
 }
 
 fn after(operation: Operation, shutdown_macs: bool, product_types: &[String]) -> PostRestoreAction {
@@ -1250,22 +1201,6 @@ mod tests {
         // Another device there ends it.
         moved.ports[2].ecid = Some(43);
         assert!(arm_for(7, &ready, &moved).is_err());
-    }
-
-    #[test]
-    fn setup_waits_for_a_successful_mobile_erase() {
-        let ipad = ["iPad13,18".into()];
-        let reported = RestoreState::RestoreReported;
-        assert!(mobile_erase(Operation::Restore, reported, &ipad));
-        for (operation, state, kinds) in [
-            (Operation::Revive, reported, ipad.as_slice()),
-            (Operation::Restore, RestoreState::TransportLost, &ipad),
-            (Operation::Restore, RestoreState::Failed, &ipad),
-            (Operation::Restore, reported, &["Mac17,5".into()]),
-            (Operation::Restore, reported, &[]),
-        ] {
-            assert!(!mobile_erase(operation, state, kinds));
-        }
     }
 
     #[test]

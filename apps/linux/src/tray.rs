@@ -57,10 +57,20 @@ impl Tray {
         }
         let mut ports = state.hubs.iter().flat_map(|hub| &hub.ports);
         if state.hubs.iter().any(|hub| hub.notice.is_some())
-            || ports.clone().any(|port| port.light.hue == Hue::Red)
+            || ports.clone().any(|port| {
+                port.light.hue == Hue::Red
+                    || port
+                        .run
+                        .as_ref()
+                        .is_some_and(|run| run.finished() && !run.succeeded())
+            })
         {
             Status::Attention
-        } else if state.images.fetch.is_some() || ports.any(|port| port.light.pulse) {
+        } else if state.images.fetch.is_some()
+            || ports.any(|port| {
+                port.light.pulse || port.run.as_ref().is_some_and(|run| !run.finished())
+            })
+        {
             Status::Busy
         } else {
             Status::Ready
@@ -188,7 +198,7 @@ impl ksni::Tray for Tray {
     fn menu(&self) -> Vec<MenuItem<Self>> {
         let mut items = Vec::new();
         match &self.state {
-            None => items.push(self.item("Iasis Service Not Running", None)),
+            None => items.push(self.item("Iasis Is Offline", None)),
             Some(state) if state.hubs.is_empty() => {
                 items.push(self.item("No Hubs Connected", None));
             }
@@ -225,7 +235,6 @@ impl ksni::Tray for Tray {
 
 #[cfg(test)]
 mod tests {
-    use iasis_api::Progress;
     use ksni::Tray as _;
 
     use super::*;
@@ -236,12 +245,11 @@ mod tests {
             serde_json::from_str(include_str!("../../../crates/api/fixtures/state.json")).unwrap();
         let port = &mut state.hubs[0].ports[0];
         port.awaiting = None;
-        port.stage = Some(Progress {
-            name: "Sending Filesystem".into(),
-            percent: 43,
-            steps: Vec::new(),
-            step: 0,
-        });
+        port.run.as_mut().unwrap().steps[0]
+            .progress
+            .as_mut()
+            .unwrap()
+            .percent = 43;
         let tray = Tray {
             state: Some(state),
             commands: async_channel::unbounded().0,

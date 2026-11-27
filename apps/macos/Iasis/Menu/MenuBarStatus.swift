@@ -14,7 +14,7 @@ enum MenuBarStatus: String, CaseIterable {
         let ports = state.hubs.lazy.flatMap(\.ports)
         if state.hubs.contains(where: { $0.notice != nil }) || ports.contains(where: { $0.light.hue == .red }) {
             self = .fault
-        } else if state.images.fetch != nil || ports.contains(where: \.light.pulse) {
+        } else if state.images.fetch != nil || ports.contains(where: { $0.light.pulse || $0.run?.inProgress == true }) {
             self = .busy
         } else {
             self = .ready

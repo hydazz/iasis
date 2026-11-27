@@ -340,13 +340,13 @@ impl Window {
                     ),
                     Event::Unreadable => (
                         "dialog-warning-symbolic",
-                        "Iasis Service Is a Different Version",
+                        "Iasis Version Mismatch",
                         "Restart it with “sudo systemctl restart iasisd”.".to_owned(),
                     ),
                     _ => (
                         "computer-fail-symbolic",
-                        "Iasis Service Not Running",
-                        "The iasisd service attends the hubs. Start it with “sudo systemctl start iasisd”.".to_owned(),
+                        "Iasis Is Offline",
+                        "Start Iasis with “sudo systemctl start iasisd”.".to_owned(),
                     ),
                 };
                 self.status.set_icon_name(Some(icon));
