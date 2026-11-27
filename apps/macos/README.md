@@ -45,7 +45,7 @@ Before it asks, Restore checks what Apple signs for each device. Where a downloa
 
 A hub on a power supply shows, beside its name, the power allocated to its ports out of the available charging budget. A bolt with a warning marks a device that took the largest offer the hub could make and would use more: with several devices sharing a supply, one with a flat battery may get too little to start.
 
-Each row shows the current activity or the outcome of the run.
+Each row ends in a mark for the current step or the outcome of the run. Select a device to see its requested steps in order, including while it reboots. Restore and Revive show the OS version and build. During installation, a progress bar shows the percentage complete and the activity beneath it names the current stage. Set Region shows the target region and language. A checkmark beside Request Enrollment means the device accepted the request. **Continue on Device** means the device or its management service must finish the step. The inspector shows the reason.
 
 The inspector also shows device identity, USB connection and power. Power shows the PD contract or default USB allowance with exact nominal watts in parentheses. The toolbar lets you hide or show the inspector. The bar under the list reports an image download.
 

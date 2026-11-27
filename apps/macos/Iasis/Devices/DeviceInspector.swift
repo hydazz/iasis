@@ -14,12 +14,17 @@ struct DeviceInspector: View {
                     if let fault = device.port.fault {
                         Label(fault, systemImage: "exclamationmark.triangle.fill")
                     }
-                    if device.port.fault == nil, !steps.isEmpty || hasLiveAction {
+                    if hasLiveAction, device.port.fault == nil,
+                       steps.isEmpty || device.port.request != nil && device.run?.inProgress != true
+                    {
                         HStack {
                             ActivityMark(activity: device.activity)
                             Text(device.activity.text)
                         }
                         .accessibilityElement(children: .combine)
+                    }
+                    ForEach(steps, id: \.kind) { step in
+                        OperationStepRow(step: step, waitingForImage: device.port.awaiting != nil)
                     }
                     if let needs = device.needs {
                         Label(needs.reason, systemImage: "exclamationmark.triangle")
