@@ -1,6 +1,7 @@
 //! Whole-job progress from the restore workers' stage-local counters.
 
 use iasis_api::Progress;
+use restorekit::restore::FILESYSTEM_STREAM_STEP;
 
 /// The restore worker's milestones in order, each with its share of the job
 /// in percent.
@@ -49,17 +50,18 @@ impl Stages for Progress {
         if self.steps.is_empty() {
             self.steps = MILESTONES.iter().map(|step| step.0.into()).collect();
         }
-        // Firmware and image requests can repeat or interleave with the
-        // filesystem at any point, and the device does not announce how many
-        // are outstanding. They name what the worker is doing and move
-        // nothing.
-        let name = match id {
+        // The host's ASR byte counter and the device's upload progress
+        // describe the same filesystem transfer.
+        let step = if id == FILESYSTEM_STREAM_STEP { 2 } else { id };
+        let name = match step {
             0..=3 => {
-                let (name, start, end) = MILESTONES[id as usize];
-                self.step = self.step.max(id as usize);
+                let (name, start, end) = MILESTONES[step as usize];
+                self.step = self.step.max(step as usize);
                 self.advance(name, f64::from(start) + fraction * f64::from(end - start));
                 return Some(());
             }
+            // Firmware and image requests can interleave with the upload.
+            // Their count is unknown, so they only update the activity name.
             4 => "Flashing Firmware",
             5 => "Flashing Baseband",
             6 => "Updating Firmware",
@@ -86,7 +88,8 @@ mod tests {
             (1, 1.0, "Preparing Device", 10),
             (4, 1.0, "Flashing Firmware", 10),
             (7, 1.0, "Sending Image", 10),
-            (2, 0.5, "Sending Filesystem", 45),
+            (FILESYSTEM_STREAM_STEP, 0.5, "Sending Filesystem", 45),
+            (2, 0.4, "Sending Filesystem", 45),
             (6, 0.5, "Updating Firmware", 45),
             (7, 0.01, "Sending Image", 45),
             (7, 1.0, "Sending Image", 45),
