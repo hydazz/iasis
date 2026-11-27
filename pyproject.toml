@@ -4,6 +4,7 @@ version = "0.1.0"
 requires-python = ">=3.14,<3.15"
 dependencies = [
   "build123d>=0.13.0",
+  "ezdxf>=1.4.5",
   "numpy>=2.5.4",
   "ocp-tessellate>=3.6.3",
   "pillow>=13.0.0",
@@ -19,6 +20,7 @@ iasis-case-build = "iasis_case.build:main"
 iasis-case-preview = "iasis_case.preview:main"
 iasis-case-check = "iasis_case.check:main"
 iasis-case-view = "iasis_case.case:main"
+iasis-case-sheet = "iasis_case.sheet:main"
 
 [build-system]
 requires = ["hatchling"]

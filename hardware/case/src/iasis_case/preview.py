@@ -4,9 +4,9 @@ import argparse
 from pathlib import Path
 from time import monotonic
 
-from build123d import Compound
+from build123d import Compound, Pos, extrude
 
-from . import case
+from . import case, sheet
 from .render import render, save
 
 PREVIEW = Path(__file__).resolve().parents[2] / "preview"
@@ -43,6 +43,22 @@ def main() -> None:
             f"{name}: {'written' if changed else 'unchanged'} in {monotonic() - start:.1f}s",
             flush=True,
         )
+    start = monotonic()
+    a = sheet.assemble()
+    f, c = a.frame, a.covers["display"]
+    marks = Compound([extrude(Pos(0, 0, f.top_out) * m, amount=0.02) for m in c.marks])
+    visible = Compound([f.lay.board.parts[ref] for ref in (*f.lay.ports, *case.LIGHTS)])
+    shown = [
+        (a.base, sheet.BLACK, True),
+        (c.part, sheet.BLACK, True),
+        (marks, sheet.WHITE, False),
+        (a.button, (30, 31, 34), True),
+        (visible, (100, 106, 112), False),
+    ]
+    if c.display is not None:
+        shown.append((c.display, (18, 22, 30), False))
+    changed = save(render(shown, VIEW), output / "case-sheet.png")
+    print(f"case-sheet.png: {'written' if changed else 'unchanged'} in {monotonic() - start:.1f}s")
 
 
 if __name__ == "__main__":

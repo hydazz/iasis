@@ -15,8 +15,13 @@ sources = [
   "../../uv.lock",
   ".mise.toml",
 ]
-outputs = ["preview/case-cm5.png", "preview/case.png"]
+outputs = ["preview/case-cm5.png", "preview/case-sheet.png", "preview/case.png"]
 run = "uv run --locked iasis-case-preview"
+
+[tasks.sheet]
+description = "Sheet-metal case order files"
+depends = ["//hardware/boards/iasis:step"]
+run = "uv run --locked iasis-case-sheet"
 
 [tasks.test]
 description = "Fit and motion"
@@ -24,6 +29,7 @@ depends = ["//hardware/boards/iasis:step", "//hardware/boards/cm5:step"]
 run = [
   "uv run --locked iasis-case-check",
   "uv run --locked iasis-case-check --cm5",
+  "uv run --locked iasis-case-sheet --check-only",
 ]
 
 [tasks.view]
