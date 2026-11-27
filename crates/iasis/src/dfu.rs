@@ -8,7 +8,7 @@ use iasis_protocol::{
 use serde::Serialize;
 
 use crate::{
-    identity::{AppleMode, Observation, TargetTracker, models::DeviceModel},
+    identity::{AppleMode, Observation, TargetTracker},
     topology::{Companion, Snapshot, UsbDevice},
 };
 
@@ -343,8 +343,7 @@ impl Attempt {
     }
 }
 
-/// A Mac by the model a running system names, or by its chip and board in
-/// RestoreKit's Mac table where its mode gives only those.
+/// Recovery and DFU identify the model by chip and board.
 fn is_mac(device: &UsbDevice) -> bool {
     let Some(apple) = &device.apple else {
         return false;
@@ -353,11 +352,9 @@ fn is_mac(device: &UsbDevice) -> bool {
     if let Some(model) = apple.model.as_deref() {
         return mac_name(model);
     }
-    if let Some((chip, board)) = DeviceModel::read(device).hardware() {
-        return u16::try_from(chip)
-            .ok()
-            .zip(u8::try_from(board).ok())
-            .is_some_and(|(chip, board)| restorekit::device::lookup(chip, board).is_some());
+    if let Some((chip, board)) = apple.hardware {
+        return restorekit::device::lookup(chip, board)
+            .is_some_and(|model| mac_name(model.identifier));
     }
     device.product.as_deref().is_some_and(mac_name)
 }
@@ -982,7 +979,9 @@ mod tests {
             RestoreAccess::Unavailable
         );
         // The same iPad in recovery.
+        st.ports[0].state = PortState::Ready;
         usb.ports[0].devices = vec![apple(AppleMode::Recovery, 0x1281, Some(42))];
+        usb.ports[0].devices[0].apple.as_mut().unwrap().hardware = Some((0x8030, 0x18));
         let recovery = report(&st, &usb, None);
         assert_eq!(recovery.signal, Signal::AlreadyRecovery);
         assert_eq!(
@@ -991,6 +990,7 @@ mod tests {
         );
         // A target in recovery whose port takes DFU goes to DFU, Mac or not.
         let mut signallable = st;
+        signallable.ports[0].state = PortState::Contract;
         signallable.ports[0].debug_actions = status().ports[0].debug_actions;
         assert_eq!(
             access(
