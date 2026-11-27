@@ -188,7 +188,7 @@ struct MenuTests {
         let download = try #require(menu.item(withTitle: "Downloading iPadOS 27.2.1"))
         #expect(!restart.isEnabled)
         status.menuWillOpen(menu)
-        state.hubs[0].ports[2].stage?.percent = 84
+        state.hubs[0].ports[2].run?.steps[0].progress?.percent = 84
         state.hubs[0].ports[2].reboot = true
         state.images.fetch?.done = 8_000_000_000
         let next = state

@@ -263,7 +263,7 @@ impl Assessment {
             Some(AppleMode::Recovery) => "Recovery mode",
             Some(AppleMode::PortDfu) => "Port DFU",
             Some(AppleMode::Normal) => "Normal mode",
-            Some(AppleMode::Restored) => "Restore service",
+            Some(AppleMode::Restored) => "Restore mode",
             None => "",
         };
         let mut parts = Vec::new();

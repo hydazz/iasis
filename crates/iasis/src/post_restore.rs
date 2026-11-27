@@ -11,8 +11,20 @@ use std::{
 };
 
 use anyhow::{Context, Result, ensure};
-use iasis_api::{PostRestore, RequestProgress, SetupLanguage};
+use iasis_api::{PostRestore, SetupLanguage};
 use restorekit_sys as sys;
+
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+struct Unconfirmed(&'static str);
+
+pub(crate) fn error_state(error: &anyhow::Error) -> iasis_api::StepState {
+    if error.is::<Unconfirmed>() {
+        iasis_api::StepState::Unconfirmed
+    } else {
+        iasis_api::StepState::Failed
+    }
+}
 
 const FILE: &str = "post-restore.json";
 const INTERNATIONAL: &CStr = c"com.apple.international";
@@ -302,18 +314,21 @@ impl Language {
         session.set(c"Locale", &self.locale)?;
         // Setup Assistant records the two writes after lockdown has acknowledged them.
         let deadline = Instant::now() + Duration::from_secs(20);
-        while !session
-            .buddy()
-            .context("checking whether Setup Assistant accepted the written settings")?
-            .accepted_language()
-        {
-            ensure!(
-                Instant::now() < deadline,
-                "language and region were written, but Setup Assistant has not confirmed them"
-            );
+        let unconfirmed = || Unconfirmed("The device has not confirmed its language and region.");
+        loop {
+            if session
+                .buddy()
+                .with_context(unconfirmed)?
+                .accepted_language()
+                && self.matches(session).with_context(unconfirmed)?
+            {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(unconfirmed().into());
+            }
             thread::sleep(Duration::from_millis(250));
         }
-        Ok(())
     }
 }
 
@@ -323,15 +338,28 @@ pub(crate) struct Setup<'a> {
     pub dep: bool,
 }
 
-impl Setup<'_> {
-    pub(crate) fn first_stage(&self) -> RequestProgress {
-        if self.language.is_some() {
-            RequestProgress::SettingLanguage
-        } else {
-            RequestProgress::Enrolling
+impl<'a> From<&'a PostRestore> for Setup<'a> {
+    fn from(value: &'a PostRestore) -> Self {
+        Self {
+            language: value.setup_language.as_ref(),
+            dep: value.try_enrollment,
         }
     }
+}
 
+impl<'a> From<&'a iasis_api::OperationRun> for Setup<'a> {
+    fn from(run: &'a iasis_api::OperationRun) -> Self {
+        Self {
+            language: run.steps.iter().find_map(|s| s.language.as_ref()),
+            dep: run
+                .steps
+                .iter()
+                .any(|s| s.kind == iasis_api::StepKind::RequestEnrollment),
+        }
+    }
+}
+
+impl Setup<'_> {
     pub(crate) fn requested(&self) -> bool {
         self.language.is_some() || self.dep
     }
@@ -355,7 +383,7 @@ impl Setup<'_> {
             "the device has already finished setup"
         );
         enrollment::check_configuration(&session)?;
-        let mut language = self
+        let language = self
             .language
             .map(|settings| Language::supported(&session, settings))
             .transpose()?;
@@ -370,10 +398,10 @@ impl Setup<'_> {
                 self.dep,
                 "Setup Assistant already accepted the requested language and region"
             );
-            language = None;
         }
         Ok(PreparedSetup {
             session,
+            write_language: !buddy.accepted_language(),
             language,
             dep: self.dep,
         })
@@ -381,34 +409,32 @@ impl Setup<'_> {
 }
 
 pub(crate) struct PreparedSetup {
+    write_language: bool,
     session: Session,
     language: Option<Language>,
     dep: bool,
 }
 
 impl PreparedSetup {
-    pub(crate) fn run(&self, mut stage: impl FnMut(RequestProgress)) -> Result<String> {
-        let mut completed = Vec::new();
+    pub(crate) fn run(&self, run: &crate::job::Run) -> Result<()> {
         if let Some(language) = &self.language {
-            stage(RequestProgress::SettingLanguage);
-            language
-                .apply(&self.session)
-                .context("setting language and region")?;
-            completed.push(format!(
-                "Language and region set to {} and {}",
-                language.language.to_string_lossy(),
-                language.locale.to_string_lossy()
-            ));
+            run.start();
+            if self.write_language {
+                language
+                    .apply(&self.session)
+                    .context("setting language and region")?;
+            }
+            run.applied_language(SetupLanguage {
+                language: language.language.to_string_lossy().into_owned(),
+                locale: language.locale.to_string_lossy().into_owned(),
+            });
         }
         if self.dep {
-            stage(RequestProgress::Enrolling);
-            if let Err(error) = enrollment::enroll(&self.session) {
-                completed.push(format!("Enrollment: {error:#}"));
-                anyhow::bail!("{}", completed.join(". "));
-            }
-            completed.push("Device accepted the enrollment request".into());
+            run.start();
+            enrollment::enroll(&self.session)?;
+            run.complete();
         }
-        Ok(completed.join(". "))
+        Ok(())
     }
 }
 

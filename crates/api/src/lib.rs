@@ -244,7 +244,7 @@ pub struct State {
     /// A submitting connection's watch receives its work's results in target
     /// order, each null until it has one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub submitted: Vec<Option<Ending>>,
+    pub submitted: Vec<Option<OperationRun>>,
     pub images: Images,
     pub post_restore: PostRestore,
     pub sharing: Sharing,
@@ -400,10 +400,8 @@ pub struct PortView {
     /// The store's id for the image the port's restore waits for, while it
     /// waits. The images' `fetch` says how much of it is here.
     pub awaiting: Option<String>,
-    /// What the job's worker is doing.
-    pub stage: Option<Progress>,
-    /// How the port's last operation ended, from the agent that ran it.
-    pub result: Option<Ending>,
+    /// The last operation requested on this device, including work still to run.
+    pub run: Option<OperationRun>,
     /// The missing prerequisite the target's restore waits for.
     pub needs: Option<String>,
 }
@@ -450,8 +448,6 @@ pub enum PowerSource {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RequestProgress {
-    SettingLanguage,
-    Enrolling,
     EnteringDfu,
     DfuUnconfirmed,
     Restarting,
@@ -470,28 +466,119 @@ pub enum Operation {
     Revive,
 }
 
-/// What a job's worker is doing: its step among the job's steps, and how
-/// far along the whole job is.
+/// The current restore activity and progress through the installation milestones.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Progress {
     pub name: String,
     pub percent: u8,
-    /// The job's steps in order, as far as the worker has named them.
+    /// Installation milestones in execution order.
     pub steps: Vec<String>,
-    /// The step under way. The steps before it are done.
+    /// Index of the current milestone, or the length once all are complete.
     pub step: usize,
 }
 
-/// How an operation ended.
+/// The steps requested together for one target, in execution order.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Ending {
-    pub operation: Operation,
-    /// The target's ECID, when it was known.
+pub struct OperationRun {
     pub ecid: Option<String>,
-    pub phase: RestorePhase,
-    pub message: String,
-    /// A requested setup step failed after the restore completed.
-    pub setup_error: Option<String>,
+    pub steps: Vec<OperationStep>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationStep {
+    pub kind: StepKind,
+    pub state: StepState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<SystemImage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<SetupLanguage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<Progress>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StepKind {
+    Restore,
+    Revive,
+    SetRegion,
+    RequestEnrollment,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StepState {
+    Pending,
+    Active,
+    Complete,
+    Failed,
+    Unconfirmed,
+    Skipped,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SystemImage {
+    pub os: String,
+    pub version: String,
+    pub build: String,
+}
+
+impl std::fmt::Display for OperationStep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self.kind {
+            StepKind::Restore => "Restore",
+            StepKind::Revive => "Revive",
+            StepKind::SetRegion => "Set region",
+            StepKind::RequestEnrollment => "Request enrollment",
+        };
+        let state = match self.state {
+            StepState::Pending => "pending",
+            StepState::Active => "in progress",
+            StepState::Complete => "complete",
+            StepState::Failed => "failed",
+            StepState::Unconfirmed => "unconfirmed",
+            StepState::Skipped => "skipped",
+        };
+        write!(f, "{name}: {state}")?;
+        if let Some(os) = &self.system {
+            write!(f, " · {} {} ({})", os.os, os.version, os.build)?;
+        }
+        if let Some(region) = &self.language {
+            write!(f, " · {} / {}", region.language, region.locale)?;
+        }
+        if let Some(reason) = &self.error {
+            write!(f, " · {reason}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::fmt::Display for OperationRun {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, step) in self.steps.iter().enumerate() {
+            if i > 0 {
+                writeln!(f)?;
+            }
+            write!(f, "{step}")?;
+        }
+        Ok(())
+    }
+}
+
+impl OperationRun {
+    pub fn finished(&self) -> bool {
+        self.steps
+            .iter()
+            .all(|step| !matches!(step.state, StepState::Pending | StepState::Active))
+    }
+
+    pub fn succeeded(&self) -> bool {
+        self.steps
+            .iter()
+            .all(|step| step.state == StepState::Complete)
+    }
 }
 
 /// The store's archives: those it holds and those it is still to fetch.

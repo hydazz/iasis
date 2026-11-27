@@ -169,13 +169,15 @@ For iPhones and iPads, right-click the selection and choose **Advance Setup…**
 iasis advance-setup --ports 1,2 --language en-AU --locale en_AU --dep
 ```
 
-Omit `--dep` to set just language and region, or use `--dep` alone to request enrollment. Add `--check` to check readiness without changing any device. Enrollment activates the device if needed and requests its assigned management profile. The host needs internet access for activation. The device reaches its enrollment service over Wi-Fi or USB Internet Sharing. Finish any required sign-in or “Partially Set Up” prompt on the device.
+Omit `--dep` to set just language and region, or use `--dep` alone to request enrollment. Use `--check` alone to check setup availability, or add it to your chosen options to check them without changing any device. Enrollment activates the device if needed and requests its assigned management profile. The host needs internet access for activation. The device reaches its enrollment service over Wi-Fi or USB Internet Sharing. Finish any required sign-in or “Partially Set Up” prompt on the device.
 
 To run the same setup after erasing, choose the options in the app’s settings or run `iasis post-restore --language en-AU --locale en_AU --enroll on`. Use `--leave-setup` to leave language and region to the device and `--enroll off` to turn off automatic enrollment.
 
 The host stays out of idle sleep from a target's preparation until its restore ends, while its display can still sleep. On battery, a Windows laptop with Modern Standby drops that hold five minutes after its sleep timeout.
 
-A port's percentage follows the whole restore, with the current stage alongside it. Repeated firmware and image transfers can hold it at the same percentage until the next milestone. Logs and working files go under `restores/` in the agent's cache directory. Allow space for an extracted OS image per worker. Iasis matches each image to the target's chip and board IDs, or to its product type when only a model identifier is available. The restore program checks Apple signing.
+The device inspector shows the requested steps and keeps each outcome. During installation, the restore row shows the current activity and overall percentage. The percentage can hold steady during repeated firmware and image transfers.
+
+Logs and working files go under `restores/` in the agent's cache directory. Allow space for an extracted OS image per worker. Iasis matches each image to the target's chip and board IDs, or to its product type when only a model identifier is available. The restore program checks Apple signing.
 
 On macOS 27.3, Finder opens a window for each Mac, iPad or iPhone that enters DFU or recovery mode. To stop it, turn off **Open Finder for DFU and Recovery Devices** in the app's Settings > General, or run this once as the user running Finder. The preference is undocumented.
 

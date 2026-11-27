@@ -56,21 +56,40 @@
             "phase": "Running"
           },
           "awaiting": "iPad_Fall_2022_26.2_24C101_Restore.ipsw",
-          "stage": {
-            "name": "Restoring the system",
-            "percent": 42,
-            "steps": [
-              "Preparing",
-              "Restoring the system"
-            ],
-            "step": 1
-          },
-          "result": {
-            "operation": "restore",
+          "run": {
             "ecid": "001a79d10e6bc01c",
-            "phase": "Reported",
-            "message": "Restore finished",
-            "setup_error": null
+            "steps": [
+              {
+                "kind": "restore",
+                "state": "active",
+                "system": {
+                  "os": "iPadOS",
+                  "version": "26.2",
+                  "build": "24C101"
+                },
+                "progress": {
+                  "name": "Restoring the system",
+                  "percent": 42,
+                  "steps": [
+                    "Preparing",
+                    "Restoring the system"
+                  ],
+                  "step": 1
+                }
+              },
+              {
+                "kind": "set_region",
+                "state": "pending",
+                "language": {
+                  "language": "en-AU",
+                  "locale": "en_AU"
+                }
+              },
+              {
+                "kind": "request_enrollment",
+                "state": "pending"
+              }
+            ]
           },
           "needs": null
         },
@@ -110,13 +129,15 @@
             "phase": "Preparing"
           },
           "awaiting": null,
-          "stage": null,
-          "result": {
-            "operation": "revive",
+          "run": {
             "ecid": "001a79d10e6bc01c",
-            "phase": "Failed",
-            "message": "Restore finished",
-            "setup_error": null
+            "steps": [
+              {
+                "kind": "revive",
+                "state": "unconfirmed",
+                "error": "The device disconnected"
+              }
+            ]
           },
           "needs": null
         },
@@ -156,8 +177,7 @@
             "phase": "Unconfirmed"
           },
           "awaiting": null,
-          "stage": null,
-          "result": null,
+          "run": null,
           "needs": null
         },
         {
@@ -168,7 +188,7 @@
           "identifying": true,
           "ecid": "001a79d10e6bc01c",
           "usb": "absent",
-          "mode": null,
+          "mode": "normal",
           "light": {
             "hue": "white",
             "pulse": false,
@@ -192,9 +212,24 @@
             "phase": "Reported"
           },
           "awaiting": null,
-          "stage": null,
-          "result": null,
-          "needs": null
+          "run": {
+            "ecid": "001a79d10e6bc01c",
+            "steps": [
+              {
+                "kind": "set_region",
+                "state": "complete",
+                "language": {
+                  "language": "en-AU",
+                  "locale": "en_AU"
+                }
+              },
+              {
+                "kind": "request_enrollment",
+                "state": "active"
+              }
+            ]
+          },
+          "needs": "apple-devices"
         },
         {
           "number": 5,
@@ -232,8 +267,7 @@
             "phase": "Failed"
           },
           "awaiting": null,
-          "stage": null,
-          "result": null,
+          "run": null,
           "needs": null
         }
       ],
@@ -285,8 +319,7 @@
           "enabled": true,
           "job": null,
           "awaiting": null,
-          "stage": null,
-          "result": null,
+          "run": null,
           "needs": null
         },
         {
@@ -322,8 +355,7 @@
           "enabled": true,
           "job": null,
           "awaiting": null,
-          "stage": null,
-          "result": null,
+          "run": null,
           "needs": null
         },
         {
@@ -359,8 +391,7 @@
           "enabled": true,
           "job": null,
           "awaiting": null,
-          "stage": null,
-          "result": null,
+          "run": null,
           "needs": null
         },
         {
@@ -396,8 +427,7 @@
           "enabled": true,
           "job": null,
           "awaiting": null,
-          "stage": null,
-          "result": null,
+          "run": null,
           "needs": null
         },
         {
@@ -433,83 +463,8 @@
           "enabled": true,
           "job": null,
           "awaiting": null,
-          "stage": null,
-          "result": null,
+          "run": null,
           "needs": null
-        },
-        {
-          "number": 1,
-          "generation": 7,
-          "occupied": true,
-          "device": "MacBook Air (M1, 2020)",
-          "identifying": false,
-          "ecid": "001a79d10e6bc01c",
-          "usb": "apple",
-          "mode": "normal",
-          "light": {
-            "hue": "green",
-            "pulse": false,
-            "dim": false
-          },
-          "request": "setting_language",
-          "waiting_for_power": false,
-          "powered": true,
-          "wrong_dfu_port": false,
-          "link": "usb2",
-          "power": {
-            "source": "pd",
-            "millivolts": 20000,
-            "milliamps": 3250
-          },
-          "allocated_mw": 68250,
-          "short": false,
-          "fault": null,
-          "dfu": false,
-          "reboot": true,
-          "restore": true,
-          "enabled": true,
-          "job": null,
-          "awaiting": null,
-          "stage": null,
-          "result": null,
-          "needs": "apple-devices"
-        },
-        {
-          "number": 2,
-          "generation": 7,
-          "occupied": true,
-          "device": "MacBook Air (M1, 2020)",
-          "identifying": false,
-          "ecid": "001a79d10e6bc01c",
-          "usb": "apple",
-          "mode": "normal",
-          "light": {
-            "hue": "green",
-            "pulse": false,
-            "dim": false
-          },
-          "request": "enrolling",
-          "waiting_for_power": false,
-          "powered": true,
-          "wrong_dfu_port": false,
-          "link": "usb2",
-          "power": {
-            "source": "pd",
-            "millivolts": 20000,
-            "milliamps": 3250
-          },
-          "allocated_mw": 68250,
-          "short": false,
-          "fault": null,
-          "dfu": false,
-          "reboot": true,
-          "restore": true,
-          "enabled": true,
-          "job": null,
-          "awaiting": null,
-          "stage": null,
-          "result": null,
-          "needs": "apple-devices"
         }
       ],
       "notice": null
@@ -550,11 +505,26 @@
   ],
   "submitted": [
     {
-      "operation": "restore",
       "ecid": "001a79d10e6bc01c",
-      "phase": "Reported",
-      "message": "Restore finished",
-      "setup_error": "The device does not support the requested region"
+      "steps": [
+        {
+          "kind": "restore",
+          "state": "complete"
+        },
+        {
+          "kind": "set_region",
+          "state": "failed",
+          "language": {
+            "language": "en-AU",
+            "locale": "en_AU"
+          },
+          "error": "The device does not support the requested region"
+        },
+        {
+          "kind": "request_enrollment",
+          "state": "skipped"
+        }
+      ]
     },
     null
   ],

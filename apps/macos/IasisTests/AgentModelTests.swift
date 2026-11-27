@@ -51,6 +51,10 @@ struct AgentModelTests {
         #expect(MenuBarStatus(state) == .busy)
         state.hubs[0].ports.removeAll { $0.light.pulse }
         #expect(MenuBarStatus(state) == .ready)
+        state.hubs[0].ports[0].run = .init(steps: [.init(kind: .setRegion, state: .active)])
+        #expect(MenuBarStatus(state) == .busy)
+        state.hubs[0].ports[0].run?.steps[0].state = .complete
+        #expect(MenuBarStatus(state) == .ready)
         state.images.fetch = try Fixtures.state.images.fetch
         #expect(MenuBarStatus(state) == .busy)
         state.hubs[0].notice = "Cannot read hub"

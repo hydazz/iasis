@@ -149,12 +149,3 @@ enum DeviceSymbol {
         return kinds.first { name.hasPrefix($0.0) }?.1 ?? "questionmark"
     }
 }
-
-extension AgentState.Operation {
-    var symbol: String {
-        switch self {
-        case .restore: DeviceSymbol.restore
-        case .revive: DeviceSymbol.revive
-        }
-    }
-}

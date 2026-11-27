@@ -30,7 +30,7 @@ use crate::{
     Error, Events, Hub, dfu,
     identity::{AppleDevice, models::Models},
     inventory::Inventory,
-    restore::{Operation, Progress},
+    restore::Operation,
     topology::{self, Attachment, Snapshot, UsbDevice},
     watch::Watch,
 };
@@ -204,7 +204,6 @@ pub struct PortJob {
     pub generation: u32,
     pub status: RestoreStatus,
     pub operation: Operation,
-    pub stage: Option<Progress>,
 }
 
 /// A port's attachment generation and what the host finds there.
@@ -1570,7 +1569,6 @@ mod tests {
             generation,
             status: job(phase),
             operation: Operation::Restore,
-            stage: None,
         };
         let mut jobs = [const { None }; PORT_COUNT];
         jobs[0] = Some(on(3, RestorePhase::Running));

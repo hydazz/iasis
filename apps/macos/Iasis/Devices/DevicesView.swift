@@ -128,6 +128,7 @@ struct DevicesView: View {
             Group {
                 if let device = browser.inspected {
                     DeviceInspector(device: device)
+                        .id(device.id)
                 }
             }
             .inspectorColumnWidth(min: 240, ideal: 280, max: 400)
