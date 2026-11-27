@@ -185,7 +185,7 @@ private final class DeviceMenu: NSObject {
         shown == nil
     }
 
-    private let info = NSMenuItem.command("Get Info", symbol: "info.circle")
+    private let openDevice = NSMenuItem.command("Open Device", symbol: "macwindow")
     private let dfu = NSMenuItem.command("Enter DFU", symbol: DeviceSymbol.dfu)
     private let restart = NSMenuItem.command("Restart", symbol: DeviceSymbol.restart)
     private let revive = NSMenuItem.command("Revive", symbol: DeviceSymbol.revive)
@@ -200,7 +200,7 @@ private final class DeviceMenu: NSObject {
         item.image = NSImage(systemSymbolName: "\(device.port.number).circle", accessibilityDescription: nil)
         let submenu = NSMenu()
         submenu.autoenablesItems = false
-        for command in [info, .separator(), dfu, restart, .separator(), revive, restore] {
+        for command in [openDevice, .separator(), dfu, restart, .separator(), revive, restore] {
             if !command.isSeparatorItem {
                 command.target = self
                 command.action = #selector(chooseDeviceAction)
@@ -228,7 +228,7 @@ private final class DeviceMenu: NSObject {
             item.subtitle = "Disconnected"
         }
         let actions = shown.map { DeviceActions([$0]) } ?? DeviceActions()
-        info.isEnabled = shown != nil
+        openDevice.isEnabled = shown != nil
         dfu.isEnabled = !actions.dfu.isEmpty
         restart.isEnabled = !actions.restart.isEmpty
         revive.isEnabled = actions.revive != nil
@@ -239,9 +239,8 @@ private final class DeviceMenu: NSObject {
         guard let live = attachment(browser.model.state?.devices.first { $0.id == id }) else { return }
         let actions = DeviceActions([live])
         switch command {
-        case info:
-            browser.selection = [id]
-            browser.showsInspector = true
+        case openDevice:
+            browser.openDevice(id)
             showDevices()
         case dfu: browser.model.perform(actions.dfu)
         case restart: browser.model.perform(actions.restart)

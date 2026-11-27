@@ -94,13 +94,6 @@ struct DeviceActionButtons: View {
                 await menuSetup.refresh(setup, model: browser.model)
             }
         }
-        if let browser, contextSelection != nil, devices.count == 1 {
-            Divider()
-            Button("Get Info", systemImage: "info.circle") {
-                browser.selection = ids
-                browser.showsInspector = true
-            }
-        }
     }
 }
 

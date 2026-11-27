@@ -14,12 +14,19 @@ final class DeviceBrowser {
     let setupCheck = SetupCheck()
     var advancing: SetupDraft?
     var showsInspector = true
+    var portToReveal: Device.ID?
     /// The erase the user is being asked to confirm.
     var confirming: RestoreConfirmation?
     @ObservationIgnored private var planning: Task<Void, Never>?
 
     init(model: AgentModel) {
         self.model = model
+    }
+
+    func openDevice(_ id: Device.ID) {
+        selection = [id]
+        showsInspector = true
+        portToReveal = id
     }
 
     func chooseSetup(for ids: Set<Device.ID>, checked: SetupAction) {
