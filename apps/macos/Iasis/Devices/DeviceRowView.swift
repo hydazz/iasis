@@ -81,16 +81,15 @@ private struct ConnectionMarks: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            if device.port.powered {
-                let limited = device.port.short
-                let power = if let reading = device.port.power, reading.source == .pd {
-                    "\(reading.title) · \(reading.reading)"
-                } else {
-                    "USB Power"
-                }
-                let detail = limited ? "\(power). The device reports insufficient power." : power
-                Image(systemName: limited ? "bolt.trianglebadge.exclamationmark.fill" : "bolt.fill")
-                    .foregroundStyle(limited ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+            if device.port.short {
+                let detail = "The device reports insufficient power."
+                Image(systemName: "bolt.trianglebadge.exclamationmark.fill")
+                    .foregroundStyle(.orange)
+                    .help(detail)
+                    .accessibilityLabel(detail)
+            } else if let power = device.port.power, power.source == .pd, power.milliamps > 0 {
+                let detail = "\(power.title) · \(power.reading)"
+                Image(systemName: "bolt.fill")
                     .help(detail)
                     .accessibilityLabel(detail)
             }

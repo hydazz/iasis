@@ -309,7 +309,7 @@ struct RestoreConfirmation: Equatable {
 
 extension AgentState.PortPower {
     var title: String {
-        source == .pd ? "PD Contract" : "USB Power"
+        source == .pd ? "PD Contract" : "USB Allowance"
     }
 
     var reading: String {
