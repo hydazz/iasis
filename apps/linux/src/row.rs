@@ -9,7 +9,7 @@ use std::{
 
 use adw::prelude::*;
 use gtk::glib;
-use iasis_api::{Hue, Light, UsbLink};
+use iasis_api::{Hue, Light, PowerSource, UsbLink};
 
 use crate::device::{self, Activity, Device, Mark};
 
@@ -54,7 +54,7 @@ impl PortRow {
             .valign(gtk::Align::Center)
             .css_classes(["dim-label"])
             .build();
-        let power = gtk::Image::new();
+        let power = gtk::Image::from_icon_name(POWER);
         let link = gtk::Image::from_icon_name("media-removable-symbolic");
         let sharing = gtk::Image::new();
         let wrong_port = gtk::Label::builder()
@@ -119,29 +119,16 @@ impl PortRow {
         self.kind.set_icon_name(kind);
         set_class(&self.kind, "turning", port.identifying);
 
-        self.power.set_visible(port.powered);
-        if port.powered {
-            let reading = port
-                .power
-                .filter(|power| power.source == iasis_api::PowerSource::Pd)
-                .map_or_else(
-                    || "USB power".to_owned(),
-                    |power| {
-                        format!(
-                            "{}: {}",
-                            device::power_title(&power),
-                            device::power_reading(&power)
-                        )
-                    },
-                );
-            self.power.set_icon_name(Some(POWER));
-            set_class(&self.power, "warning", port.short);
-            self.power.set_tooltip_text(Some(&if port.short {
-                format!("{reading}. The device reports insufficient power.")
-            } else {
-                reading
-            }));
-        }
+        let power = if port.short {
+            Some("The device reports insufficient power.".to_owned())
+        } else {
+            port.power
+                .filter(|power| power.source == PowerSource::Pd && power.milliamps > 0)
+                .map(|power| format!("PD Contract · {}", device::power_reading(&power)))
+        };
+        self.power.set_visible(power.is_some());
+        self.power.set_tooltip_text(power.as_deref());
+        set_class(&self.power, "warning", port.short);
 
         self.link.set_visible(port.link.is_some());
         if let Some(link) = port.link {

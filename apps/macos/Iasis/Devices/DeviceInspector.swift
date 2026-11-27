@@ -24,21 +24,6 @@ struct DeviceInspector: View {
             if showsActivity {
                 Section { portDetails }
             }
-            if device.port.powered || device.port.power != nil || device.port.waitingForPower || device.port.short {
-                Section("Power") {
-                    if let power = device.port.power {
-                        LabeledContent(power.title, value: power.reading)
-                            .help(power.source == .usb ? "Default USB power available to this device" : "Power negotiated by this device")
-                    } else if device.port.powered {
-                        Text("USB Power")
-                    }
-                    if device.port.waitingForPower {
-                        Text("Waiting for Power")
-                    } else if device.port.short {
-                        Text("The device reports insufficient power.").foregroundStyle(.secondary)
-                    }
-                }
-            }
         }
         .formStyle(.grouped)
         .textSelection(.enabled)
@@ -79,6 +64,14 @@ struct DeviceInspector: View {
         }
         if let mode = device.port.modeTitle {
             LabeledContent("USB Mode", value: mode)
+        }
+        if let power = device.port.power {
+            LabeledContent(power.title, value: power.reading)
+        }
+        if device.port.waitingForPower {
+            Text("Waiting for Power")
+        } else if device.port.short {
+            Text("The device reports insufficient power.").foregroundStyle(.secondary)
         }
         if device.port.wrongDfuPort {
             Text(Device.dfuPortHelp).foregroundStyle(.secondary)

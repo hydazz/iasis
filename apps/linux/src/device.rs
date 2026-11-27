@@ -297,7 +297,7 @@ pub fn link_title(link: UsbLink) -> &'static str {
 pub fn power_title(power: &PortPower) -> &'static str {
     match power.source {
         PowerSource::Pd => "PD Contract",
-        PowerSource::Usb => "USB Power",
+        PowerSource::Usb => "USB Allowance",
     }
 }
 

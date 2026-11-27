@@ -28,7 +28,6 @@ pub struct Inspector {
     mode: adw::ActionRow,
     wrong_port: Note,
     sharing: Note,
-    power: adw::PreferencesGroup,
     reading: adw::ActionRow,
     power_note: Note,
     shown: RefCell<Option<Device>>,
@@ -75,21 +74,25 @@ impl Inspector {
         let ecid = property("ECID");
         let link = property("USB Link");
         let mode = property("USB Mode");
+        let reading = property("");
+        let power_note = Note::new(Some("warning"));
         let wrong_port = Note::new(None);
         wrong_port.show(Some((device::DFU_PORT_HELP, "dialog-warning-symbolic")));
         let sharing = Note::new(None);
-        for row in [&ecid, &link, &mode, &wrong_port.row, &sharing.row] {
+        for row in [
+            &ecid,
+            &link,
+            &mode,
+            &reading,
+            &power_note.row,
+            &wrong_port.row,
+            &sharing.row,
+        ] {
             details.add(row);
         }
 
-        let power = adw::PreferencesGroup::builder().title("Power").build();
-        let reading = property("");
-        let power_note = Note::new(Some("warning"));
-        power.add(&reading);
-        power.add(&power_note.row);
-
         let page = adw::PreferencesPage::new();
-        for group in [&lead, &actions, &details, &power] {
+        for group in [&lead, &actions, &details] {
             page.add(group);
         }
         let widget = adw::ToolbarView::new();
@@ -109,7 +112,6 @@ impl Inspector {
             mode,
             wrong_port,
             sharing,
-            power,
             reading,
             power_note,
             shown: RefCell::default(),
@@ -162,20 +164,6 @@ impl Inspector {
             }
             _ => None,
         });
-        self.details.set_visible(
-            [
-                &self.ecid,
-                &self.link,
-                &self.mode,
-                &self.wrong_port.row,
-                &self.sharing.row,
-            ]
-            .iter()
-            .any(|row| row.is_visible()),
-        );
-
-        self.power
-            .set_visible(port.power.is_some() || port.waiting_for_power || port.short);
         self.reading.set_visible(port.power.is_some());
         if let Some(reading) = &port.power {
             self.reading.set_title(device::power_title(reading));
@@ -188,6 +176,19 @@ impl Inspector {
         } else {
             None
         });
+        self.details.set_visible(
+            [
+                &self.ecid,
+                &self.link,
+                &self.mode,
+                &self.reading,
+                &self.power_note.row,
+                &self.wrong_port.row,
+                &self.sharing.row,
+            ]
+            .iter()
+            .any(|row| row.get_visible()),
+        );
         *self.shown.borrow_mut() = Some(device.clone());
     }
 

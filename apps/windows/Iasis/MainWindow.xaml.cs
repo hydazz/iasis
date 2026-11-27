@@ -160,7 +160,12 @@ public sealed partial class MainWindow : Window
         var details = new List<string> { d.Place };
         if ((port.Ecid ?? port.Run?.Ecid) is { } ecid) details.Add($"ECID {ecid}");
         if (d.Mode.Length > 0) details.Add(d.Mode);
-        if (port.Power is { } power) details.Add($"{power.Millivolts / 1000.0:g} V · {power.Milliamps} mA");
+        if (port.Power is { } power)
+        {
+            var label = power.Source == PowerSource.Pd ? "PD contract" : "USB allowance";
+            details.Add($"{label} · {power.Millivolts / 1000.0:g} V · {power.Milliamps} mA");
+        }
+        if (port.Short) details.Add("The device reports insufficient power.");
         if (d.Status.Length > 0 && d.Status != d.Mode && d.Status != d.Needs?.Reason &&
             (port.Run is null || d.Status != Device.RunStatus(port.Run))) details.Add(d.Status);
         Details.Text = string.Join("\n", details);
