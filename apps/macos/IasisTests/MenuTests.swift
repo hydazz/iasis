@@ -4,6 +4,28 @@ import SwiftUI
 import Testing
 
 struct MenuTests {
+    @Test func inspectingAnEmptyPortFollowsItsNextAttachment() async throws {
+        var state = try Fixtures.state
+        let (model, agent) = try await started(state)
+        let browser = DeviceBrowser(model: model)
+        let port = state.devices[0].id
+        browser.selection = [port]
+        #expect(browser.inspected?.id == port)
+        #expect(browser.inspected?.name == "Empty")
+        #expect(browser.actions == DeviceActions())
+
+        var next = state.hubs[0].ports[1]
+        next.number = port.port
+        next.generation += 1
+        state.hubs[0].ports[0] = next
+        await agent.publish(state)
+        try await waitUntil { model.state == state }
+        #expect(browser.inspected?.id == port)
+        #expect(browser.inspected?.port.ecid == next.ecid)
+        let target = RestoreTarget(port: port.port, generation: next.generation, ecid: next.ecid)
+        #expect(browser.actions.restart == [.reboot(hubs: [.init(hub: port.hub, session: 77, targets: [target])])])
+    }
+
     @Test func deviceCommandsUseTheSelectedPort() async throws {
         let state = try Fixtures.state
         let (model, agent) = try await started(state)
