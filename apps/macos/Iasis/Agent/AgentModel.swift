@@ -75,6 +75,10 @@ final class AgentModel {
         }
     }
 
+    func advanceSetup(_ action: SetupAction, checkOnly: Bool) async throws {
+        try await agent.send(.advanceSetup(hubs: action.hubs, settings: action.settings, dep: action.enroll, checkOnly: checkOnly))
+    }
+
     /// Write the IasisOS the agent carries to a hub.
     func updateFirmware(of hub: String) {
         guard updating.insert(hub).inserted else { return }

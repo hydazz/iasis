@@ -17,29 +17,33 @@ On Linux any local user can connect; the agent reads the client's credentials an
 
 A client writes requests and reads replies as JSON, one to a line. A request is an object with an `op`:
 
-| `op`                 | Other fields             | Effect                                                               |
-| -------------------- | ------------------------ | -------------------------------------------------------------------- |
-| `state`              |                          | Reply with the state once                                            |
-| `watch`              |                          | Reply with the state now and again each time it changes              |
-| `plan`               | `hubs`                   | Reply with what a restore would install on each target               |
-| `restore`            | `hubs`, `latest`         | Erase and restore the confirmed attachments on those hubs            |
-| `revive`             | `hubs`, `latest`         | Repair the confirmed attachments on those hubs and keep their data   |
-| `dfu`                | `hubs`                   | Signal the selected attachments into DFU                             |
-| `reboot`             | `hubs`                   | Signal the selected attachments to restart                           |
-| `power`              | `hub`, `port`, `on`      | Enable or disable a port                                             |
-| `debug_usb`          | `hub`, `port`, `on`      | Carry the target's Apple Debug USB on its USB 2 pair, or take it off |
-| `brightness`         | `hub`, `percent`         | Save one hub's light level                                           |
-| `rename`             | `hub`, `name`            | Save one hub's display name                                          |
-| `update`             | `hub`, `bytes` or null   | Write IasisOS: the image the agent carries, or the UF2 sent          |
-| `sharing`            | `enabled`                | Configure USB Internet Sharing on the host                           |
-| `import_supervision` | `pkcs12`, `password`     | Replace the supervision identity with the one in a PKCS #12 archive  |
-| `export_supervision` | `password`               | Reply with the supervision identity in a PKCS #12 archive            |
-| `download`           | `model`, `build` or null | Fetch a model's newest signed release, or the one of `build`         |
-| `releases`           | `model`                  | Reply with the releases Apple signs for a model, newest first        |
-| `import`             | `name`, `bytes`          | Check the IPSW archive sent and keep it in the store as `name`       |
-| `remove`             | `image`                  | Delete an image by its `id`, or cancel its download                  |
-| `catalog`            |                          | Reply with every model the store can fetch images for                |
-| `diagnostics`        | `hub`                    | Reply with what the agent reads from the hub and finds on its USB    |
+| `op`                     | Other fields                            | Effect                                                                   |
+| ------------------------ | --------------------------------------- | ------------------------------------------------------------------------ |
+| `state`                  |                                         | Reply with the state once                                                |
+| `watch`                  |                                         | Reply with the state now and again each time it changes                  |
+| `plan`                   | `hubs`                                  | Reply with what a restore would install on each target                   |
+| `restore`                | `hubs`, `latest`                        | Erase and restore the confirmed attachments on those hubs                |
+| `revive`                 | `hubs`, `latest`                        | Repair the confirmed attachments on those hubs and keep their data       |
+| `dfu`                    | `hubs`                                  | Signal the selected attachments into DFU                                 |
+| `reboot`                 | `hubs`                                  | Signal the selected attachments to restart                               |
+| `advance_setup`          | `hubs`, `settings`, `dep`, `check_only` | Check or run Setup Assistant options for every selected device           |
+| `power`                  | `hub`, `port`, `on`                     | Enable or disable a port                                                 |
+| `debug_usb`              | `hub`, `port`, `on`                     | Carry the target's Apple Debug USB on its USB 2 pair, or take it off     |
+| `brightness`             | `hub`, `percent`                        | Save one hub's light level                                               |
+| `rename`                 | `hub`, `name`                           | Save one hub's display name                                              |
+| `update`                 | `hub`, `bytes` or null                  | Write IasisOS: the image the agent carries, or the UF2 sent              |
+| `shutdown_macs`          | `enabled`                               | Shut down Macs after erasing them                                        |
+| `enrollment_after_erase` | `enabled`                               | Try assigned enrollment after erasing iPhones and iPads                  |
+| `setup_language`         | `settings`                              | Set language and region for erased iPhones and iPads, or clear with null |
+| `sharing`                | `enabled`                               | Configure USB Internet Sharing on the host                               |
+| `import_supervision`     | `pkcs12`, `password`                    | Replace the supervision identity with the one in a PKCS #12 archive      |
+| `export_supervision`     | `password`                              | Reply with the supervision identity in a PKCS #12 archive                |
+| `download`               | `model`, `build` or null                | Fetch a model's newest signed release, or the one of `build`             |
+| `releases`               | `model`                                 | Reply with the releases Apple signs for a model, newest first            |
+| `import`                 | `name`, `bytes`                         | Check the IPSW archive sent and keep it in the store as `name`           |
+| `remove`                 | `image`                                 | Delete an image by its `id`, or cancel its download                      |
+| `catalog`                |                                         | Reply with every model the store can fetch images for                    |
+| `diagnostics`            | `hub`                                   | Reply with what the agent reads from the hub and finds on its USB        |
 
 `hub` is the serial as sixteen hexadecimal digits, and ports are numbered 1 to 5.
 
@@ -61,15 +65,16 @@ printf '{"op":"state"}\n' | nc -U /run/iasis/agent.sock
 
 ## State
 
-| Field         | Meaning                                                       |
-| ------------- | ------------------------------------------------------------- |
-| `version`     | The agent's release version                                   |
-| `hubs`        | Every attached hub                                            |
-| `submitted`   | On a connection that submitted work, its results; else absent |
-| `images`      | The image store                                               |
-| `sharing`     | USB Internet Sharing                                          |
-| `supervision` | The supervision identity                                      |
-| `missing`     | Software the host lacks that some of Iasis needs              |
+| Field          | Meaning                                                       |
+| -------------- | ------------------------------------------------------------- |
+| `version`      | The agent's release version                                   |
+| `hubs`         | Every attached hub                                            |
+| `submitted`    | On a connection that submitted work, its results; else absent |
+| `images`       | The image store                                               |
+| `post_restore` | The host’s preferences for newly submitted erases             |
+| `sharing`      | USB Internet Sharing                                          |
+| `supervision`  | The supervision identity                                      |
+| `missing`      | Software the host lacks that some of Iasis needs              |
 
 Each hub has its `serial`, `name` (empty for an unnamed hub), `session` ID, the IasisOS `firmware` version it runs, `upstream_mbps` (the negotiated rate between the host and the hub, or null), `supply`, `pool`, `host` and `restores` (a host holds the hub, and it takes restore requests), `brightness`, its `ports` and a `notice`: why the hub cannot be read, or why its last restore request came to nothing. A hub that cannot be read has no ports.
 
@@ -89,7 +94,7 @@ Each port has:
 | `usb`                          | What the host finds on the port's USB: `absent`, `other`, `ambiguous` (several devices) or `apple`; null until it has looked  |
 | `mode`                         | With `usb` `apple`, its mode: `dfu`, `port_dfu`, `kis_dfu`, `kis`, `recovery`, `restored` or `normal`                         |
 | `light`                        | What the port's light shows: `hue`, `pulse` and `dim`                                                                         |
-| `request`                      | A signal in progress (`entering_dfu`, `restarting`) or `dfu_unconfirmed`, otherwise null                                      |
+| `request`                      | An action in progress (`entering_dfu`, `restarting`, `setting_language`, `enrolling`) or `dfu_unconfirmed`, otherwise null    |
 | `waiting_for_power`, `powered` | The port is awaiting power, or has an active supply                                                                           |
 | `wrong_dfu_port`               | The target takes DFU or reboot, but this connector carries no DFU USB, as on a Mac's other port                               |
 | `link`                         | USB link: `usb2`, `usb3`, `usb` for unknown speed, or null                                                                    |
@@ -102,7 +107,7 @@ Each port has:
 | `job`                          | `operation` (`restore` or `revive`) and its `phase` (`Preparing`, `Running`, `Reported`, `Unconfirmed`, `Failed`), or null    |
 | `awaiting`                     | The `id` of the image the port's restore waits for, otherwise null; the images' `fetch` says how much is here                 |
 | `stage`                        | The worker's current `name`, overall job `percent`, the job's `steps` in order and the index of the `step` under way, or null |
-| `result`                       | How the last operation ended: `operation`, `ecid`, `phase` and `message`, or null                                             |
+| `result`                       | How the last operation ended: `operation`, `ecid`, `phase`, `message` and optional `setup_error`, or null                     |
 | `needs`                        | The `id` of the entry in `missing` the target's restore waits for, or null                                                    |
 
 The hub keeps a target's `ecid` for as long as its attachment lasts, so a Mac that has started up and left USB is still the device on its port. A device moved to another connector is identified again there. The agent notes the model of each ECID it identifies, so a mode that gives the ECID alone still names the device.
@@ -126,6 +131,12 @@ The hub drops a job when its target leaves, which a restored target does by rest
 | `in_use`                 | A restore is reading it; `remove` takes it out after   |
 
 Archives for different models share version and build numbers, so only the `id` names one.
+
+An erase uses the agent’s `post_restore` settings at submission, including an erase requested by the hub button. `shutdown_macs` defaults to false. `setup_language` is null or an object with a `language` (such as `en-AU`) and a `locale` (such as `en_AU`). `try_enrollment` defaults to false.
+
+`advance_setup` takes optional language and region in `settings` and requests assigned enrollment when `dep` is true. With `check_only` set, the agent checks every target through an existing paired session. Omit the options to check general availability. Execution requires at least one option. Execution checks the whole selection again, sets any requested language and region, then activates and requests enrollment when selected. A matching, accepted language and region can be skipped on the way to enrollment. The reply is `ok` or an `error` with per-target outcomes if a step failed. Enrollment success here means the device acknowledged its assigned configuration request.
+
+A completed erase keeps its `Reported` phase. If a setup step fails, the ending’s `setup_error` describes the failure and the CLI exits unsuccessfully.
 
 `sharing.enabled` is the saved USB Internet Sharing setting. Each entry in `sharing.ports` names a `hub` and `port`; `active` means the port's gateway is running. A `problem` on the sharing state or on a port describes a failure.
 

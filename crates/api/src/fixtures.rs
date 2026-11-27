@@ -24,6 +24,7 @@ fn ending(operation: Operation, phase: RestorePhase) -> Ending {
         ecid: Some("001a79d10e6bc01c".into()),
         phase,
         message: "Restore finished".into(),
+        setup_error: None,
     }
 }
 
@@ -69,7 +70,7 @@ fn port(number: u8) -> PortView {
 
 fn state() -> State {
     let working = PortView {
-        request: Some(SignalProgress::EnteringDfu),
+        request: Some(RequestProgress::EnteringDfu),
         job: Some(Job {
             operation: Operation::Restore,
             phase: RestorePhase::Running,
@@ -96,6 +97,7 @@ fn state() -> State {
         AppleMode::KisDfu,
         AppleMode::Restored,
         AppleMode::Normal,
+        AppleMode::Normal,
     ];
     let ports = vec![
         working,
@@ -104,7 +106,7 @@ fn state() -> State {
             mode: None,
             device: Some("USB Keyboard".into()),
             ecid: None,
-            request: Some(SignalProgress::DfuUnconfirmed),
+            request: Some(RequestProgress::DfuUnconfirmed),
             link: Some(UsbLink::Usb3),
             power: Some(PortPower {
                 source: PowerSource::Usb,
@@ -128,7 +130,7 @@ fn state() -> State {
         PortView {
             usb: Some(Usb::Ambiguous),
             mode: None,
-            request: Some(SignalProgress::Restarting),
+            request: Some(RequestProgress::Restarting),
             link: Some(UsbLink::Usb),
             fault: Some("Overcurrent".into()),
             job: Some(Job {
@@ -186,6 +188,11 @@ fn state() -> State {
         .enumerate()
         .map(|(index, mode)| PortView {
             mode: Some(*mode),
+            request: match mode {
+                AppleMode::Normal if index == modes.len() - 1 => Some(RequestProgress::Enrolling),
+                AppleMode::Normal => Some(RequestProgress::SettingLanguage),
+                _ => None,
+            },
             needs: (*mode == AppleMode::Normal).then(|| "apple-devices".into()),
             light: Light {
                 hue: if index == 0 { Hue::Blue } else { Hue::Green },
@@ -242,7 +249,10 @@ fn state() -> State {
             },
         ],
         submitted: vec![
-            Some(ending(Operation::Restore, RestorePhase::Reported)),
+            Some(Ending {
+                setup_error: Some("The device does not support the requested region".into()),
+                ..ending(Operation::Restore, RestorePhase::Reported)
+            }),
             None,
         ],
         images: Images {
@@ -283,6 +293,14 @@ fn state() -> State {
                 build: "24C101".into(),
                 bytes: 8_000_000_000,
                 done: 1_000_000_000,
+            }),
+        },
+        post_restore: PostRestore {
+            try_enrollment: true,
+            shutdown_macs: true,
+            setup_language: Some(SetupLanguage {
+                language: "en-AU".into(),
+                locale: "en_AU".into(),
             }),
         },
         sharing: Sharing {
@@ -354,6 +372,24 @@ fn requests() -> Vec<Request> {
         Request::Reboot {
             hubs: vec![selection()],
         },
+        Request::AdvanceSetup {
+            hubs: vec![selection()],
+            settings: Some(SetupLanguage {
+                language: "en-AU".into(),
+                locale: "en_AU".into(),
+            }),
+            dep: false,
+            check_only: true,
+        },
+        Request::AdvanceSetup {
+            hubs: vec![selection()],
+            settings: Some(SetupLanguage {
+                language: "en-AU".into(),
+                locale: "en_AU".into(),
+            }),
+            dep: false,
+            check_only: false,
+        },
         Request::Power {
             hub: hub(),
             port: 2,
@@ -376,6 +412,14 @@ fn requests() -> Vec<Request> {
             hub: hub(),
             bytes: Some(518_144),
         },
+        Request::ShutdownMacs { enabled: true },
+        Request::SetupLanguage {
+            settings: Some(SetupLanguage {
+                language: "en-AU".into(),
+                locale: "en_AU".into(),
+            }),
+        },
+        Request::SetupLanguage { settings: None },
         Request::Sharing { enabled: true },
         Request::ImportSupervision {
             pkcs12: PKCS12.into(),
@@ -400,6 +444,22 @@ fn requests() -> Vec<Request> {
         },
         Request::Catalog,
         Request::Diagnostics { hub: hub() },
+        Request::AdvanceSetup {
+            hubs: vec![selection()],
+            settings: None,
+            dep: true,
+            check_only: true,
+        },
+        Request::AdvanceSetup {
+            hubs: vec![selection()],
+            settings: Some(SetupLanguage {
+                language: "en-AU".into(),
+                locale: "en_AU".into(),
+            }),
+            dep: true,
+            check_only: false,
+        },
+        Request::EnrollmentAfterErase { enabled: true },
     ]
 }
 

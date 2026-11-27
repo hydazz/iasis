@@ -14,6 +14,7 @@ struct DevicesView: View {
         @Bindable var browser = browser
         let state = model.state
         let hubs = state?.hubDevices ?? []
+        let selectedSetup = browser.selectedSetup
 
         List(selection: $browser.selection) {
             ForEach(hubs) { group in
@@ -35,6 +36,11 @@ struct DevicesView: View {
                     }
                     ForEach(group.devices) { device in
                         DeviceRowView(device: device)
+                            .overlay {
+                                if device.canCheckSetup {
+                                    DeviceRowMenu(browser: browser, id: device.id)
+                                }
+                            }
                             .selectionDisabled(!device.isSelectable)
                     }
                 } header: {
@@ -44,24 +50,13 @@ struct DevicesView: View {
             }
         }
         .contextMenu(forSelectionType: Device.ID.self) { ids in
-            let devices = browser.devices(in: ids)
-            if !devices.isEmpty {
-                DeviceActionButtons(actions: browser.actions(for: ids)) { requests in
-                    model.perform(requests)
-                } restore: { confirmation in
-                    browser.confirm(confirmation)
-                }
-            }
-            if devices.count == 1 {
-                Divider()
-                Button("Get Info", systemImage: "info.circle") {
-                    browser.selection = ids
-                    browser.showsInspector = true
-                }
-            }
+            DeviceActionButtons(browser: browser, contextSelection: ids)
         } primaryAction: { ids in
             browser.selection = ids
             browser.showsInspector = true
+        }
+        .task(id: selectedSetup) {
+            await browser.setupCheck.refresh(selectedSetup, model: model)
         }
         .overlay {
             if state == nil, BundledAgent.needsApproval {
@@ -152,6 +147,9 @@ struct DevicesView: View {
             Button(confirmation.choices.isEmpty ? "OK" : "Cancel", role: .cancel) {}
         } message: { confirmation in
             Text(confirmation.message)
+        }
+        .sheet(item: $browser.advancing) { draft in
+            SetupSheet(browser: browser, draft: draft)
         }
         .focusedSceneValue(\.deviceBrowser, browser)
         .frame(minWidth: 400, minHeight: 260)

@@ -3,7 +3,7 @@
 
 use iasis_api::{
     AppleUsb, Diagnostics, HubView, Job, Operation, Pool, PortPower, PortUsb, PortView,
-    PowerSource, SignalProgress, Supply, Usb, UsbDevice, UsbLink,
+    PowerSource, RequestProgress, Supply, Usb, UsbDevice, UsbLink,
 };
 use iasis_protocol::{Info, Link, Port, PortAction, PortState, PortStatus, RestorePhase, Status};
 
@@ -65,9 +65,9 @@ pub fn hub(serial: u64, info: &Info, status: &Status) -> HubView {
                     }),
                     light: status.light(port),
                     request: state.request.map(|request| match request.action {
-                        PortAction::Reboot => SignalProgress::Restarting,
-                        _ if request.pending(status.uptime_ms) => SignalProgress::EnteringDfu,
-                        _ => SignalProgress::DfuUnconfirmed,
+                        PortAction::Reboot => RequestProgress::Restarting,
+                        _ if request.pending(status.uptime_ms) => RequestProgress::EnteringDfu,
+                        _ => RequestProgress::DfuUnconfirmed,
                     }),
                     waiting_for_power: state.state == PortState::WaitingPower,
                     powered: matches!(state.state, PortState::Ready | PortState::Contract)
@@ -417,6 +417,7 @@ pub(crate) mod tests {
                 ecid: ecid.clone(),
                 phase: RestorePhase::Failed,
                 message: "the device declined to trust this computer".into(),
+                setup_error: None,
             },
         };
         let mut row = hub(1, &info(), &status).ports.remove(0);

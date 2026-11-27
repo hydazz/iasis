@@ -40,6 +40,14 @@ pub enum Request {
     Reboot {
         hubs: Vec<Selection>,
     },
+    /// Check or run the requested Setup Assistant steps on every selected device.
+    AdvanceSetup {
+        hubs: Vec<Selection>,
+        settings: Option<SetupLanguage>,
+        #[serde(default)]
+        dep: bool,
+        check_only: bool,
+    },
     Power {
         hub: String,
         port: u8,
@@ -64,6 +72,18 @@ pub enum Request {
     Update {
         hub: String,
         bytes: Option<u64>,
+    },
+    /// Shut down Macs at the end of an erase.
+    ShutdownMacs {
+        enabled: bool,
+    },
+    /// Set the language and region to apply after erasing an iPhone or iPad.
+    SetupLanguage {
+        settings: Option<SetupLanguage>,
+    },
+    /// Try assigned enrollment after erasing an iPhone or iPad.
+    EnrollmentAfterErase {
+        enabled: bool,
     },
     /// Share a host network connection with attached USB devices.
     Sharing {
@@ -226,10 +246,28 @@ pub struct State {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub submitted: Vec<Option<Ending>>,
     pub images: Images,
+    pub post_restore: PostRestore,
     pub sharing: Sharing,
     pub supervision: Supervision,
     /// What this host lacks that some of Iasis needs.
     pub missing: Vec<Prerequisite>,
+}
+
+/// Agent-wide choices for newly submitted erases.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PostRestore {
+    pub shutdown_macs: bool,
+    pub setup_language: Option<SetupLanguage>,
+    #[serde(default)]
+    pub try_enrollment: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetupLanguage {
+    /// A device language such as `en-AU`.
+    pub language: String,
+    /// A regional format such as `en_AU`.
+    pub locale: String,
 }
 
 /// Software the host lacks or must fix, and what goes without it.
@@ -338,7 +376,7 @@ pub struct PortView {
     /// The Apple target's USB mode, when `usb` is `apple`.
     pub mode: Option<AppleMode>,
     pub light: Light,
-    pub request: Option<SignalProgress>,
+    pub request: Option<RequestProgress>,
     pub waiting_for_power: bool,
     pub powered: bool,
     /// An identified Mac answered that its connector lacks DFU USB.
@@ -408,10 +446,12 @@ pub enum PowerSource {
     Usb,
 }
 
-/// A signal in progress, or one the host could not confirm.
+/// An action under way on the device, or a DFU signal the host could not confirm.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SignalProgress {
+pub enum RequestProgress {
+    SettingLanguage,
+    Enrolling,
     EnteringDfu,
     DfuUnconfirmed,
     Restarting,
@@ -450,6 +490,8 @@ pub struct Ending {
     pub ecid: Option<String>,
     pub phase: RestorePhase,
     pub message: String,
+    /// A requested setup step failed after the restore completed.
+    pub setup_error: Option<String>,
 }
 
 /// The store's archives: those it holds and those it is still to fetch.

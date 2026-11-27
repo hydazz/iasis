@@ -69,7 +69,8 @@
             "operation": "restore",
             "ecid": "001a79d10e6bc01c",
             "phase": "Reported",
-            "message": "Restore finished"
+            "message": "Restore finished",
+            "setup_error": null
           },
           "needs": null
         },
@@ -114,7 +115,8 @@
             "operation": "revive",
             "ecid": "001a79d10e6bc01c",
             "phase": "Failed",
-            "message": "Restore finished"
+            "message": "Restore finished",
+            "setup_error": null
           },
           "needs": null
         },
@@ -449,7 +451,44 @@
             "pulse": false,
             "dim": false
           },
-          "request": null,
+          "request": "setting_language",
+          "waiting_for_power": false,
+          "powered": true,
+          "wrong_dfu_port": false,
+          "link": "usb2",
+          "power": {
+            "source": "pd",
+            "millivolts": 20000,
+            "milliamps": 3250
+          },
+          "allocated_mw": 68250,
+          "short": false,
+          "fault": null,
+          "dfu": false,
+          "reboot": true,
+          "restore": true,
+          "enabled": true,
+          "job": null,
+          "awaiting": null,
+          "stage": null,
+          "result": null,
+          "needs": "apple-devices"
+        },
+        {
+          "number": 2,
+          "generation": 7,
+          "occupied": true,
+          "device": "MacBook Air (M1, 2020)",
+          "identifying": false,
+          "ecid": "001a79d10e6bc01c",
+          "usb": "apple",
+          "mode": "normal",
+          "light": {
+            "hue": "green",
+            "pulse": false,
+            "dim": false
+          },
+          "request": "enrolling",
           "waiting_for_power": false,
           "powered": true,
           "wrong_dfu_port": false,
@@ -514,7 +553,8 @@
       "operation": "restore",
       "ecid": "001a79d10e6bc01c",
       "phase": "Reported",
-      "message": "Restore finished"
+      "message": "Restore finished",
+      "setup_error": "The device does not support the requested region"
     },
     null
   ],
@@ -558,6 +598,14 @@
       "bytes": 8000000000,
       "done": 1000000000
     }
+  },
+  "post_restore": {
+    "shutdown_macs": true,
+    "setup_language": {
+      "language": "en-AU",
+      "locale": "en_AU"
+    },
+    "try_enrollment": true
   },
   "sharing": {
     "enabled": true,

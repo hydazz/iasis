@@ -1,33 +1,106 @@
 import SwiftUI
 
+/// A List snapshots its contextual items on a secondary click. A hosting menu
+/// keeps the same menu open while the agent checks the clicked rows.
+struct DeviceRowMenu: NSViewRepresentable {
+    let browser: DeviceBrowser
+    let id: Device.ID
+
+    func makeNSView(context _: Context) -> RowView {
+        RowView()
+    }
+
+    func updateNSView(_ view: RowView, context _: Context) {
+        view.makeMenu = menu
+    }
+
+    func menu() -> NSMenu {
+        let ids = browser.selection.contains(id) ? browser.selection : [id]
+        return NSHostingMenu(rootView: DeviceActionButtons(browser: browser, contextSelection: ids, checksOnOpen: true))
+    }
+
+    final class RowView: NSView {
+        var makeMenu: (() -> NSMenu)?
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            guard let event = NSApp.currentEvent,
+                  event.type == .rightMouseDown || (event.type == .leftMouseDown && event.modifierFlags.contains(.control))
+            else { return nil }
+            return super.hitTest(point)
+        }
+
+        override func menu(for _: NSEvent) -> NSMenu? {
+            makeMenu?()
+        }
+    }
+}
+
 /// The actions in the Device menu and a row's context menu.
 struct DeviceActionButtons: View {
-    let actions: DeviceActions
-    var shortcuts = false
-    let perform: ([AgentRequest]) -> Void
-    let restore: (RestoreConfirmation) -> Void
+    let browser: DeviceBrowser?
+    var contextSelection: Set<Device.ID>?
+    var checksOnOpen = false
+    @State private var menuSetup = SetupCheck()
 
     var body: some View {
-        Button("Enter DFU", systemImage: DeviceSymbol.dfu) { perform(actions.dfu) }
-            .keyboardShortcut(shortcuts ? KeyboardShortcut("d", modifiers: [.command, .shift]) : nil)
-            .disabled(actions.dfu.isEmpty)
-        Button("Restart", systemImage: DeviceSymbol.restart) { perform(actions.restart) }
-            .keyboardShortcut(shortcuts ? KeyboardShortcut("r", modifiers: [.command, .shift]) : nil)
-            .disabled(actions.restart.isEmpty)
-        Divider()
-        Button("Revive", systemImage: DeviceSymbol.revive) {
-            if let revive = actions.revive {
-                perform([revive])
+        let ids = contextSelection ?? browser?.selection ?? []
+        let devices = browser?.devices(in: ids) ?? []
+        let actions = DeviceActions(devices)
+        let setup = SetupAction.menuCheck(for: devices)
+        let ready = (checksOnOpen ? menuSetup : browser?.setupCheck)?.accepts(setup) == true
+        let fullMenu = contextSelection == nil
+
+        Section {
+            if fullMenu || !actions.dfu.isEmpty {
+                Button("Enter DFU", systemImage: DeviceSymbol.dfu) { browser?.model.perform(actions.dfu) }
+                    .keyboardShortcut(fullMenu ? KeyboardShortcut("d", modifiers: [.command, .shift]) : nil)
+                    .disabled(actions.dfu.isEmpty)
+            }
+            if fullMenu || !actions.restart.isEmpty {
+                Button("Restart", systemImage: DeviceSymbol.restart) { browser?.model.perform(actions.restart) }
+                    .keyboardShortcut(fullMenu ? KeyboardShortcut("r", modifiers: [.command, .shift]) : nil)
+                    .disabled(actions.restart.isEmpty)
             }
         }
-        .disabled(actions.revive == nil)
-        Button("Restore…", systemImage: DeviceSymbol.restore) {
-            if let confirmation = actions.restore {
-                restore(confirmation)
+        Section {
+            if fullMenu || actions.revive != nil {
+                Button("Revive", systemImage: DeviceSymbol.revive) {
+                    if let revive = actions.revive {
+                        browser?.model.perform([revive])
+                    }
+                }
+                .disabled(actions.revive == nil)
+            }
+            if fullMenu || actions.restore != nil {
+                Button("Restore…", systemImage: DeviceSymbol.restore) {
+                    if let confirmation = actions.restore {
+                        browser?.confirm(confirmation)
+                    }
+                }
+                .keyboardShortcut(fullMenu ? KeyboardShortcut("r") : nil)
+                .disabled(actions.restore == nil)
+            }
+            if fullMenu || ready {
+                Button("Advance Setup…", systemImage: "globe") {
+                    if let setup, ready {
+                        browser?.chooseSetup(for: ids, checked: setup)
+                    }
+                }
+                .disabled(!ready)
             }
         }
-        .keyboardShortcut(shortcuts ? KeyboardShortcut("r") : nil)
-        .disabled(actions.restore == nil)
+        .task(id: setup) {
+            if checksOnOpen, let browser {
+                await menuSetup.refresh(setup, model: browser.model)
+            }
+        }
+        if let browser, contextSelection != nil, devices.count == 1 {
+            Divider()
+            Button("Get Info", systemImage: "info.circle") {
+                browser.selection = ids
+                browser.showsInspector = true
+            }
+        }
     }
 }
 

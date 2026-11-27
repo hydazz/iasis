@@ -63,6 +63,9 @@ struct Device: Identifiable, Equatable {
         if port.awaiting != nil {
             return Activity("Waiting for Image", .working(nil), symbol: DeviceSymbol.download)
         }
+        if port.result?.setupError != nil {
+            return Activity("Restored, Setup Incomplete", .caution)
+        }
         if let job = port.job {
             guard let stage = port.stage else {
                 return Activity(job.phase, operation: job.operation)
@@ -75,6 +78,8 @@ struct Device: Identifiable, Equatable {
         }
         switch port.request {
         case .enteringDfu: return Activity("Entering DFU", .working(nil))
+        case .settingLanguage: return Activity("Setting Language and Region", .working(nil))
+        case .enrolling: return Activity("Requesting Enrollment", .working(nil))
         case .restarting: return Activity("Restarting", .working(nil))
         case .dfuUnconfirmed: return Activity("DFU Not Confirmed", .uncertain)
         case nil: break
@@ -112,16 +117,21 @@ struct Device: Identifiable, Equatable {
             return status
         }
         if let request = port.request {
-            let symbol = request == .restarting ? DeviceSymbol.restart : DeviceSymbol.dfu
+            let symbol = switch request {
+            case .settingLanguage: "globe"
+            case .enrolling: "building.2"
+            case .restarting: DeviceSymbol.restart
+            case .enteringDfu, .dfuUnconfirmed: DeviceSymbol.dfu
+            }
             return OperationStatus(title: activity.text, symbol: symbol, mark: activity.mark)
         }
         if let result = port.result {
-            let ending = Activity(result.phase, operation: result.operation)
+            let ending = result.setupError == nil ? Activity(result.phase, operation: result.operation) : activity
             return OperationStatus(
                 title: ending.text,
                 symbol: result.operation.symbol,
                 mark: ending.mark,
-                detail: result.message
+                detail: result.setupError ?? result.message
             )
         }
         if let job = port.job {
@@ -132,6 +142,12 @@ struct Device: Identifiable, Equatable {
 
     var restoreTarget: RestoreTarget {
         RestoreTarget(port: port.number, generation: port.generation, ecid: port.ecid)
+    }
+
+    var canCheckSetup: Bool {
+        port.enabled && port.occupied && port.usb == .apple && port.mode == .normal
+            && port.ecid != nil && port.fault == nil && port.request == nil && port.awaiting == nil
+            && port.job?.phase != .preparing && port.job?.phase != .running
     }
 }
 
@@ -236,7 +252,7 @@ extension AgentState {
     }
 }
 
-/// DFU and restart target eligible devices. Restore and revive require the whole selection.
+/// An action is available when it applies to the whole selection.
 struct DeviceActions: Equatable {
     var dfu: [AgentRequest] = []
     var restart: [AgentRequest] = []
@@ -246,14 +262,28 @@ struct DeviceActions: Equatable {
     init() {}
 
     init(_ devices: [Device]) {
-        let signal = { (devices: [Device], request: ([RestoreSelection]) -> AgentRequest) -> [AgentRequest] in
-            guard let hubs = devices.selections, !hubs.isEmpty else { return [] }
-            return [request(hubs)]
+        guard !devices.isEmpty, devices.allSatisfy(\.isSelectable) else { return }
+        if let hubs = devices.selections {
+            if devices.allSatisfy(\.port.dfu) {
+                dfu = [.dfu(hubs: hubs)]
+            }
+            if devices.allSatisfy(\.port.reboot) {
+                restart = [.reboot(hubs: hubs)]
+            }
         }
-        dfu = signal(devices.filter(\.port.dfu)) { .dfu(hubs: $0) }
-        restart = signal(devices.filter(\.port.reboot)) { .reboot(hubs: $0) }
         restore = RestoreConfirmation(devices)
         revive = restore.map { .revive(hubs: $0.hubs, latest: false) }
+    }
+}
+
+struct SetupAction: Equatable {
+    let hubs: [RestoreSelection]
+    var settings: AgentState.SetupLanguage?
+    var enroll: Bool
+
+    static func menuCheck(for devices: [Device]) -> Self? {
+        guard !devices.isEmpty, devices.allSatisfy(\.canCheckSetup), let hubs = devices.selections else { return nil }
+        return Self(hubs: hubs, settings: nil, enroll: false)
     }
 }
 

@@ -11,6 +11,7 @@ nonisolated struct AgentState: Codable, Equatable {
     /// has one. Absent on other connections.
     var submitted: [Ending?]?
     var images: ImageStore
+    var postRestore: PostRestore
     var sharing: Sharing
     var supervision: Supervision
     /// What the host lacks that some of Iasis needs.
@@ -90,7 +91,7 @@ nonisolated struct AgentState: Codable, Equatable {
         /// The Apple target's USB mode, when `usb` is `apple`.
         var mode: AppleMode?
         var light: Light
-        var request: SignalProgress?
+        var request: RequestProgress?
         var waitingForPower: Bool
         var powered: Bool
         var wrongDfuPort: Bool
@@ -157,6 +158,23 @@ nonisolated struct AgentState: Codable, Equatable {
         var allocatedMw: Int
     }
 
+    struct PostRestore: Codable, Equatable {
+        var shutdownMacs: Bool
+        var setupLanguage: SetupLanguage?
+        var tryEnrollment: Bool
+    }
+
+    struct SetupLanguage: Codable, Equatable {
+        var language: String
+        var locale: String
+
+        static var current: Self {
+            let locale = Locale.current.identifier(.icu).components(separatedBy: "@")[0]
+            let language = Locale.preferredLanguages.first ?? Locale.current.identifier(.bcp47)
+            return Self(language: language, locale: locale)
+        }
+    }
+
     struct Sharing: Codable, Equatable {
         var enabled: Bool
         var problem: String?
@@ -203,7 +221,9 @@ nonisolated struct AgentState: Codable, Equatable {
         }
     }
 
-    enum SignalProgress: String, Codable {
+    enum RequestProgress: String, Codable {
+        case settingLanguage = "setting_language"
+        case enrolling
         case enteringDfu = "entering_dfu"
         case dfuUnconfirmed = "dfu_unconfirmed"
         case restarting
@@ -268,6 +288,7 @@ nonisolated struct AgentState: Codable, Equatable {
         var ecid: String?
         var phase: RestorePhase
         var message: String
+        var setupError: String?
     }
 
     /// The store's archives: those it holds and those it is still to fetch.

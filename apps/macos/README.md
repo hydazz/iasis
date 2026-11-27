@@ -29,14 +29,17 @@ Each row represents a physical port. Its number follows the port light. A new at
 
 The bolt shows USB power. The cable marks a live USB link. A highlighted tip indicates USB 3. A wired network symbol marks active internet sharing. **PORT** means the connected Mac reports that this connector lacks DFU USB. Hover over an indicator or open Get Info for details.
 
-Select rows and use the toolbar, the Device menu or a row's context menu:
+Select rows and use the toolbar, the Device menu or a row’s context menu. The context menu shows actions that apply to every selected device, including selections across hubs.
 
-| Action    | Applies to                                                                          |
-| --------- | ----------------------------------------------------------------------------------- |
-| Enter DFU | Each selected device that can be signalled                                          |
-| Restart   | Each selected device that can be signalled                                          |
-| Revive    | Every selected device, on any number of hubs. Repairs the system and keeps the data |
-| Restore   | Every selected device, on any number of hubs. Asks first, then erases them          |
+| Action        | What it does                                                                                                                              |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Enter DFU     | Signals the selected devices to enter DFU.                                                                                                |
+| Restart       | Signals the selected devices to restart.                                                                                                  |
+| Revive        | Repairs the system and keeps the data.                                                                                                    |
+| Restore       | Asks for confirmation, then erases the devices and reinstalls their system.                                                               |
+| Advance Setup | Choose whether to set language and region and whether to request the assigned management configuration on the selected iPhones and iPads. |
+
+**Advance Setup…** starts with the choices in Settings > General. If both are off, it offers to set this Mac’s preferred language and regional format. Changes in the sheet apply to this run. Enrollment activates each device if needed. Complete any required sign-in or **Partially Set Up** prompt on the device.
 
 Before it asks, Restore checks what Apple signs for each device. Where a downloaded image is older than the newest release, it offers both: download the newest, or use the one downloaded. Otherwise it says what each device gets and how much is to download. Restore is unavailable while any selected device cannot be restored.
 

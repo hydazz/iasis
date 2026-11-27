@@ -7,6 +7,12 @@ import SwiftUI
 final class DeviceBrowser {
     let model: AgentModel
     var selection = Set<Device.ID>()
+    var selectedSetup: SetupAction? {
+        SetupAction.menuCheck(for: selected)
+    }
+
+    let setupCheck = SetupCheck()
+    var advancing: SetupDraft?
     var showsInspector = true
     /// The erase the user is being asked to confirm.
     var confirming: RestoreConfirmation?
@@ -14,6 +20,27 @@ final class DeviceBrowser {
 
     init(model: AgentModel) {
         self.model = model
+    }
+
+    func chooseSetup(for ids: Set<Device.ID>, checked: SetupAction) {
+        let devices = devices(in: ids)
+        guard advancing == nil, SetupAction.menuCheck(for: devices) == checked, let defaults = model.state?.postRestore else { return }
+        advancing = SetupDraft(devices: devices, targets: checked, defaults: defaults)
+    }
+
+    func advance(_ draft: SetupDraft) async {
+        guard advancing === draft, !draft.submitting, let action = draft.action(in: self), draft.check.accepts(action) else { return }
+        draft.submitting = true
+        defer { draft.submitting = false }
+        draft.check.clear()
+        setupCheck.clear()
+        do {
+            try await model.advanceSetup(action, checkOnly: false)
+            advancing = nil
+        } catch {
+            draft.submissionError = error.localizedDescription
+        }
+        await setupCheck.refresh(selectedSetup, model: model)
     }
 
     /// Ask the agent what each device would be restored with, then ask the
@@ -45,15 +72,45 @@ final class DeviceBrowser {
     }
 
     var actions: DeviceActions {
-        actions(for: selection)
+        DeviceActions(selected)
     }
 
     func devices(in ids: Set<Device.ID>) -> [Device] {
-        model.state?.devices.filter { ids.contains($0.id) && $0.isSelectable } ?? []
+        let devices = model.state?.devices.filter { ids.contains($0.id) && $0.isSelectable } ?? []
+        return devices.count == ids.count ? devices : []
+    }
+}
+
+@Observable
+final class SetupCheck {
+    private(set) var checked: SetupAction?
+    private(set) var refusal: String?
+    @ObservationIgnored private var revision: UInt = 0
+
+    func accepts(_ action: SetupAction?) -> Bool {
+        action != nil && checked == action && refusal == nil
     }
 
-    func actions(for ids: Set<Device.ID>) -> DeviceActions {
-        DeviceActions(devices(in: ids))
+    func refresh(_ action: SetupAction?, model: AgentModel) async {
+        clear()
+        let currentRevision = revision
+        guard let action else { return }
+        let reason: String?
+        do {
+            try await model.advanceSetup(action, checkOnly: true)
+            reason = nil
+        } catch {
+            reason = error.localizedDescription
+        }
+        guard !Task.isCancelled, currentRevision == revision else { return }
+        checked = action
+        refusal = reason
+    }
+
+    func clear() {
+        revision &+= 1
+        checked = nil
+        refusal = nil
     }
 }
 

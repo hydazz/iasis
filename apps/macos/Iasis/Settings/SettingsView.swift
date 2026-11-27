@@ -49,6 +49,29 @@ private struct GeneralSettings: View {
                         .textSelection(.enabled)
                 }
             }
+            Section {
+                Toggle("Shut Down Macs After Erasing", isOn: Binding {
+                    model.state?.postRestore.shutdownMacs == true
+                } set: { enabled in
+                    model.perform([.shutdownMacs(enabled: enabled)])
+                })
+                Toggle("Set Language and Region on Erased iPhones and iPads", isOn: Binding {
+                    model.state?.postRestore.setupLanguage != nil
+                } set: { enabled in
+                    model.perform([.setupLanguage(enabled ? .current : nil)])
+                })
+                if let settings = model.state?.postRestore.setupLanguage {
+                    LabeledContent("Language and Region", value: "\(settings.language), \(settings.locale)")
+                }
+                Toggle("Try enrollment after erasing", isOn: Binding {
+                    model.state?.postRestore.tryEnrollment == true
+                } set: { enabled in
+                    model.perform([.enrollmentAfterErase(enabled: enabled)])
+                })
+            } footer: {
+                Text("If enrollment requires sign-in or Setup Assistant shows Partially Set Up, continue on the iPhone or iPad.")
+            }
+            .disabled(model.state == nil)
             SupervisionSection(model: model)
             Section {
                 Toggle("Open Finder for DFU and Recovery Devices", isOn: Binding {
