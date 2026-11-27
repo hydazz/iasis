@@ -10,7 +10,6 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use iasis_protocol::Port;
 use restorekit::PostRestoreAction;
 
 use crate::{
@@ -72,15 +71,13 @@ pub(crate) fn program() -> io::Result<PathBuf> {
 
 /// Restore one device: erase it, or revive it and keep its data, and leave
 /// it to `after`. RestoreKit restores one device per process, so every target
-/// gets its own. A Mac in DFU over Debug USB is found only at its own KIS
-/// device's `location`.
+/// gets its own.
 pub(crate) fn worker_command(
     program: &Path,
     operation: Operation,
     after: PostRestoreAction,
     ecid: u64,
     ipsw: &Path,
-    location: Option<u32>,
 ) -> Command {
     let verb = match operation {
         Operation::Restore => "erase",
@@ -95,25 +92,7 @@ pub(crate) fn worker_command(
         .args([WORKER, verb, &format!("{ecid:016x}")])
         .arg(ipsw)
         .arg(ending);
-    if let Some(location) = location {
-        command.arg(format!("{location:08x}"));
-    }
     command
-}
-
-/// Where the target a restore starts from in `mode` is reached only through
-/// its KIS device, that device's IOKit location. Its worker opens no other
-/// KIS device, so it does not disturb another restore's.
-pub(crate) fn kis_location(snapshot: &Snapshot, port: Port, mode: AppleMode) -> Option<u32> {
-    #[cfg(target_os = "macos")]
-    return (mode == AppleMode::KisDfu)
-        .then(|| Some(snapshot.target(port)?.info.as_ref()?.location_id()))
-        .flatten();
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (snapshot, port, mode);
-        None
-    }
 }
 
 /// Read what RestoreKit finds of each masked port's unnamed Apple target: the
@@ -212,9 +191,7 @@ mod worker {
 
     pub(super) fn run(arguments: &[OsString]) -> Result<()> {
         match arguments {
-            [command, ecid, ipsw, ending, location @ ..]
-                if (command == "erase" || command == "revive") && location.len() <= 1 =>
-            {
+            [command, ecid, ipsw, ending] if command == "erase" || command == "revive" => {
                 let mode = if command == "erase" {
                     Mode::Erase
                 } else {
@@ -225,16 +202,7 @@ mod worker {
                     Some("shutdown") => PostRestoreAction::Shutdown,
                     _ => return Err("invalid post-restore action".into()),
                 };
-                let location = location
-                    .first()
-                    .map(|location| {
-                        location
-                            .to_str()
-                            .and_then(|location| u32::from_str_radix(location, 16).ok())
-                            .ok_or("invalid KIS location")
-                    })
-                    .transpose()?;
-                attempt(ecid, Path::new(ipsw), mode, after, location)
+                attempt(ecid, Path::new(ipsw), mode, after)
             }
             #[cfg(windows)]
             [command] if command == "winusb" => super::driver::serve(),
@@ -242,24 +210,12 @@ mod worker {
         }
     }
 
-    fn attempt(
-        ecid: &OsStr,
-        ipsw: &Path,
-        mode: Mode,
-        after: PostRestoreAction,
-        location: Option<u32>,
-    ) -> Result<()> {
+    fn attempt(ecid: &OsStr, ipsw: &Path, mode: Mode, after: PostRestoreAction) -> Result<()> {
         let ecid = ecid
             .to_str()
             .and_then(|id| u64::from_str_radix(id, 16).ok())
             .filter(|&ecid| ecid != 0)
             .ok_or("invalid ECID")?;
-        #[cfg(target_os = "macos")]
-        if let Some(location) = location {
-            restorekit::restore::only_kis_at(location)?;
-        }
-        #[cfg(not(target_os = "macos"))]
-        let _ = location;
         let cache = std::env::current_dir()?.join("cache");
         fs::create_dir_all(&cache)?;
         let records = Mutex::new(records()?);

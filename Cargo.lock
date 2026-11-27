@@ -3443,8 +3443,8 @@ dependencies = [
 
 [[package]]
 name = "restorekit"
-version = "0.6.6"
-source = "git+https://github.com/hydazz/restorekit?rev=0e0bdd5cd228bf0710ece19741bfb5918e3f331f#0e0bdd5cd228bf0710ece19741bfb5918e3f331f"
+version = "0.7.1"
+source = "git+https://github.com/hydazz/restorekit?branch=dev#863017007d70fa87b83b6ab8bf4b4c3cba3b82a8"
 dependencies = [
  "core-foundation",
  "dunce",
@@ -3467,13 +3467,13 @@ dependencies = [
 
 [[package]]
 name = "restorekit-dongle-proto"
-version = "0.6.6"
-source = "git+https://github.com/hydazz/restorekit?rev=0e0bdd5cd228bf0710ece19741bfb5918e3f331f#0e0bdd5cd228bf0710ece19741bfb5918e3f331f"
+version = "0.7.1"
+source = "git+https://github.com/hydazz/restorekit?branch=dev#863017007d70fa87b83b6ab8bf4b4c3cba3b82a8"
 
 [[package]]
 name = "restorekit-sys"
-version = "0.6.6"
-source = "git+https://github.com/hydazz/restorekit?rev=0e0bdd5cd228bf0710ece19741bfb5918e3f331f#0e0bdd5cd228bf0710ece19741bfb5918e3f331f"
+version = "0.7.1"
+source = "git+https://github.com/hydazz/restorekit?branch=dev#863017007d70fa87b83b6ab8bf4b4c3cba3b82a8"
 dependencies = [
  "cc",
  "cmake",

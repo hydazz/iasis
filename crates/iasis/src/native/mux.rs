@@ -2,14 +2,10 @@
 //! runs Apple's and Linux the system's usbmuxd. Windows uses Apple's when it is
 //! installed, and otherwise one the agent serves while a restore needs it.
 
-use std::ffi::OsString;
-
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
-#[cfg(windows)]
-mod served;
 #[cfg(windows)]
 mod windows;
 
@@ -32,8 +28,6 @@ pub(crate) fn probe() {
 
 /// The multiplexer, held for one restore.
 pub(crate) struct Lease {
-    /// What the restore's worker needs in its environment to reach it.
-    pub(crate) environment: Vec<(&'static str, OsString)>,
     #[cfg(windows)]
-    _served: Option<served::Serving>,
+    _server: Option<restorekit::usbmuxd::UsbmuxdGuard>,
 }

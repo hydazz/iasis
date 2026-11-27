@@ -5,6 +5,7 @@
 use std::{
     io::{self, Cursor, Read, Write},
     os::{fd::AsRawFd, unix::net::UnixStream},
+    process::Command,
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
@@ -23,14 +24,10 @@ const ANSWER: Duration = Duration::from_secs(3);
 /// Whether usbmuxd took a connection and did not answer at the last probe.
 static STALLED: AtomicBool = AtomicBool::new(false);
 
-pub(crate) fn lease() -> io::Result<Lease> {
-    Ok(Lease {
-        environment: vec![
-            ("USBMUXD_SOCKET_ADDRESS", format!("UNIX:{SOCKET}").into()),
-            // The restore uses this multiplexer instead of starting its own.
-            ("RESTOREKIT_SHARED_USBMUXD", "1".into()),
-        ],
-    })
+pub(crate) fn lease(command: &mut Command) -> io::Result<Lease> {
+    command.env("USBMUXD_SOCKET_ADDRESS", format!("UNIX:{SOCKET}"));
+    command.env("RESTOREKIT_SHARED_USBMUXD", "1");
+    Ok(Lease {})
 }
 
 /// A restart of usbmuxd, while it stalls: it then neither adds a target in
