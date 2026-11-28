@@ -19,6 +19,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail};
+use chrono::{DateTime, Utc};
 use iasis_protocol::{
     AppleMode, CommandError, CommandResult, DEBUG_USB, DFU_USB, DebugActions, HostControl,
     HostReport, HostSession, IDENTIFY_MS, Observed, PORT_COUNT, Port, PortAction, PortCommand,
@@ -30,6 +31,7 @@ use crate::{
     Error, Events, Hub, dfu,
     identity::{AppleDevice, models::Models},
     inventory::Inventory,
+    job::PortSlots,
     restore::Operation,
     topology::{self, Attachment, Snapshot, UsbDevice},
     watch::Watch,
@@ -68,6 +70,7 @@ const DEBUG_USB_ONLY: [u16; 10] = [
 /// with the attachment it runs on, and the images they wait for. It outlives
 /// each session, so the next session reports it.
 pub(crate) struct Work {
+    pub ports: PortSlots,
     jobs: Mutex<[Option<PortJob>; PORT_COUNT]>,
     awaiting: Mutex<[Option<Awaiting>; PORT_COUNT]>,
     /// The hub has not been told of a change to them.
@@ -109,6 +112,7 @@ impl Drop for Tunnelled {
 impl Work {
     pub(crate) fn new(changes: Arc<Watch>) -> Self {
         Self {
+            ports: PortSlots::default(),
             jobs: Mutex::default(),
             awaiting: Mutex::default(),
             unreported: AtomicBool::new(false),
@@ -191,6 +195,18 @@ impl Work {
         self.jobs.lock().unwrap()[port.index()]
             .as_ref()
             .is_some_and(|job| !finished(&job.status))
+    }
+
+    fn restore_remaining_secs(&self, now: DateTime<Utc>) -> Option<u32> {
+        let ports = self.ports.lock().unwrap();
+        let estimates = ports.iter().filter_map(|port| {
+            port.run
+                .as_ref()?
+                .snapshot()
+                .active_restore()
+                .map(|step| step.estimated_completion_at)
+        });
+        iasis_api::restore_remaining_secs(estimates, now)
     }
 
     fn moved(&self) {
@@ -608,6 +624,7 @@ impl Shared {
                 id: self.session,
                 restore_ready: self.restore_ready.load(Ordering::Relaxed),
                 internet_sharing: self.internet_sharing.load(Ordering::Relaxed),
+                restore_remaining_secs: self.work.restore_remaining_secs(Utc::now()),
             },
             ports: compose(
                 &seen,
@@ -875,7 +892,9 @@ impl Shared {
                 continue;
             }
             finished[i] = None;
+            let busy = self.work.ports.lock().unwrap()[i].busy();
             if let Some(device) = device
+                && !busy
                 && crate::view::setup_ready(
                     &status.ports[i],
                     observe(&snapshot, port),
@@ -1387,6 +1406,51 @@ mod tests {
             }
         }
         status
+    }
+
+    #[test]
+    fn each_hub_counts_down_to_its_last_active_restore() {
+        let work = Work::new(Default::default());
+        let start = |hub: &Work, port: Port| {
+            let run = crate::job::Run::restore(
+                iasis_api::Target {
+                    port,
+                    generation: 1,
+                    ecid: None,
+                },
+                Some(1),
+                Operation::Restore,
+                None,
+                Default::default(),
+            );
+            hub.ports.lock().unwrap()[port.index()].run = Some(run.clone());
+            run.start();
+            run
+        };
+        let at = |s| DateTime::from_timestamp_secs(s).unwrap();
+        let predict = |run: &crate::job::Run, finish| {
+            run.progress(&iasis_api::Progress::default(), Some(at(finish)));
+        };
+        let other_hub = Work::new(Default::default());
+        let other = start(&other_hub, Port::ALL[0]);
+        predict(&other, 2_000);
+        let first = start(&work, Port::ALL[0]);
+        predict(&first, 1_241);
+        assert_eq!(work.restore_remaining_secs(at(1_000)), Some(241));
+        let later = start(&work, Port::ALL[4]);
+        assert_eq!(work.restore_remaining_secs(at(1_030)), None);
+        assert_eq!(other_hub.restore_remaining_secs(at(1_030)), Some(970));
+        predict(&later, 1_753);
+        assert_eq!(work.restore_remaining_secs(at(1_030)), Some(723));
+        predict(&first, 1_779);
+        assert_eq!(work.restore_remaining_secs(at(1_030)), Some(749));
+        assert_eq!(work.restore_remaining_secs(at(1_753)), None);
+        assert!(later.busy());
+        later.complete();
+        assert_eq!(work.restore_remaining_secs(at(1_753)), Some(26));
+        first.complete();
+        assert_eq!(work.restore_remaining_secs(at(1_754)), None);
+        assert_eq!(other_hub.restore_remaining_secs(at(1_754)), Some(246));
     }
 
     #[cfg(target_os = "linux")]

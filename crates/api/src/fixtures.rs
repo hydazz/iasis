@@ -511,6 +511,7 @@ fn diagnostics() -> Diagnostics {
             id: 3,
             restore_ready: true,
             internet_sharing: false,
+            restore_remaining_secs: Some(720),
         }),
         bus_mv: Some(24_030),
         thermistor_adc: [Some(2_048), Some(1_990)],

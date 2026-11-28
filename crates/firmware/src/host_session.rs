@@ -90,6 +90,7 @@ mod tests {
                 id,
                 restore_ready,
                 internet_sharing: false,
+                restore_remaining_secs: None,
             },
             ports: [None; 5],
         }

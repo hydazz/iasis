@@ -33,7 +33,7 @@ use crate::{
     identity::models::Models,
     images::{Network, Store},
     inventory::Inventory,
-    job::{self, Gate, PortSlots, PortWork, Run},
+    job::{self, Gate, PortWork, Run},
     parse_serial,
     restore::RestoreEngine,
     update, view,
@@ -57,7 +57,6 @@ pub struct Options {
 /// outlive them.
 pub(crate) struct Attendance {
     pub(crate) work: Arc<Work>,
-    pub(crate) ports: PortSlots,
     link: Mutex<Option<Arc<Link>>>,
     notice: Mutex<Option<String>>,
     /// What a hub on another protocol says of itself.
@@ -69,7 +68,6 @@ impl Attendance {
     fn new(changes: Arc<Watch>) -> Self {
         Self {
             work: Arc::new(Work::new(changes)),
-            ports: PortSlots::default(),
             link: Mutex::default(),
             notice: Mutex::default(),
             outdated: Mutex::default(),
@@ -148,14 +146,14 @@ fn reserve(
     make_run: impl Fn(&Attendance, Target) -> PortWork,
 ) -> Result<Vec<(Arc<Attendance>, Target, PortWork)>> {
     for (hub, targets) in hubs {
-        let slots = hub.ports.lock().unwrap();
+        let slots = hub.work.ports.lock().unwrap();
         for target in targets {
             slots[target.port.index()].require_idle(target.port)?;
         }
     }
     let mut reserved = Vec::new();
     for (hub, targets) in hubs {
-        let mut slots = hub.ports.lock().unwrap();
+        let mut slots = hub.work.ports.lock().unwrap();
         for target in targets {
             let work = make_run(hub, *target);
             slots[target.port.index()].run = Some(work.clone());
@@ -241,7 +239,7 @@ impl Agent {
                                     version: update::carried_text(&carried),
                                     required: false,
                                 });
-                            let slots = hub.ports.lock().unwrap();
+                            let slots = hub.work.ports.lock().unwrap();
                             for (port, slot) in view.ports.iter_mut().zip(slots.iter()) {
                                 port.run = slot
                                     .run
@@ -348,7 +346,7 @@ impl Agent {
                 "a hub is named twice"
             );
             for target in &targets {
-                hub.ports.lock().unwrap()[target.port.index()].require_idle(target.port)?;
+                hub.work.ports.lock().unwrap()[target.port.index()].require_idle(target.port)?;
             }
             checked.push((link, targets));
         }
@@ -404,7 +402,7 @@ impl Agent {
             let (hub, link) = self.hub(&group.hub)?;
             ensure!(link.session() == group.session, "the hub has reconnected");
             setup_target(&link, &target, &self.models)?;
-            let mut slots = hub.ports.lock().unwrap();
+            let mut slots = hub.work.ports.lock().unwrap();
             let slot = &mut slots[target.port.index()];
             slot.require_idle(target.port)?;
             slot.run = Some(run.clone());
@@ -643,7 +641,13 @@ impl Agent {
                 .as_ref()
                 .and_then(|link| link.status())
                 .is_some_and(|status| status.ports.iter().any(|port| port.restoring()))
-                || hub.ports.lock().unwrap().iter().any(job::PortSlot::busy);
+                || hub
+                    .work
+                    .ports
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(job::PortSlot::busy);
             ensure!(!restoring, "the hub has an active operation");
         }
         // An attended hub is asked through its session's claim. One on another
@@ -1546,6 +1550,7 @@ mod tests {
                 id: 1,
                 restore_ready: true,
                 internet_sharing: false,
+                restore_remaining_secs: None,
             }),
             ..Status::default()
         };
@@ -1590,7 +1595,7 @@ mod tests {
             )
             .is_err()
         );
-        assert!(!second.ports.lock().unwrap()[b.port.index()].busy());
+        assert!(!second.work.ports.lock().unwrap()[b.port.index()].busy());
         previous.stop(iasis_api::StepState::Failed, "Device disconnected".into());
         let manual = Run::setup(
             b,
@@ -1604,10 +1609,10 @@ mod tests {
             },
             Default::default(),
         );
-        second.ports.lock().unwrap()[b.port.index()].run = Some(manual.clone());
+        second.work.ports.lock().unwrap()[b.port.index()].run = Some(manual.clone());
         assert!(reserve(&group, new).is_err());
         assert!(Arc::ptr_eq(
-            first.ports.lock().unwrap()[a.port.index()]
+            first.work.ports.lock().unwrap()[a.port.index()]
                 .run
                 .as_ref()
                 .unwrap(),

@@ -107,10 +107,10 @@ Connect an [Adafruit 938](https://www.adafruit.com/product/938) to the display I
 
 A port reads `DFU` or `REC` while the host sees it in DFU or recovery, `DFU?` for a DFU sent and not yet seen, `BOOT` after a reboot is sent, and `IMG` with a percentage while the host fetches its restore image.
 
-| Selection | Lower area                                                                                             |
-| --------- | ------------------------------------------------------------------------------------------------------ |
-| All       | Voltage measured at each occupied connector. With a brick, input voltage and reserved/available watts. |
-| One port  | Connector voltage and USB link, then the PD contract or default USB allowance.                         |
+| Selection | Lower area                                                                                                                                                                         |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| All       | Connector voltages. An available restore estimate replaces the usual brick input voltage and reserved/available watts with minutes left until the last restore or revive finishes. |
+| One port  | Connector voltage and USB link, then the PD contract or default USB allowance.                                                                                                     |
 
 A target with a USB link shows `USB2` or `USB3` after its voltage, as the hub reports the port. A target in DFU holds USB 2 whatever its cable carries. Without a link nothing is shown, which a cable without data lines and a device that has not enumerated both look like.
 

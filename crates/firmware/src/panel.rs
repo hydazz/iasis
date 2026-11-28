@@ -160,6 +160,7 @@ mod tests {
             id: 1,
             restore_ready,
             internet_sharing: false,
+            restore_remaining_secs: None,
         })
     }
 
@@ -309,6 +310,7 @@ mod tests {
             id: 1,
             restore_ready: true,
             internet_sharing: false,
+            restore_remaining_secs: None,
         });
         assert_eq!(indicators(&status, &Button::default(), 2000)[5], OFF);
         // A Lightning iPad the host can restore through recovery.

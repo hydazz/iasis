@@ -398,6 +398,7 @@ mod tests {
                 id,
                 restore_ready: true,
                 internet_sharing: false,
+                restore_remaining_secs: None,
             });
             self.button
                 .sample(&self.status, self.pending.take(), down, self.now)

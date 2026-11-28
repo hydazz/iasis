@@ -634,6 +634,8 @@ pub struct HostSession {
     pub restore_ready: bool,
     /// The host is sharing Internet access on at least one of this hub's ports.
     pub internet_sharing: bool,
+    /// Estimated seconds until the last active restore or revive on this hub finishes.
+    pub restore_remaining_secs: Option<u32>,
 }
 
 /// How the session's host can prepare this attachment for restore.
@@ -1310,6 +1312,7 @@ mod tests {
                 id: u32::MAX,
                 restore_ready: true,
                 internet_sharing: true,
+                restore_remaining_secs: Some(u32::MAX),
             }),
             settings: Settings {
                 name: HubName::new("ABCDEFGHIJKLMNOP").unwrap(),
@@ -1332,6 +1335,7 @@ mod tests {
                 id: u32::MAX,
                 restore_ready: true,
                 internet_sharing: true,
+                restore_remaining_secs: Some(u32::MAX),
             },
             ports: [Some(PortReport {
                 generation: u32::MAX,
@@ -1442,12 +1446,14 @@ mod tests {
             id: 1,
             restore_ready: false,
             internet_sharing: false,
+            restore_remaining_secs: None,
         });
         assert_eq!(status.gesture_mask(Gesture::Restore), 0);
         status.host = Some(HostSession {
             id: 1,
             restore_ready: true,
             internet_sharing: false,
+            restore_remaining_secs: None,
         });
         assert_eq!(status.gesture_mask(Gesture::Restore), 0b10001);
         assert!(!status.ports[0].offers(PortAction::Enable));
@@ -1480,6 +1486,7 @@ mod tests {
                 id: 1,
                 restore_ready: true,
                 internet_sharing: false,
+                restore_remaining_secs: None,
             }),
             ..Status::default()
         };

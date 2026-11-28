@@ -267,7 +267,8 @@
       "host": {
         "id": 3,
         "restore_ready": true,
-        "internet_sharing": false
+        "internet_sharing": false,
+        "restore_remaining_secs": 720
       },
       "settings": {
         "name": "",

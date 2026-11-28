@@ -236,7 +236,7 @@ pub fn view(status: &Status, button: &Button, now: u64) -> View {
                 }
             }
         }
-        view.lines[1] = supply(status);
+        view.lines[1] = overview(status);
     }
     view
 }
@@ -465,10 +465,23 @@ fn readings(port: &PortStatus) -> [String<32>; 2] {
     lines
 }
 
-/// Measured input voltage and the allocated share of the charging budget.
-fn supply(status: &Status) -> String<32> {
+/// The line beneath the five connector voltages.
+fn overview(status: &Status) -> String<32> {
     let mut line = String::new();
-    if status.supply == Supply::Brick {
+    if status.supply != Supply::Brick
+        && let Some(error) = status.upstream_error
+    {
+        line.push_str(error.text()).unwrap();
+    } else if status.supply == Supply::Off {
+        line.push_str("USB Power Off").unwrap();
+    } else if let Some(seconds) = status.host.and_then(|host| host.restore_remaining_secs) {
+        if seconds < 60 {
+            line.push_str("Less than 1 min left").unwrap();
+        } else {
+            let minutes = seconds.saturating_add(30) / 60;
+            write!(line, "About {minutes} min left").unwrap();
+        }
+    } else if status.supply == Supply::Brick {
         if let Some(mv) = status.bus_mv {
             write!(line, "{}.{}V  ", mv / 1000, mv % 1000 / 100).unwrap();
         }
@@ -479,10 +492,6 @@ fn supply(status: &Status) -> String<32> {
             watts(status.charging_budget_mw)
         )
         .unwrap();
-    } else if let Some(error) = status.upstream_error {
-        line.push_str(error.text()).unwrap();
-    } else if status.supply == Supply::Off {
-        line.push_str("USB Power Off").unwrap();
     }
     line
 }
@@ -909,6 +918,7 @@ mod tests {
             id: 1,
             restore_ready: false,
             internet_sharing: false,
+            restore_remaining_secs: None,
         });
         assert!(view(&status, &button, 0).connected);
         // The host still sees the running system while the target restarts.
@@ -1049,6 +1059,7 @@ mod tests {
                 id: 1,
                 restore_ready: false,
                 internet_sharing: true,
+                restore_remaining_secs: None,
             }),
             ..Status::default()
         };
@@ -1078,6 +1089,7 @@ mod tests {
                 id: 1,
                 restore_ready: false,
                 internet_sharing: true,
+                restore_remaining_secs: None,
             }),
             ..Status::default()
         };
@@ -1110,6 +1122,7 @@ mod tests {
                 id: 1,
                 restore_ready: false,
                 internet_sharing: false,
+                restore_remaining_secs: None,
             }),
             ..Status::default()
         };
@@ -1210,6 +1223,71 @@ mod tests {
     }
 
     #[test]
+    fn the_overview_shows_the_restore_countdown_below_the_connector_voltages() {
+        let mut status = Status {
+            supply: Supply::Brick,
+            charging_budget_mw: 20_000,
+            host: Some(iasis_protocol::HostSession {
+                id: 7,
+                restore_ready: true,
+                internet_sharing: false,
+                restore_remaining_secs: None,
+            }),
+            ..Status::default()
+        };
+        status.ports[0] = PortStatus {
+            vbus_mv: Some(5040),
+            restore: Some(RestoreStatus {
+                ecid: 1,
+                phase: RestorePhase::Running,
+                progress: 42,
+            }),
+            ..contract(5000, 900)
+        };
+        let all = Button::default();
+        let power = view(&status, &all, 0);
+        assert_eq!(power.lines, pair("", "5/20W"));
+        status.host.as_mut().unwrap().restore_remaining_secs = Some(12 * 60);
+        let estimated = view(&status, &all, 0);
+        assert_eq!(estimated.lines, pair("", "About 12 min left"));
+        assert_eq!(estimated.cells[0], "5.0V");
+        assert_eq!(estimated.changed_pages(Some(&power)), 0b1110_0000);
+        let (before, after) = (frame(&power), frame(&estimated));
+        let mut changed = after
+            .bounding_box()
+            .points()
+            .filter(|&p| before.pixel(p) != after.pixel(p))
+            .peekable();
+        assert!(changed.peek().is_some());
+        assert!(changed.all(|p| p.y >= 54));
+        status.brick_input_fault = true;
+        assert_eq!(
+            view(&status, &all, 0).lines,
+            pair("Power fault", "Targets off")
+        );
+        status.brick_input_fault = false;
+        for (seconds, text) in [
+            (89, "About 1 min left"),
+            (90, "About 2 min left"),
+            (60, "About 1 min left"),
+            (59, "Less than 1 min left"),
+            (0, "Less than 1 min left"),
+        ] {
+            status.host.as_mut().unwrap().restore_remaining_secs = Some(seconds);
+            assert_eq!(view(&status, &all, 0).lines[1], text);
+        }
+        assert_eq!(view(&status, &all, 0).columns[0].0, "RUN");
+        assert_eq!(
+            view(&status, &selecting(0), 0).lines,
+            pair("Installing", "42%")
+        );
+        let session = crate::host_session::Session::default();
+        assert!(session.report(status.host.unwrap(), 0));
+        status.host = session.active(iasis_protocol::HOST_SESSION_MS);
+        assert_eq!(view(&status, &all, 0).lines, power.lines);
+    }
+
+    #[test]
     fn selected_job_uses_the_workspace_without_repeating_the_port() {
         let mut status = Status::default();
         status.ports[1] = PortStatus {
@@ -1235,7 +1313,16 @@ mod tests {
 
     #[test]
     fn a_hold_offers_actions_and_its_feedback_cannot_hide_a_fault() {
-        let mut status = Status::default();
+        let mut status = Status {
+            supply: Supply::Brick,
+            host: Some(iasis_protocol::HostSession {
+                id: 1,
+                restore_ready: false,
+                internet_sharing: false,
+                restore_remaining_secs: Some(180),
+            }),
+            ..Status::default()
+        };
         status.ports[0] = contract(5000, 900);
         status.ports[2] = contract(5000, 900);
         status.ports[2].restore = Some(RestoreStatus {
