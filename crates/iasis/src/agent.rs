@@ -458,7 +458,12 @@ impl Agent {
                 let actions = crate::dfu::assess(serial, port, &status, &snapshot, None)
                     .actions(state, crate::native::mux::missing_for);
                 takes(actions).err().map(|reason| {
-                    let name = view::name(state.ecid, snapshot.target(port), &host);
+                    let name = view::name(
+                        state.ecid,
+                        snapshot.target(port),
+                        state.debug_actions,
+                        &host,
+                    );
                     format!(
                         "{} on port {}: {reason}",
                         name.as_deref().unwrap_or("The device"),

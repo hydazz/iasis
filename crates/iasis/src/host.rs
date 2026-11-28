@@ -1475,12 +1475,21 @@ mod tests {
         let unknown = sample(&mut status, &usb, &models);
         assert!(unknown.device.is_none() && unknown.ecid.is_none());
 
-        // An Apple target's product string names its mode, not the device.
-        for (vendor, name) in [(0x05ac, None), (0x045e, Some("Controller"))] {
+        // The Apple debug reply names a target even while it is off USB.
+        status.ports[0].debug_actions = DebugActions::Listed([0; iasis_protocol::MAX_ACTIONS]);
+        let apple_pd = sample(&mut status, &usb, &models);
+        assert_eq!(apple_pd.device.as_deref(), Some("Apple Device"));
+        assert!(apple_pd.ecid.is_none());
+        status.ports[0].debug_actions = DebugActions::Silent;
+
+        for (vendor, name) in [(0x05ac, "Apple Device"), (0x045e, "Controller")] {
             let mut other = device(one, vendor, 0x12ab, None);
             other.product = Some("Controller".into());
             usb.ports[0].devices = vec![other];
-            assert_eq!(sample(&mut status, &usb, &models).device.as_deref(), name);
+            assert_eq!(
+                sample(&mut status, &usb, &models).device.as_deref(),
+                Some(name)
+            );
         }
         usb.ports[0].devices.clear();
 

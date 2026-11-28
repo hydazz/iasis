@@ -6,7 +6,8 @@ use iasis_api::{
     PowerSource, RequestProgress, Supply, Usb, UsbDevice, UsbLink,
 };
 use iasis_protocol::{
-    Info, Link, Observed, Port, PortAction, PortState, PortStatus, RestorePhase, Status,
+    DebugActions, Info, Link, Observed, Port, PortAction, PortState, PortStatus, RestorePhase,
+    Status,
 };
 
 use crate::{
@@ -162,7 +163,7 @@ pub(crate) fn describe_devices(
             });
         }
         row.advance_setup = setup_ready(slot, seen, live, host.models);
-        row.device = name(ecid, live, host);
+        row.device = name(ecid, live, slot.debug_actions, host);
     }
 }
 
@@ -184,17 +185,23 @@ pub(crate) fn setup_ready(
         && models.supports_setup(seen.ecid, device)
 }
 
-/// A target's name: its model, by what this host noted for its ECID or what
-/// its USB says, or the product string of a device that is not Apple's.
-pub(crate) fn name(ecid: Option<u64>, live: Option<&Device>, host: &Host) -> Option<String> {
+/// Prefer a known model to the name the current USB device supplies.
+pub(crate) fn name(
+    ecid: Option<u64>,
+    live: Option<&Device>,
+    debug: DebugActions,
+    host: &Host,
+) -> Option<String> {
     let Host { store, models } = *host;
-    ecid.and_then(|ecid| models.name(ecid, store)).or_else(|| {
-        let device = live?;
-        // An Apple target's product string names its mode.
-        DeviceModel::read(device)
-            .name(store)
-            .or_else(|| device.product.clone().filter(|_| device.apple.is_none()))
-    })
+    ecid.and_then(|ecid| models.name(ecid, store))
+        .or_else(|| live.and_then(|device| DeviceModel::read(device).name(store)))
+        .or_else(|| live.and_then(Device::product_name).map(str::to_owned))
+        .or_else(|| {
+            let apple = live.map_or(matches!(debug, DebugActions::Listed(_)), |device| {
+                device.vendor_id == restorekit::device::APPLE_VID
+            });
+            (apple || ecid.is_some()).then(|| "Apple Device".to_owned())
+        })
 }
 
 pub(crate) fn restore_power_warning(status: &Status) -> Option<&'static str> {

@@ -136,6 +136,17 @@ impl Attachment {
 }
 
 impl UsbDevice {
+    /// A product descriptor that names the device or its family. Apple also uses
+    /// product descriptors to name its recovery and debug transports.
+    pub(crate) fn product_name(&self) -> Option<&str> {
+        let name = self.product.as_deref()?.trim();
+        if self.apple.is_none() {
+            return (!name.is_empty()).then_some(name);
+        }
+        let family = restorekit::device::kind(name);
+        (family != "device").then_some(family)
+    }
+
     /// A Mac wired back to its own hub enumerates its gadget like another Mac.
     pub(crate) fn is_host(&self) -> bool {
         #[cfg(target_os = "macos")]
@@ -570,6 +581,24 @@ mod tests {
             USB2_HUB
         };
         hub
+    }
+
+    #[test]
+    fn product_names_distinguish_apple_targets_from_their_usb_modes() {
+        let mut d = device("02", &[1, 4], Speed::High);
+        d.vendor_id = 0x05ac;
+        d.apple = AppleDevice::from_usb(d.vendor_id, 0x1281, 0, None, None);
+        assert!(d.apple.is_some());
+        d.product = Some("Apple Mobile Device (Recovery Mode)".into());
+        assert_eq!(d.product_name(), None);
+        d.product = Some("iPad".into());
+        assert_eq!(d.product_name(), Some("iPad"));
+        d.apple = None;
+        d.product = None;
+        assert_eq!(d.product_name(), None);
+        d.vendor_id = 0x1a86;
+        d.product = Some("USB Serial".into());
+        assert_eq!(d.product_name(), Some("USB Serial"));
     }
 
     #[test]
