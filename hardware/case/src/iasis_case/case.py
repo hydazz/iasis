@@ -754,7 +754,7 @@ def _top_slots(lay: Layout, z: float, depth: float, display: Display | None) -> 
 
 
 BOARDS = Path(__file__).resolve().parents[4] / "build" / "boards" / "iasis"
-STEP = BOARDS / "board.step"  # HubPD, which fits Hub too
+STEP = BOARDS / "board.step"  # the default population, which fits NoCM5 too
 
 
 def assemble(

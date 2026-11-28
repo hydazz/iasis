@@ -22,17 +22,6 @@
 		)
 		(uuid "8841088b-a86f-4e33-8d56-b989ab5550fe")
 	)
-	(text "Hub and HubPD share the same USB/DFU data path. Only each Optional charging child is depopulated for Hub."
-		(exclude_from_sim no)
-		(at 25.4 26.67 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left top)
-		)
-		(uuid "bf26eeab-7555-4349-9160-6c652e56c135")
-	)
 	(wire
 		(pts
 			(xy 317.5 66.04) (xy 314.96 66.04)

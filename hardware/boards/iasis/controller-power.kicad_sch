@@ -968,7 +968,7 @@
 		)
 		(uuid "dbe27e6f-919f-421a-8e8e-4293440247a4")
 	)
-	(text "Power control registers — fitted in both populations"
+	(text "Power control registers"
 		(exclude_from_sim no)
 		(at 25.4 20.32 0)
 		(effects
@@ -2295,18 +2295,6 @@
 				)
 			)
 		)
-		(property "Population" "Common"
-			(at 261.62 60.96 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "LCSC" "C25744"
 			(at 259.08 60.96 0)
 			(hide yes)
@@ -2435,18 +2423,6 @@
 			)
 		)
 		(property "MPN" "74HC595PW,118"
-			(at 96.52 45.72 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "Common"
 			(at 96.52 45.72 0)
 			(hide yes)
 			(show_name no)
@@ -2667,18 +2643,6 @@
 				(font
 					(size 1.27 1.27)
 				)
-			)
-		)
-		(property "Population" "Common"
-			(at 142.24 50.8 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
 			)
 		)
 		(property "LCSC" "C1525"
@@ -2948,18 +2912,6 @@
 				)
 			)
 		)
-		(property "Population" "Common"
-			(at 248.92 104.14 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "LCSC" "C25744"
 			(at 246.38 104.14 0)
 			(hide yes)
@@ -3151,18 +3103,6 @@
 				)
 			)
 		)
-		(property "Population" "Common"
-			(at 185.42 63.5 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "LCSC" "C25741"
 			(at 182.88 63.5 0)
 			(hide yes)
@@ -3352,18 +3292,6 @@
 				(font
 					(size 1.27 1.27)
 				)
-			)
-		)
-		(property "Population" "Common"
-			(at 142.24 106.68 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
 			)
 		)
 		(property "LCSC" "C1525"
@@ -3733,18 +3661,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "Common"
-			(at 96.52 101.6 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "Manufacturer" "Nexperia"
 			(at 96.52 119.38 0)
 			(hide yes)
@@ -4032,18 +3948,6 @@
 				)
 			)
 		)
-		(property "Population" "Common"
-			(at 236.22 63.5 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "LCSC" "C25741"
 			(at 233.68 63.5 0)
 			(hide yes)
@@ -4235,18 +4139,6 @@
 				)
 			)
 		)
-		(property "Population" "Common"
-			(at 210.82 104.14 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "LCSC" "C25744"
 			(at 208.28 104.14 0)
 			(hide yes)
@@ -4436,18 +4328,6 @@
 				(font
 					(size 1.27 1.27)
 				)
-			)
-		)
-		(property "Population" "Common"
-			(at 210.82 63.5 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
 			)
 		)
 		(property "LCSC" "C25741"
