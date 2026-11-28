@@ -117,6 +117,8 @@ The hub keeps a target's `ecid` for as long as its attachment lasts, so a Mac th
 
 The hub reports its current USB job in `job`. The agent owns `run` from submission through completion. Each step has a `kind` (restore, revive, set_region, activate or request_enrollment) and a `state` (pending, active, complete, failed, unconfirmed, on_device or skipped). Restore and revive carry the selected `system` (OS, version and build) once the image is known, and retain the nested restore `progress` (current activity and estimated overall percent). A region step carries its language and locale. A failed or unconfirmed step carries its own `error`. An `on_device` step uses that field to explain where to continue. Later steps that cannot run are skipped.
 
+An active restore or revive step can carry `estimated_completion_at`, an RFC 3339 UTC timestamp with whole-second precision. The agent estimates completion from the expected duration, observed transfer rate and device milestones. Clients show a countdown while the timestamp is in the future. A countdown covering several restores uses the latest timestamp when every active restore or revive in scope has a current estimate. The step state reports the outcome.
+
 A port retains its latest run for the matching device while the agent is running. A client can reopen the inspector during or after the operation. Targets without an ECID are identified by hub session and attachment generation until their identity is known.
 
 `light.hue` is `off`, `red`, `green`, `white`, `blue`, `amber` or `purple`, with the meanings in the [light table](../firmware/README.md#controls-and-status). A client that draws the port in that colour agrees with the hub.

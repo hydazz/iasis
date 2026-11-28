@@ -30,7 +30,7 @@ use crate::{
         models::{DeviceModel, Models},
     },
     images::{Lease, Store},
-    restore::{Operation, PreparedIpsw, RestoreEngine, RestoreState, Worker},
+    restore::{Operation, PreparedIpsw, RestoreEngine, RestoreState, Timing, Worker},
     topology::Snapshot,
     watch::Watch,
 };
@@ -105,6 +105,7 @@ pub(crate) fn spawn(
         generation: target.generation,
         ecid: target.ecid,
         ask,
+        started: Instant::now(),
         run: work.clone(),
     };
     let spawned = thread::Builder::new()
@@ -127,7 +128,14 @@ pub(crate) fn spawn(
     }
 }
 
+/// The selected image and timing for one target.
+struct TargetImage {
+    ipsw: Lease,
+    timing: Timing,
+}
+
 struct Job {
+    started: Instant,
     run: PortWork,
     host: Host,
     hub: Arc<Attendance>,
@@ -141,7 +149,18 @@ struct Job {
 
 impl Job {
     fn run(&mut self, ticket: Option<Ticket>) -> Result<()> {
-        self.run.start();
+        let known = self.ecid.and_then(|ecid| self.host.models.model(ecid));
+        let timing = self.host.engine.timing(
+            known.as_ref().and_then(DeviceModel::hardware),
+            self.ask.operation,
+            known
+                .as_ref()
+                .and_then(DeviceModel::identifier)
+                .and_then(crate::images::system)
+                == Some("macOS"),
+            self.started,
+        );
+        self.run.start_restore(timing.initial_finish());
         let taken = self.hub.work.take(self.port);
         let awake = crate::awake::hold("Preparing a restore");
         let (worker, tracker, image) = self.prepare(ticket)?;
@@ -202,7 +221,7 @@ impl Job {
     /// Bring the target to its restore: its image, from the model known
     /// before the target is touched where there is one; DFU or recovery;
     /// a Restore hold's erase; the worker.
-    fn prepare(&mut self, ticket: Option<Ticket>) -> Result<(Worker, TargetTracker, Lease)> {
+    fn prepare(&mut self, ticket: Option<Ticket>) -> Result<(Worker, TargetTracker, TargetImage)> {
         let image = match self.model_before()? {
             Some(model) => Some(self.obtain(&model)?),
             None => None,
@@ -265,11 +284,16 @@ impl Job {
     /// The image the store gives for this model, fetched first if it must
     /// be, leased for as long as the job holds it. The target is left alone
     /// while it waits, and the wait ends if the target goes.
-    fn obtain(&mut self, model: &DeviceModel) -> Result<Lease> {
+    fn obtain(&mut self, model: &DeviceModel) -> Result<TargetImage> {
         let store = self.host.store.clone();
         let (chip, board) = store.hardware_for(model)?;
         let mut absent = None;
+        let mut waited_for_image = false;
         let image = store.obtain(chip, board, self.ask.latest, |image, fetch| {
+            if !waited_for_image {
+                self.run.wait_for_image();
+                waited_for_image = true;
+            }
             self.still_here(&mut absent)?;
             // A download waiting behind another has not begun.
             let percent = fetch.map_or(0, |fetch| fetch.done * 100 / fetch.bytes.max(1));
@@ -301,6 +325,16 @@ impl Job {
             .setup
             .as_ref()
             .filter(|_| matches!(os, "iOS" | "iPadOS"));
+        if waited_for_image {
+            self.started = Instant::now();
+        }
+        let timing = self.host.engine.timing(
+            Some((chip, board)),
+            self.ask.operation,
+            os == "macOS",
+            self.started,
+        );
+        self.run.start_restore(timing.initial_finish());
         self.run.image(
             SystemImage {
                 os: os.into(),
@@ -309,7 +343,10 @@ impl Job {
             },
             setup,
         );
-        Ok(image)
+        Ok(TargetImage {
+            ipsw: image,
+            timing,
+        })
     }
 
     /// The port still holds the target, as the hub reports it: on its
@@ -514,7 +551,7 @@ impl Job {
     /// Start the worker once the target is present in a mode a restore
     /// starts from and its port is ready, on whatever attachment it is on
     /// then.
-    fn launch(&mut self, tracker: &TargetTracker, image: &PreparedIpsw) -> Result<Worker> {
+    fn launch(&mut self, tracker: &TargetTracker, image: &TargetImage) -> Result<Worker> {
         let deadline = Instant::now() + ABSENCE;
         let mut seen = self.host.changes.count();
         let index = self.port.index();
@@ -531,7 +568,7 @@ impl Job {
                         }
                         let model = present(tracker, &snapshot).map(|(_, model)| model);
                         ensure!(
-                            model.is_none_or(|model| image.restores(&model)),
+                            model.is_none_or(|model| image.ipsw.restores(&model)),
                             "the image does not restore the target"
                         );
                         if status.ready_mask() & (1 << index) != 0 {
@@ -541,11 +578,11 @@ impl Job {
                                 .work
                                 .job(self.port, Some(self.preparing(tracker.ecid)));
                             let worker = self.host.engine.start(
-                                image,
+                                &image.ipsw,
+                                image.timing.starting_at(self.started),
                                 tracker.ecid,
                                 mode,
-                                self.ask.operation,
-                                self.after(image),
+                                self.after(&image.ipsw),
                             );
                             if worker.is_err() {
                                 self.hub.work.job(self.port, None);
@@ -577,7 +614,7 @@ impl Job {
     /// failed restore left in recovery, past its iBEC, does not restore from
     /// there. One it cannot signal, such as an iPhone on Lightning, starts
     /// again from recovery.
-    fn relaunch(&mut self, tracker: &TargetTracker, image: &PreparedIpsw) -> Result<Worker> {
+    fn relaunch(&mut self, tracker: &TargetTracker, image: &TargetImage) -> Result<Worker> {
         let index = self.port.index();
         let mut deadline = Instant::now() + ABSENCE;
         let mut signalled = false;
@@ -658,13 +695,14 @@ impl Job {
         &mut self,
         mut worker: Worker,
         tracker: &TargetTracker,
-        image: &PreparedIpsw,
+        image: &TargetImage,
     ) -> crate::restore::RestoreStatus {
         let mut relaunches = 0;
         let mut seen = self.host.changes.count();
         loop {
             let job = worker.status();
-            self.run.progress(&job.progress);
+            self.run
+                .progress(&job.progress, job.estimated_completion_at);
             let link = self.hub.link();
             let sample = link.as_ref().and_then(|link| link.sample());
             let observed = sample
@@ -706,6 +744,10 @@ impl Job {
                                 "Port {}: the restore of {:016x} failed; starting it again ({relaunches} of {RELAUNCHES}) once it is in DFU or recovery",
                                 self.port.number(),
                                 tracker.ecid
+                            );
+                            self.started = Instant::now();
+                            self.run.start_restore(
+                                image.timing.starting_at(self.started).initial_finish(),
                             );
                             match self.relaunch(tracker, image) {
                                 Ok(again) => {

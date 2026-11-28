@@ -205,6 +205,7 @@ impl Agent {
             models: Arc::new(Models::open(home.state.join("device-models.json"))),
             engine: RestoreEngine::for_host(
                 home.cache.join("restores"),
+                home.state.join("restore-timings.json"),
                 supervision.clone(),
                 changes.clone(),
             ),

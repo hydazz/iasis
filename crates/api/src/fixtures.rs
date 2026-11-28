@@ -28,6 +28,7 @@ fn step(kind: StepKind, state: StepState) -> OperationStep {
         }),
         system: None,
         progress: None,
+        estimated_completion_at: None,
         error: None,
     }
 }
@@ -92,11 +93,10 @@ fn state() -> State {
                     version: "26.2".into(),
                     build: "24C101".into(),
                 }),
+                estimated_completion_at: chrono::DateTime::from_timestamp_secs(1_800_000_000),
                 progress: Some(Progress {
                     name: "Restoring the system".into(),
                     percent: 42,
-                    steps: vec!["Preparing".into(), "Restoring the system".into()],
-                    step: 1,
                 }),
                 ..step(StepKind::Restore, StepState::Active)
             },

@@ -32,7 +32,13 @@ const WORKER: &str = "worker";
 #[serde(tag = "record", rename_all = "snake_case")]
 pub(crate) enum Record {
     /// The restore step under way, and the fraction of it done.
-    Step { step: u32, progress: f32 },
+    Step {
+        step: u32,
+        name: String,
+        progress: f32,
+    },
+    /// The device began this restore operation.
+    DeviceOperation { code: u32 },
     /// What the device reported of its storage's erasure: `confirmed`,
     /// `failed`, `unconfirmed` or `not_applicable`.
     Obliteration { status: String, detail: String },
@@ -238,9 +244,18 @@ mod worker {
         };
         // One attempt: a failed restore ends the target's job.
         let result = restore.attempt(&mut |event| match event {
-            Event::RestoreStep { step, progress, .. } => {
-                send(&Record::Step { step, progress });
+            Event::RestoreStep {
+                step,
+                name,
+                progress,
+            } => {
+                send(&Record::Step {
+                    step,
+                    name,
+                    progress,
+                });
             }
+            Event::DeviceOperation { code, .. } => send(&Record::DeviceOperation { code }),
             Event::Obliteration { status, detail } => {
                 send(&Record::Obliteration { status, detail });
             }

@@ -2,6 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use chrono::{DateTime, Utc};
 use iasis_api::{
     Operation, OperationRun, OperationStep, PortView, Progress, SetupLanguage, SetupOptions,
     StepKind, StepState, SystemImage, Target,
@@ -25,6 +26,7 @@ fn step(kind: StepKind) -> OperationStep {
         system: None,
         language: None,
         progress: None,
+        estimated_completion_at: None,
         error: None,
     }
 }
@@ -129,8 +131,29 @@ impl Run {
         });
     }
 
-    pub fn progress(&self, progress: &Progress) {
-        self.update(|run| run.steps[0].progress = Some(progress.clone()));
+    pub fn progress(&self, progress: &Progress, estimated_completion_at: Option<DateTime<Utc>>) {
+        self.update(|run| {
+            let step = &mut run.steps[0];
+            step.progress = Some(progress.clone());
+            step.estimated_completion_at = estimated_completion_at;
+        });
+    }
+
+    pub fn start_restore(&self, finish: DateTime<Utc>) {
+        self.update(|run| {
+            let step = &mut run.steps[0];
+            step.state = StepState::Active;
+            step.progress = Some(crate::restore::preparing_progress());
+            step.estimated_completion_at = Some(finish);
+        });
+    }
+
+    pub fn wait_for_image(&self) {
+        self.update(|run| {
+            let step = &mut run.steps[0];
+            step.progress = None;
+            step.estimated_completion_at = None;
+        });
     }
 
     pub fn start(&self) {
@@ -152,6 +175,7 @@ impl Run {
                 .iter_mut()
                 .find(|s| s.state == StepState::Active)
                 .expect("an active step");
+            current.estimated_completion_at = None;
             current.state = StepState::Complete;
         });
     }
@@ -175,6 +199,7 @@ impl Run {
                 .iter_mut()
                 .filter(|s| matches!(s.state, StepState::Active | StepState::Pending));
             if let Some(current) = remaining.next() {
+                current.estimated_completion_at = None;
                 current.state = state;
                 current.error = Some(reason);
             }
@@ -264,7 +289,17 @@ mod tests {
         };
         use StepState::*;
         assert_eq!(states(), [Pending, Pending, Pending, Pending]);
-        work.start();
+        let estimate = DateTime::from_timestamp_secs(1_800_000_000).unwrap();
+        work.start_restore(estimate);
+        assert_eq!(
+            work.snapshot().steps[0].estimated_completion_at,
+            Some(estimate)
+        );
+        work.wait_for_image();
+        let waiting = &work.snapshot().steps[0];
+        assert_eq!(waiting.state, Active);
+        assert!(waiting.estimated_completion_at.is_none() && waiting.progress.is_none());
+        work.start_restore(estimate);
         let image = SystemImage {
             os: "iOS".into(),
             version: "26.2".into(),
@@ -272,12 +307,19 @@ mod tests {
         };
         work.image(image.clone(), Some(&settings));
         let progress = Progress {
-            steps: vec!["Preparing Device".into()],
             percent: 100,
-            step: 1,
             name: "Complete".into(),
         };
-        work.progress(&progress);
+        work.progress(&progress, Some(estimate));
+        let retry = estimate + chrono::TimeDelta::minutes(5);
+        work.start_restore(retry);
+        let restarted = &work.snapshot().steps[0];
+        assert_eq!(restarted.estimated_completion_at, Some(retry));
+        assert_eq!(
+            restarted.progress,
+            Some(crate::restore::preparing_progress())
+        );
+        work.progress(&progress, Some(retry));
         work.complete();
         work.start();
         assert_eq!(states(), [Complete, Active, Pending, Pending]);
@@ -286,6 +328,7 @@ mod tests {
         let snapshot = work.snapshot();
         assert_eq!(snapshot.steps[0].system, Some(image));
         assert_eq!(snapshot.steps[0].progress, Some(progress));
+        assert_eq!(snapshot.steps[0].estimated_completion_at, None);
         assert_eq!(snapshot.steps[1].language, Some(settings.region));
         assert!(snapshot.finished() && !snapshot.succeeded());
     }

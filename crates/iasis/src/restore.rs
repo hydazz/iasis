@@ -8,10 +8,11 @@ use std::{
     process::{Command, Stdio},
     sync::{Arc, Mutex, mpsc},
     thread,
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 use anyhow::{Context, Result, bail, ensure};
+use chrono::{DateTime, SubsecRound, TimeDelta, Utc};
 use iasis_protocol::AppleMode;
 use restorekit::PostRestoreAction;
 
@@ -20,11 +21,18 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 
+mod estimate;
+use estimate::{Estimate, History, Sample};
 mod integrity;
 use integrity::{FileStamp, Integrity};
 mod progress;
+pub(crate) use estimate::Timing;
 pub use iasis_api::{Operation, Progress};
-use progress::Stages;
+pub(crate) use progress::starting as preparing_progress;
+
+fn completion_at(seconds: f64) -> DateTime<Utc> {
+    (Utc::now() + TimeDelta::seconds(seconds.max(1.0).round() as i64)).trunc_subsecs(0)
+}
 
 /// Checked local archive. Apple authorizes the restore when the engine
 /// requests a signing ticket for the connected target.
@@ -266,6 +274,7 @@ pub struct RestoreStatus {
     pub state: RestoreState,
     pub pid: Option<u32>,
     pub progress: Progress,
+    pub estimated_completion_at: Option<DateTime<Utc>>,
     pub message: String,
     pub exit_code: Option<i32>,
 }
@@ -286,6 +295,7 @@ pub struct RestoreEngine {
     scratch: PathBuf,
     supervision: Arc<Supervision>,
     active: Arc<Mutex<HashSet<u64>>>,
+    history: Arc<History>,
     /// Advances whenever a job's status changes.
     changes: Arc<Watch>,
 }
@@ -296,6 +306,7 @@ impl RestoreEngine {
     /// first, and goes now.
     pub fn for_host(
         scratch: impl Into<PathBuf>,
+        timings: PathBuf,
         supervision: Arc<Supervision>,
         changes: Arc<Watch>,
     ) -> Self {
@@ -313,6 +324,7 @@ impl RestoreEngine {
         }
         Self {
             supervision,
+            history: Arc::new(History::open(timings)),
             changes,
             // An executable that cannot name itself fails each worker's start.
             ..Self::with(crate::native::program().unwrap_or_default(), scratch)
@@ -325,6 +337,7 @@ impl RestoreEngine {
             scratch: scratch.into(),
             supervision: Arc::default(),
             active: Arc::default(),
+            history: Arc::default(),
             changes: Arc::default(),
         }
     }
@@ -347,15 +360,25 @@ impl RestoreEngine {
             .map_err(|error| anyhow::anyhow!("{error}"))
     }
 
+    pub(crate) fn timing(
+        &self,
+        hardware: Option<(u32, u32)>,
+        operation: Operation,
+        mac: bool,
+        start: Instant,
+    ) -> Timing {
+        self.history.timing(hardware, operation, mac, start)
+    }
+
     /// Start a worker that restores or revives the target with this ECID,
     /// verified in `mode`, from `ipsw`, and leaves it to `after`. The worker
     /// runs to its end whatever becomes of the returned handle.
-    pub fn start(
+    pub(crate) fn start(
         &self,
         ipsw: &PreparedIpsw,
+        timing: Timing,
         ecid: u64,
         mode: AppleMode,
-        operation: Operation,
         after: PostRestoreAction,
     ) -> Result<Worker> {
         ensure!(
@@ -377,6 +400,7 @@ impl RestoreEngine {
             self.active.lock().unwrap().insert(ecid),
             "ECID {ecid:016x} already has an active restore"
         );
+        let operation = timing.operation;
         let mut command =
             crate::native::worker_command(&self.program, operation, after, ecid, ipsw.path());
         command.current_dir(directory.path());
@@ -385,17 +409,19 @@ impl RestoreEngine {
             ecid,
             state: RestoreState::Starting,
             pid: None,
-            progress: Progress::starting(),
+            progress: progress::starting(),
+            estimated_completion_at: Some(timing.initial_finish()),
             message: String::new(),
             exit_code: None,
         }));
         let worker = Worker(status.clone());
         let (active, changes) = (self.active.clone(), self.changes.clone());
+        let history = self.history.clone();
         let spawn = thread::Builder::new()
             .name(format!("restore-{ecid:x}"))
             .spawn(move || {
                 let _awake = crate::awake::hold(&format!("{operation:?} of {ecid:016x}"));
-                let (state, message) = run_worker(command, &status, &changes)
+                let (state, message) = run_worker(command, &status, &changes, &history, timing)
                     .unwrap_or_else(|error| (RestoreState::Failed, format!("{error:#}")));
                 log::info!("{ecid:016x}: {message}");
                 // The worker's scratch is of no use once its job ends, and the
@@ -403,8 +429,12 @@ impl RestoreEngine {
                 drop(directory);
                 active.lock().unwrap().remove(&ecid);
                 let mut status = status.lock().unwrap();
+                status.estimated_completion_at = None;
                 if state == RestoreState::RestoreReported {
-                    status.progress.complete();
+                    status.progress = Progress {
+                        name: "Complete".into(),
+                        percent: 100,
+                    };
                 }
                 (status.state, status.message) = (state, message);
                 drop(status);
@@ -436,6 +466,8 @@ fn run_worker(
     mut command: Command,
     status: &Arc<Mutex<RestoreStatus>>,
     changes: &Arc<Watch>,
+    history: &History,
+    timing: Timing,
 ) -> Result<(RestoreState, String)> {
     use process_wrap::std::*;
 
@@ -463,13 +495,14 @@ fn run_worker(
     let stdout = child.stdout().take().context("opening restore progress")?;
     let stderr = child.stderr().take().context("opening the restore log")?;
     let ecid = status.lock().unwrap().ecid;
+    let estimate = Estimate::new(timing);
     thread::spawn(move || log_lines(stderr, ecid));
     let (ended, records) = mpsc::channel();
     let terminal = Arc::new(Mutex::new(None));
     {
         let (status, changes, terminal) = (status.clone(), changes.clone(), terminal.clone());
         thread::spawn(move || {
-            follow_records(stdout, &status, &changes, &terminal);
+            follow_records(stdout, &status, &changes, &terminal, estimate);
             let _ = ended.send(());
         });
     }
@@ -478,14 +511,18 @@ fn run_worker(
     let _ = records.recv_timeout(RECORDS_AFTER_EXIT);
     status.lock().unwrap().exit_code = exit.code();
     Ok(match terminal.lock().unwrap().take() {
-        Some(Record::Finished) if exit.success() => {
+        Some((Record::Finished, sample)) if exit.success() => {
+            timing.remember(history, sample);
             (RestoreState::RestoreReported, "Restore completed".into())
         }
-        Some(Record::Failed {
-            summary,
-            tail,
-            retryable,
-        }) => {
+        Some((
+            Record::Failed {
+                summary,
+                tail,
+                retryable,
+            },
+            _,
+        )) => {
             if tail != summary {
                 log::warn!("{ecid:016x}: {tail}");
             }
@@ -514,9 +551,17 @@ fn follow_records(
     input: impl Read,
     status: &Mutex<RestoreStatus>,
     changes: &Watch,
-    terminal: &Mutex<Option<Record>>,
+    terminal: &Mutex<Option<(Record, Sample)>>,
+    mut estimate: Estimate,
 ) {
     let ecid = status.lock().unwrap().ecid;
+    let mut forecast = status
+        .lock()
+        .unwrap()
+        .estimated_completion_at
+        .unwrap_or_else(|| estimate.timing.initial_finish());
+    let mut last_step = None;
+    let mut last_operation = None;
     for line in BufReader::new(input).lines() {
         let Ok(line) = line else {
             return;
@@ -528,25 +573,67 @@ fn follow_records(
                 continue;
             }
         };
-        match record {
-            Record::Step { step, progress } => {
-                let mut status = status.lock().unwrap();
-                let before = status.progress.clone();
-                status.progress.worker_step(step, progress);
-                let moved = status.progress != before;
-                drop(status);
-                if moved {
-                    changes.changed();
+        let now = Instant::now();
+        let mut state = status.lock().unwrap();
+        let before = state.progress.clone();
+        let previous_estimate = state.estimated_completion_at;
+        let remaining = match record {
+            Record::Step {
+                step,
+                name,
+                progress: fraction,
+            } => {
+                if !(0.0..=1.0).contains(&fraction) || last_step == Some((step, fraction)) {
+                    continue;
                 }
+                last_step = Some((step, fraction));
+                state.progress.name = name;
+                if step == restorekit::restore::FILESYSTEM_STREAM_STEP {
+                    estimate.filesystem(fraction, now)
+                } else {
+                    None
+                }
+            }
+            Record::DeviceOperation { code } => {
+                if last_operation == Some(code) {
+                    continue;
+                }
+                last_operation = Some(code);
+                estimate.device_operation(code, now)
             }
             Record::Obliteration { status, detail } => {
                 log::info!("{ecid:016x}: obliteration {status}: {detail}");
+                continue;
             }
             Record::Finished | Record::Failed { .. } => {
-                *terminal.lock().unwrap() = Some(record);
+                *terminal.lock().unwrap() = Some((record, estimate.sample(now)));
+                continue;
             }
+        };
+        let observed_at = Utc::now();
+        if let Some(left) = remaining {
+            forecast = completion_at(left);
+        }
+        let finish = finishing_deadline(forecast, observed_at);
+        state.estimated_completion_at = Some(finish);
+        progress::advance(
+            &mut state.progress,
+            now - estimate.timing.start,
+            finish,
+            observed_at,
+        );
+        let moved = state.progress != before || previous_estimate != state.estimated_completion_at;
+        drop(state);
+        if moved {
+            changes.changed();
         }
     }
+}
+
+// Activity near the predicted finish can use up to 15 seconds of allowance.
+fn finishing_deadline(forecast: DateTime<Utc>, observed: DateTime<Utc>) -> DateTime<Utc> {
+    let allowance = TimeDelta::seconds(15);
+    forecast.max(observed.trunc_subsecs(0).min(forecast) + allowance)
 }
 
 /// Send each line of a worker's stderr to the log under its target's ECID,
@@ -786,9 +873,9 @@ mod tests {
             engine
                 .start(
                     &ipsw,
+                    engine.timing(Some((1, 1)), Operation::Revive, true, Instant::now()),
                     0x31,
                     AppleMode::Normal,
-                    Operation::Revive,
                     PostRestoreAction::Reboot,
                 )
                 .is_err()
@@ -797,9 +884,9 @@ mod tests {
             engine
                 .start(
                     &ipsw,
+                    engine.timing(Some((1, 1)), Operation::Restore, true, Instant::now()),
                     0,
                     AppleMode::Dfu,
-                    Operation::Restore,
                     PostRestoreAction::Reboot,
                 )
                 .is_err()
@@ -812,9 +899,9 @@ mod tests {
                 &engine
                     .start(
                         &ipsw,
+                        engine.timing(Some((1, 1)), operation, true, Instant::now()),
                         ecid,
                         AppleMode::KisDfu,
-                        operation,
                         PostRestoreAction::Reboot,
                     )
                     .unwrap(),
@@ -851,9 +938,9 @@ mod tests {
             engine
                 .start(
                     &changed,
+                    engine.timing(Some((1, 1)), Operation::Restore, true, Instant::now()),
                     2,
                     AppleMode::Dfu,
-                    Operation::Restore,
                     PostRestoreAction::Reboot,
                 )
                 .is_err()
@@ -865,9 +952,9 @@ mod tests {
                 &engine
                     .start(
                         ipsw,
+                        engine.timing(Some((1, 1)), Operation::Restore, true, Instant::now()),
                         ecid,
                         AppleMode::Dfu,
-                        Operation::Restore,
                         PostRestoreAction::Reboot,
                     )
                     .unwrap(),
@@ -902,7 +989,7 @@ while :; do
     [ "$attempt" -lt 500 ] || exit 9
     sleep 0.01
 done
-printf '%s\n' '{{"record":"step","step":2,"progress":0.5}}'
+printf '%s\n' '{{"record":"step","step":2,"name":"uploading filesystem","progress":0.5}}'
 dd if=/dev/zero bs=1024 count=128 >&2 2>/dev/null
 printf '\nworker stderr drained\n' >&2
 printf '%s\n' '{FINISHED}'
@@ -914,9 +1001,9 @@ printf '%s\n' '{FINISHED}'
         let start = |ecid| {
             engine.start(
                 &ipsw,
+                engine.timing(Some((1, 1)), Operation::Restore, true, Instant::now()),
                 ecid,
                 AppleMode::Dfu,
-                Operation::Restore,
                 PostRestoreAction::Reboot,
             )
         };
@@ -939,9 +1026,59 @@ printf '%s\n' '{FINISHED}'
                 (status.progress.name.as_str(), status.progress.percent),
                 ("Complete", 100)
             );
-            assert_eq!(status.progress.step, status.progress.steps.len());
         }
         cleared(&scratch);
+    }
+
+    #[test]
+    fn repeated_activity_cannot_keep_an_overdue_countdown_alive() {
+        let forecast = DateTime::from_timestamp_secs(100).unwrap();
+        let at = |s| DateTime::from_timestamp_secs(s).unwrap();
+        assert_eq!(finishing_deadline(forecast, at(50)), forecast);
+        assert_eq!(finishing_deadline(forecast, at(95)), at(110));
+        assert_eq!(finishing_deadline(forecast, at(200)), at(115));
+    }
+
+    #[test]
+    fn a_device_milestone_updates_the_forecast_without_completing_the_installation() {
+        let history = History::default();
+        let model = (1, 1);
+        let now = Instant::now();
+        let timing = history.timing(Some(model), Operation::Restore, true, now);
+        let mut prior = Estimate::new(timing);
+        prior.device_operation(25, now);
+        history.remember(
+            model,
+            Operation::Restore,
+            prior.sample(now + Duration::from_secs(60)),
+        );
+
+        let status = Mutex::new(RestoreStatus {
+            operation: Operation::Restore,
+            ecid: 1,
+            state: RestoreState::Running,
+            pid: None,
+            progress: progress::starting(),
+            estimated_completion_at: None,
+            message: String::new(),
+            exit_code: None,
+        });
+        let records = br#"{"record":"step","step":3,"name":"verifying filesystem","progress":1.0}
+{"record":"device_operation","code":25}"#;
+        let before = Utc::now().timestamp();
+        follow_records(
+            &records[..],
+            &status,
+            &Watch::default(),
+            &Mutex::new(None),
+            Estimate::new(history.timing(Some(model), Operation::Restore, true, now)),
+        );
+        let status = status.into_inner().unwrap();
+        assert_eq!(status.progress.name, "verifying filesystem");
+        assert!(status.progress.percent < 100);
+        let finish = status.estimated_completion_at.unwrap();
+        assert_eq!(finish.timestamp_subsec_nanos(), 0);
+        assert!((before + 60..=Utc::now().timestamp() + 60).contains(&finish.timestamp()));
     }
 
     #[test]
@@ -952,7 +1089,8 @@ printf '%s\n' '{FINISHED}'
             temp.path(),
             &format!(
                 r#"
-printf '%s\n' '{{"record":"step","step":2,"progress":0.5}}' '{{"record":"step","step":7,"progress":1.0}}'
+printf '%s\n' '{{"record":"step","step":2,"name":"uploading filesystem","progress":0.5}}' '{{"record":"step","step":7,"name":"uploading image","progress":1.0}}'
+echo '{{"record":"device_operation","code":25}}'
 case "$1" in
     confirmed) echo '{FINISHED}' ;;
     diagnostic) echo '{FINISHED}' >&2 ;;
@@ -964,33 +1102,21 @@ esac
 "#
             ),
         );
-        for (arg, expected, percent, message) in [
+        for (arg, expected, message) in [
             (
                 "confirmed",
                 RestoreState::RestoreReported,
-                45,
                 "Restore completed",
             ),
-            (
-                "diagnostic",
-                RestoreState::Unconfirmed,
-                45,
-                "did not confirm",
-            ),
-            ("exit", RestoreState::Unconfirmed, 45, "did not confirm"),
-            (
-                "dropped",
-                RestoreState::TransportLost,
-                45,
-                "USB disconnected",
-            ),
+            ("diagnostic", RestoreState::Unconfirmed, "did not confirm"),
+            ("exit", RestoreState::Unconfirmed, "did not confirm"),
+            ("dropped", RestoreState::TransportLost, "USB disconnected"),
             (
                 "failed",
                 RestoreState::Failed,
-                45,
                 "Unable to discover device mode",
             ),
-            ("silent", RestoreState::Unconfirmed, 45, "did not confirm"),
+            ("silent", RestoreState::Unconfirmed, "did not confirm"),
         ] {
             let mut cmd = Command::new(&program);
             cmd.arg(arg);
@@ -999,14 +1125,29 @@ esac
                 ecid: 1,
                 state: RestoreState::Starting,
                 pid: None,
-                progress: Progress::starting(),
+                progress: progress::starting(),
+                estimated_completion_at: None,
                 message: String::new(),
                 exit_code: None,
             }));
-            let (state, said) = run_worker(cmd, &status, &Arc::default()).unwrap();
+            let timings_file = temp.path().join(format!("{arg}.json"));
+            let history = History::open(timings_file.clone());
+            let model = (1, 1);
+            let timing = history.timing(Some(model), Operation::Restore, true, Instant::now());
+            let (state, said) =
+                run_worker(cmd, &status, &Arc::default(), &history, timing).unwrap();
             assert_eq!(state, expected, "{arg}");
-            assert_eq!(status.lock().unwrap().progress.percent, percent, "{arg}");
+            assert_eq!(
+                status.lock().unwrap().progress.name,
+                "uploading image",
+                "{arg}"
+            );
             assert!(said.contains(message), "{arg}: {said}");
+            assert_eq!(
+                timings_file.exists(),
+                expected == RestoreState::RestoreReported,
+                "{arg}"
+            );
         }
     }
 
@@ -1025,9 +1166,9 @@ esac
                 &engine
                     .start(
                         &ipsw,
+                        engine.timing(Some((1, 1)), Operation::Restore, true, Instant::now()),
                         1,
                         AppleMode::Dfu,
-                        Operation::Restore,
                         PostRestoreAction::Reboot,
                     )
                     .unwrap(),
@@ -1049,12 +1190,20 @@ esac
             ecid: 1,
             state: RestoreState::Starting,
             pid: None,
-            progress: Progress::starting(),
+            progress: progress::starting(),
+            estimated_completion_at: None,
             message: String::new(),
             exit_code: None,
         }));
         let started = Instant::now();
-        let (state, _) = run_worker(Command::new(&program), &status, &Arc::default()).unwrap();
+        let (state, _) = run_worker(
+            Command::new(&program),
+            &status,
+            &Arc::default(),
+            &History::default(),
+            History::default().timing(Some((1, 1)), Operation::Restore, true, started),
+        )
+        .unwrap();
         assert!(started.elapsed() < Duration::from_secs(10));
         assert_eq!(state, RestoreState::RestoreReported);
     }

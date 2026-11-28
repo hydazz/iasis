@@ -70,13 +70,9 @@
                 },
                 "progress": {
                   "name": "Restoring the system",
-                  "percent": 42,
-                  "steps": [
-                    "Preparing",
-                    "Restoring the system"
-                  ],
-                  "step": 1
-                }
+                  "percent": 42
+                },
+                "estimated_completion_at": "2027-01-15T08:00:00Z"
               },
               {
                 "kind": "set_region",

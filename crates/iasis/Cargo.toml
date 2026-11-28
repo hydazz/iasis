@@ -45,6 +45,7 @@ process-wrap = { version = "11.0.0", default-features = false, features = [
   "process-group",
   "std",
 ] }
+chrono = { version = "0.4.45", default-features = false, features = ["now"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"

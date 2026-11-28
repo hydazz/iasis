@@ -3,6 +3,7 @@
 //! bytes it names. `README.md` describes each message for clients in any
 //! language; `fixtures/` holds an example of each, which clients test against.
 
+use chrono::{DateTime, Utc};
 pub use iasis_protocol::{AppleMode, Hue, Light, Port, RestorePhase, Status};
 use serde::{Deserialize, Serialize};
 
@@ -475,15 +476,47 @@ pub enum Operation {
     Revive,
 }
 
-/// The current restore activity and progress through the installation milestones.
+/// The current activity and estimated overall progress of a restore or revive.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Progress {
     pub name: String,
     pub percent: u8,
-    /// Installation milestones in execution order.
-    pub steps: Vec<String>,
-    /// Index of the current milestone, or the length once all are complete.
-    pub step: usize,
+}
+
+/// Countdown for the active restores and revives on the selected ports.
+pub fn selected_restore_remaining_secs<'a>(
+    ports: impl IntoIterator<Item = &'a PortView>,
+    now: DateTime<Utc>,
+) -> Option<u32> {
+    let estimates = ports.into_iter().filter_map(|port| {
+        if let Some(step) = port.run.as_ref().and_then(OperationRun::active_restore) {
+            Some(
+                step.estimated_completion_at
+                    .filter(|_| port.awaiting.is_none()),
+            )
+        } else if port.run.is_none()
+            && port.job.is_some_and(|job| {
+                matches!(job.phase, RestorePhase::Preparing | RestorePhase::Running)
+            })
+        {
+            Some(None)
+        } else {
+            None
+        }
+    });
+    restore_remaining_secs(estimates, now)
+}
+
+/// Every active restore or revive must have a future estimate to predict the last completion.
+pub fn restore_remaining_secs(
+    estimates: impl IntoIterator<Item = Option<DateTime<Utc>>>,
+    now: DateTime<Utc>,
+) -> Option<u32> {
+    let mut latest = None;
+    for estimate in estimates {
+        latest = latest.max(Some(estimate.filter(|at| *at > now)?));
+    }
+    (latest? - now).num_seconds().try_into().ok()
 }
 
 /// The steps requested together for one target, in execution order.
@@ -503,6 +536,9 @@ pub struct OperationStep {
     pub language: Option<SetupLanguage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub progress: Option<Progress>,
+    /// Predicted finish of an active restore or revive, in UTC.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_completion_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -581,6 +617,13 @@ impl std::fmt::Display for OperationRun {
 }
 
 impl OperationRun {
+    pub fn active_restore(&self) -> Option<&OperationStep> {
+        self.steps.iter().find(|step| {
+            step.state == StepState::Active
+                && matches!(step.kind, StepKind::Restore | StepKind::Revive)
+        })
+    }
+
     pub fn finished(&self) -> bool {
         self.steps
             .iter()
