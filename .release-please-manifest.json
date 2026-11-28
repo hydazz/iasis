@@ -1,5 +1,5 @@
 {
-  ".": "0.0.0",
+  ".": "0.1.0",
   "hardware/boards/iasis": "1.0.0",
   "hardware/boards/cm5": "0.0.0"
 }
