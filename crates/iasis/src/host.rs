@@ -620,6 +620,9 @@ impl Shared {
         match self.hub.host_report(&report) {
             Ok(()) => Ok(()),
             Err(crate::Error::Transfer(TransferError::Stall)) => Err(Unsent::Refused),
+            Err(crate::Error::Transfer(TransferError::Disconnected)) => Err(Unsent::Unreachable(
+                anyhow!("the hub disconnected from USB"),
+            )),
             Err(error) => Err(Unsent::Unreachable(error.into())),
         }
     }

@@ -293,6 +293,9 @@ pub struct HubView {
     /// The negotiated rate between the host and the hub.
     pub upstream_mbps: Option<u16>,
     pub supply: Supply,
+    /// Advice for a restore or revive on this hub's attached devices.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restore_power_warning: Option<String>,
     /// What the power supply gives the targets and what the ports have
     /// committed of it.
     pub pool: Option<Pool>,
@@ -318,6 +321,7 @@ impl HubView {
             update: None,
             upstream_mbps: None,
             supply: Supply::Off,
+            restore_power_warning: None,
             pool: None,
             host: false,
             restores: false,

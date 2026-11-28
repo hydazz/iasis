@@ -65,16 +65,12 @@ struct DevicesView: View {
             ToolbarSpacer(.fixed)
             ToolbarItemGroup {
                 Button("Revive", systemImage: DeviceSymbol.revive) {
-                    if let revive = actions.revive {
-                        model.perform([revive])
-                    }
+                    browser.begin(.revive, on: actions.restore)
                 }
-                .disabled(actions.revive == nil)
+                .disabled(actions.restore == nil)
                 .help(browser.lacking?.reason ?? "Reinstall the system on the selected device and keep its data")
                 Button("Restore…", systemImage: DeviceSymbol.restore) {
-                    if let restore = actions.restore {
-                        browser.confirm(restore)
-                    }
+                    browser.begin(.restore, on: actions.restore)
                 }
                 .disabled(actions.restore == nil)
                 .help(browser.lacking?.reason ?? "Erase the selected devices and reinstall their system")
@@ -110,20 +106,26 @@ struct DevicesView: View {
             .inspectorColumnWidth(min: 240, ideal: 280, max: 400)
         }
         .alert(
-            browser.confirming?.title ?? "",
-            isPresented: Binding { browser.confirming != nil } set: { shown in
+            browser.restorePrompt?.title ?? "",
+            isPresented: Binding { browser.restorePrompt != nil } set: { shown in
                 if !shown {
-                    browser.confirming = nil
+                    browser.restorePrompt = nil
                 }
             },
-            presenting: browser.confirming
-        ) { confirmation in
-            ForEach(confirmation.choices) { choice in
-                Button(choice.title, role: .destructive) { model.restore(confirmation.hubs, latest: choice.latest) }
+            presenting: browser.restorePrompt
+        ) { prompt in
+            switch prompt {
+            case let .power(_, operation, restore):
+                Button("Continue") { browser.proceed(with: operation, on: restore) }
+                Button("Cancel", role: .cancel) {}
+            case let .erase(confirmation):
+                ForEach(confirmation.choices) { choice in
+                    Button(choice.title, role: .destructive) { model.restore(confirmation.hubs, latest: choice.latest) }
+                }
+                Button(confirmation.choices.isEmpty ? "OK" : "Cancel", role: .cancel) {}
             }
-            Button(confirmation.choices.isEmpty ? "OK" : "Cancel", role: .cancel) {}
-        } message: { confirmation in
-            Text(confirmation.message)
+        } message: { prompt in
+            Text(prompt.message)
         }
         .focusedSceneValue(\.deviceBrowser, browser)
         .frame(minWidth: 400, minHeight: 260)

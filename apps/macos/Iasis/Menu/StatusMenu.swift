@@ -232,7 +232,7 @@ private final class DeviceMenu: NSObject {
         openDevice.isEnabled = shown != nil
         dfu.isEnabled = !actions.dfu.isEmpty
         restart.isEnabled = !actions.restart.isEmpty
-        revive.isEnabled = actions.revive != nil
+        revive.isEnabled = actions.restore != nil
         restore.isEnabled = actions.restore != nil
         advanceSetup.isEnabled = !actions.advanceSetup.isEmpty
     }
@@ -247,15 +247,8 @@ private final class DeviceMenu: NSObject {
         case advanceSetup: browser.model.advanceSetup(actions.advanceSetup)
         case dfu: browser.model.perform(actions.dfu)
         case restart: browser.model.perform(actions.restart)
-        case revive:
-            if let request = actions.revive {
-                browser.model.perform([request])
-            }
-        case restore:
-            if let confirmation = actions.restore {
-                showDevices()
-                browser.confirm(confirmation)
-            }
+        case revive: browser.begin(.revive, on: actions.restore, showDevices: showDevices)
+        case restore: browser.begin(.restore, on: actions.restore, showDevices: showDevices)
         default: break
         }
     }

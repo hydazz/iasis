@@ -42,6 +42,7 @@ pub fn hub(serial: u64, info: &Info, status: &Status) -> HubView {
             iasis_protocol::Supply::HostPresence => Supply::Host,
             iasis_protocol::Supply::Off => Supply::Off,
         },
+        restore_power_warning: restore_power_warning(status).map(str::to_owned),
         pool: (status.supply == iasis_protocol::Supply::Brick).then(|| Pool {
             budget_mw: status.charging_budget_mw,
             allocated_mw: status.allocated_mw(),
@@ -103,7 +104,16 @@ pub fn hub(serial: u64, info: &Info, status: &Status) -> HubView {
                 }
             })
             .into(),
-        notice: None,
+        notice: (status.supply == iasis_protocol::Supply::Off
+            && status.upstream_orientation.is_some()
+            && status.host_allowance_ma == 0
+            && status.upstream_error.is_none()
+            && !status.brick_input_fault
+            && status
+                .ports
+                .iter()
+                .any(|p| p.state == PortState::WaitingPower && p.occupied()))
+        .then(|| dfu::Signal::NoTargetPower.description().to_owned()),
     }
 }
 
@@ -185,6 +195,38 @@ pub(crate) fn name(ecid: Option<u64>, live: Option<&Device>, host: &Host) -> Opt
             .name(store)
             .or_else(|| device.product.clone().filter(|_| device.apple.is_none()))
     })
+}
+
+pub(crate) fn restore_power_warning(status: &Status) -> Option<&'static str> {
+    use iasis_protocol::{DebugActions, Supply};
+
+    let mut shared = status
+        .ports
+        .iter()
+        .filter(|p| p.supply == Supply::HostPresence && p.occupied());
+    let count = shared.clone().count();
+    if count == 0 {
+        return None;
+    }
+    if status.host_limiter_fault {
+        return Some(
+            "The shared 5 V supply is at its current limit. Starting a restore may interrupt other devices on this hub.",
+        );
+    }
+    if status.supply != Supply::HostPresence {
+        return None;
+    }
+    // Apple debug replies come from the target over CC. A Lightning cable can
+    // negotiate 5 V itself, and both kinds of connection can carry USB 2 data.
+    let unconfirmed = shared.any(|p| !matches!(p.debug_actions, DebugActions::Listed(_)));
+    if status.host_allowance_ma == 1500 && (count > 1 || unconfirmed) {
+        return Some(
+            "The host offers 1.5 A for this hub. Connect a power supply if the devices need more current in recovery.",
+        );
+    }
+    (count == status.ports.len() && unconfirmed).then_some(
+        "All five ports are sharing host power. Devices entering recovery together can interrupt one another. Connect a power supply to the hub."
+    )
 }
 
 /// USB enumeration and a first identity read can take several seconds.
@@ -343,6 +385,58 @@ pub(crate) mod tests {
         assert!(!check(Some(43), Some(43)));
         assert!(!check(Some(42), None));
         assert!(!check(Some(43), Some(42)));
+    }
+
+    #[test]
+    fn restore_advice_uses_the_powered_attachments_without_identifying_models() {
+        use iasis_protocol::{DebugActions, Supply};
+
+        let native = DebugActions::Listed([0x206; iasis_protocol::MAX_ACTIONS]);
+        let mut status = Status {
+            supply: Supply::HostPresence,
+            host_allowance_ma: 3000,
+            ..Status::default()
+        };
+        for p in &mut status.ports {
+            p.supply = Supply::HostPresence;
+            p.state = PortState::Contract;
+            p.contract_mv = 5000;
+            p.link = Some(Link::Usb2);
+            p.debug_actions = native;
+        }
+        assert!(restore_power_warning(&status).is_none());
+        for uncertain in [DebugActions::Silent, DebugActions::Pending] {
+            status.ports[0].debug_actions = uncertain;
+            assert!(restore_power_warning(&status).is_some());
+        }
+        status.ports[4] = PortStatus::default();
+        assert!(restore_power_warning(&status).is_none());
+        status.host_allowance_ma = 1500;
+        assert!(restore_power_warning(&status).is_some());
+        status.ports[1..].fill(PortStatus::default());
+        assert!(restore_power_warning(&status).is_some());
+        status.ports[0].debug_actions = native;
+        assert!(restore_power_warning(&status).is_none());
+        status.host_limiter_fault = true;
+        assert!(restore_power_warning(&status).is_some());
+        status.supply = Supply::Brick;
+        status.ports[0].supply = Supply::Brick;
+        assert!(restore_power_warning(&status).is_none());
+    }
+
+    #[test]
+    fn idle_default_usb_only_prompts_for_power_with_a_waiting_target() {
+        use iasis_protocol::Orientation;
+        let mut status = Status {
+            upstream_orientation: Some(Orientation::Cc2),
+            ..Status::default()
+        };
+        status.ports[0].state = PortState::WaitingPower;
+        assert!(hub(1, &info(), &status).notice.is_none());
+        status.ports[0].orientation = Some(Orientation::Cc1);
+        assert!(hub(1, &info(), &status).notice.is_some());
+        status.supply = iasis_protocol::Supply::Brick;
+        assert!(hub(1, &info(), &status).notice.is_none());
     }
 
     #[test]

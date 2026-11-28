@@ -294,6 +294,7 @@
       "update": null,
       "upstream_mbps": null,
       "supply": "host",
+      "restore_power_warning": "The shared 5 V supply is at its current limit. Starting a restore may interrupt other devices on this hub.",
       "pool": null,
       "host": true,
       "restores": false,

@@ -1071,6 +1071,14 @@ fn submit(
 ) -> Result<()> {
     // The agent refuses a target it would not restore, and says why.
     let hubs = vec![selection(state, hub, ports)?];
+    if let Some(warning) = state
+        .hubs
+        .iter()
+        .find(|h| h.serial == hub)
+        .and_then(|h| h.restore_power_warning.as_deref())
+    {
+        eprintln!("{warning}");
+    }
     agent.request(&request(hubs))?;
     follow_work(agent, hub, ports)
 }
