@@ -85,8 +85,9 @@ const PRESENCE_TIERS: [HostLimit; 4] = [
     },
 ];
 
-/// The board's own load on host power: the modelled 2.9 W with five Gen 2
-/// links, the OLED and five cable markers, at 4.5 V and rounded up.
+/// Five Gen 2 links, OLED, LEDs and passive cable allowance model 2.87 W
+/// (639 mA at 4.5 V). The five-M5 restore run peaked at 2.26 W averaged
+/// over a minute. The 1.5 A and 3 A tiers leave another 300 and 460 mA.
 const BOARD_MA: u32 = 650;
 
 /// Reserve the board's load before target presence. AP22653 upper bounds
@@ -282,15 +283,6 @@ pub fn allows(allowance_ma: u16, tier: HostLimit) -> bool {
     host_limit(allowance_ma).is_some_and(|allowed| tier.upper_ma <= allowed.upper_ma)
 }
 
-/// Target current available from the upstream CC advertisement.
-pub fn host_allowance(cc_level: u8) -> u16 {
-    match cc_level {
-        3 => 3000,
-        2 => 1500,
-        _ => 0,
-    }
-}
-
 /// Only a continuous open CC interval ends the attachment.
 pub fn cc_detached(
     open_since: &mut Option<u64>,
@@ -371,11 +363,6 @@ mod tests {
 
     #[test]
     fn host_tiers_never_spend_the_board_reservation() {
-        // What USB grants a configured USB 3 device opens the smallest tier;
-        // USB 2's opens none.
-        assert_eq!(host_limit(500), None);
-        assert_eq!(host_limit(900).unwrap().bits, 0);
-        assert_eq!(host_limit(1200).unwrap().bits, 1);
         assert_eq!(host_limit(1500).unwrap().bits, 1);
         assert_eq!(host_limit(3000).unwrap().bits, 3);
         for allowance in 0..=3000 {
@@ -383,10 +370,6 @@ mod tests {
                 assert!(u32::from(tier.upper_ma) + BOARD_MA <= u32::from(allowance));
             }
         }
-        assert_eq!(host_allowance(1), 0);
-        assert_eq!(host_allowance(2), 1500);
-        assert_eq!(host_allowance(3), 3000);
-        assert_eq!(host_allowance(0), 0);
         assert!(safe_presence(Some(4500)));
         assert!(!safe_presence(Some(4300)));
         assert!(!safe_presence(None));
@@ -394,13 +377,13 @@ mod tests {
 
     #[test]
     fn a_tier_change_enforces_the_larger_while_it_latches() {
-        let [high, low] = [host_limit(3000).unwrap(), host_limit(1200).unwrap()];
+        let [high, low] = [host_limit(3000).unwrap(), host_limit(1500).unwrap()];
         assert_eq!(while_latching(None, low), low);
         assert_eq!(while_latching(Some(high), low), high);
         assert_eq!(while_latching(Some(low), high), high);
         assert!(allows(3000, low) && allows(3000, high));
-        assert!(allows(1200, low) && !allows(1200, high));
-        assert!(!allows(500, low));
+        assert!(allows(1500, low) && !allows(1500, high));
+        assert!(!allows(0, low));
     }
 
     #[test]
@@ -481,7 +464,7 @@ mod tests {
             isolated = src.isolate_input;
             programmed = plan.tier;
         }
-        status.host_allowance_ma = 500;
+        status.host_allowance_ma = 0;
         let src = sources(&status, true, None, None, false);
         assert!(src.presence.is_none() && !src.isolate_input);
     }
@@ -496,6 +479,9 @@ mod tests {
         let qualified = sources(&status, false, Some(15_000), None, false);
         assert_eq!(qualified.brick_mw, 15_000);
         assert!(qualified.presence.is_none());
+        let unplugged = sources(&status, false, None, None, false);
+        assert_eq!(unplugged.brick_mw, 0);
+        assert!(unplugged.presence.is_none());
         status.side_power_enabled = true;
         status.host_allowance_ma = 3000;
         status.brick_input_fault = true;

@@ -4,7 +4,7 @@ use iasis_protocol::PortError;
 use crate::{board::Controls, bus::Bus};
 
 // Bits 0..7 are U1181 QA..QH, 8..15 U1182 QA..QH. U1181 QH is HOST_EXT;
-// U1182 QA and QE..QH discharge ports 1..5, QB..QD control the host current limit.
+// U1182 QA and QE..QH discharge ports 1..5, QB/QC select the shared current limit and QD enables the rail.
 const HOST_EXT: u16 = 1 << 7;
 pub const PD_INPUT_OFF: u16 = 1 << 5;
 pub const PORT_STAGES_OFF: u16 = 1 << 6;

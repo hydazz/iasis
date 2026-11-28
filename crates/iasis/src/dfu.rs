@@ -53,7 +53,7 @@ impl Signal {
             Self::Disabled => "Port disabled. Enable it before signalling.",
             Self::NoAttachment => "No CC attachment.",
             Self::NoTargetPower => {
-                "The host's USB port gives no current for targets. Connect a power supply."
+                "Host USB power is insufficient for targets. Connect an external power supply."
             }
             Self::WaitingPower => {
                 "Target power unavailable. Check the supply and available port budget."
@@ -424,10 +424,7 @@ pub fn assess(
     } else if p.state == PortState::WaitingPower
         || (p.state == PortState::Debouncing && p.supply == Supply::Off)
     {
-        if status.supply == Supply::Off
-            && status.host_allowance_ma == 0
-            && status.charging_budget_mw == 0
-        {
+        if status.supply == Supply::Off && status.charging_budget_mw == 0 {
             Signal::NoTargetPower
         } else {
             Signal::WaitingPower
@@ -845,6 +842,7 @@ mod tests {
         st.ports[0].state = PortState::WaitingPower;
         // A USB 2 host's default allowance leaves no current for targets.
         st.supply = Supply::Off;
+        st.host_allowance_ma = 500;
         assert_eq!(report(&st, &s, None).signal, Signal::NoTargetPower);
         // A brick whose budget is spent.
         st.supply = Supply::Brick;

@@ -53,10 +53,10 @@ const IDLE_ROLES: u8 = 0xb0;
 /// Source, DFP, revision 2.0 GoodCRC headers, automatic GoodCRC.
 const PD_ROLES: u8 = 0xb4;
 /// Default USB current on Rp.
-const HOST_CURRENT: u8 = 0x04;
-/// 3 A on Rp, which under a contract is PD 3 SinkTxOK. Sinks that keep
-/// collision avoidance at revision 2.0 abandon a contract held at default Rp.
-const SINK_TX_OK: u8 = 0x0c;
+const DEFAULT_RP: u8 = 0x04;
+/// USB Type-C §4.6.2.4 permits 1.5 A or 3 A Rp after the first acknowledged
+/// PS_RDY in PD 2.0. The explicit contract sets the current the sink may draw.
+const CONTRACT_RP: u8 = 0x0c;
 /// Comparator code for 1.6 V, above the Rd range at default Rp.
 const OPEN_THRESHOLD: u8 = 0x26;
 /// Comparator code for 2.6 V, above the Rd range at 3 A Rp.
@@ -126,7 +126,7 @@ pub async fn write(bus: &mut Bus, register: u8, value: u8) -> Result<(), PortErr
 
 /// Remove Rp and stop PD on the selected branch.
 pub async fn release(bus: &mut Bus) -> Result<(), PortError> {
-    write(bus, CONTROL0, TX_FLUSH | HOST_CURRENT).await?;
+    write(bus, CONTROL0, TX_FLUSH | DEFAULT_RP).await?;
     write(bus, CONTROL2, 0).await?;
     write(bus, SWITCHES1, IDLE_ROLES).await?;
     write(bus, SWITCHES0, 0).await
@@ -178,7 +178,7 @@ impl<'a> Phy<'a> {
             toggling: Cell::new(false),
             toggle: Cell::new(None),
             cc_open: Cell::new(false),
-            rp: Cell::new(HOST_CURRENT),
+            rp: Cell::new(DEFAULT_RP),
             hard_reset: Cell::new(false),
             hard_sent: Cell::new(false),
             sent: Cell::new(None),
@@ -212,7 +212,7 @@ impl<'a> Phy<'a> {
         self.toggling.set(false);
         self.toggle.set(None);
         self.cc_open.set(false);
-        self.rp.set(HOST_CURRENT);
+        self.rp.set(DEFAULT_RP);
         self.hard_reset.set(false);
         self.hard_sent.set(false);
         self.sent.set(None);
@@ -233,7 +233,7 @@ impl<'a> Phy<'a> {
         Timer::after_millis(1).await;
         for (register, value) in [
             (POWER, 0x0f),
-            (CONTROL0, HOST_CURRENT),
+            (CONTROL0, DEFAULT_RP),
             (CONTROL3, RETRIES),
             // Comparator change and collision.
             (MASK, 0xdd),
@@ -278,7 +278,7 @@ impl<'a> Phy<'a> {
         write(bus, RESET, 0x02).await?;
         write(bus, SWITCHES0, 0xc0 | (line << 2)).await?;
         write(bus, MEASURE, OPEN_THRESHOLD).await?;
-        write(bus, CONTROL0, TX_FLUSH | HOST_CURRENT).await?;
+        write(bus, CONTROL0, TX_FLUSH | DEFAULT_RP).await?;
         write(bus, CONTROL1, RECEIVE).await?;
         write(bus, SWITCHES1, PD_ROLES | line).await?;
         self.set_up();
@@ -303,11 +303,11 @@ impl<'a> Phy<'a> {
         let mut io = self.io.lock().await;
         let bus = io.port(self.channel).await?;
         write(bus, RESET, 0x02).await?;
-        write(bus, CONTROL0, TX_FLUSH | HOST_CURRENT).await?;
+        write(bus, CONTROL0, TX_FLUSH | DEFAULT_RP).await?;
         write(bus, MEASURE, OPEN_THRESHOLD).await?;
         write(bus, CONTROL1, RECEIVE).await?;
         drop(io);
-        self.rp.set(HOST_CURRENT);
+        self.rp.set(DEFAULT_RP);
         self.hard_reset.set(false);
         self.hard_sent.set(false);
         self.sent.set(None);
@@ -560,17 +560,16 @@ impl<'a> Phy<'a> {
         Ok(())
     }
 
-    /// Let the sink start messages once a contract holds.
-    async fn sink_tx_ok(&self) -> Result<(), PortError> {
-        if self.rp.replace(SINK_TX_OK) == SINK_TX_OK {
+    async fn set_contract_rp(&self) -> Result<(), PortError> {
+        if self.rp.replace(CONTRACT_RP) == CONTRACT_RP {
             return Ok(());
         }
         let mut io = self.io.lock().await;
         let bus = io.port(self.channel).await?;
         // Rd reads as open at 3 A Rp until the threshold is raised.
         write(bus, MEASURE, OPEN_THRESHOLD_3A).await?;
-        write(bus, CONTROL0, SINK_TX_OK).await?;
-        defmt::info!("port {=usize} SinkTxOK", self.channel + 1);
+        write(bus, CONTROL0, CONTRACT_RP).await?;
+        defmt::info!("port {=usize} contract Rp", self.channel + 1);
         Ok(())
     }
 
@@ -647,7 +646,7 @@ impl Driver for PdPhy<'_, '_> {
         let ps_rdy = control && message[0] & 0x1f == PS_RDY;
         let result = match self.phy.send(SOP, &message).await {
             Ok(Tx::Sent) => {
-                if ps_rdy && let Err(error) = self.phy.sink_tx_ok().await {
+                if ps_rdy && let Err(error) = self.phy.set_contract_rp().await {
                     self.phy.fail(error);
                 }
                 Ok(())

@@ -990,6 +990,7 @@ pub struct Status {
     pub upstream_cc: Option<[u8; 2]>,
     pub upstream_orientation: Option<Orientation>,
     pub upstream_error: Option<PortError>,
+    /// Current advertised by upstream Rp for host-powered operation, or zero on Default USB power or without a valid reading.
     pub host_allowance_ma: u16,
     pub host_limit_ma: u16,
     pub ch224_current_50ma: Option<u8>,
