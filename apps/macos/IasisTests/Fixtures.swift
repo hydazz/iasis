@@ -87,8 +87,9 @@ actor FakeAgent: AgentService {
         ""
     }
 
-    func plan(_: [RestoreSelection]) async throws -> [AgentState.Planned] {
-        []
+    func plan(_ hubs: [RestoreSelection]) async throws -> [AgentState.Planned] {
+        requests.append(.plan(hubs: hubs))
+        return []
     }
 
     func importImage(_: URL, progress _: @escaping @Sendable (Int64) -> Void) async throws {}

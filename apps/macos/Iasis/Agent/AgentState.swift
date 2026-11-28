@@ -43,6 +43,7 @@ nonisolated struct AgentState: Codable, Equatable {
         var supply: Supply
         /// The power supply's pool for the targets, when there is a supply.
         var pool: Pool?
+        var restorePowerWarning: String?
         /// A host holds the hub.
         var host: Bool
         /// The host takes restore requests for the hub.

@@ -63,19 +63,13 @@ struct DeviceActionButtons: View {
             }
         }
         Section {
-            if fullMenu || actions.revive != nil {
-                Button("Revive", systemImage: DeviceSymbol.revive) {
-                    if let revive = actions.revive {
-                        browser?.model.perform([revive])
-                    }
-                }
-                .disabled(actions.revive == nil)
-            }
             if fullMenu || actions.restore != nil {
+                Button("Revive", systemImage: DeviceSymbol.revive) {
+                    browser?.begin(.revive, on: actions.restore)
+                }
+                .disabled(actions.restore == nil)
                 Button("Restore…", systemImage: DeviceSymbol.restore) {
-                    if let confirmation = actions.restore {
-                        browser?.confirm(confirmation)
-                    }
+                    browser?.begin(.restore, on: actions.restore)
                 }
                 .keyboardShortcut(fullMenu ? KeyboardShortcut("r") : nil)
                 .disabled(actions.restore == nil)
