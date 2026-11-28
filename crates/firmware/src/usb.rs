@@ -145,8 +145,8 @@ pub struct Management<'a> {
     pub status: &'a Cell<Status>,
     pub update: &'a Cell<bool>,
     pub command: &'a Cell<Option<PortCommand>>,
-    pub configured: &'a Cell<bool>,
-    pub suspended: &'a Cell<bool>,
+    pub configured: bool,
+    pub suspended: bool,
     pub settings: &'a RefCell<crate::SettingsStore>,
     pub ports: &'a crate::ports::Ports,
     pub session: &'a Session,
@@ -167,19 +167,19 @@ impl Handler for Management<'_> {
 
     fn reset(&mut self) {
         self.session.disconnect();
-        self.configured.set(false);
-        self.suspended.set(false);
+        self.configured = false;
+        self.suspended = false;
     }
 
     fn configured(&mut self, configured: bool) {
-        self.configured.set(configured);
+        self.configured = configured;
         if !configured {
             self.session.disconnect();
         }
     }
 
     fn suspended(&mut self, suspended: bool) {
-        self.suspended.set(suspended);
+        self.suspended = suspended;
         if suspended {
             self.session.disconnect();
         }
@@ -239,7 +239,7 @@ impl Handler for Management<'_> {
                 Some(OutResponse::Accepted)
             }
             _ if request.value != protocol::VERSION => Some(OutResponse::Rejected),
-            protocol::HOST_REPORT if self.configured.get() && !self.suspended.get() => {
+            protocol::HOST_REPORT if self.configured && !self.suspended => {
                 let accepted = protocol::decode::<protocol::HostReport>(data).is_ok_and(|report| {
                     let now = embassy_time::Instant::now().as_millis();
                     if !self.session.report(report.session, now) {
@@ -254,7 +254,7 @@ impl Handler for Management<'_> {
                     OutResponse::Rejected
                 })
             }
-            protocol::HOST_CONTROL if self.configured.get() && !self.suspended.get() => {
+            protocol::HOST_CONTROL if self.configured && !self.suspended => {
                 let accepted =
                     protocol::decode::<protocol::HostControl>(data).is_ok_and(|control| {
                         self.session.apply(

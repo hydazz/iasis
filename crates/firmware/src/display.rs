@@ -380,6 +380,8 @@ fn details(status: &Status, port: &PortStatus) -> [String<32>; 2] {
             lines[1].push_str(error.text()).unwrap();
         } else if status.supply == Supply::Brick {
             lines[1].push_str("Brick budget full").unwrap();
+        } else if status.host_allowance_ma == 0 {
+            lines[1].push_str("Connect power").unwrap();
         } else {
             write!(lines[1], "Host budget {}mA", status.host_allowance_ma).unwrap();
         }
@@ -1203,10 +1205,7 @@ mod tests {
         let host = view(&host, &button, 0);
         assert_eq!(host.cells, ["", "", "", "", ""]);
         assert_eq!(host.lines[1], "");
-        let limited = Status {
-            host_allowance_ma: 900,
-            ..Status::default()
-        };
+        let limited = Status::default();
         assert_eq!(view(&limited, &button, 0).lines[1], "USB Power Off");
     }
 
@@ -1272,7 +1271,6 @@ mod tests {
     #[test]
     fn waiting_explains_the_budget_without_repeating_selection() {
         let status = Status {
-            host_allowance_ma: 900,
             ports: [PortStatus {
                 enabled: true,
                 state: PortState::WaitingPower,
@@ -1284,7 +1282,7 @@ mod tests {
         for port in 0..5 {
             let view = view(&status, &selecting(port), 0);
             assert_eq!(view.ports, 1 << port);
-            assert_eq!(view.lines, pair("Waiting for power", "Host budget 900mA"));
+            assert_eq!(view.lines, pair("Waiting for power", "Connect power"));
         }
     }
 

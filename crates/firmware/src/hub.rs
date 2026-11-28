@@ -13,6 +13,11 @@ pub const ADDRESS: u8 = 0x2d;
 /// USB2_HUB_NRD, indexed by physical port. The RP2354B is on port 6.
 pub const USB2_NON_REMOVABLE: u32 = 0xbf80_3009;
 pub const MANAGEMENT_PORT: u8 = 1 << 6;
+/// H_MAXP_S and HC_MAXP_S, the USB 2 configuration and hub descriptor currents.
+pub const USB2_MAX_POWER: u32 = 0xbf80_300c;
+pub const USB2_CONTROLLER_CURRENT: u32 = 0xbf80_300e;
+/// USB3_HUB_MAX_POWER, the SuperSpeed configuration's bMaxPower byte.
+pub const USB3_MAX_POWER: u32 = 0xbfd2_e560;
 /// USB2_DN_SPEED41 and USB2_DN_SPEED75: two bits for each physical port.
 pub const USB2_SPEEDS: u32 = 0xbf80_3195;
 /// USB30_HUB_DN_SPEED_IND1 and IND2, laid out the same way.

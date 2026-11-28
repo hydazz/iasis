@@ -189,8 +189,6 @@ async fn main(_spawner: Spawner) {
     let update = Cell::new(false);
     let command = Cell::new(None);
     let ports = ports::Ports::new();
-    let configured = Cell::new(false);
-    let suspended = Cell::new(false);
     let session = usb::Session::default();
     let mut management = usb::Management {
         info,
@@ -198,8 +196,8 @@ async fn main(_spawner: Spawner) {
         status: &status,
         update: &update,
         command: &command,
-        configured: &configured,
-        suspended: &suspended,
+        configured: false,
+        suspended: false,
         settings: &settings,
         ports: &ports,
     };
@@ -421,11 +419,7 @@ async fn main(_spawner: Spawner) {
             next.upstream_cc = physical.cc;
             next.upstream_orientation = physical.orientation;
             next.upstream_error = physical.error;
-            let allowance = || {
-                physical
-                    .advertisement
-                    .allowance(Instant::now().as_millis())
-            };
+            let allowance = || physical.advertisement.allowance(Instant::now().as_millis());
             next.host_allowance_ma = allowance();
             let paths = next.ports.map(|port| port.supply);
             let qualified_mv = board.brick.voltage_mv(&next, board.bus.faulted());

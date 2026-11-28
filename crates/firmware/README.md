@@ -33,13 +33,15 @@ A port whose voltage or negotiation fails switches its output off, discharges VB
 
 With host USB alone, charged Apple targets use 5 V for attachment and PD signalling. A 5 V / 0 mA offer is how PD says a source has no power to give, and the OLED shows `No charging`. Targets running their own OS take nothing on it. iPads draw anyway while they restore, roughly 0.15–0.3 A each while iBEC loads and about 55 mA in the restore OS, all through the shared limiter below; M5 Macs draw nothing measurable. The port ADC measures connector voltage only. Ordinary USB peripherals draw their operating current from the same 5 V supply. Each port has a nominal 0.51 A current limit. Component tolerance can put the trip point below 500 mA. All five also share a limiter, which holds their total current to the threshold below.
 
-| Upstream allowance | Shared limiter threshold (max) |
-| ------------------ | ------------------------------ |
-| Default USB | Off |
-| 1500 mA | 550 mA |
-| 3000 mA            | 1890 mA                        |
+| Host current advertisement | Shared host-port limiter (max) |
+| -------------------------- | ------------------------------ |
+| Default USB power          | Target power off               |
+| 1.5 A                      | 550 mA                         |
+| 3 A                        | 1890 mA                        |
 
-Default USB requires the charging input to power targets.
+On Default USB power, including a USB-A to USB-C cable, the hub stays visible and the five target outputs stay off until the charging input has power. The board budgets with the target outputs off are 100 mA on USB 2 and 240 mA on SuperSpeed in the configuration descriptors. Rev A's USB7206C reports local power good even when the target outputs are off. Iasis reads the supply and switch state from the RP2354.
+
+Rev A exceeds the USB 2 suspend-current limit on host power. Use the charging input with hosts that enforce it.
 
 On the charging input, Iasis requests the highest-power fixed profile it supports, up to 20 V. The host USB port stays at 5 V.
 

@@ -28,13 +28,7 @@ pub const VERSION: u16 = {
     ])
 };
 /// Every message exchanged after `GET_INFO`.
-type Messages = (
-    Status,
-    HostReport,
-    HostControl,
-    PortCommand,
-    Setting,
-);
+type Messages = (Status, HostReport, HostControl, PortCommand, Setting);
 pub const MAX_PACKET: usize = 1408;
 pub const INTERFACE: u8 = 0;
 pub const GET_INFO: u8 = 1;
@@ -996,6 +990,7 @@ pub struct Status {
     pub upstream_cc: Option<[u8; 2]>,
     pub upstream_orientation: Option<Orientation>,
     pub upstream_error: Option<PortError>,
+    /// Current advertised by upstream Rp for host-powered operation, or zero on Default USB power or without a valid reading.
     pub host_allowance_ma: u16,
     pub host_limit_ma: u16,
     pub ch224_current_50ma: Option<u8>,

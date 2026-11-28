@@ -265,7 +265,7 @@ pub enum Funding {
 impl Funding {
     pub fn covers(self, contract: Contract) -> bool {
         match self {
-            Self::Host => true,
+            Self::Host => contract.millivolts == 5000 && contract.limit_ma == 0,
             Self::Brick {
                 budget_mw,
                 input_mv,
@@ -547,11 +547,16 @@ mod tests {
             evaluate(&offered, request(5, 0, 0), funding, None),
             Err(Refusal::Invalid(RequestError::ObjectPosition))
         );
-        // Host presence charges nothing, so it covers any valid request.
         assert_eq!(
             evaluate(&host_offers(), request(1, 0, 0), Funding::Host, None),
             Ok(contract(5000, 0))
         );
+        for rdo in [request(1, 0, 10), request(2, 0, 0)] {
+            assert_eq!(
+                evaluate(&offered, rdo, Funding::Host, None),
+                Err(Refusal::Unfunded)
+            );
+        }
     }
 
     #[test]

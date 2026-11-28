@@ -4,7 +4,7 @@ use iasis_protocol::PortError;
 use crate::{board::Controls, bus::Bus};
 
 // Bits 0..7 are U1181 QA..QH, 8..15 U1182 QA..QH. U1181 QH is HOST_EXT;
-// U1182 QA and QE..QH discharge ports 1..5, QB..QD control the host current limit.
+// U1182 QA and QE..QH discharge ports 1..5, QB/QC select the shared current limit and QD enables the rail.
 const HOST_EXT: u16 = 1 << 7;
 pub const PD_INPUT_OFF: u16 = 1 << 5;
 pub const PORT_STAGES_OFF: u16 = 1 << 6;
@@ -36,7 +36,8 @@ impl Outputs {
             | HOST_TARGET_EN
             | inhibit
             | if isolate_input { PD_INPUT_OFF } else { 0 };
-        if (controls.shift ^ value) & PD_INPUT_OFF != 0 && bits != controls.shift & HOST_LIMIT_MASK {
+        if (controls.shift ^ value) & PD_INPUT_OFF != 0 && bits != controls.shift & HOST_LIMIT_MASK
+        {
             // Isolate before raising the tier, and set a funded tier before
             // admitting the brick. Both intermediate words keep stages reset.
             let isolated_bits = if isolate_input {
@@ -44,7 +45,8 @@ impl Outputs {
             } else {
                 bits
             };
-            let isolated = (value & !HOST_LIMIT_MASK) | isolated_bits | PD_INPUT_OFF | PORT_STAGES_OFF;
+            let isolated =
+                (value & !HOST_LIMIT_MASK) | isolated_bits | PD_INPUT_OFF | PORT_STAGES_OFF;
             self.latch(bus, controls, isolated).await?;
         }
         let releasing_stages =

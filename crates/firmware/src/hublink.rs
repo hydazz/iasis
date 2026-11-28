@@ -62,6 +62,9 @@ async fn configure(bus: &mut Bus, outputs: &mut Outputs) -> Result<(), PortError
         write(bus, register, flags[0] | mask).await?;
     }
     write(bus, hub::I2S_FEATURES, 0).await?;
+    write(bus, hub::USB2_MAX_POWER, 100 / 2).await?;
+    write(bus, hub::USB2_CONTROLLER_CURRENT, 100).await?;
+    write(bus, hub::USB3_MAX_POWER, 240 / 8).await?;
     bus.write(hub::ADDRESS, &hub::ATTACH).await
 }
 
@@ -81,8 +84,9 @@ pub async fn start(bus: &mut Bus, outputs: &mut Outputs) -> bool {
     configured
 }
 
-/// Read each target port's link. The lock is taken for one register at a
-/// time so a port's PD reply never waits behind the whole reading.
+/// Read each target port's link.
+/// The lock is taken for one register at a time so a port's PD reply never
+/// waits behind the whole reading.
 pub async fn links(io: &SharedIo) -> Option<[Link; PORT_COUNT]> {
     let mut usb2 = [0; 2];
     let mut usb3 = [0; 2];
