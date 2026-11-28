@@ -53,13 +53,6 @@ type Handle = *mut c_void;
 
 // These functions live in the libimobiledevice and libplist that RestoreKit links.
 unsafe extern "C" {
-    fn lockdownd_start_session(
-        client: sys::lockdownd_client_t,
-        host_id: *const c_char,
-        session_id: *mut *mut c_char,
-        ssl_enabled: *mut c_int,
-    ) -> c_int;
-
     fn lockdownd_start_service(
         client: sys::lockdownd_client_t,
         name: *const c_char,
@@ -82,92 +75,6 @@ unsafe extern "C" {
 struct Session {
     device: sys::idevice_t,
     client: sys::lockdownd_client_t,
-}
-
-impl Drop for Session {
-    fn drop(&mut self) {
-        unsafe {
-            if !self.client.is_null() {
-                sys::lockdownd_client_free(self.client);
-            }
-            if !self.device.is_null() {
-                sys::idevice_free(self.device);
-            }
-        }
-    }
-}
-
-fn paired_host(udid: &CStr) -> Result<CString> {
-    #[derive(serde::Deserialize)]
-    struct PairRecord {
-        #[serde(rename = "HostID")]
-        host: String,
-    }
-    let mut record = ptr::null_mut();
-    let mut size = 0;
-    ensure!(
-        unsafe { sys::usbmuxd_read_pair_record(udid.as_ptr(), &mut record, &mut size) } == 0
-            && !record.is_null(),
-        "the device is not paired with this host"
-    );
-    let parsed = unsafe {
-        let bytes = std::slice::from_raw_parts(record.cast::<u8>(), size as usize);
-        let parsed = plist::from_bytes::<PairRecord>(bytes);
-        sys::plist_mem_free(record.cast());
-        parsed
-    };
-    Ok(CString::new(
-        parsed.context("reading the host pairing record")?.host,
-    )?)
-}
-
-impl Session {
-    fn open(udid: &str, allow_pairing: bool) -> Result<Self> {
-        let udid = CString::new(udid)?;
-        let mut session = Self {
-            device: ptr::null_mut(),
-            client: ptr::null_mut(),
-        };
-        ensure!(
-            unsafe { sys::idevice_new(&mut session.device, udid.as_ptr()) }
-                == sys::IDEVICE_E_SUCCESS,
-            "the device disconnected"
-        );
-        let handshake = |session: &mut Self| unsafe {
-            sys::lockdownd_client_new_with_handshake(
-                session.device,
-                &mut session.client,
-                c"iasis".as_ptr(),
-            )
-        };
-        if allow_pairing {
-            let status = handshake(&mut session);
-            if status != sys::LOCKDOWN_E_INVALID_HOST_ID {
-                check(status).context("pairing with the erased device")?;
-                return Ok(session);
-            }
-        }
-        unsafe {
-            check(sys::lockdownd_client_new(
-                session.device,
-                &mut session.client,
-                c"iasis".as_ptr(),
-            ))?;
-            if allow_pairing {
-                // An erase can leave the host holding the previous pairing record.
-                check(sys::lockdownd_pair(session.client, ptr::null_mut()))?;
-            }
-            let host = paired_host(&udid)?;
-            check(lockdownd_start_session(
-                session.client,
-                host.as_ptr(),
-                ptr::null_mut(),
-                ptr::null_mut(),
-            ))
-            .context("opening the paired session")?;
-        }
-        Ok(session)
-    }
 }
 
 struct Plist(sys::plist_t);
@@ -414,9 +321,11 @@ impl Session {
 /// A menu hint from an existing trust relationship. An unreadable device
 /// can still be paired by the operator when setup is requested.
 pub(crate) fn finished(serial: &str) -> bool {
-    Session::open(serial, false)
-        .and_then(|s| s.buddy())
-        .is_ok_and(|state| state.setup_finished())
+    restorekit::recovery::with_existing_session(serial, |device, client| {
+        Session { device, client }
+            .buddy()
+            .is_ok_and(|buddy| buddy.setup_finished())
+    }) == Some(true)
 }
 
 pub(crate) fn supports(product_type: &str) -> bool {
@@ -425,6 +334,7 @@ pub(crate) fn supports(product_type: &str) -> bool {
 
 pub(crate) fn advance(
     target: impl Fn() -> Result<Option<u64>>,
+    supervision: &crate::supervision::Supervision,
     run: &crate::job::Run,
 ) -> Result<()> {
     // Normal USB enumeration can precede lockdown during the first boot after an erase.
@@ -449,7 +359,27 @@ pub(crate) fn advance(
         device.product_type.as_deref().is_some_and(supports),
         "only iPhones and iPads support this setup"
     );
-    advance_session(&Session::open(&device.udid, true)?, run)
+    let supervisor = supervision.supervisor()?;
+    device
+        .with_paired_session(supervisor.as_deref(), |device, client| {
+            advance_session(&Session { device, client }, run)
+        })
+        .map_err(|error| match error {
+            restorekit::Error::DeviceLocked => {
+                OnDevice("Unlock the device to pair with this host.").into()
+            }
+            restorekit::Error::TrustPending => {
+                OnDevice("Tap Trust on the device to pair with this host.").into()
+            }
+            restorekit::Error::TrustDenied => {
+                OnDevice("The device declined to trust this host.").into()
+            }
+            restorekit::Error::Lockdown {
+                code: -36 | -38 | sys::LOCKDOWN_E_MC_CHALLENGE_REQUIRED,
+                ..
+            } => anyhow::anyhow!("The device refused USB pairing with this host."),
+            other => anyhow::Error::new(other).context("opening a paired session"),
+        })?
 }
 
 fn advance_session(session: &Session, run: &crate::job::Run) -> Result<()> {

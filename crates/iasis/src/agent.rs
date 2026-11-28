@@ -409,6 +409,7 @@ impl Agent {
             link
         };
         let work = run.clone();
+        let supervision = self.supervision.clone();
         let models = self.models.clone();
         thread::Builder::new()
             .name(format!("setup-{}", target.port.number()))
@@ -416,6 +417,7 @@ impl Agent {
                 work.start();
                 let result = crate::post_restore::advance(
                     || setup_target(&link, &target, &models).map(Some),
+                    &supervision,
                     &work,
                 );
                 if let Err(error) = result {
@@ -554,6 +556,7 @@ impl Agent {
             crate::post_restore::validate(setup)?;
         }
         let host = job::Host {
+            supervision: self.supervision.clone(),
             engine: self.engine.clone(),
             store: self.store.clone(),
             models: self.models.clone(),

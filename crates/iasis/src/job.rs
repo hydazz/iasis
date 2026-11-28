@@ -72,6 +72,7 @@ pub(crate) type PortSlots = Mutex<[PortSlot; protocol::PORT_COUNT]>;
 /// What every job uses of its host.
 #[derive(Clone)]
 pub(crate) struct Host {
+    pub supervision: Arc<crate::supervision::Supervision>,
     pub engine: RestoreEngine,
     pub store: Store,
     pub models: Arc<Models>,
@@ -214,6 +215,7 @@ impl Job {
                     _ => Ok(None),
                 }
             },
+            &self.host.supervision,
             &self.run,
         )
     }
