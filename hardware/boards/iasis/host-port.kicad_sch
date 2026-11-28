@@ -12460,17 +12460,6 @@
 				)
 			)
 		)
-		(property "Population" "Common"
-			(at 330.2 231.14 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(property "Manufacturer" "Jiangsu Changjing Electronics Technology Co., Ltd."
 			(at 330.2 231.14 0)
 			(hide yes)
@@ -13566,17 +13555,6 @@
 			)
 		)
 		(property "MPN" "2N7002"
-			(at 297.18 231.14 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "Common"
 			(at 297.18 231.14 0)
 			(hide yes)
 			(show_name no)

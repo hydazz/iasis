@@ -6,12 +6,9 @@ The hardware is a prototype.
 
 ## Hardware
 
-| Build | Power and connections                                                                        |
-| ----- | -------------------------------------------------------------------------------------------- |
-| Hub   | Host USB powers the hub and its ports for restores of charged targets                        |
-| HubPD | Adds a USB-C power input and per-port charging supplies; works as Hub without a power supply |
+The main board has a USB-C power input and a charging supply for each target port. A power supply on that input runs the hub and charges the targets. Without one, host USB powers the hub and its ports for restores of charged targets.
 
-The optional [CM5 carrier](hardware/boards/cm5/README.md) plugs into HubPD and houses a Compute Module 5, NVMe storage and Ethernet. Both builds fit the [printed case](hardware/case/README.md), with plain or OLED lids.
+The optional [CM5 carrier](hardware/boards/cm5/README.md) plugs into the main board and houses a Compute Module 5, NVMe storage and Ethernet. The [printed case](hardware/case/README.md) holds the main board alone or with the carrier, with plain or OLED lids.
 
 See the [main board](hardware/boards/iasis/README.md) for fabrication files and ordering settings.
 

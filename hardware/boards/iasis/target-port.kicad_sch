@@ -10,7 +10,7 @@
 		(rev "${VERSION}")
 	)
 	(lib_symbols)
-	(text "Only per-port signals cross this page.\n3V3_AON, 5V_LOGIC, HOST_TARGET_5V and HV_CHARGE\nare explicit common rails inside their circuit sheets.\nUSB data, CC, host presence, discharge and telemetry\nremain fitted in both assembly populations."
+	(text "Only per-port signals cross this page.\n3V3_AON, 5V_LOGIC, HOST_TARGET_5V and HV_CHARGE\nare explicit common rails inside their circuit sheets."
 		(exclude_from_sim no)
 		(at 66.04 124.46 0)
 		(effects

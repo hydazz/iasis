@@ -4522,7 +4522,7 @@
 		)
 		(uuid "cfbc4fb6-f6d7-4bcb-a672-654800b6abdd")
 	)
-	(text "Hub population: entire sheet DNP. Charging input never powers the logic rail or bypasses a target protection switch."
+	(text "The charging input reaches 5V_LOGIC only through U1004 and U1005 and never bypasses a target protection switch."
 		(exclude_from_sim no)
 		(at 25.4 26.67 0)
 		(effects
@@ -6874,18 +6874,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "PD"
-			(at 160.02 114.3 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "LCSC" "C25744"
 			(at 157.48 114.3 0)
 			(hide yes)
@@ -7023,17 +7011,6 @@
 			)
 		)
 		(property "Manufacturer" "UNI-ROYAL(Uniroyal Elec)"
-			(at 223.52 318.77 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 223.52 318.77 0)
 			(hide yes)
 			(show_name no)
@@ -7508,18 +7485,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "PD"
-			(at 381 128.27 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "LCSC" "C25741"
 			(at 378.46 128.27 0)
 			(hide yes)
@@ -7637,18 +7602,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "PD"
-			(at 223.52 184.15 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "LCSC" "C307331"
 			(at 220.98 184.15 0)
 			(hide yes)
@@ -7755,18 +7708,6 @@
 			)
 		)
 		(property "Description" ""
-			(at 256.54 107.95 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "PD"
 			(at 256.54 107.95 0)
 			(hide yes)
 			(show_name no)
@@ -8001,17 +7942,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 477.52 275.59 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "0f9434f0-280c-4848-b535-ec0b8bb27107")
 		)
@@ -8115,17 +8045,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 297.18 260.35 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(property "Manufacturer" "Lelon"
 			(at 297.18 260.35 0)
 			(hide yes)
@@ -8208,17 +8127,6 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
-			(at 81.28 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 81.28 265.43 0)
 			(hide yes)
 			(show_name no)
@@ -8335,18 +8243,6 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 144.78 166.37 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "PD"
 			(at 144.78 166.37 0)
 			(hide yes)
 			(show_name no)
@@ -8629,18 +8525,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "PD"
-			(at 233.68 97.79 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "LCSC" "C307331"
 			(at 231.14 97.79 0)
 			(hide yes)
@@ -8864,17 +8748,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 200.66 266.7 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "0262241a-c227-4fb2-bd76-6584692326c4")
 		)
@@ -8946,17 +8819,6 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 167.64 274.32 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 167.64 274.32 0)
 			(hide yes)
 			(show_name no)
@@ -9309,17 +9171,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 248.92 311.15 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(property "LCSC" "C25887"
 			(at 248.92 311.15 0)
 			(hide yes)
@@ -9473,18 +9324,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "PD"
-			(at 248.92 91.44 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(pin "1"
 			(uuid "3b16ff2a-1892-46e7-b910-67e8709a8bcf")
 		)
@@ -9585,17 +9424,6 @@
 			)
 		)
 		(property "MPN" "PSTMAA666460-6R8MB"
-			(at 148.59 262.89 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 148.59 262.89 0)
 			(hide yes)
 			(show_name no)
@@ -9713,18 +9541,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "PD"
-			(at 276.86 72.39 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(pin "1"
 			(uuid "364f1ff3-2c7e-44bc-aa8a-e377fc219a1f")
 		)
@@ -9793,17 +9609,6 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 223.52 311.15 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 223.52 311.15 0)
 			(hide yes)
 			(show_name no)
@@ -9950,17 +9755,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 287.02 92.71 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(property "Manufacturer" "PANASONIC"
 			(at 287.02 92.71 0)
 			(hide yes)
@@ -10043,17 +9837,6 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 154.94 266.7 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 154.94 266.7 0)
 			(hide yes)
 			(show_name no)
@@ -10363,17 +10146,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 177.8 266.7 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "335255ae-b267-4649-a9e4-a8bf201027df")
 		)
@@ -10467,17 +10239,6 @@
 			)
 		)
 		(property "MPN" "2N7002"
-			(at 485.14 271.78 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 485.14 271.78 0)
 			(hide yes)
 			(show_name no)
@@ -10838,18 +10599,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "PD"
-			(at 144.78 173.99 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "Manufacturer" "YAGEO"
 			(at 142.24 173.99 0)
 			(hide yes)
@@ -11051,17 +10800,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 248.92 318.77 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "c1d06110-286f-4bb3-a7cd-b3128d508798")
 		)
@@ -11155,17 +10893,6 @@
 			)
 		)
 		(property "MPN" "CL32B106KBJNNNE"
-			(at 71.12 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 71.12 265.43 0)
 			(hide yes)
 			(show_name no)
@@ -11447,18 +11174,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "PD"
-			(at 182.88 147.32 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "Manufacturer" "Texas Instruments"
 			(at 182.88 167.64 0)
 			(hide yes)
@@ -11599,18 +11314,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "PD"
-			(at 240.03 154.94 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "LCSC" "C23345"
 			(at 237.49 154.94 0)
 			(hide yes)
@@ -11717,18 +11420,6 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
-			(at 256.54 100.33 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "PD"
 			(at 256.54 100.33 0)
 			(hide yes)
 			(show_name no)
@@ -11887,17 +11578,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 276.86 318.77 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "c61f5ebf-2f91-46b5-a49d-4dcc1a7a727e")
 		)
@@ -11969,17 +11649,6 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 83.82 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 83.82 265.43 0)
 			(hide yes)
 			(show_name no)
@@ -12096,18 +11765,6 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
-			(at 119.38 92.71 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "PD"
 			(at 119.38 92.71 0)
 			(hide yes)
 			(show_name no)
@@ -12266,17 +11923,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 495.3 270.51 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "58527ec0-fb72-4dc8-b6af-47879ba6b168")
 		)
@@ -12381,17 +12027,6 @@
 			)
 		)
 		(property "Manufacturer" "UNI-ROYAL(Uniroyal Elec)"
-			(at 83.82 273.05 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 83.82 273.05 0)
 			(hide yes)
 			(show_name no)
@@ -12571,17 +12206,6 @@
 			)
 		)
 		(property "MPN" "2N7002"
-			(at 386.08 124.46 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 386.08 124.46 0)
 			(hide yes)
 			(show_name no)
@@ -12948,17 +12572,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 396.24 123.19 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "eb6e5769-f15f-4686-9502-aefa49162e43")
 		)
@@ -13195,18 +12808,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "PD"
-			(at 81.28 72.39 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(pin "1"
 			(uuid "1dbc507c-232c-44b1-8533-c029a0f79020")
 		)
@@ -13301,18 +12902,6 @@
 			)
 		)
 		(property "MPN" "CL32B106KBJNNNE"
-			(at 254 158.75 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "PD"
 			(at 254 158.75 0)
 			(hide yes)
 			(show_name no)
@@ -13601,17 +13190,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 193.04 266.7 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "201696c3-6703-4a34-b885-36adb456b765")
 		)
@@ -13726,17 +13304,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 302.26 262.89 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "dba6c986-52e4-445a-aa4d-d86553076601")
 		)
@@ -13810,18 +13377,6 @@
 			)
 		)
 		(property "Description" ""
-			(at 264.16 168.91 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "PD"
 			(at 264.16 168.91 0)
 			(hide yes)
 			(show_name no)
@@ -14026,18 +13581,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "PD"
-			(at 246.38 138.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(pin "1"
 			(uuid "887bccc9-c850-4ef1-bcc0-01899f9b9ee2")
 		)
@@ -14147,17 +13690,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 133.35 254 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "0fbadfa4-0a11-476b-852d-315fa78c5401")
 		)
@@ -14229,17 +13761,6 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 396.24 115.57 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 396.24 115.57 0)
 			(hide yes)
 			(show_name no)
@@ -14364,17 +13885,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 297.18 318.77 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(property "LCSC" "C11702"
 			(at 297.18 318.77 0)
 			(hide yes)
@@ -14479,17 +13989,6 @@
 			)
 		)
 		(property "Description" ""
-			(at 261.62 274.32 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 261.62 274.32 0)
 			(hide yes)
 			(show_name no)
@@ -14638,17 +14137,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 142.24 281.94 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(property "LCSC" "C25768"
 			(at 142.24 281.94 0)
 			(hide yes)
@@ -14755,18 +14243,6 @@
 			)
 		)
 		(property "Description" "Special symbol for telling ERC where power comes from"
-			(at 297.18 72.39 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "PD"
 			(at 297.18 72.39 0)
 			(hide yes)
 			(show_name no)
@@ -14955,17 +14431,6 @@
 			)
 		)
 		(property "Manufacturer" "FH (Guangdong Fenghua Advanced Tech)"
-			(at 167.64 266.7 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 167.64 266.7 0)
 			(hide yes)
 			(show_name no)
@@ -15312,18 +14777,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "PD"
-			(at 144.78 151.13 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "Manufacturer" "YAGEO"
 			(at 142.24 151.13 0)
 			(hide yes)
@@ -15492,17 +14945,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 495.3 262.89 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(property "LCSC" "C25765"
 			(at 495.3 262.89 0)
 			(hide yes)
@@ -15609,18 +15051,6 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 231.14 181.61 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "PD"
 			(at 231.14 181.61 0)
 			(hide yes)
 			(show_name no)
@@ -15761,18 +15191,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "PD"
-			(at 312.42 143.51 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(pin "1"
 			(uuid "3be8054a-24a3-4194-a438-6852bd969039")
 		)
@@ -15890,18 +15308,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "PD"
-			(at 101.6 92.71 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(pin "1"
 			(uuid "f4561d35-9d80-4088-89fa-c91e04433ecd")
 		)
@@ -15995,17 +15401,6 @@
 			)
 		)
 		(property "MPN" "LMR51450SDRRR"
-			(at 109.22 266.7 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 109.22 266.7 0)
 			(hide yes)
 			(show_name no)
@@ -16174,17 +15569,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 228.6 158.75 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "e742fbd3-6045-4f56-883c-ed3635aa6899")
 		)
@@ -16278,17 +15662,6 @@
 			)
 		)
 		(property "MPN" "CL32B106KBJNNNE"
-			(at 60.96 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 60.96 265.43 0)
 			(hide yes)
 			(show_name no)
@@ -16470,18 +15843,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "PD"
-			(at 160.02 106.68 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "LCSC" "C11425"
 			(at 157.48 106.68 0)
 			(hide yes)
@@ -16612,18 +15973,6 @@
 			)
 		)
 		(property "MPN" "USB4105-GF-A-120"
-			(at 58.42 81.28 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "PD"
 			(at 58.42 81.28 0)
 			(hide yes)
 			(show_name no)
@@ -16957,17 +16306,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 185.42 266.7 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "627518fa-fb2f-41d7-a8e3-77df5c9e4a55")
 		)
@@ -17066,18 +16404,6 @@
 			)
 		)
 		(property "MPN" "SP60N05GNJ"
-			(at 269.24 91.44 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "PD"
 			(at 269.24 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -17358,18 +16684,6 @@
 			)
 		)
 		(property "MPN" "LM74502DDFR"
-			(at 205.74 96.52 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "PD"
 			(at 205.74 96.52 0)
 			(hide yes)
 			(show_name no)
@@ -17665,17 +16979,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 312.42 266.7 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(property "Manufacturer" "Jiangsu Changjing Electronics Technology Co., Ltd."
 			(at 312.42 266.7 0)
 			(hide yes)
@@ -17787,18 +17090,6 @@
 			)
 		)
 		(property "MPN" "CH224Q"
-			(at 292.1 146.05 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "PD"
 			(at 292.1 146.05 0)
 			(hide yes)
 			(show_name no)
@@ -18249,18 +17540,6 @@
 			)
 		)
 		(property "MPN" "RT0603BRD07100KL"
-			(at 144.78 158.75 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "PD"
 			(at 144.78 158.75 0)
 			(hide yes)
 			(show_name no)

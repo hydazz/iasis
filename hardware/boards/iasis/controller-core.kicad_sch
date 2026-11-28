@@ -9279,18 +9279,6 @@
 				)
 			)
 		)
-		(property "Population" "Common"
-			(at 88.9 214.63 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "LCSC" "C231329"
 			(at 88.9 231.14 0)
 			(hide yes)
@@ -12194,18 +12182,6 @@
 				(font
 					(size 1.27 1.27)
 				)
-			)
-		)
-		(property "Population" "Common"
-			(at 114.3 214.63 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
 			)
 		)
 		(property "LCSC" "C231329"

@@ -1692,18 +1692,7 @@
 		)
 		(uuid "42ffd884-74d9-4d95-9619-21fcb60dd816")
 	)
-	(text "Hub: entire child DNP.\nHubPD: converter and protected source fitted."
-		(exclude_from_sim no)
-		(at 279.4 139.7 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left top)
-		)
-		(uuid "4464e63a-8bd6-4cc5-b508-59b08cb6a2a6")
-	)
-	(text "HOST_TARGET_5V feeds a reverse-blocking switch; optional charging joins only at VBUS."
+	(text "HOST_TARGET_5V feeds a reverse-blocking switch; the charging stage joins only at VBUS."
 		(exclude_from_sim no)
 		(at 25.4 26.67 0)
 		(effects
@@ -2580,18 +2569,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "Common"
-			(at 266.7 59.69 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "LCSC" "C17513"
 			(at 264.16 59.69 0)
 			(hide yes)
@@ -3001,18 +2978,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "Common"
-			(at 88.9 129.54 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "LCSC" "C1525"
 			(at 86.36 129.54 0)
 			(hide yes)
@@ -3133,18 +3098,6 @@
 			)
 		)
 		(property "Description" ""
-			(at 43.18 165.1 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "Common"
 			(at 43.18 165.1 0)
 			(hide yes)
 			(show_name no)
@@ -3406,18 +3359,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "Common"
-			(at 73.66 91.44 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "Manufacturer" "Nexperia"
 			(at 73.66 101.6 0)
 			(hide yes)
@@ -3536,18 +3477,6 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
-			(at 139.7 59.69 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "Common"
 			(at 139.7 59.69 0)
 			(hide yes)
 			(show_name no)
@@ -3980,18 +3909,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "Common"
-			(at 287.02 59.69 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "LCSC" "C25741"
 			(at 284.48 59.69 0)
 			(hide yes)
@@ -4127,18 +4044,6 @@
 			)
 		)
 		(property "MPN" "74LVC2G08DC-Q100H"
-			(at 73.66 66.04 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "Common"
 			(at 73.66 66.04 0)
 			(hide yes)
 			(show_name no)
@@ -4463,18 +4368,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "Common"
-			(at 139.7 95.25 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "LCSC" "C364360"
 			(at 137.16 95.25 0)
 			(hide yes)
@@ -4687,18 +4580,6 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 107.95 96.52 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "Common"
 			(at 107.95 96.52 0)
 			(hide yes)
 			(show_name no)
@@ -5028,18 +4909,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "Common"
-			(at 251.46 74.93 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "LCSC" "C25741"
 			(at 248.92 74.93 0)
 			(hide yes)
@@ -5265,18 +5134,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "Common"
-			(at 93.98 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "LCSC" "C25741"
 			(at 91.44 80.01 0)
 			(hide yes)
@@ -5434,18 +5291,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "Common"
-			(at 266.7 71.12 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "Manufacturer" "Jiangsu Changjing Electronics Technology Co., Ltd."
 			(at 261.62 71.12 0)
 			(hide yes)
@@ -5549,18 +5394,6 @@
 			)
 		)
 		(property "Description" ""
-			(at 167.64 60.96 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "Common"
 			(at 167.64 60.96 0)
 			(hide yes)
 			(show_name no)
@@ -5718,18 +5551,6 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
-			(at 223.52 59.69 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "Common"
 			(at 223.52 59.69 0)
 			(hide yes)
 			(show_name no)
@@ -6082,18 +5903,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "Common"
-			(at 73.66 119.38 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "Manufacturer" "Nexperia"
 			(at 73.66 129.54 0)
 			(hide yes)
@@ -6210,18 +6019,6 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 43.18 152.4 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "Common"
 			(at 43.18 152.4 0)
 			(hide yes)
 			(show_name no)
@@ -6447,18 +6244,6 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 111.76 100.33 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "Common"
 			(at 111.76 100.33 0)
 			(hide yes)
 			(show_name no)
@@ -6776,18 +6561,6 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
-			(at 121.92 90.17 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Population" "Common"
 			(at 121.92 90.17 0)
 			(hide yes)
 			(show_name no)
@@ -7210,18 +6983,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "Common"
-			(at 208.28 59.69 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "LCSC" "C57895"
 			(at 205.74 59.69 0)
 			(hide yes)
@@ -7355,18 +7116,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "Common"
-			(at 198.12 72.39 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "LCSC" "C25744"
 			(at 195.58 72.39 0)
 			(hide yes)
@@ -7446,7 +7195,7 @@
 			(color 0 0 0 0)
 		)
 		(uuid "42bf7062-60f9-4e10-8fdf-2895ab8c3e6f")
-		(property "Sheetname" "Optional charging"
+		(property "Sheetname" "Charging stage"
 			(at 279.4 100.8884 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7532,38 +7281,18 @@
 			(project "iasis"
 				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5/eda5d45e-e86d-4d58-83d3-d3aa1de94feb/1980e6d3-fe63-4159-934f-e1343e1cb8bc/7c1e1271-4607-4b20-87e9-40e766ed110f"
 					(page "12")
-					(variant
-						(name "Hub")
-						(dnp yes)
-					)
 				)
 				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5/eda5d45e-e86d-4d58-83d3-d3aa1de94feb/2661a9c5-45e6-413e-acf1-976df62591a5/7c1e1271-4607-4b20-87e9-40e766ed110f"
 					(page "16")
-					(variant
-						(name "Hub")
-						(dnp yes)
-					)
 				)
 				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5/eda5d45e-e86d-4d58-83d3-d3aa1de94feb/672b9e1d-749d-4280-bdb9-d44bea0929df/7c1e1271-4607-4b20-87e9-40e766ed110f"
 					(page "24")
-					(variant
-						(name "Hub")
-						(dnp yes)
-					)
 				)
 				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5/eda5d45e-e86d-4d58-83d3-d3aa1de94feb/973fb476-58e0-4ce2-9f9c-9c93ff84c555/7c1e1271-4607-4b20-87e9-40e766ed110f"
 					(page "20")
-					(variant
-						(name "Hub")
-						(dnp yes)
-					)
 				)
 				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5/eda5d45e-e86d-4d58-83d3-d3aa1de94feb/acb7f356-15f5-43b4-b29f-4e8b238af2f2/7c1e1271-4607-4b20-87e9-40e766ed110f"
 					(page "8")
-					(variant
-						(name "Hub")
-						(dnp yes)
-					)
 				)
 			)
 		)

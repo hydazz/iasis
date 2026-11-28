@@ -1663,7 +1663,7 @@
 		)
 		(uuid "48d6d2a5-5cb6-4b46-91a8-bb5b63d66d37")
 	)
-	(text "HubPD: side link fitted; Hub: sheet DNP. SIDE_POWER_EN enables the feed after firmware\nreserves 32 W on a 20 V or higher contract. ILIM 5.6k: 2.14 A. Three SIDE_BUS contacts; nine grounds. Mate only with power disconnected."
+	(text "Sheet DNP in NoCM5. SIDE_POWER_EN enables the feed after firmware\nreserves 35 W on a 20 V or higher contract. ILIM 5.6k: 2.14 A. Three SIDE_BUS contacts; nine grounds. Mate only with power disconnected."
 		(exclude_from_sim no)
 		(at 25.4 160.02 0)
 		(effects
@@ -2545,17 +2545,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 236.22 99.06 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "c7e8442e-26e7-4d45-96c6-ae688efb545d")
 		)
@@ -2714,17 +2703,6 @@
 			)
 		)
 		(property "Manufacturer" "UNI-ROYAL(Uniroyal Elec)"
-			(at 137.16 107.95 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 137.16 107.95 0)
 			(hide yes)
 			(show_name no)
@@ -2916,17 +2894,6 @@
 			)
 		)
 		(property "Manufacturer" "UNI-ROYAL(Uniroyal Elec)"
-			(at 63.5 100.33 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 63.5 100.33 0)
 			(hide yes)
 			(show_name no)
@@ -3587,17 +3554,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 93.98 110.49 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "152d97fc-c723-4661-bc53-5a72a894585d")
 		)
@@ -3853,17 +3809,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 116.84 93.98 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(property "Manufacturer" "Texas Instruments"
 			(at 116.84 93.98 0)
 			(hide yes)
@@ -4100,17 +4045,6 @@
 			)
 		)
 		(property "Manufacturer" "UNI-ROYAL(Uniroyal Elec)"
-			(at 63.5 85.09 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 63.5 85.09 0)
 			(hide yes)
 			(show_name no)
@@ -4466,17 +4400,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 147.32 110.49 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "5f5395f6-2ad9-4ef2-a04f-b92ccef1780a")
 		)
@@ -4634,17 +4557,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 88.9 85.09 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(property "LCSC" "C113803"
 			(at 88.9 85.09 0)
 			(hide yes)
@@ -4759,17 +4671,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 142.24 85.09 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(property "LCSC" "C113803"
 			(at 142.24 85.09 0)
 			(hide yes)
@@ -4874,17 +4775,6 @@
 			)
 		)
 		(property "Description" ""
-			(at 63.5 92.71 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 63.5 92.71 0)
 			(hide yes)
 			(show_name no)
