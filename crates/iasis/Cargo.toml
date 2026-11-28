@@ -31,7 +31,7 @@ zip = { version = "9.1.2", default-features = false, features = ["deflate-flate2
 sha2 = "0.10"
 restorekit.workspace = true
 restorekit-sys.workspace = true
-reqwest = { version = "0.12", default-features = false, features = [
+reqwest = { version = "0.13", default-features = false, features = [
   "blocking",
   "rustls-tls-native-roots",
 ] }
