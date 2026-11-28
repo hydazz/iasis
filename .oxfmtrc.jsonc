@@ -1,6 +1,8 @@
 {
   "printWidth": 100,
   "ignorePatterns": [
+    "CHANGELOG.md",
+    ".release-please-manifest.json",
     ".mise/",
     "**/.mise.toml",
     ".work/",
