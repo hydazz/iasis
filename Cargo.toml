@@ -22,7 +22,7 @@ iasis-protocol = { path = "crates/protocol" }
 iasis-pd = { path = "crates/pd" }
 postcard = { version = "1.1", default-features = false }
 restorekit = { version = "=0.6.6", default-features = false }
-restorekit-sys = "=0.6.6"
+restorekit-sys = "=0.7.1"
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 
 # RestoreKit 0.6.6 with fixes not yet released upstream.
