@@ -57,6 +57,69 @@ struct MenuTests {
         #expect(browser.actions == DeviceActions())
     }
 
+    @Test func aPowerWarningPrecedesPlanningAndTheEraseConfirmation() async throws {
+        var state = try Fixtures.state
+        state.hubs[0].ports[1].restore = true
+        state.hubs[0].restorePowerWarning = "Connect a power supply."
+        var cart = state.hubs[0]
+        cart.serial = "817a23bd502453b4"
+        cart.name = "Cart"
+        cart.restorePowerWarning = "Use a larger power supply."
+        var spare = cart
+        spare.serial = "spare"
+        spare.name = "Spare"
+        state.hubs += [cart, spare]
+        let (model, agent) = try await started(state)
+        let browser = DeviceBrowser(model: model)
+        browser.selection = Set([state.devices[1].id, state.devices[3].id, state.hubDevices[1].devices[3].id])
+        let hubs = try #require(browser.actions.restore?.hubs)
+        let window = NSWindow(contentViewController: NSHostingController(rootView: DevicesView(browser: browser)))
+        defer { window.orderOut(nil) }
+        window.setFrameOrigin(NSPoint(x: -2000, y: -2000))
+        window.orderBack(nil)
+
+        let menu = NSHostingMenu(rootView: DeviceActionButtons(browser: browser))
+        menu.update()
+        let restore = menu.indexOfItem(withTitle: "Restore…")
+        try #require(restore >= 0)
+        menu.performActionForItem(at: restore)
+        #expect(browser.restorePrompt?.message == "Repair Bench\nConnect a power supply.\n\nCart\nUse a larger power supply.")
+        try await press("Cancel", in: window)
+        try await waitUntil { browser.restorePrompt == nil && window.attachedSheet == nil }
+        #expect(await agent.received.isEmpty)
+
+        menu.performActionForItem(at: restore)
+        try await press("Continue", in: window)
+        try await waitUntil { browser.restorePrompt?.title == "Restore 3 Devices?" }
+        #expect(await agent.received == [.plan(hubs: hubs)])
+        try await press("Restore", in: window)
+        try await waitUntil { await agent.received == [.plan(hubs: hubs), .restore(hubs: hubs, latest: false)] }
+    }
+
+    @Test(arguments: [false, true])
+    func statusMenuReviveOpensTheWindowOnlyForAPowerWarning(warns: Bool) async throws {
+        var state = try Fixtures.state
+        state.hubs[0].ports[1].restore = true
+        state.hubs[0].restorePowerWarning = warns ? "Connect a power supply." : nil
+        let (model, agent) = try await started(state)
+        let browser = DeviceBrowser(model: model)
+        let window = NSWindow(contentViewController: NSHostingController(rootView: DevicesView(browser: browser)))
+        defer { window.orderOut(nil) }
+        window.setFrameOrigin(NSPoint(x: -2000, y: -2000))
+        let status = StatusMenu(browser: browser, showDevices: { window.orderBack(nil) }, showSettings: {})
+        status.menuNeedsUpdate(status.menu)
+        let submenu = try #require(status.menu.item(withTitle: "MacBook Air")?.submenu)
+        submenu.performActionForItem(at: submenu.indexOfItem(withTitle: "Revive"))
+        #expect(window.isVisible == warns)
+        if warns {
+            #expect(await agent.received.isEmpty)
+            try await press("Continue", in: window)
+        }
+        let hubs = try #require([state.devices[1]].selections)
+        try await waitUntil { await agent.received == [.revive(hubs: hubs, latest: false)] }
+        #expect(browser.restorePrompt == nil)
+    }
+
     @Test func oneMenuCheckOpensSetupForThePinnedSelection() async throws {
         var state = try Fixtures.state
         state.hubs[0].ports[1].device = nil
@@ -300,6 +363,19 @@ struct MenuTests {
         model.start()
         try await waitUntil { model.state != nil }
         return (model, agent)
+    }
+
+    private func press(_ title: String, in window: NSWindow) async throws {
+        func button(in view: NSView?) -> NSButton? {
+            guard let view else { return nil }
+            if let button = view as? NSButton, button.title == title {
+                return button
+            }
+            return view.subviews.lazy.compactMap { button(in: $0) }.first
+        }
+        try await waitUntil { button(in: window.attachedSheet?.contentView) != nil }
+        let button = try #require(button(in: window.attachedSheet?.contentView))
+        button.performClick(nil)
     }
 
     private func waitUntil(_ done: () async -> Bool) async throws {

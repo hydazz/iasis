@@ -2,21 +2,21 @@
 //! devices with their actions, the download under way, and the window,
 //! Preferences and Quit.
 
-use iasis_api::{Hue, Request, State};
+use iasis_api::{Hue, Operation, Request, State};
 use ksni::{
     MenuItem, ToolTip,
     blocking::{Handle, TrayMethods},
     menu::{StandardItem, SubMenu},
 };
 
-use crate::device::{self, Actions, Device, DeviceId, Hub};
+use crate::device::{self, Actions, Device, DeviceId, Hub, RestoreTargets};
 
 /// What a choice in the tray asks the app to do.
 #[derive(Clone, Debug)]
 pub enum Command {
     Open,
     Show(DeviceId),
-    Restore(DeviceId),
+    Install(Operation, RestoreTargets),
     Perform(Vec<Request>),
     Preferences,
     Quit,
@@ -108,13 +108,18 @@ impl Tray {
                 self.item("Enter DFU", perform(actions.dfu)),
                 self.item("Restart", perform(actions.restart)),
                 MenuItem::Separator,
-                self.item("Revive", perform(actions.revive.into_iter().collect())),
+                self.item(
+                    "Revive",
+                    actions
+                        .restore
+                        .clone()
+                        .map(|targets| Command::Install(Operation::Revive, targets)),
+                ),
                 self.item(
                     "Restore…",
                     actions
                         .restore
-                        .is_some()
-                        .then(|| Command::Restore(device.id())),
+                        .map(|targets| Command::Install(Operation::Restore, targets)),
                 ),
             ],
             ..Default::default()

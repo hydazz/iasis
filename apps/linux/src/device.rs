@@ -504,8 +504,7 @@ pub struct Actions {
     pub dfu: Vec<Request>,
     pub restart: Vec<Request>,
     pub setup_targets: Option<Vec<Selection>>,
-    pub revive: Option<Request>,
-    pub restore: Option<RestoreConfirmation>,
+    pub restore: Option<RestoreTargets>,
 }
 
 impl Actions {
@@ -540,11 +539,7 @@ impl Actions {
             actions.setup_targets = Some(hubs.clone());
         }
         if all(|port| port.occupied && port.restore) {
-            actions.revive = Some(Request::Revive {
-                hubs: hubs.clone(),
-                latest: false,
-            });
-            actions.restore = Some(RestoreConfirmation {
+            actions.restore = Some(RestoreTargets {
                 devices: devices.to_vec(),
                 hubs,
                 planned: Vec::new(),
@@ -572,10 +567,9 @@ fn selections(devices: &[Device]) -> Option<Vec<Selection>> {
     Some(hubs)
 }
 
-/// An erase the user is asked to confirm: the attachments as shown, on any
-/// number of hubs, and what the agent says each would be restored with.
+/// The attachments selected for restore or revive, and the images offered for an erase.
 #[derive(Clone, Debug, PartialEq)]
-pub struct RestoreConfirmation {
+pub struct RestoreTargets {
     pub devices: Vec<Device>,
     pub hubs: Vec<Selection>,
     pub planned: Vec<Planned>,
@@ -588,7 +582,44 @@ pub struct Choice {
     pub request: Request,
 }
 
-impl RestoreConfirmation {
+impl RestoreTargets {
+    pub fn still_available(&self, hubs: &[Hub]) -> bool {
+        self.devices.iter().all(|selected| {
+            hubs.iter()
+                .find(|hub| {
+                    hub.view.serial == selected.serial && hub.view.session == selected.session
+                })
+                .and_then(|hub| {
+                    hub.view
+                        .ports
+                        .iter()
+                        .find(|port| port.number == selected.port.number)
+                })
+                .is_some_and(|port| {
+                    port.occupied
+                        && port.restore
+                        && port.generation == selected.port.generation
+                        && (selected.port.ecid.is_none() || port.ecid == selected.port.ecid)
+                })
+        })
+    }
+
+    pub fn power_warning(&self, hubs: &[Hub]) -> Option<String> {
+        let warnings: Vec<_> = hubs
+            .iter()
+            .filter(|hub| {
+                self.hubs.iter().any(|selection| {
+                    selection.hub == hub.view.serial && Some(selection.session) == hub.view.session
+                })
+            })
+            .filter_map(|hub| {
+                let warning = hub.view.restore_power_warning.as_ref()?;
+                Some(format!("{}\n{warning}", hub.title))
+            })
+            .collect();
+        (!warnings.is_empty()).then(|| warnings.join("\n\n"))
+    }
+
     pub fn heading(&self) -> String {
         let subject = match self.devices.as_slice() {
             [device] => device.short_name(),
@@ -915,6 +946,37 @@ mod tests {
     }
 
     #[test]
+    fn restore_power_shows_one_current_warning_per_selected_hub() {
+        let mut state: State =
+            serde_json::from_str(include_str!("../../../crates/api/fixtures/state.json")).unwrap();
+        state.hubs.truncate(1);
+        let first = &mut state.hubs[0];
+        first.name = "Bench".into();
+        first.restore_power_warning = Some("First warning.".into());
+        let mut second = first.clone();
+        second.serial = "second".into();
+        second.name = "Other".into();
+        second.restore_power_warning = Some("Second warning.".into());
+        let mut unrelated = first.clone();
+        unrelated.serial = "unrelated".into();
+        unrelated.name = "Unrelated".into();
+        state.hubs.extend([second, unrelated]);
+        let mut hubs = hubs(&state);
+        let first = hubs[0].devices[0].clone();
+        let mut sibling = first.clone();
+        sibling.port.number = 2;
+        let devices = [first, sibling, hubs[1].devices[0].clone()];
+        let targets = Actions::new(&devices).restore.unwrap();
+        assert_eq!(
+            targets.power_warning(&hubs).as_deref(),
+            Some("Bench\nFirst warning.\n\nOther\nSecond warning.")
+        );
+        hubs[0].view.restore_power_warning = None;
+        hubs[1].view.session = None;
+        assert_eq!(targets.power_warning(&hubs), None);
+    }
+
+    #[test]
     fn a_restore_asks_only_when_a_downloaded_image_is_older() {
         let devices = [device(port(1)), device(port(3))];
         let mut confirmation = Actions::new(&devices).restore.unwrap();
@@ -986,13 +1048,6 @@ mod tests {
             [Request::Reboot {
                 hubs: expected.clone()
             }]
-        );
-        assert_eq!(
-            actions.revive,
-            Some(Request::Revive {
-                hubs: expected.clone(),
-                latest: false
-            })
         );
         assert_eq!(actions.restore.unwrap().hubs, expected);
 

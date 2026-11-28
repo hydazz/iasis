@@ -230,7 +230,7 @@ struct DeviceTests {
         let other = RestoreTarget(port: 4, generation: 4, ecid: "0002250e3c04c01e")
         #expect(all.dfu.isEmpty)
         #expect(all.restart.isEmpty)
-        #expect(all.revive == nil)
+        #expect(all.restore == nil)
         let pair = DeviceActions([state.devices[1], state.devices[3]])
         #expect(pair.dfu.isEmpty)
         #expect(pair.restart == [.reboot(hubs: [RestoreSelection(hub: hub, session: 77, targets: [mac, other])])])
@@ -238,7 +238,7 @@ struct DeviceTests {
 
         state.hubs[0].ports[1].restore = true
         let one = DeviceActions([state.devices[1]])
-        #expect(one.revive == .revive(hubs: [RestoreSelection(hub: hub, session: 77, targets: [mac])], latest: false))
+        #expect(one.restore?.hubs == [RestoreSelection(hub: hub, session: 77, targets: [mac])])
     }
 
     @Test func hubsWithOneNameAreToldApart() throws {

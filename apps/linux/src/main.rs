@@ -193,10 +193,14 @@ impl Shell {
                 self.window.present();
                 self.window.show_device(id);
             }
-            Command::Restore(id) => {
-                self.window.present();
-                self.window.show_device(id);
-                let _ = WidgetExt::activate_action(&self.window.window, "win.restore", None);
+            Command::Install(operation, targets) => {
+                if operation == iasis_api::Operation::Restore {
+                    self.window.present();
+                    if let [device] = targets.devices.as_slice() {
+                        self.window.show_device(device.id());
+                    }
+                }
+                self.window.install(operation, targets);
             }
             Command::Perform(requests) => {
                 let window = Rc::downgrade(&self.window);

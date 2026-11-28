@@ -35,6 +35,22 @@ public class DeviceTests
     }
 
     [Fact]
+    public void RestorePowerShowsOneCurrentWarningPerSelectedHub()
+    {
+        var first = DeviceOn("aaa", 1);
+        var second = DeviceOn("bbb", 1);
+        var last = DeviceOn("ccc", 1);
+        var targets = DeviceActionTargets.For([first, second, first with { Port = first.Port with { Number = 2 } }, last], DeviceAction.Restore)!;
+        var warned = first.Hub with { Name = "Bench", RestorePowerWarning = "First warning." };
+        var other = last.Hub with { Name = "", RestorePowerWarning = "Second warning." };
+        var unrelated = warned with { Serial = "ddd" };
+        var reconnected = warned with { Session = 4 };
+        Assert.Null(targets.RestorePowerWarning([second.Hub with { RestorePowerWarning = null }, unrelated, reconnected]));
+        Assert.Equal("Bench (aaa)\nFirst warning.\n\nccc\nSecond warning.",
+            targets.RestorePowerWarning([warned, second.Hub with { RestorePowerWarning = null }, other, unrelated]));
+    }
+
+    [Fact]
     public void DeviceCommandsRequireEverySelectedPort()
     {
         var a = DeviceOn("aaa", 1);

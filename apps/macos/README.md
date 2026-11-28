@@ -41,7 +41,7 @@ Select rows and use the toolbar, the Device menu or a row’s context menu. The 
 
 **Advance Setup…** starts with the choices in Settings > Restore. If both are off, it offers to set this Mac’s preferred language and regional format. Changes in the sheet apply to this run. Enrollment activates each device if needed. Complete any required sign-in or **Partially Set Up** prompt on the device.
 
-Before it asks, Restore checks what Apple signs for each device. Where a downloaded image is older than the newest release, it offers both: download the newest, or use the one downloaded. Otherwise it says what each device gets and how much is to download. Restore is unavailable while any selected device cannot be restored.
+If a selected hub may have too little power for its connected devices, Revive and Restore show a warning. You can cancel to change the power setup or continue. Before asking you to erase, Restore checks what Apple signs for each device. Where a downloaded image is older than the newest release, it offers both: download the newest, or use the one downloaded. Otherwise it says what each device gets and how much is to download. Restore is unavailable while any selected device cannot be restored.
 
 A hub on a power supply shows, beside its name, the power allocated to its ports out of the available charging budget. A bolt with a warning marks a device that took the largest offer the hub could make and would use more: with several devices sharing a supply, one with a flat battery may get too little to start.
 

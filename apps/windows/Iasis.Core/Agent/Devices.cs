@@ -142,6 +142,17 @@ public sealed record DeviceActionTargets(IReadOnlyList<Device> Devices, IReadOnl
         _ => throw new ArgumentOutOfRangeException(nameof(action)),
     };
 
+    public string? RestorePowerWarning(IReadOnlyList<Hub> hubs)
+    {
+        var warnings = hubs.Where(hub => hub.RestorePowerWarning is not null &&
+            Hubs.Any(selected => selected.Hub == hub.Serial && selected.Session == hub.Session))
+            .Select(hub => string.IsNullOrEmpty(hub.Name)
+                ? $"{hub.Serial}\n{hub.RestorePowerWarning}"
+                : $"{hub.Name} ({hub.Serial})\n{hub.RestorePowerWarning}");
+        var body = string.Join("\n\n", warnings);
+        return body.Length == 0 ? null : body;
+    }
+
     public ErasePlan Review(IReadOnlyList<Planned> plan)
     {
         var lines = new List<string>();

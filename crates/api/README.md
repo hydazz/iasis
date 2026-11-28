@@ -82,6 +82,8 @@ Each hub has its `serial`, `name` (empty for an unnamed hub), `session` ID, the 
 
 `supply` is what powers the targets: `brick` for a USB-C power supply, `host` for the host's USB port alone, or `off`. With a power supply, `pool` has its `budget_mw` for the targets and the `allocated_mw` committed to the powered ports; otherwise it is null.
 
+When present, `restore_power_warning` gives advice for a restore or revive on the hub. It considers devices across all five ports. Desktop clients show the advice before requesting an image plan or starting work.
+
 Each port has:
 
 | Field                          | Meaning                                                                                                                      |

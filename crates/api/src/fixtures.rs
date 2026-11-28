@@ -236,6 +236,7 @@ fn state() -> State {
                 }),
                 upstream_mbps: Some(10_000),
                 supply: Supply::Brick,
+                restore_power_warning: None,
                 pool: Some(Pool {
                     budget_mw: 90_000,
                     allocated_mw: 68_250,
@@ -252,6 +253,7 @@ fn state() -> State {
                 session: Some(1),
                 firmware: "0.1.0".into(),
                 supply: Supply::Host,
+                restore_power_warning: Some("The shared 5 V supply is at its current limit. Starting a restore may interrupt other devices on this hub.".into()),
                 host: true,
                 ports: more,
                 notice: None,

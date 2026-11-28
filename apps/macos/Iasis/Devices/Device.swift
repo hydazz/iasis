@@ -190,7 +190,6 @@ extension AgentState {
 struct DeviceActions: Equatable {
     var dfu: [AgentRequest] = []
     var restart: [AgentRequest] = []
-    var revive: AgentRequest?
     var restore: RestoreConfirmation?
 
     init() {}
@@ -206,7 +205,6 @@ struct DeviceActions: Equatable {
             }
         }
         restore = RestoreConfirmation(devices)
-        revive = restore.map { .revive(hubs: $0.hubs, latest: false) }
     }
 }
 

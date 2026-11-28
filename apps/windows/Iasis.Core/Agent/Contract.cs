@@ -33,6 +33,7 @@ public sealed record Hub
     public FirmwareUpdate? Update { get; init; }
     public int? UpstreamMbps { get; init; }
     public required Supply Supply { get; init; }
+    public string? RestorePowerWarning { get; init; }
     public Pool? Pool { get; init; }
     public required bool Host { get; init; }
     public required bool Restores { get; init; }

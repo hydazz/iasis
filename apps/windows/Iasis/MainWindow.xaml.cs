@@ -259,6 +259,14 @@ public sealed partial class MainWindow : Window
         {
             var targets = DeviceActionTargets.For(selected, action);
             if (targets is null) return;
+            if (action is DeviceAction.Restore or DeviceAction.Revive &&
+                targets.RestorePowerWarning(state?.Hubs ?? []) is { } warning)
+            {
+                var message = new TextBlock { Text = warning, TextWrapping = TextWrapping.Wrap };
+                if (await Dialog("Limited hub power", message, "Continue").ShowAsync() != ContentDialogResult.Primary)
+                    return;
+            }
+            EnsureCurrent();
             var latest = false;
             if (action == DeviceAction.Restore)
             {
@@ -274,16 +282,21 @@ public sealed partial class MainWindow : Window
                     new ScrollViewer { Content = content, MaxHeight = 400 }, plan.Blocked ? "" : "Erase and restore");
                 if (await dialog.ShowAsync() != ContentDialogResult.Primary || plan.Blocked) return;
                 latest = newest.IsChecked == true;
+                EnsureCurrent();
             }
-            var current = trayDevice is null ? Selected : Devices.ToArray();
-            if ((trayDevice is null && current.Length != selected.Length) ||
-                selected.Any(old => !current.Any(d => old.SameAttachment(d) && d.Supports(action))))
-                throw new InvalidOperationException("The devices available for this action changed. Select them again.");
             var request = targets.Request(action, latest);
             if (action is DeviceAction.Restore or DeviceAction.Revive)
                 _ = Track(request, targets);
             else
                 await Send(request);
+
+            void EnsureCurrent()
+            {
+                var current = trayDevice is null ? Selected : Devices.ToArray();
+                if ((trayDevice is null && current.Length != selected.Length) ||
+                    selected.Any(old => !current.Any(d => old.SameAttachment(d) && d.Supports(action))))
+                    throw new InvalidOperationException("The devices available for this action changed. Select them again.");
+            }
         });
     }
 

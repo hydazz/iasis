@@ -15,8 +15,7 @@ final class DeviceBrowser {
     var advancing: SetupDraft?
     var showsInspector = true
     var portToReveal: Device.ID?
-    /// The erase the user is being asked to confirm.
-    var confirming: RestoreConfirmation?
+    var restorePrompt: RestorePrompt?
     @ObservationIgnored private var planning: Task<Void, Never>?
 
     init(model: AgentModel) {
@@ -50,16 +49,34 @@ final class DeviceBrowser {
         await setupCheck.refresh(selectedSetup, model: model)
     }
 
-    /// Ask the agent what each device would be restored with, then ask the
-    /// user to confirm the erase.
-    func confirm(_ restore: RestoreConfirmation) {
-        guard planning == nil else { return }
+    func begin(_ operation: AgentState.Operation, on restore: RestoreConfirmation?, showDevices: () -> Void = {}) {
+        guard let restore, let state = model.state else { return }
+        let warnings = state.hubs.compactMap { hub -> String? in
+            guard restore.hubs.contains(where: { $0.hub == hub.serial }), let warning = hub.restorePowerWarning else { return nil }
+            return "\(state.title(for: hub))\n\(warning)"
+        }
+        if operation == .restore || !warnings.isEmpty {
+            showDevices()
+            guard restorePrompt == nil, planning == nil else { return }
+        }
+        if warnings.isEmpty {
+            proceed(with: operation, on: restore)
+        } else {
+            restorePrompt = .power(warnings.joined(separator: "\n\n"), operation, restore)
+        }
+    }
+
+    func proceed(with operation: AgentState.Operation, on restore: RestoreConfirmation) {
+        if operation == .revive {
+            model.perform([.revive(hubs: restore.hubs, latest: false)])
+            return
+        }
         planning = Task {
             defer { planning = nil }
             guard let planned = await model.plan(restore.hubs) else { return }
             var confirmation = restore
             confirmation.planned = planned
-            confirming = confirmation
+            restorePrompt = .erase(confirmation)
         }
     }
 
@@ -85,6 +102,25 @@ final class DeviceBrowser {
     func devices(in ids: Set<Device.ID>) -> [Device] {
         let devices = model.state?.devices.filter { ids.contains($0.id) } ?? []
         return devices.count == ids.count ? devices : []
+    }
+}
+
+enum RestorePrompt {
+    case power(String, AgentState.Operation, RestoreConfirmation)
+    case erase(RestoreConfirmation)
+
+    var title: String {
+        switch self {
+        case .power: "Check Hub Power"
+        case let .erase(confirmation): confirmation.title
+        }
+    }
+
+    var message: String {
+        switch self {
+        case let .power(warning, _, _): warning
+        case let .erase(confirmation): confirmation.message
+        }
     }
 }
 

@@ -53,7 +53,7 @@ impl Signal {
             Self::Disabled => "Port disabled. Enable it before signalling.",
             Self::NoAttachment => "No CC attachment.",
             Self::NoTargetPower => {
-                "Host USB power is insufficient for targets. Connect an external power supply."
+                "To power the target ports, connect a power supply or use a USB-C host offering 1.5 A or 3 A."
             }
             Self::WaitingPower => {
                 "Target power unavailable. Check the supply and available port budget."

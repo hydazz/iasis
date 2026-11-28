@@ -281,7 +281,7 @@ impl Agent {
                                     port.dfu = false;
                                 }
                             }
-                            view.notice = notice;
+                            view.notice = notice.or(view.notice);
                             view
                         }
                         None => {
@@ -844,6 +844,10 @@ impl Agent {
             link.restore_ready(true)?;
             loop {
                 let targets = job::next_hold(&link)?;
+                if let Some(warning) = link.status().as_ref().and_then(view::restore_power_warning)
+                {
+                    log::warn!("Hub {:016x}: {warning}", link.hub().serial());
+                }
                 if let Err(error) = self.hold(hub, targets) {
                     *hub.notice.lock().unwrap() = Some(format!("{error:#}"));
                     self.changes.changed();

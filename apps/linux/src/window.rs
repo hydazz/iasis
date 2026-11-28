@@ -9,11 +9,11 @@ use std::{
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
-use iasis_api::{Reply, Request, Selection, State};
+use iasis_api::{Operation, Reply, Request, Selection, State};
 
 use crate::{
     agent::{self, Event},
-    device::{self, Actions, Device, DeviceId, Hub},
+    device::{self, Actions, Device, DeviceId, Hub, RestoreTargets},
     inspector::Inspector,
     preferences::Preferences,
     row::PortRow,
@@ -238,10 +238,8 @@ impl Window {
         simple("restart", |this| {
             this.perform_all(this.model.borrow().actions.restart.clone());
         });
-        simple("revive", |this| {
-            this.perform_all(this.model.borrow().actions.revive.clone());
-        });
-        simple("restore", |this| this.restore());
+        simple("revive", |this| this.install_selected(Operation::Revive));
+        simple("restore", |this| this.install_selected(Operation::Restore));
 
         let group = gio::SimpleActionGroup::new();
         self.advance_setup.set_enabled(false);
@@ -453,7 +451,7 @@ impl Window {
         };
         enable("dfu", !actions.dfu.is_empty());
         enable("restart", !actions.restart.is_empty());
-        enable("revive", actions.revive.is_some());
+        enable("revive", actions.restore.is_some());
         enable("restore", actions.restore.is_some());
         let selecting = self.model.borrow().selecting;
         // Selection mode names what is selected where the app's name was.
@@ -666,46 +664,80 @@ impl Window {
         });
     }
 
-    /// Ask what each device would get, then whether to erase them.
-    fn restore(self: &Rc<Self>) {
-        let Some(mut confirmation) = self.model.borrow().actions.restore.clone() else {
-            return;
-        };
-        let weak = Rc::downgrade(self);
+    fn install_selected(self: &Rc<Self>, operation: Operation) {
+        if let Some(targets) = self.model.borrow().actions.restore.clone() {
+            self.install(operation, targets);
+        }
+    }
+
+    pub fn install(self: &Rc<Self>, operation: Operation, targets: RestoreTargets) {
+        let this = self.clone();
         glib::spawn_future_local(async move {
-            let planned = agent::ask(Request::Plan {
-                hubs: confirmation.hubs.clone(),
-            })
-            .await;
-            let Some(this) = weak.upgrade() else { return };
-            match planned {
-                Ok(Reply::Plan(planned)) => confirmation.planned = planned,
-                Ok(Reply::Error(message)) | Err(message) => return this.toast(&message),
-                Ok(_) => {}
+            let warning = targets.power_warning(&this.model.borrow().hubs);
+            if let Some(warning) = warning {
+                this.present();
+                let dialog = adw::AlertDialog::new(Some("Limited Hub Power"), Some(&warning));
+                dialog.add_response("cancel", "_Cancel");
+                dialog.add_response("continue", "_Continue");
+                dialog.set_default_response(Some("cancel"));
+                dialog.set_close_response("cancel");
+                if dialog.choose_future(Some(&this.window)).await != "continue" {
+                    return;
+                }
             }
-            let dialog =
-                adw::AlertDialog::new(Some(&confirmation.heading()), Some(&confirmation.body()));
-            dialog.add_response("cancel", "_Cancel");
-            let choices = confirmation.choices();
-            for (index, choice) in choices.iter().enumerate() {
-                let id = index.to_string();
-                dialog.add_response(&id, &choice.label);
-                dialog.set_response_appearance(&id, adw::ResponseAppearance::Destructive);
-            }
-            dialog.set_default_response(Some("cancel"));
-            dialog.set_close_response("cancel");
-            let response = dialog.choose_future(Some(&this.window)).await;
-            let Some(choice) = response
-                .parse::<usize>()
-                .ok()
-                .and_then(|index| choices.into_iter().nth(index))
-            else {
+            if !targets.still_available(&this.model.borrow().hubs) {
+                this.present();
+                this.toast("The selected devices changed. Select them again.");
                 return;
+            }
+            let request = match operation {
+                Operation::Revive => Request::Revive {
+                    hubs: targets.hubs,
+                    latest: false,
+                },
+                Operation::Restore => {
+                    let Some(request) = this.confirm_erase(targets).await else {
+                        return;
+                    };
+                    request
+                }
             };
-            if let Err(message) = agent::perform(choice.request).await {
+            if let Err(message) = agent::perform(request).await {
+                this.present();
                 this.toast(&message);
             }
         });
+    }
+
+    async fn confirm_erase(&self, mut targets: RestoreTargets) -> Option<Request> {
+        match agent::ask(Request::Plan {
+            hubs: targets.hubs.clone(),
+        })
+        .await
+        {
+            Ok(Reply::Plan(planned)) => targets.planned = planned,
+            Ok(Reply::Error(message)) | Err(message) => {
+                self.toast(&message);
+                return None;
+            }
+            Ok(_) => {
+                self.toast("The service returned no restore plan.");
+                return None;
+            }
+        }
+        let dialog = adw::AlertDialog::new(Some(&targets.heading()), Some(&targets.body()));
+        dialog.add_response("cancel", "_Cancel");
+        let choices = targets.choices();
+        for (index, choice) in choices.iter().enumerate() {
+            let id = index.to_string();
+            dialog.add_response(&id, &choice.label);
+            dialog.set_response_appearance(&id, adw::ResponseAppearance::Destructive);
+        }
+        dialog.set_default_response(Some("cancel"));
+        dialog.set_close_response("cancel");
+        let response = dialog.choose_future(Some(&self.window)).await;
+        let choice = choices.into_iter().nth(response.parse::<usize>().ok()?)?;
+        Some(choice.request)
     }
 
     pub fn open_preferences(self: &Rc<Self>) {
