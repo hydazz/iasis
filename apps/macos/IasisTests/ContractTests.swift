@@ -84,6 +84,7 @@ struct ContractTests {
     private func written(_ value: some Encodable) throws -> Data {
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
+        encoder.dateEncodingStrategy = .iso8601
         return try encoder.encode(value)
     }
 

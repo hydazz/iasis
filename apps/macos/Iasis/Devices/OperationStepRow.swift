@@ -5,20 +5,14 @@ struct OperationStepRow: View {
     let waitingForImage: Bool
 
     var body: some View {
-        let progress = step.activeInstallProgress
+        let progress = step.activeRestoreProgress
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             mark
                 .frame(width: 16)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(step.kind.title)
-                        .foregroundStyle(step.state == .pending || step.state == .skipped ? .secondary : .primary)
-                    Spacer(minLength: 2)
-                    if let progress {
-                        Text("\(progress.percent)%").monospacedDigit().foregroundStyle(.secondary)
-                    }
-                }
+                Text(step.kind.title)
+                    .foregroundStyle(step.state == .pending || step.state == .skipped ? .secondary : .primary)
                 if let detail = step.detail {
                     Text(detail).font(.callout).foregroundStyle(.secondary)
                 }
@@ -33,8 +27,13 @@ struct OperationStepRow: View {
                     Text(error).font(.callout).textSelection(.enabled)
                 } else if waitingForImage, step.kind == .restore || step.kind == .revive, step.state == .active || step.state == .pending {
                     Text("Waiting for image…").font(.callout).foregroundStyle(.secondary)
-                } else if let caption = progress?.activityCaption {
-                    Text(caption).font(.callout).foregroundStyle(.secondary)
+                } else {
+                    if let caption = progress?.activityCaption {
+                        Text(caption).font(.callout).foregroundStyle(.secondary)
+                    }
+                    if step.isActiveRestore, let finish = step.estimatedCompletionAt {
+                        RestoreTimeRemaining(estimate: RestoreEstimate(finish: finish))
+                    }
                 }
             }
         }
@@ -45,11 +44,34 @@ struct OperationStepRow: View {
     @ViewBuilder private var mark: some View {
         if step.state == .pending {
             Image(systemName: "circle.fill").imageScale(.large).foregroundStyle(.tertiary)
-        } else if step.state == .active, step.kind == .restore || step.kind == .revive {
+        } else if step.isActiveRestore {
             Image(systemName: step.kind == .restore ? DeviceSymbol.restore : DeviceSymbol.revive)
         } else {
             ActivityMark(activity: step.activity)
         }
+    }
+}
+
+struct RestoreTimeRemaining: View {
+    let estimate: RestoreEstimate
+    var compact = false
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            if let minutes = estimate.minutesRemaining(at: context.date) {
+                if compact {
+                    (minutes == 0 ? Text("<1 min left") : Text("\(minutes) min left"))
+                        .help("Estimated time remaining")
+                } else if minutes == 0 {
+                    Text("Less than a minute remaining")
+                } else {
+                    Text("About \(minutes) min remaining")
+                }
+            }
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .monospacedDigit()
     }
 }
 

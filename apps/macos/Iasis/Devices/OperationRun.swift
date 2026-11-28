@@ -44,9 +44,9 @@ extension AgentState.OperationStep {
         switch state {
         case .pending: return Activity("\(kind.title) Pending", .pending)
         case .active:
-            if let progress = activeInstallProgress {
+            if let progress = activeRestoreProgress {
                 let symbol = kind == .restore ? DeviceSymbol.restore : DeviceSymbol.revive
-                return Activity("\(kind.activeTitle) \(progress.percent)%", .working(Double(progress.percent) / 100), symbol: "\(symbol).circle")
+                return Activity(kind.activeTitle, .working(Double(progress.percent) / 100), symbol: "\(symbol).circle")
             }
             return Activity(kind.activeTitle, .working(nil))
         case .complete: return Activity(kind.completedTitle, .done)
@@ -57,8 +57,52 @@ extension AgentState.OperationStep {
         }
     }
 
-    var activeInstallProgress: AgentState.Progress? {
-        state == .active && (kind == .restore || kind == .revive) ? progress : nil
+    var activeRestoreProgress: AgentState.Progress? {
+        isActiveRestore ? progress : nil
+    }
+
+    var isActiveRestore: Bool {
+        state == .active && (kind == .restore || kind == .revive)
+    }
+}
+
+struct ActiveRestores {
+    let count: Int
+    let estimate: RestoreEstimate?
+
+    init(devices: [Device]) {
+        var finishes: [Date?] = []
+        for device in devices {
+            let run = device.run
+            if let step = run?.steps.first(where: \.isActiveRestore) {
+                finishes.append(device.port.awaiting == nil ? step.estimatedCompletionAt : nil)
+            } else if run == nil, let job = device.port.job, job.phase == .running || job.phase == .preparing {
+                finishes.append(nil)
+            }
+        }
+        count = finishes.count
+        let known = finishes.compactMap(\.self)
+        if known.count == count, let first = known.min(), let last = known.max() {
+            estimate = RestoreEstimate(finish: last, validUntil: first)
+        } else {
+            estimate = nil
+        }
+    }
+}
+
+struct RestoreEstimate {
+    private let firstFinish: Date
+    private let lastFinish: Date
+
+    init(finish: Date, validUntil: Date? = nil) {
+        firstFinish = validUntil ?? finish
+        lastFinish = finish
+    }
+
+    func minutesRemaining(at date: Date) -> Int? {
+        guard date < firstFinish else { return nil }
+        let seconds = lastFinish.timeIntervalSince(date)
+        return seconds < 60 ? 0 : Int((seconds / 60).rounded())
     }
 }
 

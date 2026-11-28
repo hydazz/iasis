@@ -88,7 +88,7 @@ struct DeviceTests {
         let activity = { (state: AgentState, port: Int) in state.devices[port - 1].activity }
         #expect(activity(state, 1) == .idle)
         #expect(activity(state, 2) == Activity("DFU", .none))
-        #expect(activity(state, 3) == Activity("Restoring 43%", .working(0.43), symbol: "arrow.counterclockwise.circle"))
+        #expect(activity(state, 3) == Activity("Restoring", .working(0.43), symbol: "arrow.counterclockwise.circle"))
         #expect(activity(state, 5) == Activity("Protection tripped", .failed))
         state.hubs[0].ports[4].enabled = false
         #expect(activity(state, 5) == Activity("Protection tripped", .failed))
@@ -105,20 +105,20 @@ struct DeviceTests {
         #expect(activity(state, 2) == Activity("Restarting", .working(nil)))
     }
 
-    @Test func onlyTheActiveInstallReportsItsPercentAndActivity() throws {
+    @Test func onlyTheActiveRestoreReportsItsPercentAndActivity() throws {
         var state = try Fixtures.state
         var run = try #require(state.devices[2].port.run)
         #expect(run.steps.map(\.kind) == [.restore, .setRegion, .activate, .requestEnrollment])
         #expect(run.steps[0].detail == "iPadOS 27.2.1 (24B156)")
         #expect(run.steps[1].detail?.contains("en-AU") == true)
-        #expect(run.steps[0].activeInstallProgress?.percent == 43)
-        #expect(run.steps[0].activeInstallProgress?.activityCaption == "Sending filesystem…")
+        #expect(run.steps[0].activeRestoreProgress?.percent == 43)
+        #expect(run.steps[0].activeRestoreProgress?.activityCaption == "Sending filesystem…")
         run.steps[0].progress?.name = "Sending Image"
-        #expect(run.steps[0].activeInstallProgress?.activityCaption == "Sending image…")
+        #expect(run.steps[0].activeRestoreProgress?.activityCaption == "Sending image…")
         run.steps[0].state = .failed
-        #expect(run.steps[0].activeInstallProgress == nil)
+        #expect(run.steps[0].activeRestoreProgress == nil)
         run.steps[0].state = .complete
-        #expect(run.steps[0].activeInstallProgress == nil)
+        #expect(run.steps[0].activeRestoreProgress == nil)
         run.steps[1].state = .active
         state.hubs[0].ports[2].run = run
         #expect(state.devices[2].activity == Activity("Setting Language and Region", .working(nil)))
@@ -157,6 +157,72 @@ struct DeviceTests {
         #expect(state.waitingForDownload == 2)
     }
 
+    @Test func theSelectionEstimatesTheLastActiveRestore() throws {
+        var state = try Fixtures.state
+        state.hubs[0].ports[2].run?.steps[0].estimatedCompletionAt = Date(timeIntervalSince1970: 1000)
+        state.hubs[0].ports[3].run?.steps[0].kind = .revive
+        state.hubs[0].ports[3].run?.steps[0].state = .active
+        state.hubs[0].ports[3].run?.steps[0].estimatedCompletionAt = Date(timeIntervalSince1970: 1090)
+        let estimate = try #require(ActiveRestores(devices: state.devices).estimate)
+        #expect(estimate.minutesRemaining(at: Date(timeIntervalSince1970: 935)) == 3)
+        #expect(estimate.minutesRemaining(at: Date(timeIntervalSince1970: 999)) == 2)
+        #expect(estimate.minutesRemaining(at: Date(timeIntervalSince1970: 1000)) == nil)
+
+        for phase: AgentState.RestorePhase in [.preparing, .running] {
+            state.hubs[0].ports[1].job = .init(operation: .restore, phase: phase)
+            #expect(ActiveRestores(devices: state.devices).estimate == nil)
+        }
+        state.hubs[0].ports[1].job = nil
+        state.hubs[0].ports[2].awaiting = "image"
+        #expect(ActiveRestores(devices: state.devices).estimate == nil)
+        state.hubs[0].ports[2].awaiting = nil
+        state.hubs[0].ports[2].run?.steps[0].progress = nil
+        #expect(ActiveRestores(devices: state.devices).estimate?.minutesRemaining(at: Date(timeIntervalSince1970: 935)) == 3)
+        state.hubs[0].ports[2].run?.steps[0].state = .complete
+        state.hubs[0].ports[2].run?.steps[1].state = .active
+        let remaining = try #require(ActiveRestores(devices: state.devices).estimate)
+        #expect(remaining.minutesRemaining(at: Date(timeIntervalSince1970: 1030)) == 1)
+        #expect(remaining.minutesRemaining(at: Date(timeIntervalSince1970: 1031)) == 0)
+        #expect(remaining.minutesRemaining(at: Date(timeIntervalSince1970: 1090)) == nil)
+        state.hubs[0].ports[3].run?.steps[0].estimatedCompletionAt = nil
+        #expect(ActiveRestores(devices: state.devices).estimate == nil)
+        state.hubs[0].ports[3].run?.steps[0].estimatedCompletionAt = Date(timeIntervalSince1970: 1090)
+        state.hubs[0].ports[3].run?.steps[0].state = .failed
+        #expect(ActiveRestores(devices: state.devices).estimate == nil)
+    }
+
+    @Test func theWindowFollowsRestoresAsTheyJoinAndLeaveAcrossHubs() throws {
+        var state = try Fixtures.state
+        let now = Date(timeIntervalSince1970: 900)
+        let first = Date(timeIntervalSince1970: 1000)
+        state.hubs[0].ports[2].run?.steps[0].estimatedCompletionAt = Date(timeIntervalSince1970: 1000)
+        let restores = { (state: AgentState) in ActiveRestores(devices: state.devices) }
+        #expect(restores(state).count == 1)
+        #expect(restores(state).estimate?.minutesRemaining(at: now) == 2)
+
+        var cart = state.hubs[0]
+        cart.serial = "817a23bd502453b4"
+        cart.ports = [cart.ports[2]]
+        cart.ports[0].run?.steps[0].kind = .revive
+        cart.ports[0].run?.steps[0].estimatedCompletionAt = nil
+        state.hubs.append(cart)
+        #expect(restores(state).count == 2)
+        #expect(restores(state).estimate == nil)
+        state.hubs[1].ports[0].run?.steps[0].estimatedCompletionAt = Date(timeIntervalSince1970: 1090)
+        #expect(restores(state).estimate?.minutesRemaining(at: now) == 3)
+        #expect(restores(state).estimate?.minutesRemaining(at: first) == nil)
+        #expect(restores(state).count == 2)
+        #expect(state.devices[2].activity.text == "Restoring")
+
+        state.hubs[0].ports[2].run?.steps[0].state = .complete
+        state.hubs[0].ports[2].run?.steps[1].state = .active
+        #expect(restores(state).count == 1)
+        #expect(restores(state).estimate?.minutesRemaining(at: first) == 2)
+        state.hubs[1].ports[0].run?.steps[0].state = .unconfirmed
+        #expect(restores(state).count == 0)
+        #expect(restores(state).estimate == nil)
+    }
+
     @Test func anActiveRunFollowsThePortAcrossReboots() throws {
         var state = try Fixtures.state
         state.hubs[0].ports[2].occupied = false
@@ -164,7 +230,7 @@ struct DeviceTests {
         state.hubs[0].ports[2].job = nil
         let waiting = state.devices[2]
         #expect(waiting.name == "Waiting for Device")
-        #expect(waiting.activity.text == "Restoring 43%")
+        #expect(waiting.activity.text == "Restoring")
 
         state.hubs[0].ports[2].run = state.hubs[0].ports[3].run
         #expect(state.devices[2].run == nil)

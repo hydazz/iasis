@@ -176,7 +176,7 @@ Advance Setup activates the device if needed. With enrollment enabled, it then r
 
 The host stays out of idle sleep from a target's preparation until its restore ends, while its display can still sleep. On battery, a Windows laptop with Modern Standby drops that hold five minutes after its sleep timeout.
 
-The device inspector shows the requested steps and keeps each outcome. During installation, the restore row shows the current activity and overall percentage. The percentage can hold steady during repeated firmware and image transfers.
+The device inspector shows the requested steps and keeps each outcome. During installation, the restore row shows the current activity, an overall progress bar and an approximate countdown.
 
 Logs and working files go under `restores/` in the agent's cache directory. Allow space for an extracted OS image per worker. Iasis matches each image to the target's chip and board IDs, or to its product type when only a model identifier is available. The restore program checks Apple signing.
 

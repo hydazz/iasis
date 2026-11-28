@@ -195,7 +195,7 @@ struct MenuTests {
         submenu.performActionForItem(at: submenu.index(of: open))
         #expect(opened && browser.showsInspector)
         #expect(browser.inspected?.port.number == 2)
-        #expect(menu.item(withTitle: "iPad")?.subtitle == "Restoring 43%")
+        #expect(menu.item(withTitle: "iPad")?.subtitle == "Restoring")
         let download = try #require(menu.item(withTitle: "Downloading iPadOS 27.2.1"))
         #expect(download.subtitle == "42%")
         #expect(!download.isEnabled)
@@ -221,7 +221,7 @@ struct MenuTests {
         await whileMenuTracks {
             Task { await agent.publish(next) }
         } until: {
-            row.subtitle == "Restoring 84%" && restart.isEnabled && download.subtitle == "73%"
+            row.subtitle == "Restoring" && restart.isEnabled && download.subtitle == "73%"
         }
         #expect(menu.item(withTitle: "iPad") === row)
         #expect(row.submenu === submenu)

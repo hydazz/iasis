@@ -163,6 +163,7 @@ nonisolated enum AgentReply: Decodable, Equatable {
     init(line: Data) throws {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
+        decoder.dateDecodingStrategy = .iso8601
         self = try decoder.decode(Self.self, from: line)
     }
 

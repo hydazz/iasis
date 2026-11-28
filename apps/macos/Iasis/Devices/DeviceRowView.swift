@@ -25,6 +25,10 @@ struct DeviceRowView: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
+            if device.port.awaiting == nil, let finish = device.run?.steps.first(where: \.isActiveRestore)?.estimatedCompletionAt {
+                RestoreTimeRemaining(estimate: RestoreEstimate(finish: finish), compact: true)
+                    .lineLimit(1)
+            }
             ActivityMark(activity: activity)
         }
         .accessibilityElement(children: .combine)

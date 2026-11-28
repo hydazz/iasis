@@ -228,9 +228,6 @@ nonisolated struct AgentState: Codable, Equatable {
     struct Progress: Codable, Equatable {
         var name: String
         var percent: UInt8
-        var steps: [String]
-        /// The step under way. The steps before it are done.
-        var step: Int
     }
 
     /// The port's light on the hub.
@@ -281,6 +278,7 @@ nonisolated struct AgentState: Codable, Equatable {
         var system: SystemImage?
         var language: SetupLanguage?
         var progress: Progress?
+        var estimatedCompletionAt: Date?
         var error: String?
     }
 

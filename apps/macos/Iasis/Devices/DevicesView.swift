@@ -96,7 +96,12 @@ struct DevicesView: View {
                         } else if browser.selection.count == 1 {
                             Text("Port Unavailable")
                         } else {
-                            Text("\(browser.selection.count) Ports Selected")
+                            VStack {
+                                Text("\(browser.selection.count) Ports Selected")
+                                if let estimate = ActiveRestores(devices: browser.selected).estimate {
+                                    RestoreTimeRemaining(estimate: estimate)
+                                }
+                            }
                         }
                     }
                     .foregroundStyle(.secondary)
@@ -205,39 +210,46 @@ private struct HubHeader: View {
     }
 }
 
-/// The image the agent is downloading, while it downloads one, and how many
-/// devices wait for it.
 private struct AgentStatusBar: View {
     let state: AgentState
 
     var body: some View {
-        if let fetch = state.images.fetch {
-            bar {
-                Label("Downloading \(state.images.fetching?.title ?? "Image")", systemImage: DeviceSymbol.download)
-                ProgressView(value: fetch.fraction)
-                    .frame(maxWidth: 160)
-                Text("\(fetch.percent)%")
-                    .monospacedDigit()
-                switch state.waitingForDownload {
-                case 0: EmptyView()
-                case 1: Text("1 device waiting")
-                case let waiting: Text("\(waiting) devices waiting")
+        let restores = ActiveRestores(devices: state.devices)
+        if restores.count > 0 || state.images.fetch != nil {
+            VStack(alignment: .leading, spacing: 4) {
+                if restores.count > 0 {
+                    HStack {
+                        Text(restores.count == 1 ? "1 restore in progress" : "\(restores.count) restores in progress")
+                        Spacer()
+                        if let estimate = restores.estimate {
+                            RestoreTimeRemaining(estimate: estimate)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+                if let fetch = state.images.fetch {
+                    HStack(spacing: 8) {
+                        Label("Downloading \(state.images.fetching?.title ?? "Image")", systemImage: DeviceSymbol.download)
+                        ProgressView(value: fetch.fraction)
+                            .frame(maxWidth: 160)
+                        Text("\(fetch.percent)%")
+                        switch state.waitingForDownload {
+                        case 0: EmptyView()
+                        case 1: Text("1 device waiting")
+                        case let waiting: Text("\(waiting) devices waiting")
+                        }
+                        Spacer(minLength: 0)
+                    }
                 }
             }
+            .font(.callout)
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.bar)
+            .overlay(alignment: .top) { Divider() }
         }
-    }
-
-    private func bar(@ViewBuilder content: () -> some View) -> some View {
-        HStack(spacing: 8) {
-            content()
-            Spacer(minLength: 0)
-        }
-        .font(.callout)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
     }
 }
