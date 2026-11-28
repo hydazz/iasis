@@ -6,7 +6,7 @@ The hardware is a prototype.
 
 ## Hardware
 
-The main board has a USB-C power input and a charging supply for each target port. A power supply on that input runs the hub and charges the targets. Without one, host USB powers the hub and its ports for restores of charged targets.
+The main board has a USB-C power input and a charging supply for each target port. A power supply on that input runs the hub and charges the targets. Without one, the host port runs the hub, and a USB-C host advertising 1.5 A or 3 A also powers the targets.
 
 The optional [CM5 carrier](hardware/boards/cm5/README.md) plugs into the main board and houses a Compute Module 5, NVMe storage and Ethernet. The [printed case](hardware/case/README.md) holds the main board alone or with the carrier, with plain or OLED lids.
 
@@ -79,9 +79,7 @@ After a DFU the port pulses blue. It turns steady blue once a host sees the targ
 
 A steady white port light marks a device Iasis cannot act on, such as a USB peripheral or a laptop. It can use USB normally. DFU leaves target data intact and works with Apple Configurator. `power <port> off` disables a port. `power <port> on` enables it and retries a fault. The selected hub stores its name and light brightness in flash.
 
-A USB-C host advertising 1.5 A or 3 A can power the targets. Default USB requires the charging input.
-
-The [firmware power table](crates/firmware/README.md#port-power) lists the limits.
+With Default USB power, including an A-to-C cable, the target ports stay off until a power supply is connected. A USB-C host advertising 1.5 A or 3 A can power the ports directly. They share the available current. Connect external power if the targets draw more during recovery. See the [firmware power table](crates/firmware/README.md#port-power) for the limits.
 
 ### Host agent
 
