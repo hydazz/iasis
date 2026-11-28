@@ -190,9 +190,8 @@ impl Allocation {
     }
 }
 
-/// An attachment keeps its presence path. A newcomer waits if peers on
-/// stages can make room by advertising less. If its starting load cannot
-/// fit even then, it can join the shared presence rail with the watts left.
+/// Keep a restore on presence. Other targets can move to a charging stage
+/// once the brick covers their starting load.
 pub fn allocate(
     brick_mw: u32,
     input_mv: u16,
@@ -202,16 +201,18 @@ pub fn allocate(
     demands: [PortDemand; 5],
 ) -> Allocation {
     let mut stages = demands;
+    let mut restoring_on_presence = false;
     for (port, path) in stages.iter_mut().zip(paths) {
-        if path == Supply::HostPresence {
+        if path == Supply::HostPresence && port.restoring {
             port.attached = false;
+            restoring_on_presence = true;
         }
     }
     let on_presence = paths.contains(&Supply::HostPresence);
-    // New stage starts share what remains after the live presence tier.
+    // A restore keeps the live limiter tier while other ports change paths.
     let retained = presence
         .zip(programmed)
-        .filter(|_| on_presence)
+        .filter(|_| restoring_on_presence)
         .map(|(max, old)| {
             if old.upper_ma <= max.upper_ma {
                 old
@@ -229,8 +230,10 @@ pub fn allocate(
             .any(|i| stages[i].attached && paths[i] == Supply::Off && shares[i] == Grant::Off);
         if on_presence || overflow {
             let mut spare = brick_mw;
-            for (port, grant) in stages.iter().zip(shares) {
-                let floor = if grant == Grant::Off {
+            for ((port, grant), path) in stages.iter().zip(shares).zip(paths) {
+                let floor = if grant == Grant::Off
+                    || (grant == Grant::Waiting && path == Supply::HostPresence)
+                {
                     0
                 } else {
                     Contract::USB_DEFAULT.cost_mw()
@@ -252,7 +255,8 @@ pub fn allocate(
     for i in 0..5 {
         if tier.is_some()
             && demands[i].attached
-            && shares[i] == Grant::Off
+            && (shares[i] == Grant::Off
+                || (paths[i] == Supply::HostPresence && shares[i] == Grant::Waiting))
             && paths[i] != Supply::Brick
         {
             shares[i] = Grant::Presence;
@@ -400,60 +404,42 @@ mod tests {
     }
 
     #[test]
-    fn presence_reserves_one_tier_across_all_ports_on_both_inputs() {
+    fn only_the_restoring_port_stays_on_presence_when_the_brick_arrives() {
         let sink = PortDemand {
             attached: true,
             ..Default::default()
         };
-        let demands = [sink; 5];
+        let mut demands = [sink; 5];
         let tier = host_limit(3000);
         let host = allocate(0, 0, tier, None, [Supply::Off; 5], demands);
         assert_eq!(host.shares, [Grant::Presence; 5]);
 
-        let paths = [
-            Supply::HostPresence,
-            Supply::HostPresence,
-            Supply::Off,
-            Supply::Off,
-            Supply::Off,
-        ];
+        let paths = [Supply::HostPresence; 5];
+        demands[0].restoring = true;
         let brick = allocate(60_000, 19_000, tier, tier, paths, demands);
         assert_eq!(brick.supply(), Supply::Brick);
-        assert_eq!(brick.shares[..2], [Grant::Presence; 2]);
+        assert_eq!(brick.shares[0], Grant::Presence);
+        assert_eq!(brick.tier, tier);
         assert_eq!(brick.stage_mw, 60_000 - tier.unwrap().cost_mw());
         assert!(
-            brick.shares[2..]
+            brick.shares[1..]
                 .iter()
                 .all(|grant| matches!(grant, Grant::Brick { .. }))
         );
-        let lost = allocate(
-            0,
-            0,
-            tier,
-            tier,
-            [
-                paths[0],
-                paths[1],
-                Supply::Brick,
-                Supply::Brick,
-                Supply::Brick,
-            ],
-            demands,
-        );
-        assert_eq!(
-            lost.shares,
-            [
-                Grant::Presence,
-                Grant::Presence,
-                Grant::Off,
-                Grant::Off,
-                Grant::Off
-            ]
-        );
+        let mut paths = [Supply::Brick; 5];
+        paths[0] = Supply::HostPresence;
+        demands[1].restoring = true;
+        let lost = allocate(0, 0, tier, tier, paths, demands);
+        assert_eq!(lost.shares[0], Grant::Presence);
+        assert_eq!(lost.shares[1..], [Grant::Off; 4]);
+
+        demands[0].restoring = false;
+        let finished = allocate(60_000, 19_000, tier, tier, paths, demands);
+        assert!(matches!(finished.shares[0], Grant::Brick { .. }));
     }
 
     #[test]
-    fn presence_stays_on_its_path_while_the_isolated_brick_qualifies_and_falls() {
+    fn a_restore_keeps_presence_while_the_isolated_brick_qualifies_and_falls() {
         let mut status = Status {
             host_allowance_ma: 3000,
             ..Status::default()
@@ -462,6 +448,7 @@ mod tests {
         let paths = status.ports.map(|p| p.supply);
         let mut demands = [PortDemand::default(); 5];
         demands[0].attached = true;
+        demands[0].restoring = true;
         let mut isolated = true;
         let mut programmed = host_limit(3000);
         for (bus_mv, fault, admission, qualified, expected_gate, expected_ma) in [
@@ -548,6 +535,28 @@ mod tests {
         let held = allocate(weak, 19_000, tier, first.tier, paths, demands);
         assert_eq!(held.shares, first.shares);
         assert_eq!(held.tier, first.tier);
+
+        // The brick can fund two stages once the first releases its old offer.
+        demands[0].advertised_mw = 2 * start;
+        let budget = 2 * start + 1000;
+        let waiting = allocate(budget, 19_000, tier, held.tier, paths, demands);
+        assert_eq!(waiting.shares[1], Grant::Presence);
+        demands[0].advertised_mw = start;
+        let ready = allocate(budget, 19_000, tier, waiting.tier, paths, demands);
+        assert!(matches!(ready.shares[1], Grant::Brick { .. }));
+    }
+
+    #[test]
+    fn an_idle_port_can_charge_from_a_brick_too_small_for_its_previous_limiter_tier() {
+        let mut demands = [PortDemand::default(); 5];
+        demands[0].attached = true;
+        let mut paths = [Supply::Off; 5];
+        paths[0] = Supply::HostPresence;
+        let brick_mw = Contract::USB_DEFAULT.cost_mw() + 1000;
+        let allowed = presence_limit(3000, brick_mw);
+        let plan = allocate(brick_mw, 9000, allowed, host_limit(3000), paths, demands);
+        assert!(matches!(plan.shares[0], Grant::Brick { .. }));
+        assert!(plan.stage_mw + plan.tier.map_or(0, HostLimit::cost_mw) <= brick_mw);
     }
 
     #[test]

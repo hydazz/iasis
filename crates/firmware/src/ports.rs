@@ -293,7 +293,12 @@ impl Ports {
     }
 
     pub fn demands(&self) -> [PortDemand; PORT_COUNT] {
-        self.ports.each_ref().map(|port| port.demand.get())
+        self.ports.each_ref().map(|port| {
+            let mut demand = port.demand.get();
+            // A host report can arrive before the port task publishes again.
+            demand.restoring |= port.status.get().restoring();
+            demand
+        })
     }
 
     pub fn grant(
