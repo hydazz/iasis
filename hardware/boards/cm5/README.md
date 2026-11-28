@@ -1,12 +1,12 @@
 # CM5 carrier
 
-An optional Raspberry Pi Compute Module 5 carrier for Iasis. It plugs into the main board's HubPD population and carries Ethernet, NVMe storage, an accessory USB-C port and a service USB-C port. The [CM5 case](../../case/README.md#cm5-assembly) holds both boards.
+An optional Raspberry Pi Compute Module 5 carrier for Iasis. It plugs into the main board's side socket and carries Ethernet, NVMe storage, an accessory USB-C port and a service USB-C port. The [CM5 case](../../case/README.md#cm5-assembly) holds both boards.
 
 ## Parts and power
 
 | Item                      | Requirement or limit                                       |
 | ------------------------- | ---------------------------------------------------------- |
-| Main board                | HubPD, with its fitted side socket and power feed          |
+| Main board                | Default population, with the side socket and its feed      |
 | Input                     | USB-C PD supply offering 20 V, connected to the main board |
 | Storage                   | eMMC on the module, or NVMe for CM5 Lite; no microSD slot  |
 | NVMe SSD                  | M-key, 2230 / 2242 / 2280, up to 6 W                       |

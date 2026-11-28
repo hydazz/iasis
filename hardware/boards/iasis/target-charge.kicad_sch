@@ -3802,7 +3802,7 @@
 		)
 		(uuid "4ecfa078-7548-4ad4-b498-f43b66e59bdb")
 	)
-	(text "TPS55288 at I2C 0x75 on the port channel (MODE open: external VCC, PFM). OE defaults off; EN low resets the registers.\nFSW 47k: 425 kHz. ILIM 47k: 7.0 A average inductor limit. Output limit via 10 mOhm sense, up to 6.35 A by register.\nOutput switch: LM74502 with back-to-back FETs; OV trips at 6.6 V, or 23 V with OV_HIGH set (default off).\nHub population: entire sheet DNP."
+	(text "TPS55288 at I2C 0x75 on the port channel (MODE open: external VCC, PFM). OE defaults off; EN low resets the registers.\nFSW 47k: 425 kHz. ILIM 47k: 7.0 A average inductor limit. Output limit via 10 mOhm sense, up to 6.35 A by register.\nOutput switch: LM74502 with back-to-back FETs; OV trips at 6.6 V, or 23 V with OV_HIGH set (default off)."
 		(exclude_from_sim no)
 		(at 25.4 248.92 0)
 		(effects
@@ -5323,17 +5323,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 281.94 172.72 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(property "Manufacturer" "Jiangsu Changjing Electronics Technology Co., Ltd."
 			(at 281.94 172.72 0)
 			(hide yes)
@@ -5571,17 +5560,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 317.5 63.5 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "8ad2edcb-f78e-4754-80ba-98380dae5bc3")
 		)
@@ -5710,17 +5688,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 63.5 85.09 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(property "Manufacturer" "Samsung Electro-Mechanics"
 			(at 63.5 85.09 0)
 			(hide yes)
@@ -5819,17 +5786,6 @@
 			)
 		)
 		(property "Description" ""
-			(at 157.48 179.07 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 157.48 179.07 0)
 			(hide yes)
 			(show_name no)
@@ -5993,17 +5949,6 @@
 			)
 		)
 		(property "Manufacturer" "Samsung Electro-Mechanics"
-			(at 45.72 186.69 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 45.72 186.69 0)
 			(hide yes)
 			(show_name no)
@@ -6236,17 +6181,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 93.98 85.09 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "4b11c36c-15a2-4439-9a96-7e5275dacb3b")
 		)
@@ -6334,17 +6268,6 @@
 			)
 		)
 		(property "Description" "Polarized capacitor"
-			(at 332.74 102.87 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 332.74 102.87 0)
 			(hide yes)
 			(show_name no)
@@ -6669,17 +6592,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 99.06 186.69 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(property "LCSC" "C25796"
 			(at 99.06 186.69 0)
 			(hide yes)
@@ -6800,17 +6712,6 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 271.78 163.83 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 271.78 163.83 0)
 			(hide yes)
 			(show_name no)
@@ -6984,17 +6885,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 276.86 87.63 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "c918273f-284a-4378-931b-37e21a613438")
 		)
@@ -7104,17 +6994,6 @@
 			)
 		)
 		(property "MPN" "CL32B106KBJNNNE"
-			(at 243.84 64.77 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 243.84 64.77 0)
 			(hide yes)
 			(show_name no)
@@ -7348,17 +7227,6 @@
 			)
 		)
 		(property "Manufacturer" "Samsung Electro-Mechanics"
-			(at 166.37 134.62 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 166.37 134.62 0)
 			(hide yes)
 			(show_name no)
@@ -7685,17 +7553,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 99.06 194.31 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "56b862d9-8668-418b-930b-b49ba6624d5a")
 		)
@@ -7997,17 +7854,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 204.47 101.6 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(property "Manufacturer" "Coilank"
 			(at 204.47 101.6 0)
 			(hide yes)
@@ -8106,17 +7952,6 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 63.5 186.69 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 63.5 186.69 0)
 			(hide yes)
 			(show_name no)
@@ -8382,17 +8217,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 132.08 132.08 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "427d1d02-dcde-4b68-ad98-d0dc6eb8e477")
 		)
@@ -8584,17 +8408,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 251.46 64.77 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(property "Manufacturer" "Samsung Electro-Mechanics"
 			(at 251.46 64.77 0)
 			(hide yes)
@@ -8693,17 +8506,6 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 81.28 186.69 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 81.28 186.69 0)
 			(hide yes)
 			(show_name no)
@@ -8926,17 +8728,6 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 284.48 163.83 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 284.48 163.83 0)
 			(hide yes)
 			(show_name no)
@@ -9202,17 +8993,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 177.8 114.3 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "9476bb95-2045-4194-a3a3-4bb144536e0b")
 		)
@@ -9444,17 +9224,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 297.18 63.5 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "eac14866-c4eb-4148-91e6-876f70e816d6")
 		)
@@ -9594,17 +9363,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 287.02 104.14 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "8556522a-c0b4-40d3-b828-65e4c08dd24f")
 		)
@@ -9725,17 +9483,6 @@
 			)
 		)
 		(property "Manufacturer" "Samsung Electro-Mechanics"
-			(at 119.38 186.69 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 119.38 186.69 0)
 			(hide yes)
 			(show_name no)
@@ -9938,18 +9685,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "PD"
-			(at 232.41 44.45 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(pin "1"
 			(uuid "d2e1f900-730d-47d7-8f4a-84c2e164cbc4")
 		)
@@ -10124,17 +9859,6 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 262.89 60.96 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 262.89 60.96 0)
 			(hide yes)
 			(show_name no)
@@ -10389,17 +10113,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 309.88 101.6 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(property "Manufacturer" "Texas Instruments"
 			(at 309.88 101.6 0)
 			(hide yes)
@@ -10538,17 +10251,6 @@
 			)
 		)
 		(property "MPN" "CL32B106KBJNNNE"
-			(at 73.66 85.09 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 73.66 85.09 0)
 			(hide yes)
 			(show_name no)
@@ -10792,17 +10494,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 271.78 176.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "195831d9-0a1c-45c8-9fcd-a0bb96e88123")
 		)
@@ -10933,17 +10624,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 166.37 124.46 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "6b659b74-e380-4fc7-b8f9-8797643e9e0d")
 		)
@@ -11031,17 +10711,6 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 151.13 175.26 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 151.13 175.26 0)
 			(hide yes)
 			(show_name no)
@@ -11399,17 +11068,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 177.8 93.98 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(pin "1"
 			(uuid "2d3a8556-2c84-4ba1-9194-febf92ed87d2")
 		)
@@ -11539,17 +11197,6 @@
 			)
 		)
 		(property "Manufacturer" "UNI-ROYAL(Uniroyal Elec)"
-			(at 271.78 156.21 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 271.78 156.21 0)
 			(hide yes)
 			(show_name no)
@@ -11868,18 +11515,6 @@
 				(justify left)
 			)
 		)
-		(property "Population" "PD"
-			(at 279.4 64.77 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
 		(property "Manufacturer" "Lelon"
 			(at 276.86 64.77 0)
 			(hide yes)
@@ -12000,17 +11635,6 @@
 			)
 		)
 		(property "MPN" "CL32B106KBJNNNE"
-			(at 228.6 64.77 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 228.6 64.77 0)
 			(hide yes)
 			(show_name no)
@@ -12235,17 +11859,6 @@
 			)
 		)
 		(property "MPN" "CL32B106KBJNNNE"
-			(at 83.82 85.09 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 83.82 85.09 0)
 			(hide yes)
 			(show_name no)
@@ -12481,17 +12094,6 @@
 				)
 			)
 		)
-		(property "Population" "PD"
-			(at 53.34 85.09 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
 		(property "Manufacturer" "Samsung Electro-Mechanics"
 			(at 53.34 85.09 0)
 			(hide yes)
@@ -12704,17 +12306,6 @@
 			)
 		)
 		(property "MPN" "CL32B106KBJNNNE"
-			(at 236.22 64.77 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 236.22 64.77 0)
 			(hide yes)
 			(show_name no)
@@ -12948,17 +12539,6 @@
 			)
 		)
 		(property "Manufacturer" "Samsung Electro-Mechanics"
-			(at 259.08 64.77 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "PD"
 			(at 259.08 64.77 0)
 			(hide yes)
 			(show_name no)

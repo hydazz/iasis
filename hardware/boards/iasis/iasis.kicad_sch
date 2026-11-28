@@ -56,7 +56,7 @@
 		)
 		(uuid "29f53299-0ae8-4951-97e2-32c6158bc88f")
 	)
-	(text "Common hub and control circuitry with an optional five-port charging population"
+	(text "Hub, control and five-port charging circuitry"
 		(exclude_from_sim no)
 		(at 25.4 26.67 0)
 		(effects
@@ -179,7 +179,7 @@
 		)
 		(uuid "d20cce80-9ebe-4c1c-89ae-da2537495c93")
 	)
-	(text "Optional USB-C charging power input"
+	(text "USB-C charging power input"
 		(exclude_from_sim no)
 		(at 284.48 168.91 0)
 		(effects
@@ -255,10 +255,6 @@
 			(project "iasis"
 				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5"
 					(page "32")
-					(variant
-						(name "Hub")
-						(dnp yes)
-					)
 				)
 			)
 		)
@@ -396,10 +392,6 @@
 			(project "iasis"
 				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5"
 					(page "33")
-					(variant
-						(name "Hub")
-						(dnp yes)
-					)
 				)
 			)
 		)
@@ -536,7 +528,7 @@
 				(path "/a379403c-5d83-493f-982e-fb5e1b803ee5"
 					(page "34")
 					(variant
-						(name "Hub")
+						(name "NoCM5")
 						(dnp yes)
 					)
 				)

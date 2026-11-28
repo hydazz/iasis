@@ -1,6 +1,6 @@
 # Iasis board
 
-The main board connects five target USB-C ports to a host and controls their power and DFU signalling. HubPD adds charging supplies and a socket for the optional [CM5 carrier](../cm5/README.md).
+The main board connects five target USB-C ports to a host and controls their power and DFU signalling. It has a USB-C power input, a charging supply for each port and a socket for the optional [CM5 carrier](../cm5/README.md).
 
 <img src="board.png" alt="Iasis main PCB, top side" width="400">
 
@@ -15,12 +15,12 @@ mise run //hardware/boards/iasis:fab
 
 Outputs go to `build/boards/iasis/`. Both populations use the same `gerbers.zip`:
 
-| Population      | Assembly files               | Includes                                         |
-| --------------- | ---------------------------- | ------------------------------------------------ |
-| HubPD (default) | `bom.csv`, `cpl.csv`         | Charging supplies, protected CM5 feed and socket |
-| Hub             | `bom-Hub.csv`, `cpl-Hub.csv` | Host-powered hub and target presence supplies    |
+| Population | Assembly files                   | Includes                                                    |
+| ---------- | -------------------------------- | ----------------------------------------------------------- |
+| Default    | `bom.csv`, `cpl.csv`             | Every part, including the CM5 socket and its protected feed |
+| NoCM5      | `bom-NoCM5.csv`, `cpl-NoCM5.csv` | Every part except the CM5 socket and its feed               |
 
-The CM5 build uses HubPD plus the separate carrier. No main-board component changes are needed.
+The CM5 build uses the default population plus the separate carrier.
 
 ## JLCPCB order
 
@@ -52,4 +52,4 @@ Open `iasis.kicad_pro` in KiCad. Shared symbols, footprints and models are in `.
 
 Use `mise run //hardware/boards/iasis:step` for the populated STEP and `:preview` for `board.png`. The [board tools](../../tools/README.md) describe the exports and checks.
 
-`version.txt` holds the board's version, which the title blocks and the underside silkscreen print. Hub and HubPD share it. Each ordered version is a release tagged `iasis-board-v<version>` with its `gerbers.zip`, BOM and placement files attached. Revision A, the first order, is version 1.0.0; its files are in the `iasis-rev-a` release. Software versions are separate.
+`version.txt` holds the board's version, which the title blocks and the underside silkscreen print. Both populations share it. Each ordered version is a release tagged `iasis-board-v<version>` with its `gerbers.zip`, BOM and placement files attached. Revision A, the first order, is version 1.0.0; its files are in the `iasis-rev-a` release. Software versions are separate.

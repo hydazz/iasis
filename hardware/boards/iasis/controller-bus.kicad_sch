@@ -2008,7 +2008,7 @@
 		)
 		(uuid "b7d13560-3157-4ad2-9655-434e6e5d6ef7")
 	)
-	(text "I2C mux address 0x70; select one channel at a time. Channels 0-4 are targets 1-5; channel 5 is the host CC controller.\nChannel 6 reaches the hub strap/status pins without pull-ups; autonomous ROM boot takes priority.\nChannel 7 is the optional display and charging-input control bus."
+	(text "I2C mux address 0x70; select one channel at a time. Channels 0-4 are targets 1-5; channel 5 is the host CC controller.\nChannel 6 reaches the hub strap/status pins without pull-ups; autonomous ROM boot takes priority.\nChannel 7 is the charging-input control and optional display bus."
 		(exclude_from_sim no)
 		(at 25.4 30.48 0)
 		(effects
@@ -4897,17 +4897,6 @@
 			)
 		)
 		(property "AssemblyNote" "Solder pads; RX / GND / TX; no adapter power"
-			(at 233.68 132.08 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Population" "Common"
 			(at 233.68 132.08 0)
 			(hide yes)
 			(show_name no)
