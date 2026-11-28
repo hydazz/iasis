@@ -62,6 +62,10 @@ struct DeviceInspector: View {
         if let link = device.port.link {
             LabeledContent("USB Link", value: link.title)
         }
+        if device.port.identification == .waitingForUSB {
+            Text("Unlock the device and allow the accessory if prompted. If it still doesn’t appear, reconnect the cable while it’s unlocked.")
+                .foregroundStyle(.secondary)
+        }
         if let mode = device.port.modeTitle {
             LabeledContent("USB Mode", value: mode)
         }

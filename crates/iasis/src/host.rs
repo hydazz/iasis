@@ -276,9 +276,8 @@ struct Observer {
     last: Seen,
     /// When each port's latest view was first seen.
     since: [Option<Instant>; PORT_COUNT],
-    /// Hub uptime when each port's identification began: at its
-    /// attachment, or when the agent asked its target to show itself through
-    /// Debug USB.
+    /// Hub uptime at the last attachment or USB identity change, or a request
+    /// to present the target through Debug USB.
     identify_from_ms: [u64; PORT_COUNT],
     stable: Seen,
 }
@@ -294,10 +293,10 @@ impl Observer {
             if now.map(|(generation, _)| generation)
                 != self.last[index].map(|(generation, _)| generation)
             {
-                self.identify_from_ms[index] = status.uptime_ms;
                 self.stable[index] = None;
             }
             if now != self.last[index] {
+                self.identify_from_ms[index] = status.uptime_ms;
                 self.last[index] = now;
                 self.since[index] = Some(at);
             } else if self.since[index].is_some_and(|since| at.duration_since(since) >= AGREE) {
@@ -1144,7 +1143,7 @@ impl Link {
             let age_ms = status
                 .uptime_ms
                 .saturating_sub(view.observer.identify_from_ms[index]);
-            crate::view::identify_for(row, age_ms);
+            crate::view::identify_for(row, status.ports[index].debug_actions, age_ms);
         }
         Some(hub)
     }
@@ -1735,6 +1734,43 @@ mod tests {
             look(&mut observer, &status, &usb, AGREE),
             [None; PORT_COUNT]
         );
+    }
+
+    #[test]
+    fn unlocking_can_enumerate_twice_on_the_same_attachment() {
+        let mut status = attached([Some(1), None, None, None, None]);
+        status.ports[0].enabled = true;
+        status.ports[0].supply = iasis_protocol::Supply::Brick;
+        let mut usb = snapshot();
+        let mut observer = Observer::default();
+        let start = Instant::now();
+        let one = Port::ALL[0];
+        let debug = DebugActions::Listed([0; iasis_protocol::MAX_ACTIONS]);
+        let mut sample = |ms, usb: &Snapshot| {
+            status.uptime_ms = ms;
+            let seen = observe(usb, one);
+            status.ports[0].observed = Some(seen);
+            observer.sample(&status, usb, start + Duration::from_millis(ms));
+            let mut row = crate::view::hub(1, &crate::view::tests::info(), &status)
+                .ports
+                .remove(0);
+            row.device = Some("Apple Device".into());
+            crate::view::identify_for(&mut row, debug, ms - observer.identify_from_ms[0]);
+            row.identification
+        };
+        assert_eq!(sample(0, &usb), None);
+        assert_eq!(
+            sample(12_000, &usb),
+            Some(iasis_api::Identification::WaitingForUsb)
+        );
+        usb.ports[0].devices.push(device(one, 0x05ac, 0x12ab, None));
+        assert_eq!(sample(130_000, &usb), None);
+        usb.ports[0].devices.clear();
+        assert_eq!(sample(130_307, &usb), None);
+        usb.ports[0]
+            .devices
+            .push(device(one, 0x05ac, 0x12ab, Some(42)));
+        assert_eq!(sample(131_227, &usb), None);
     }
 
     #[test]

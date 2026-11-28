@@ -42,7 +42,7 @@ struct Device: Identifiable, Equatable {
             "Empty"
         } else if let name = port.device {
             name
-        } else if port.identifying {
+        } else if port.identification == .identifying {
             "Identifying…"
         } else {
             "Unknown Device"
@@ -86,6 +86,9 @@ struct Device: Identifiable, Equatable {
         }
         if let job = port.job {
             return Activity(job.phase, operation: job.operation)
+        }
+        if port.identification == .waitingForUSB {
+            return Activity("Unlock for USB access", .none)
         }
         switch port.mode {
         case .dfu, .kisDfu: return Activity("DFU", .none)

@@ -366,8 +366,7 @@ pub struct PortView {
     pub occupied: bool,
     /// The target's model, or a USB product's name.
     pub device: Option<String>,
-    /// A newly attached device is awaiting its first name.
-    pub identifying: bool,
+    pub identification: Option<Identification>,
     /// The target's ECID, kept by the hub for as long as the attachment
     /// lasts.
     pub ecid: Option<String>,
@@ -406,6 +405,14 @@ pub struct PortView {
     pub run: Option<OperationRun>,
     /// The missing prerequisite the target's restore waits for.
     pub needs: Option<String>,
+}
+
+/// Why the port is waiting for a device identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Identification {
+    Identifying,
+    WaitingForUsb,
 }
 
 /// What a host finds on a port's USB.

@@ -2,8 +2,8 @@
 //! shows them to clients.
 
 use iasis_api::{
-    AppleUsb, Diagnostics, HubView, Job, Operation, Pool, PortPower, PortUsb, PortView,
-    PowerSource, RequestProgress, Supply, Usb, UsbDevice, UsbLink,
+    AppleUsb, Diagnostics, HubView, Identification, Job, Operation, Pool, PortPower, PortUsb,
+    PortView, PowerSource, RequestProgress, Supply, Usb, UsbDevice, UsbLink,
 };
 use iasis_protocol::{
     DebugActions, Info, Link, Observed, Port, PortAction, PortState, PortStatus, RestorePhase,
@@ -59,7 +59,7 @@ pub fn hub(serial: u64, info: &Info, status: &Status) -> HubView {
                     generation: state.generation,
                     occupied: state.occupied(),
                     device: None,
-                    identifying: false,
+                    identification: None,
                     ecid: state.ecid.map(|id| format!("{id:016x}")),
                     usb: port_usb(state),
                     mode: state.observed.and_then(|seen| match seen.usb {
@@ -238,16 +238,28 @@ pub(crate) fn restore_power_warning(status: &Status) -> Option<&'static str> {
 
 /// USB enumeration and a first identity read can take several seconds.
 /// An attachment that stays silent can still acquire a name later.
-pub(crate) fn identify_for(row: &mut PortView, attachment_age_ms: u64) {
-    row.identifying = row.enabled
-        && row.occupied
-        && row.device.is_none()
-        && row.fault.is_none()
-        && !row.waiting_for_power
-        && row.job.is_none()
-        && row.request.is_none()
-        && row.awaiting.is_none()
-        && attachment_age_ms < IDENTIFYING_MS;
+pub(crate) fn identify_for(row: &mut PortView, debug: DebugActions, attachment_age_ms: u64) {
+    row.identification = if !row.enabled
+        || !row.occupied
+        || row.fault.is_some()
+        || row.waiting_for_power
+        || row.job.is_some()
+        || row.request.is_some()
+        || row.awaiting.is_some()
+    {
+        None
+    } else if attachment_age_ms < IDENTIFYING_MS {
+        row.device.is_none().then_some(Identification::Identifying)
+    } else if row.powered
+        && row.usb == Some(Usb::Absent)
+        && row.link.is_none()
+        && row.ecid.is_none()
+        && matches!(debug, DebugActions::Listed(_))
+    {
+        Some(Identification::WaitingForUsb)
+    } else {
+        None
+    };
 }
 
 /// Show the host's job on the port, while it runs on the port's attachment.
@@ -514,21 +526,53 @@ pub(crate) mod tests {
         status.ports[0].state = PortState::Ready;
         status.ports[0].enabled = true;
         let mut row = hub(1, &info(), &status).ports.remove(0);
-        identify_for(&mut row, 0);
-        assert!(row.identifying);
+        identify_for(&mut row, DebugActions::Silent, 0);
+        assert_eq!(row.identification, Some(Identification::Identifying));
         row.link = Some(UsbLink::Usb3);
         row.dfu = true;
-        identify_for(&mut row, 4_000);
-        assert!(row.identifying);
-        identify_for(&mut row, 12_000);
-        assert!(!row.identifying);
+        identify_for(&mut row, DebugActions::Silent, 4_000);
+        assert_eq!(row.identification, Some(Identification::Identifying));
+        identify_for(&mut row, DebugActions::Silent, 12_000);
+        assert_eq!(row.identification, None);
         row.device = Some("MacBook Air".into());
-        identify_for(&mut row, 2_000);
-        assert!(!row.identifying);
+        identify_for(&mut row, DebugActions::Silent, 2_000);
+        assert_eq!(row.identification, None);
         row.device = None;
         row.fault = Some("Protection tripped".into());
-        identify_for(&mut row, 100);
-        assert!(!row.identifying);
+        identify_for(&mut row, DebugActions::Silent, 100);
+        assert_eq!(row.identification, None);
+    }
+
+    #[test]
+    fn a_silent_apple_target_can_restore_while_waiting_for_usb() {
+        let mut row = hub(1, &info(), &Status::default()).ports.remove(0);
+        row.enabled = true;
+        row.occupied = true;
+        row.powered = true;
+        row.usb = Some(Usb::Absent);
+        row.device = Some("Apple Device".into());
+        row.dfu = true;
+        row.restore = true;
+        let debug = DebugActions::Listed([0; iasis_protocol::MAX_ACTIONS]);
+
+        identify_for(&mut row, debug, IDENTIFYING_MS - 1);
+        assert_eq!(row.identification, None);
+        identify_for(&mut row, DebugActions::Silent, IDENTIFYING_MS);
+        assert_eq!(row.identification, None);
+        identify_for(&mut row, debug, IDENTIFYING_MS);
+        assert_eq!(row.identification, Some(Identification::WaitingForUsb));
+        assert!(row.dfu && row.restore);
+
+        row.usb = None; // The hub and the host have not agreed on the new enumeration.
+        identify_for(&mut row, debug, IDENTIFYING_MS);
+        assert_eq!(row.identification, None);
+        row.usb = Some(Usb::Apple);
+        identify_for(&mut row, debug, IDENTIFYING_MS);
+        assert_eq!(row.identification, None);
+        row.usb = Some(Usb::Absent);
+        row.ecid = Some("000000000000002a".into());
+        identify_for(&mut row, debug, IDENTIFYING_MS);
+        assert_eq!(row.identification, None);
     }
 
     #[test]

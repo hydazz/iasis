@@ -25,7 +25,7 @@ The menu groups devices by hub, each under its physical port number with a line 
 
 ## Window
 
-Each row represents a physical port. Its number follows the port light. A new attachment shows _Identifying…_ until the agent learns its name or the initial lookup ends. A question mark represents an unrecognized device. A Mac keeps its name when it leaves USB while still plugged in.
+Each row represents a physical port. Its number follows the port light. A new attachment shows _Identifying…_ until the agent learns its name or the initial lookup ends. If an Apple device answers the hub but stays off USB, its row shows **Unlock for USB access**. Restore remains available when the hub can enter DFU. A question mark represents an unrecognized device. A Mac keeps its name when it leaves USB while still plugged in.
 
 A bolt marks a device that negotiated power from the hub’s external supply. The cable marks a live USB link. A highlighted tip indicates USB 3. A wired network symbol marks active internet sharing. **PORT** means the connected Mac reports that this connector lacks DFU USB. Hover over an indicator or click the row for details.
 

@@ -55,13 +55,13 @@ struct DeviceName: View {
 
     var body: some View {
         Text(device.name)
-            .italic(device.port.identifying)
-            .foregroundStyle(device.port.identifying || !device.port.occupied ? .secondary : .primary)
+            .italic(device.port.identification == .identifying)
+            .foregroundStyle(device.port.identification != nil || !device.port.occupied ? .secondary : .primary)
             .lineLimit(lineLimit)
             .padding(.leading, 26)
             .overlay(alignment: .topLeading) {
                 Group {
-                    if device.port.identifying {
+                    if device.port.identification == .identifying {
                         Image(systemName: ActivityMark.turning)
                             .symbolEffect(.rotate, options: .repeat(.continuous), isActive: !reduceMotion)
                     } else if let symbol = device.symbol {

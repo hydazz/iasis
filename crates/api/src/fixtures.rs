@@ -44,7 +44,7 @@ fn port(number: u8) -> PortView {
         generation: 7,
         occupied: true,
         device: Some("MacBook Air (M1, 2020)".into()),
-        identifying: false,
+        identification: None,
         ecid: Some("001a79d10e6bc01c".into()),
         usb: Some(Usb::Apple),
         mode: Some(AppleMode::Dfu),
@@ -170,7 +170,7 @@ fn state() -> State {
         PortView {
             usb: Some(Usb::Absent),
             mode: Some(AppleMode::Normal),
-            identifying: true,
+            identification: Some(Identification::Identifying),
             waiting_for_power: true,
             powered: false,
             link: None,

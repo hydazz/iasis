@@ -653,7 +653,11 @@ fn hub_text(hub: &HubView) -> String {
             "  {}  {:<16} {:<34}{:<7}{}",
             port.number,
             activity(port),
-            usb_text(port.usb, port.mode, port.ecid.as_deref()),
+            if port.identification == Some(iasis_api::Identification::WaitingForUsb) {
+                "Unlock for USB access".into()
+            } else {
+                usb_text(port.usb, port.mode, port.ecid.as_deref())
+            },
             port.link.map_or("", link_label),
             port.power.map(power_reading).unwrap_or_default()
         );
@@ -708,7 +712,9 @@ fn activity(port: &PortView) -> String {
         None if !port.enabled => "off",
         None if !port.occupied => "empty",
         None if port.waiting_for_power => "waiting for power",
-        None if port.identifying => "identifying",
+        None if port.identification == Some(iasis_api::Identification::Identifying) => {
+            "identifying"
+        }
         None if let Some(device) = &port.device => device,
         None if port.dfu || port.reboot => "ready",
         None if port.link.is_some() => "connected",

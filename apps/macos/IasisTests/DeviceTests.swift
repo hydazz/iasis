@@ -39,14 +39,34 @@ struct DeviceTests {
     @Test func aPeripheralWithNoAppleModeIsAnOrdinaryDevice() throws {
         var state = try Fixtures.state
         state.hubs[0].ports[0].occupied = true
-        state.hubs[0].ports[0].identifying = true
+        state.hubs[0].ports[0].identification = .identifying
         #expect(state.devices[0].name == "Identifying…")
-        state.hubs[0].ports[0].identifying = false
+        state.hubs[0].ports[0].identification = nil
         #expect(state.devices[0].name == "Unknown Device")
         state.hubs[0].ports[0].link = .usb2
         #expect(state.devices[0].name == "Unknown Device")
         state.hubs[0].ports[0].device = "USB JTAG/serial debug unit"
         #expect(state.devices[0].name == "USB JTAG/serial debug unit")
+        #expect(state.devices[0].activity == .idle)
+    }
+
+    @Test func waitingForUSBShowsTheHintAndKeepsRestoreAvailable() throws {
+        var state = try Fixtures.state
+        var port = state.hubs[0].ports[0]
+        port.occupied = true
+        port.device = "Apple Device"
+        port.identification = .waitingForUSB
+        port.dfu = true
+        port.restore = true
+        state.hubs[0].ports[0] = port
+        let device = state.devices[0]
+        #expect(device.name == "Apple Device")
+        #expect(device.activity == Activity("Unlock for USB access", .none))
+        #expect(device.menuSubtitle == device.activity.text)
+        #expect(DeviceActions([device]).restore != nil)
+        state.hubs[0].ports[0].device = "iPad (A16)"
+        state.hubs[0].ports[0].identification = nil
+        #expect(state.devices[0].name == "iPad (A16)")
         #expect(state.devices[0].activity == .idle)
     }
 

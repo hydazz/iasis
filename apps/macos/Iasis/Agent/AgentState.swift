@@ -84,7 +84,7 @@ nonisolated struct AgentState: Codable, Equatable {
         var generation: UInt32
         var occupied: Bool
         var device: String?
-        var identifying: Bool
+        var identification: Identification?
         var ecid: String?
         /// What the hub's host finds on the port's USB.
         var usb: USB?
@@ -131,6 +131,11 @@ nonisolated struct AgentState: Codable, Equatable {
         /// Several devices, so no single target can be named.
         case ambiguous
         case apple
+    }
+
+    enum Identification: String, Codable {
+        case identifying
+        case waitingForUSB = "waiting_for_usb"
     }
 
     enum AppleMode: String, Codable {

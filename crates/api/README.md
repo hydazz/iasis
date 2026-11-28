@@ -92,7 +92,7 @@ Each port has:
 | `number`                       | 1 to 5                                                                                                                       |
 | `generation`, `occupied`       | The attachment generation, and whether the port is occupied                                                                  |
 | `device`                       | The known model, product or Apple family name, `Apple Device` for an unidentified Apple target, or null                      |
-| `identifying`                  | A newly attached device is awaiting its first name                                                                           |
+| `identification`               | `identifying` on attachment or `waiting_for_usb` when a powered Apple target stays off USB                                   |
 | `ecid`                         | The target's ECID as sixteen hexadecimal digits, once read on this attachment, or null                                       |
 | `usb`                          | What the host finds on the port's USB: `absent`, `other`, `ambiguous` (several devices) or `apple`; null until it has looked |
 | `mode`                         | With `usb` `apple`, its mode: `dfu`, `port_dfu`, `kis_dfu`, `kis`, `recovery`, `restored` or `normal`                        |

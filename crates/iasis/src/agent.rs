@@ -247,6 +247,7 @@ impl Agent {
                                     .as_ref()
                                     .and_then(|run| run.visible(port, view.session));
                                 if slot.busy() {
+                                    port.identification = None;
                                     port.restore = false;
                                     port.advance_setup = false;
                                     port.reboot = false;
