@@ -132,7 +132,7 @@ jobs:
           install: false
 
       - name: Install system packages
-        run: mise bootstrap packages apply --yes
+        run: mise bootstrap packages apply --yes --update
 
       - name: Install tools
         run: mise install --locked rust cargo:cargo-deb github:raspberrypi/pico-sdk-tools
