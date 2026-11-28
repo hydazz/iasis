@@ -14,12 +14,14 @@ See the [main board](hardware/boards/iasis/README.md) for fabrication files and 
 
 ## Software
 
-| Part                                    | Role                                       |
-| --------------------------------------- | ------------------------------------------ |
-| [IasisOS](crates/firmware/README.md)    | Firmware on the hub's RP2354               |
-| [`iasisd`](#host-agent)                 | Host agent: follows hubs and runs restores |
-| `iasis`                                 | Command-line control of hubs and the agent |
-| [Iasis for macOS](apps/macos/README.md) | Menu bar app, with the host tools inside   |
+| Part                                                     | Role                                       |
+| -------------------------------------------------------- | ------------------------------------------ |
+| [IasisOS](crates/firmware/README.md)                     | Firmware on the hub's RP2354               |
+| [`iasisd`](#host-agent)                                  | Host agent: follows hubs and runs restores |
+| `iasis`                                                  | Command-line control of hubs and the agent |
+| [Iasis for Linux](crates/iasis/README.md#debian-package) | GTK desktop app in the Debian package      |
+| [Iasis for macOS](apps/macos/README.md)                  | Menu bar app, with the host tools inside   |
+| [Iasis for Windows](apps/windows/README.md)              | Desktop app and notification area controls |
 
 They share one version and are released together.
 
@@ -96,7 +98,7 @@ While the agent is running:
 - It runs the restores that a hub's button or a client asks for.
 - On Linux and macOS, it can share an internet connection with attached devices over USB.
 
-The status light is green and the OLED shows a USB symbol while a host is attached. One host holds a hub at a time, and on it only the agent opens the hub; `iasis` and the Mac app are its clients, and other clients use its [local socket](crates/api/README.md). Without the agent, `iasis` says how to start it.
+The status light is green and the OLED shows a USB symbol while a host is attached. One host holds a hub at a time, and on it only the agent opens the hub; `iasis` and the apps are its clients, and other clients use its [local socket](crates/api/README.md). Without the agent, `iasis` says how to start it.
 
 On Linux, the [Debian package](crates/iasis/README.md#debian-package) runs the agent at boot for the person signed in at the computer and members of the `iasis` group. On Windows, the [installer](crates/iasis/README.md#windows-installer) runs it at boot for Administrators and the person signed in at the computer. On macOS, the [menu bar app](apps/macos/README.md) shows the same hubs and ports, sends the same actions and runs the agent it carries while you are logged in. To run your own build in the background, turn Iasis off under Background App Activity in Login Items & Extensions, then prefix the command with `launchctl submit -l local.iasisd --`. With `IASIS_HOME` set to a directory, the agent keeps its files and socket there, and `iasis` with the same `IASIS_HOME` talks to it.
 
@@ -189,9 +191,9 @@ To restore the default behaviour, run `defaults delete com.apple.AMPDeviceDiscov
 
 An iPhone or iPad whose enrollment profile lists the agent's supervision certificate pairs with the host without asking for Trust, so its restores through recovery need no one at the device. Other devices still ask.
 
-The agent makes its identity when it first starts. Export the certificate with Export… in the identity's ⋯ menu, in the Mac app's Settings > Restore, or with `iasis supervision certificate Iasis.cer`, and add it to the devices' Automated Device Enrollment profile as a supervising host certificate. In Intune that is Sync with computers, Allow Apple Configurator by certificate, in the enrollment program token's profile. A device takes the certificate when it enrolls, so an enrolled one needs one erase, with a Trust tap, and enrollment again first.
+The agent makes its identity when it first starts. Export the certificate with Export… in the identity's ⋯ menu, in the Mac app's Settings > Restore or the Linux app's Preferences, or with `iasis supervision certificate Iasis.cer`, and add it to the devices' Automated Device Enrollment profile as a supervising host certificate. In Intune that is Sync with computers, Allow Apple Configurator by certificate, in the enrollment program token's profile. A device takes the certificate when it enrolls, so an enrolled one needs one erase, with a Trust tap, and enrollment again first.
 
-To back the identity up or give another host the same one, export it with its private key in a password-protected PKCS #12 archive, with Export… in the Mac app or `iasis supervision export Iasis.p12`, and import it with Import… or `iasis supervision import Iasis.p12`. The agent keeps it as `supervision.pem` in its state directory, open to the agent's account alone: mode 600 in a 700 directory on macOS (`~/Library/Application Support/com.hydaz.Iasis`) and Linux (`/var/lib/iasis`), and on Windows an access list of the agent's account and Administrators. Anyone holding the identity can pair with every device that lists its certificate.
+To back the identity up or give another host the same one, export it with its private key in a password-protected PKCS #12 archive, with Export… in the apps or `iasis supervision export Iasis.p12`, and import it with Import… or `iasis supervision import Iasis.p12`. The agent keeps it as `supervision.pem` in its state directory, open to the agent's account alone: mode 600 in a 700 directory on macOS (`~/Library/Application Support/com.hydaz.Iasis`) and Linux (`/var/lib/iasis`), and on Windows an access list of the agent's account and Administrators. Anyone holding the identity can pair with every device that lists its certificate.
 
 #### Button restores
 

@@ -28,7 +28,8 @@ UV_PYTHON = "python"
 [monorepo]
 config_roots = [
   "apps/macos",
-  "crates/iasis/windows",
+  "apps/linux",
+  "apps/windows",
   "hardware/case",
   "hardware/boards/*",
 ]
@@ -49,7 +50,6 @@ postinstall = "lefthook install"
 "apt:patch" = { os = "linux" }
 "apt:libpcap-dev" = { os = "linux" }
 "apt:libusb-1.0-0-dev" = { os = "linux" }
-"apt:dpkg-dev" = { os = "linux" }
 "brew:autoconf" = { os = "macos" }
 "brew:automake" = { os = "macos" }
 "brew:libtool" = { os = "macos" }
@@ -103,10 +103,6 @@ run = ["mise fmt --check", "oxfmt --check"]
 depends = ["firmware:build"]
 env = { IASIS_OS_UF2 = "{{config_root}}/target/thumbv8m.main-none-eabihf/release/IasisOS.uf2" }
 run = "cargo build --locked --release -p iasis"
-
-[tasks.deb]
-depends = ["host:build"]
-run = "cargo deb --locked --no-build -p iasis"
 
 [tasks.bootstrap]
 run = []

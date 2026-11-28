@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.hydaz.Iasis</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+  <name>Iasis</name>
+  <summary>Put Apple devices in DFU and restore them</summary>
+  <description>
+    <p>
+      Iasis shows every port of every Iasis hub connected to this computer. It puts the Macs, iPads and iPhones on them into DFU, restarts them, and erases and restores them with a system Apple still signs.
+    </p>
+  </description>
+  <developer id="com.hydaz">
+    <name>hydazz</name>
+  </developer>
+  <url type="homepage">https://github.com/hydazz/iasis</url>
+  <url type="bugtracker">https://github.com/hydazz/iasis/issues</url>
+  <launchable type="desktop-id">com.hydaz.Iasis.desktop</launchable>
+  <content_rating type="oars-1.1" />
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+</component>

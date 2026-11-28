@@ -47,7 +47,7 @@ jobs:
             v*)
               VERSION="${RELEASE_TAG#v}"
               grep -Fqx "version = \"${VERSION}\"" Cargo.toml
-              grep -Fqx "version = \"${VERSION}\" # x-release-please-version" crates/iasis/windows/.mise.toml
+              grep -Fqx "version = \"${VERSION}\" # x-release-please-version" apps/windows/.mise.toml
               grep -Fqx "MARKETING_VERSION = ${VERSION} // x-release-please-version" apps/macos/Config/Version.xcconfig
               ;;
             *-board-v*)
@@ -132,7 +132,7 @@ jobs:
           install: false
 
       - name: Install system packages
-        run: mise bootstrap packages apply --yes
+        run: mise -C apps/linux bootstrap packages apply --yes
 
       - name: Install tools
         run: mise install --locked rust cargo:cargo-deb github:raspberrypi/pico-sdk-tools
@@ -146,7 +146,7 @@ jobs:
       - name: Build package
         run: |
           mise run --skip-deps host:build
-          mise run --skip-deps deb
+          mise run --skip-deps //apps/linux:package
 
       - name: Upload release asset
         env:
@@ -182,7 +182,7 @@ jobs:
           install: false
 
       - name: Install tools
-        run: mise -C crates/iasis/windows install --locked rust github:raspberrypi/pico-sdk-tools dotnet
+        run: mise -C apps/windows install --locked rust github:raspberrypi/pico-sdk-tools dotnet
 
       - name: Setup MSYS2
         uses: msys2/setup-msys2@3c51bf698df1e37b2261f53cb67797b97761185c # v2.34.0
@@ -206,13 +206,13 @@ jobs:
         run: mise run --skip-deps host:build
 
       - name: Build MSI
-        run: mise run //crates/iasis/windows:package
+        run: mise run //apps/windows:package
 
       - name: Upload release asset
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${RELEASE_TAG}" "crates/iasis/windows/build/Iasis-${VERSION}-x64.msi" --clobber --repo "${GITHUB_REPOSITORY}"
+        run: gh release upload "${RELEASE_TAG}" "apps/windows/build/Iasis-${VERSION}-x64.msi" --clobber --repo "${GITHUB_REPOSITORY}"
 
   macos:
     name: macOS

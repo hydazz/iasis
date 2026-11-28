@@ -1,5 +1,0 @@
-<Project>
-  <ItemGroup>
-    <PackageVersion Include="WixToolset.Util.wixext" Version="7.0.1" />
-  </ItemGroup>
-</Project>

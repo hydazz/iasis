@@ -6,7 +6,7 @@
 
 ## Debian package
 
-`mise run deb` builds `target/debian/iasis_<version>_<arch>.deb` on and for the Linux machine it runs on. Releases publish it for amd64 and arm64; it supports Debian 13 and Ubuntu 26.04.
+`mise run //apps/linux:package` builds `target/debian/iasis_<version>_<arch>.deb`, with the [Linux app](../../apps/linux), on and for the Linux machine it runs on. Releases publish it for amd64 and arm64; it supports Debian 13 and Ubuntu 26.04.
 
 ```sh
 sudo apt install ./iasis_0.1.0-1_amd64.deb
@@ -37,12 +37,13 @@ Removing the package keeps the images; purging it deletes `/var/lib/iasis` and `
 
 ## Windows installer
 
-`mise run //crates/iasis/windows:package` builds `crates/iasis/windows/build/Iasis-<version>-x64.msi` from the tools `mise run host:build` builds in MSYS2's MINGW64 shell. It installs for the whole machine, and installing a newer one upgrades it.
+`mise run //apps/windows:package` builds `apps/windows/build/Iasis-<version>-x64.msi` with the [Windows app](../../apps/windows), from the tools `mise run host:build` builds in MSYS2's MINGW64 shell. It installs for the whole machine, and installing a newer one upgrades it.
 
 The installer runs the agent at boot as the `iasisd` service, under its own account `NT SERVICE\iasisd`. The agent serves Administrators and the person signed in at the computer.
 
 | Path                                    | Contents                                                                                            |
 | --------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `C:\Program Files\Iasis\Iasis.exe`      | The app                                                                                             |
 | `C:\Program Files\Iasis\bin\iasis.exe`  | The command line, on `PATH`                                                                         |
 | `C:\Program Files\Iasis\bin\iasisd.exe` | The agent and its WinUSB helper                                                                     |
 | `%ProgramData%\Iasis\state`             | Settings, the supervision identity and images added from a file, for the service and Administrators |

@@ -1,0 +1,40 @@
+# GTK 4 and libadwaita for the app; a virtual display and session bus for
+# its startup test; validators for its desktop entry and AppStream metadata;
+# dpkg-dev for the Debian package.
+[bootstrap.packages]
+"apt:libgtk-4-dev" = { os = "linux" }
+"apt:libadwaita-1-dev" = { os = "linux" }
+"apt:adwaita-icon-theme" = { os = "linux" }
+"apt:librsvg2-common" = { os = "linux" }
+"apt:dbus" = { os = "linux" }
+"apt:xvfb" = { os = "linux" }
+"apt:xauth" = { os = "linux" }
+"apt:desktop-file-utils" = { os = "linux" }
+"apt:appstream" = { os = "linux" }
+"apt:dpkg-dev" = { os = "linux" }
+
+[tasks.build]
+run = "cargo build --locked -p iasis-desktop"
+
+[tasks.lint]
+run = [
+  "cargo clippy --locked -p iasis-desktop --all-targets -- -D warnings",
+  "desktop-file-validate data/com.hydaz.Iasis.desktop",
+  "appstreamcli validate --no-net data/com.hydaz.Iasis.metainfo.xml",
+]
+
+[tasks.test]
+env = { GTK_A11Y = "none" }
+description = "Under Xvfb"
+run = "xvfb-run -a dbus-run-session -- cargo test --locked -p iasis-desktop"
+
+[tasks.package]
+description = "Debian package"
+depends = ["//:host:build"]
+run = [
+  "cargo build --locked --release -p iasis-desktop",
+  "cargo deb --locked --no-build -p iasis",
+]
+
+[tasks.run]
+run = "cargo run --locked -p iasis-desktop"

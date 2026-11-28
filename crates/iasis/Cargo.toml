@@ -1,6 +1,6 @@
 [package]
 name = "iasis"
-description = "Host tools for the Iasis restore hub"
+description = "App and host tools for the Iasis restore hub"
 homepage = "https://github.com/hydazz/iasis"
 default-run = "iasis"
 version.workspace = true
@@ -82,7 +82,7 @@ windows-sys = { version = "0.61", features = [
 maintainer = "hydazz <hydazz@users.noreply.github.com>"
 copyright = "hydazz"
 license-file = ["../../LICENSE", "0"]
-extended-description = "The iasis CLI and the iasisd agent. The console user and members of the iasis group can use the agent."
+extended-description = "The Iasis app, the iasis CLI and the iasisd agent. The console user and members of the iasis group can use the agent."
 section = "utils"
 depends = "$auto, udev, usbmuxd, systemd | systemd-standalone-sysusers | systemd-sysusers"
 recommends = "polkitd"
@@ -116,6 +116,31 @@ assets = [
   [
     "debian/com.hydaz.iasis.rules",
     "usr/share/polkit-1/rules.d/",
+    "644",
+  ],
+  [
+    "target/release/iasis-desktop",
+    "usr/bin/",
+    "755",
+  ],
+  [
+    "../../apps/linux/data/com.hydaz.Iasis.desktop",
+    "usr/share/applications/",
+    "644",
+  ],
+  [
+    "../../apps/linux/data/com.hydaz.Iasis.metainfo.xml",
+    "usr/share/metainfo/",
+    "644",
+  ],
+  [
+    "../../apps/linux/data/icons/hicolor/scalable/apps/com.hydaz.Iasis.svg",
+    "usr/share/icons/hicolor/scalable/apps/",
+    "644",
+  ],
+  [
+    "../../apps/linux/data/icons/hicolor/symbolic/apps/*.svg",
+    "usr/share/icons/hicolor/symbolic/apps/",
     "644",
   ],
   [

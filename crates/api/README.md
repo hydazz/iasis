@@ -1,6 +1,6 @@
 # Agent socket
 
-`iasisd` serves its clients on a local Unix socket, which Windows has too: the `iasis` command line, the Mac app and any other client. This crate defines the messages, and [`fixtures/`](fixtures) holds an example of each, with every field set and every value of every enumeration. A client's models read each fixture and write it back unchanged; the Mac app tests this. `diagnostics.json` holds the `diagnostics` reply, which only the command line reads. After a change to the messages, `IASIS_FIXTURES=write cargo test -p iasis-api` rewrites the fixtures.
+`iasisd` serves its clients on a local Unix socket, which Windows has too: the `iasis` command line, the apps and any other client. This crate defines the messages, and [`fixtures/`](fixtures) holds an example of each, with every field set and every value of every enumeration. A client's models read each fixture and write it back unchanged; the Mac and Windows apps test this. `diagnostics.json` holds the `diagnostics` reply, which only the command line reads. After a change to the messages, `IASIS_FIXTURES=write cargo test -p iasis-api` rewrites the fixtures.
 
 | Agent                            | Socket                                                     | Whom the agent serves                                                      |
 | -------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------- |

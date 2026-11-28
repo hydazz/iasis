@@ -1,5 +1,12 @@
 [workspace]
-members = ["crates/firmware", "crates/protocol", "crates/api", "crates/iasis", "crates/pd"]
+members = [
+  "crates/firmware",
+  "crates/protocol",
+  "crates/api",
+  "crates/iasis",
+  "crates/pd",
+  "apps/linux",
+]
 default-members = ["crates/protocol", "crates/api", "crates/iasis", "crates/pd"]
 resolver = "3"
 

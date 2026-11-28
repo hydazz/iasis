@@ -63,11 +63,13 @@ jobs:
               - .github/workflows/ci.yaml
             linux:
               - *host
+              - apps/linux/**
             macos:
               - *host
               - apps/macos/**
             windows:
               - *host
+              - apps/windows/**
             firmware:
               - Cargo.toml
               - Cargo.lock
@@ -103,7 +105,7 @@ jobs:
           install: false
 
       - name: Install system packages
-        run: mise bootstrap packages apply --yes
+        run: mise -C apps/linux bootstrap packages apply --yes
 
       - name: Install tools
         run: mise install --locked rust github:raspberrypi/pico-sdk-tools
@@ -119,6 +121,12 @@ jobs:
 
       - name: Build host software
         run: mise run host:build
+
+      - name: Lint Linux app
+        run: mise run //apps/linux:lint
+
+      - name: Test Linux app
+        run: mise run //apps/linux:test
 
   macos:
     name: macOS
@@ -197,7 +205,7 @@ jobs:
           install: false
 
       - name: Install tools
-        run: mise install --locked rust github:raspberrypi/pico-sdk-tools
+        run: mise -C apps/windows install --locked rust github:raspberrypi/pico-sdk-tools dotnet
 
       # The runner's own MSYS2, which the bootstrap task installs packages into.
       - name: Setup MSYS2
@@ -225,6 +233,15 @@ jobs:
       - name: Build host software
         shell: msys2 {0}
         run: mise run host:build
+
+      - name: Lint Windows app
+        run: mise run //apps/windows:lint
+
+      - name: Test Windows app
+        run: mise run //apps/windows:test
+
+      - name: Build Windows app
+        run: mise run //apps/windows:build
 
   firmware:
     name: Firmware

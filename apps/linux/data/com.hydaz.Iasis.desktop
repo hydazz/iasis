@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Iasis
+Comment=Put Apple devices in DFU and restore them on Iasis hubs
+Exec=iasis-desktop
+Icon=com.hydaz.Iasis
+Categories=Utility;
+Keywords=DFU;Restore;Apple;Mac;iPad;USB;
+StartupNotify=true
+SingleMainWindow=true

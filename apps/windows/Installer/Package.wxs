@@ -7,12 +7,16 @@
       Scope="perMachine">
     <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of Iasis is already installed." />
     <MediaTemplate EmbedCab="yes" />
+    <Icon Id="Iasis.ico" SourceFile="$(var.AppDir)\Assets\Iasis.ico" />
+    <Property Id="ARPPRODUCTICON" Value="Iasis.ico" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Iasis">
+        <!-- NTFS cannot hold Iasis.exe and iasis.exe in one folder. -->
         <Directory Id="BINFOLDER" Name="bin" />
       </Directory>
     </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
     <!-- The agent's state and cache. Users may read the cache; the agent
          keeps its state to itself and Administrators. -->
     <StandardDirectory Id="CommonAppDataFolder">
@@ -28,6 +32,7 @@
         Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
 
     <Feature Id="Iasis">
+      <Files Directory="INSTALLFOLDER" Include="$(var.AppDir)\**" />
       <Component Directory="BINFOLDER">
         <File Source="$(var.ToolsDir)\iasis.exe" />
         <Environment Id="Path" Name="PATH" Value="[BINFOLDER]" Part="last" System="yes" Action="set" />
@@ -85,6 +90,12 @@
           <PermissionEx Sddl="D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;S-1-5-80-1909915432-955103889-361278497-479388142-1594523046)(A;OICI;0x1200a9;;;BU)" />
         </CreateFolder>
         <util:RemoveFolderEx On="uninstall" Property="CACHEFOLDER" />
+      </Component>
+      <Component Directory="ProgramMenuFolder">
+        <Shortcut Id="StartMenu" Name="Iasis" Target="[INSTALLFOLDER]Iasis.exe" WorkingDirectory="INSTALLFOLDER">
+          <ShortcutProperty Key="System.AppUserModel.ID" Value="com.hydaz.Iasis" />
+        </Shortcut>
+        <RegistryValue Root="HKLM" Key="Software\hydazz\Iasis" Name="StartMenu" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </Feature>
   </Package>
