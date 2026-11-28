@@ -4,7 +4,7 @@ monorepo_root = true
 # On Windows the host tools build under MSYS2, with rustup's default host set
 # to x86_64-pc-windows-gnu as RestoreKit does.
 python = { version = "3.14.10", os = ["linux", "macos"] }
-rust = { version = "1.100.0", components = "rustfmt,clippy", targets = "thumbv8m.main-none-eabihf" }
+rust = { version = "1.100.1", components = "rustfmt,clippy", targets = "thumbv8m.main-none-eabihf" }
 uv = { version = "0.13.10", os = ["linux", "macos"] }
 ruff = { version = "0.17.6", os = ["linux", "macos"] }
 lefthook = { version = "2.2.3", os = ["linux", "macos"] }
