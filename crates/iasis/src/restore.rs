@@ -659,8 +659,9 @@ fn log_lines(input: impl Read, ecid: u64) {
 mod tests {
     use super::*;
     use std::io::Write;
+    use std::time::Duration;
     #[cfg(unix)]
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
     use zip::{ZipWriter, write::SimpleFileOptions};
 
     const MANIFEST: &str = r#"<?xml version="1.0"?><plist version="1.0"><dict>
@@ -726,6 +727,14 @@ mod tests {
             .unwrap();
         bytes[offset] ^= 1;
         fs::write(&path, bytes).unwrap();
+        // On Windows the stamp is only the modification time, and a write
+        // this soon after the check can keep it.
+        File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(ready.modified + Duration::from_secs(1))
+            .unwrap();
         assert!(PreparedIpsw::open(&path).is_err());
         assert!(ready.check_unchanged().is_err());
         archive(&path, None);
