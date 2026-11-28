@@ -7,6 +7,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
+use chrono::Utc;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use iasis::{
     agent::Client,
@@ -670,6 +671,15 @@ fn hub_text(hub: &HubView) -> String {
     text
 }
 
+fn time_remaining<'a>(ports: impl IntoIterator<Item = &'a PortView>) -> Option<String> {
+    let seconds = iasis_api::selected_restore_remaining_secs(ports, Utc::now())?;
+    Some(if seconds < 60 {
+        "Less than a minute remaining".into()
+    } else {
+        format!("About {} min remaining", (u64::from(seconds) + 30) / 60)
+    })
+}
+
 /// What the port is doing, or what is on it.
 fn activity(port: &PortView) -> String {
     if let Some(fault) = &port.fault {
@@ -691,12 +701,17 @@ fn activity(port: &PortView) -> String {
             })
             .or_else(|| run.steps.last());
         if let Some(step) = step {
-            if step.state == iasis_api::StepState::Active
-                && let Some(progress) = &step.progress
-            {
-                return format!("{}  {}%  {}", step, progress.percent, progress.name);
+            let mut text = step.to_string();
+            if step.state == iasis_api::StepState::Active {
+                if let Some(progress) = &step.progress {
+                    text.push_str(&format!("  {}%  {}", progress.percent, progress.name));
+                }
+                if let Some(eta) = time_remaining([port]) {
+                    text.push_str("  ");
+                    text.push_str(&eta);
+                }
             }
-            return step.to_string();
+            return text;
         }
     }
     if port.awaiting.is_some() {
@@ -1131,6 +1146,7 @@ fn follow_work(agent: &mut Client, hub: &str, ports: &[Port]) -> Result<()> {
     let mut ended = vec![false; ports.len()];
     let mut success = true;
     let mut download = None;
+    let mut selection_eta = None;
     let mut reply = agent.ask(&Request::Watch)?;
     loop {
         let Reply::State(state) = reply else {
@@ -1166,6 +1182,22 @@ fn follow_work(agent: &mut Client, hub: &str, ports: &[Port]) -> Result<()> {
                     println!("Port {}  {}", port.number(), line.trim_end());
                     shown[index] = line;
                 }
+            }
+        }
+        if ports.len() > 1 {
+            let eta = view.and_then(|v| {
+                let rows = ports
+                    .iter()
+                    .zip(&ended)
+                    .filter(|(_, done)| !**done)
+                    .filter_map(|(port, _)| v.ports.get(port.index()));
+                time_remaining(rows)
+            });
+            if eta != selection_eta {
+                if let Some(eta) = &eta {
+                    println!("Selected ports  {eta}");
+                }
+                selection_eta = eta;
             }
         }
         if ended.iter().all(|ended| *ended) {
